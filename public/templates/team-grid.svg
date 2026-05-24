@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" role="img" aria-label="Three-up team grid schematic">
+  <rect width="320" height="180" fill="#0a0a0a"/>
+  <rect x="100" y="18" width="120" height="8" rx="1" fill="#c97f2c"/>
+  <g stroke="#3a3a3a" stroke-width="0.6">
+    <rect x="20" y="40" width="86" height="120" rx="3" fill="none"/>
+    <rect x="117" y="40" width="86" height="120" rx="3" fill="none"/>
+    <rect x="214" y="40" width="86" height="120" rx="3" fill="none"/>
+  </g>
+  <g fill="#c97f2c" opacity="0.85">
+    <circle cx="63" cy="78" r="18"/>
+    <circle cx="160" cy="78" r="18"/>
+    <circle cx="257" cy="78" r="18"/>
+  </g>
+  <g fill="#cdc4b6" opacity="0.55">
+    <rect x="34" y="110" width="58" height="4" rx="1"/>
+    <rect x="34" y="120" width="48" height="3" rx="1"/>
+    <rect x="131" y="110" width="58" height="4" rx="1"/>
+    <rect x="131" y="120" width="48" height="3" rx="1"/>
+    <rect x="228" y="110" width="58" height="4" rx="1"/>
+    <rect x="228" y="120" width="48" height="3" rx="1"/>
+  </g>
+</svg>

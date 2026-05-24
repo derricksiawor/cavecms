@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" role="img" aria-label="FAQ accordion with five rows schematic">
+  <rect width="320" height="180" fill="#0a0a0a"/>
+  <rect x="20" y="18" width="280" height="8" rx="1" fill="#c97f2c"/>
+  <g stroke="#3a3a3a" stroke-width="0.6">
+    <rect x="20" y="38" width="280" height="22" rx="3" fill="none"/>
+    <rect x="20" y="66" width="280" height="22" rx="3" fill="none"/>
+    <rect x="20" y="94" width="280" height="22" rx="3" fill="none"/>
+    <rect x="20" y="122" width="280" height="22" rx="3" fill="none"/>
+    <rect x="20" y="150" width="280" height="22" rx="3" fill="none"/>
+  </g>
+  <g fill="#cdc4b6" opacity="0.55">
+    <rect x="34" y="47" width="180" height="4" rx="1"/>
+    <rect x="34" y="75" width="160" height="4" rx="1"/>
+    <rect x="34" y="103" width="200" height="4" rx="1"/>
+    <rect x="34" y="131" width="150" height="4" rx="1"/>
+    <rect x="34" y="159" width="170" height="4" rx="1"/>
+  </g>
+  <g fill="#c97f2c">
+    <path d="M280 47 l6 -4 l-6 -4 z"/>
+    <path d="M280 75 l6 -4 l-6 -4 z"/>
+    <path d="M280 103 l6 -4 l-6 -4 z"/>
+    <path d="M280 131 l6 -4 l-6 -4 z"/>
+    <path d="M280 159 l6 -4 l-6 -4 z"/>
+  </g>
+</svg>

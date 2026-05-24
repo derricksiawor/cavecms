@@ -1,0 +1,47 @@
+[Unit]
+Description=BWC CRM dispatch retry worker
+# No After=/Requires= on the app units. The retry worker is fully
+# DB-driven — it doesn't talk to the PM2 worker over loopback (unlike
+# cron-purge which calls /api/internal/revalidate-tags), so an app
+# restart can't block this from running.
+OnFailure=bwc-alert@%n.service
+
+[Service]
+Type=oneshot
+# Hard ceiling. Each row's outbound HTTP call has a 5s timeout
+# (AbortSignal.timeout(5000)). Worst-case backlog of 50 rows × 5s =
+# 250s; 5min ceiling leaves comfortable headroom for the in-line
+# claim/log/update writes around each.
+TimeoutStartSec=5min
+User=bwc
+Group=bwc
+# Belt-and-suspenders: cron-crm-retry.ts hard-refuses to run unless
+# NODE_ENV=production. Setting it on the unit guarantees the gate
+# passes even if env.production is missing the line.
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/bwc/env.production
+WorkingDirectory=-/opt/bwc/current
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+# Worker only reads/writes the DB + makes outbound HTTPS. No
+# filesystem writes outside the log directory.
+ReadWritePaths=/var/log/bwc
+# tsx + Node + Drizzle baseline is ~200M; the worker processes
+# bounded batches (max 50 rows / tick) with no per-row buffering of
+# response bodies. 512M ceiling is comfortable.
+MemoryMax=512M
+MemorySwapMax=0
+TasksMax=128
+ExecCondition=/usr/bin/test -x /opt/bwc/current/node_modules/.bin/tsx
+ExecStart=/opt/bwc/current/node_modules/.bin/tsx scripts/cron-crm-retry.ts

@@ -1,0 +1,125 @@
+# dependencies
+/node_modules
+# Nested package install dir (migrator/) — same exclusion as root.
+**/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next
+/out
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+.vscode
+
+# Local safe-delete workspace — `mv` targets instead of `rm -rf`.
+.trash-*/
+
+# Playwright MCP debug artifacts (console logs, page snapshots, screenshots).
+.playwright-mcp/
+homepage-*.png
+# Catch-all: ad-hoc screenshots dumped at repo root (Playwright walks, UX captures, etc.).
+# Anchored with leading slash so deliberately-tracked PNGs deeper in the tree (icons,
+# brand assets under /public, /components) are unaffected.
+/*.png
+
+# Test results / playwright reports
+/test-results
+/playwright-report
+/playwright/.cache
+
+# env — only .env.example is tracked
+.env
+.env.*
+!.env.example
+*.env
+.env*.bak
+.env*.swp
+
+# crypto / keys / secrets / auth artifacts
+*.age
+*.age-key
+.age-identity*
+*.key
+*.kdbx
+*.cer
+*.crt
+*.csr
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+.htpasswd*
+
+# macOS resource forks
+._*
+
+# editor / agent
+.claude
+.cursor
+.superpowers
+.notes
+# Project-level Claude instructions — local-only per global rule #1
+# (NEVER commit files with "claude" in the name).
+/CLAUDE.md
+
+# uploads live on disk (mounted dir), not in git
+/public/uploads
+/public/uploads*
+/uploads/
+/.test-uploads/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# test artifacts (additive — never ship to prod)
+/coverage
+/test-results
+/playwright-report
+/.playwright
+
+# scripts — only the ones that ship are tracked
+/scripts/*
+!/scripts/setup.sh
+!/scripts/deploy.sh
+!/scripts/rollback.sh
+!/scripts/preflight.sh
+!/scripts/db-backup.sh
+!/scripts/uploads-backup.sh
+!/scripts/restore-drill.sh
+!/scripts/cron-purge.ts
+!/scripts/verify-media-refs.ts
+!/scripts/update-fingerprint.ts
+!/scripts/check-fingerprint.ts
+!/scripts/pre-migrate-asserts.ts
+!/scripts/post-migrate-asserts.ts
+!/scripts/db-migrate-with-lock.ts
+!/scripts/verify-route-collisions.ts
+!/scripts/add-contact-map-and-social.ts
+!/scripts/postbuild-check-slug-collisions.ts
+!/scripts/disk-check.sh
+!/scripts/prune-static-pool.sh
+!/scripts/install-nginx.sh
+!/scripts/install-systemd.sh
+!/scripts/dev-bootstrap.mjs
+!/scripts/setup-shared.sh
+!/scripts/check.sh
+!/scripts/nginx/
+!/scripts/nginx/**
+!/scripts/systemd/
+!/scripts/systemd/**

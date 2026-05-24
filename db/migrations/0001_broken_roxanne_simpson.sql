@@ -1,0 +1,1 @@
+ALTER TABLE `failed_logins_by_email` ADD `reset_at` timestamp(3);

@@ -1,0 +1,43 @@
+// Per-block tone enum registry. Single source of truth — every
+// block-registry schema that has a `tone` field reads its enum
+// values from here, and the editor's insert pipeline reads the same
+// values to pick a contrasting tone when the destination section
+// renders dark.
+//
+// Adding a new tone token to a block (or registering a new tone-aware
+// block) is a ONE-place edit here. The schema picks it up via the
+// imported tuple; the dynamic tone resolver in InlineEditContext picks
+// it up via the same export. CI pin in tests/unit/blockSeeds.test.ts
+// round-trips every block's SEED_DATA through its Zod schema so a
+// drift between this registry and the schemas surfaces immediately.
+//
+// `as const satisfies` pins the literal-tuple type so each enum
+// arrives at the schema layer with the exact `[token, ...tokens]`
+// shape `colorTokenOrHex` and `z.enum` require — without `as const`
+// the values would widen to `string[]` and break the Zod union types.
+//
+// NOT marked `server-only` — both block-registry (server) and the
+// inline-edit insert pipeline (client) import this module.
+
+export const BLOCK_TONE_ENUMS = {
+  // Legacy icon_box — minimum 2-token enum (legacy near-black + ivory
+  // light counterpart). Other legacy widgets (heading, text, eyebrow)
+  // don't carry a tone field and aren't listed here.
+  icon_box: ['near-black', 'ivory'],
+
+  // Luxury primitives.
+  lx_heading: ['obsidian', 'ivory', 'champagne'],
+  lx_text: ['obsidian', 'ivory', 'warm-stone'],
+  // lx_eyebrow defaults to champagne (gold) — neutral, reads on both
+  // dark and light surfaces. Listed here so future dynamic adapters
+  // can see its full enum, but the resolver below treats champagne as
+  // neutral and skips the override for it.
+  lx_eyebrow: ['champagne', 'obsidian', 'ivory', 'warm-stone'],
+
+  // Luxury composites.
+  lx_channel_card: ['obsidian', 'ivory'],
+  lx_stat: ['obsidian', 'ivory', 'champagne'],
+  lx_quote: ['obsidian', 'ivory'],
+} as const satisfies Record<string, readonly [string, ...string[]]>
+
+export type ToneAwareBlockType = keyof typeof BLOCK_TONE_ENUMS

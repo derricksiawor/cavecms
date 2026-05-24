@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" role="img" aria-label="Hero plus three feature columns plus copper CTA schematic">
+  <rect width="320" height="180" fill="#0a0a0a"/>
+  <!-- Hero section -->
+  <rect x="20" y="18" width="280" height="58" rx="3" fill="none" stroke="#3a3a3a" stroke-width="0.6"/>
+  <rect x="32" y="30" width="180" height="6" rx="1" fill="#c97f2c"/>
+  <rect x="32" y="42" width="140" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+  <rect x="32" y="49" width="160" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+  <rect x="32" y="60" width="46" height="10" rx="2" fill="#c97f2c"/>
+  <!-- Features row -->
+  <rect x="20" y="86" width="280" height="50" rx="3" fill="none" stroke="#3a3a3a" stroke-width="0.6"/>
+  <g fill="#cdc4b6">
+    <rect x="36" y="100" width="58" height="22" rx="2" opacity="0.18"/>
+    <rect x="131" y="100" width="58" height="22" rx="2" opacity="0.18"/>
+    <rect x="226" y="100" width="58" height="22" rx="2" opacity="0.18"/>
+    <circle cx="50" cy="108" r="3" opacity="0.55"/>
+    <circle cx="145" cy="108" r="3" opacity="0.55"/>
+    <circle cx="240" cy="108" r="3" opacity="0.55"/>
+  </g>
+  <!-- CTA strip -->
+  <rect x="20" y="146" width="280" height="22" rx="3" fill="#c97f2c" opacity="0.85"/>
+  <rect x="36" y="153" width="120" height="3" rx="1" fill="#0a0a0a" opacity="0.7"/>
+  <rect x="36" y="160" width="80" height="3" rx="1" fill="#0a0a0a" opacity="0.55"/>
+</svg>

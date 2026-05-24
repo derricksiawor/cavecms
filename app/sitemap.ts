@@ -1,0 +1,159 @@
+import type { MetadataRoute } from 'next'
+import { headers } from 'next/headers'
+import { sql } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { env } from '@/lib/env'
+import { isMissingTable } from '@/lib/db/errors'
+
+export const dynamic = 'force-dynamic'
+
+// PR-2 §2.7: the static-page URL set is no longer hard-coded — it
+// comes from the `pages` table via `url_path` (the STORED generated
+// column). The home row emits `/` and non-home rows emit `/{slug}`
+// from a single column — no special-case branching, no `'/' + slug`
+// ad-hoc construction anywhere.
+//
+// ORDER BY discipline: `is_home DESC` ensures the home row is always
+// the first row returned. The 5000 cap (`slice(0, 5000)`) is taken
+// from the START of the ordered list, so the home `/` URL is NEVER
+// truncated even if `pages` grows past the cap. `updated_at DESC` is
+// the tiebreaker so the most-recently-edited content surfaces first.
+//
+// /projects and /blog stay hard-coded — they are listing routes, not
+// CMS-managed pages. The posts SELECT below additionally adds per-
+// post entries once the table exists.
+const STATIC_LISTING_PATHS = ['/projects', '/blog']
+
+// Build-time constant for static-path lastModified, validated at
+// boot via lib/env.ts. Using `new Date()` per request would lie to
+// crawlers ("everything changed!") and burn crawl budget; pinning
+// to BWC_RELEASE_TS stays stable across the lifetime of a release.
+const RELEASE_LAST_MOD = new Date(env.BWC_RELEASE_TS)
+
+// Hard cap matching the sitemap spec recommendation (50k per file)
+// but lower for crawl-budget hygiene. When `pages` grows past this,
+// `logWarn`-style structured log surfaces in PM2/nginx logs so ops
+// can schedule the sitemap-index migration (out of scope this PR).
+const SITEMAP_PAGE_CAP = 5000
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  // Host-aware. Only the apex production host serves a sitemap of
+  // production URLs; staging hosts, preview hosts, localhost, IP
+  // access etc. all serve an empty sitemap so a non-production
+  // origin can never leak production URLs as canonical to a
+  // crawler that happens to find it.
+  const host = (await headers()).get('host') ?? ''
+  const apexHost = new URL(env.SITE_ORIGIN).host
+  if (host !== apexHost) return []
+  const origin = env.SITE_ORIGIN
+
+  // Parallel reads via Promise.allSettled — one query rejecting (a
+  // slow lock on projects, a transient pages query) must NOT take
+  // down the whole sitemap. A 500 on /sitemap.xml burns crawl budget
+  // and trains a negative crawler signal; partial sitemap is
+  // strictly better than no sitemap. Each rejected branch emits a
+  // structured warning so operators see the partial-failure signal.
+  // posts retains its existing missing-table feature-detect (the
+  // table may not exist yet during early Plan 06 deploys).
+  const settled = await Promise.allSettled([
+    (async () => {
+      // SELECT one over the cap so we can detect overflow. The
+      // ORDER BY guarantees the home row (is_home=1) is first and
+      // therefore never truncated.
+      const [rows] = (await db.execute(sql`
+        SELECT url_path, is_home, updated_at
+        FROM pages
+        WHERE published = 1 AND deleted_at IS NULL
+        ORDER BY is_home DESC, updated_at DESC
+        LIMIT ${SITEMAP_PAGE_CAP + 1}
+      `)) as unknown as [
+        Array<{ url_path: string | null; is_home: number | boolean; updated_at: Date }>,
+      ]
+      return rows
+    })(),
+    (async () => {
+      const [rows] = (await db.execute(sql`
+        SELECT slug, updated_at
+        FROM projects
+        WHERE published = TRUE AND deleted_at IS NULL
+      `)) as unknown as [Array<{ slug: string; updated_at: Date }>]
+      return rows
+    })(),
+    (async () => {
+      try {
+        const [rows] = (await db.execute(sql`
+          SELECT slug, updated_at
+          FROM posts
+          WHERE published = TRUE AND deleted_at IS NULL
+        `)) as unknown as [Array<{ slug: string; updated_at: Date }>]
+        return rows
+      } catch (err) {
+        if (!isMissingTable(err)) throw err
+        return []
+      }
+    })(),
+  ])
+  const pageRowsResult = settled[0]
+  const projectRowsResult = settled[1]
+  const postRowsResult = settled[2]
+  function unwrap<T>(
+    result: PromiseSettledResult<T>,
+    label: string,
+  ): T | null {
+    if (result.status === 'fulfilled') return result.value
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'sitemap_query_failed',
+        which: label,
+        err_name: result.reason instanceof Error ? result.reason.name : 'unknown',
+      }),
+    )
+    return null
+  }
+  const pageRows = unwrap(pageRowsResult, 'pages') ?? []
+  const projectRows = unwrap(projectRowsResult, 'projects') ?? []
+  const postRows = unwrap(postRowsResult, 'posts') ?? []
+
+  if (pageRows.length > SITEMAP_PAGE_CAP) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'sitemap_truncated',
+        count: pageRows.length,
+        omitted: pageRows.length - SITEMAP_PAGE_CAP,
+      }),
+    )
+  }
+
+  const pageEntries = pageRows.slice(0, SITEMAP_PAGE_CAP).map((p) => ({
+    // `url_path` is the canonical single column. Fall back to `/`
+    // for the home row (the runtime expression never produces NULL,
+    // but the TS column type is nullable per Drizzle 0.36 + MariaDB
+    // STORED-generated-column limitations).
+    url: `${origin}${p.url_path ?? '/'}`,
+    lastModified: p.updated_at,
+    changeFrequency: 'monthly' as const,
+    // Truthy check (not `=== 1`) so a future mysql2 typecast config
+    // that converts TINYINT(1) to JS boolean doesn't silently
+    // collapse home priority to 0.7. is_home is `0|1|true|false` at
+    // the row layer; both `1` and `true` are truthy.
+    priority: p.is_home ? 1.0 : 0.7,
+  }))
+
+  return [
+    ...pageEntries,
+    ...STATIC_LISTING_PATHS.map((p) => ({
+      url: `${origin}${p}`,
+      lastModified: RELEASE_LAST_MOD,
+    })),
+    ...projectRows.map((p) => ({
+      url: `${origin}/projects/${p.slug}`,
+      lastModified: p.updated_at,
+    })),
+    ...postRows.map((p) => ({
+      url: `${origin}/blog/${p.slug}`,
+      lastModified: p.updated_at,
+    })),
+  ]
+}

@@ -1,0 +1,13 @@
+[Unit]
+Description=BWC disk check timer
+
+[Timer]
+# Hourly with NO RandomizedDelaySec — disk-check is the gate that
+# blocks deploys at 90% utilisation; we want it to run at predictable
+# top-of-the-hour for operator log-correlation.
+OnCalendar=hourly
+Persistent=true
+Unit=bwc-disk-check.service
+
+[Install]
+WantedBy=timers.target

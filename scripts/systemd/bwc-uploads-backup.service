@@ -1,0 +1,45 @@
+[Unit]
+Description=BWC daily encrypted uploads backup (tar | gzip | age + rclone off-site)
+OnFailure=bwc-alert@%n.service
+
+[Service]
+Type=oneshot
+User=bwc
+Group=backup
+# Group=backup drops supplementary groups; add bwcstate so the process
+# can write to /var/lib/bwc (mode 2770 root:bwcstate, see setup.sh
+# bwcstate-group block). The dedicated bwcstate group scopes the grant
+# to bwc-user services only — NOT www-data which is in group `bwc`.
+SupplementaryGroups=bwcstate
+IOSchedulingClass=idle
+EnvironmentFile=/etc/bwc/env.production
+# `-` prefix tolerates missing symlink pre-first-deploy (see
+# bwc-db-backup.service for the rationale).
+WorkingDirectory=-/opt/bwc/current
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+# Reads /opt/bwc/uploads, writes /backup/bwc/uploads, may also write
+# a success-marker to /var/lib/bwc for cron-purge's gate.
+ReadWritePaths=/backup /var/log/bwc /var/lib/bwc
+# tar + gzip + age + rclone are streaming workloads; 256M caps any
+# pathological in-memory state without affecting the PM2 worker.
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=256
+# Cap total runtime. tar over a multi-GB uploads tree on slow disk +
+# slow off-site upload can legitimately take 30-60min. 2h is generous
+# headroom for the worst-case full-archive day.
+TimeoutStartSec=7200s
+ExecCondition=/usr/bin/test -x /opt/bwc/current/scripts/uploads-backup.sh
+ExecStart=/opt/bwc/current/scripts/uploads-backup.sh

@@ -1,0 +1,83 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1778464980912,
+      "tag": "0000_next_sharon_carter",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1778469051754,
+      "tag": "0001_broken_roxanne_simpson",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1778493670407,
+      "tag": "0002_sudden_mister_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1778502592583,
+      "tag": "0003_exotic_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1778550255109,
+      "tag": "0004_normal_shard",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1778550850390,
+      "tag": "0005_hard_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1778551140581,
+      "tag": "0006_early_chameleon",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1778599883251,
+      "tag": "0007_spotty_nova",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1778793721147,
+      "tag": "0008_elite_bushwacker",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1778803837998,
+      "tag": "0009_uneven_unus",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1778885640000,
+      "tag": "0010_pages_cms",
+      "breakpoints": true
+    }
+  ]
+}

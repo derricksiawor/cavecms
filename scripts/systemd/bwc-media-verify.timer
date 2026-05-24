@@ -1,0 +1,14 @@
+[Unit]
+Description=BWC media-verify timer
+
+[Timer]
+# Sunday 05:00 UTC — between Saturday's backups and Monday's
+# trading-day traffic. Weekly is plenty; the migration triggers
+# already enforce ref integrity on writes.
+OnCalendar=Sun *-*-* 05:00:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=bwc-media-verify.service
+
+[Install]
+WantedBy=timers.target

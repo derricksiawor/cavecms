@@ -1,0 +1,718 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ────────────────────────────────────────────────────────────────────────
+   BWC luxury palette + type system.
+   Palette is a working set until the formal brand-audit step (later plan)
+   produces lib/theme/tokens.ts. Copper accent on warm cream + deep
+   near-black text per the luxury-ui-design guide.
+   ──────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-copper-50: #FDF8F5;
+  --color-copper-100: #F6E6D9;
+  --color-copper-200: #ECC8AB;
+  --color-copper-300: #D89F71;
+  --color-copper-400: #C2853D;
+  --color-copper-500: #B87333;
+  --color-copper-600: #A66529;
+  --color-copper-700: #8B5320;
+  --color-copper-800: #6E4119;
+  --color-copper-900: #553212;
+
+  --color-cream: #F3E9DC;
+  --color-cream-50: #FDFCFA;
+  --color-cream-100: #F9F5EF;
+  --color-cream-200: #F3E9DC;
+  --color-cream-300: #E8DAC4;
+  --color-cream-400: #D9C5A4;
+
+  --color-near-black: #050505;
+  --color-deep-charcoal: #1A1A1A;
+  --color-warm-stone: #6E665A;
+
+  --font-sans: var(--font-montserrat), system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-playfair), Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
+
+  /* ─── Motion tokens ─────────────────────────────────────────────────
+     Anna-informed system (anna.command-space.com — luxury real-estate
+     portfolio). Material Standard `cubic-bezier(0.4, 0, 0.2, 1)` carries
+     ~90% of interactive transitions.
+
+     --ease-luxury — RESERVED. Allowed callers:
+       1. bwc-rise keyframe (page-level hero intros)
+       2. EditModePill drop-in
+       3. Section-template hero reveals (Chunk C, when landed)
+     Anything else uses --ease-standard. New --ease-luxury call sites
+     require explicit motion-token-owner review before merging.
+
+     Tailwind v4 picks these up automatically and emits:
+       ease-{standard|decelerate|inout|accelerate|luxury}
+       duration-{quick|standard|drawer|reveal|elegant|shimmer|ambient|drift}
+       animate-bwc-{rise|fade-in|slide-up|scale-in|toast-in|toast-out|
+                    pulse-copper|shimmer|drift|drawer-in|drawer-out}
+     ─────────────────────────────────────────────────────────────────── */
+  --ease-standard:    cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate:  cubic-bezier(0, 0, 0.2, 1);
+  --ease-inout:       cubic-bezier(0.4, 0, 0.6, 1);
+  --ease-accelerate:  cubic-bezier(0.4, 0, 1, 1);
+  --ease-luxury:      cubic-bezier(0.19, 0.91, 0.38, 0.98);
+
+  --duration-quick:    200ms;
+  --duration-standard: 300ms;
+  --duration-drawer:   400ms;
+  --duration-reveal:   500ms;
+  --duration-elegant:  700ms;
+  --duration-shimmer:  1500ms;
+  --duration-ambient:  2000ms;
+  --duration-drift:    3000ms;
+
+  --animate-bwc-rise:         bwc-rise         var(--duration-elegant)  var(--ease-luxury)     both;
+  --animate-bwc-fade-in:      bwc-fade-in      var(--duration-standard) var(--ease-standard)   both;
+  --animate-bwc-slide-up:     bwc-slide-up     var(--duration-reveal)   var(--ease-standard)   both;
+  --animate-bwc-scale-in:     bwc-scale-in     var(--duration-standard) var(--ease-standard)   both;
+  --animate-bwc-toast-in:     bwc-toast-in     var(--duration-standard) var(--ease-standard)   both;
+  --animate-bwc-toast-out:    bwc-toast-out    var(--duration-quick)    var(--ease-accelerate) both;
+  --animate-bwc-pulse-copper: bwc-pulse-copper var(--duration-ambient)  var(--ease-inout)      infinite;
+  --animate-bwc-shimmer:      bwc-shimmer      var(--duration-shimmer)  linear                 infinite;
+  --animate-bwc-drift:        bwc-drift        var(--duration-drift)    var(--ease-inout)      infinite;
+  --animate-bwc-drawer-in:    bwc-drawer-in    var(--duration-drawer)   var(--ease-decelerate) both;
+  --animate-bwc-drawer-out:   bwc-drawer-out   var(--duration-quick)    var(--ease-accelerate) both;
+
+  /* Stagger tokens — promoted to @theme so a global override is
+     possible without editing the .bwc-stagger-item rule. The calc() in
+     that rule retains 50ms fallbacks in case a future @theme override
+     unsets them (defence in depth). */
+  --stagger-base: 50ms;
+  --stagger-step: 50ms;
+}
+
+/* Stagger system — Anna's 50ms-per-item cascade, decoupled from
+   nth-child so it scales past 10. Consumer passes the index via
+   inline style: `style={{ '--stagger-index': i }}`. Combine with any
+   `animate-*` utility — the delay piles onto the existing animation
+   without rewriting the keyframe pipeline. */
+.bwc-stagger-item {
+  animation-delay: calc(var(--stagger-base, 50ms) + var(--stagger-index, 0) * var(--stagger-step, 50ms));
+}
+
+@layer base {
+  :root {
+    --background: var(--color-cream);
+    --foreground: var(--color-near-black);
+  }
+  html { color-scheme: light; }
+  body { background: var(--background); color: var(--foreground); }
+  /* Selection in copper for brand recall. */
+  ::selection { background: var(--color-copper-500); color: var(--color-cream-50); }
+}
+
+/* reCAPTCHA badge hidden globally — RecaptchaNotice component carries the
+   legally required attribution + Google policy/terms links. */
+.grecaptcha-badge {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Luxury keyframes — picked up by `--animate-bwc-*` tokens in @theme
+   above which generate the `animate-bwc-*` Tailwind utilities.
+
+   Animation definitions (duration + curve + fill-mode) live in @theme;
+   keep this block focused on geometric definitions only.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Hero-tier entrance — preserved with BWC's soft-overshoot luxury curve.
+   Used for page-level intros and the EditModePill drop-in; everything
+   else uses Anna's slideUp / scaleIn / fadeIn at standard duration. */
+@keyframes bwc-rise {
+  0% { opacity: 0; transform: translateY(24px); filter: blur(8px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+/* Micro-entrance — small UI elements (toolbar pills, dropdowns).
+   4px translateY for a subtle settle vs. slideUp's 20px hero reveal. */
+@keyframes bwc-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Standard reveal — Anna's primary entrance keyframe.
+   20px lift + opacity fade, 500ms `--ease-standard`. Pair with the
+   `.bwc-stagger-item` class + `--stagger-index` for cascading lists. */
+@keyframes bwc-slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Micro-reveal — small interactive surfaces (cards, icons settling
+   into place). Anna's scaleIn at 0.94 vs. her 0.9; tighter pop. */
+@keyframes bwc-scale-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Toast in/out — vertical settle + scale, with --ease-accelerate
+   carrying the exit (steep at start = quicker dismissal). */
+@keyframes bwc-toast-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes bwc-toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(16px) scale(0.96); }
+}
+
+/* Side-drawer slide — Material Design asymmetric pattern: decelerate
+   on entry (slow-stop as it settles into place), accelerate on exit
+   (snap-leave as it slides off-screen). 400ms entry feels considered;
+   200ms exit feels responsive. */
+@keyframes bwc-drawer-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes bwc-drawer-out {
+  from { transform: translateX(0); }
+  to   { transform: translateX(100%); }
+}
+
+/* Skeleton shimmer — 1.5s loop (consolidated with `--duration-shimmer`). */
+@keyframes bwc-shimmer {
+  0%   { background-position: -468px 0; }
+  100% { background-position:  468px 0; }
+}
+
+/* Copper-pulse halo — replaces Anaarkutu's `goldPulse` with BWC's
+   copper-500 alpha. 2s loop on `--ease-inout`. */
+@keyframes bwc-pulse-copper {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 115, 51, 0.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(184, 115, 51, 0); }
+}
+
+/* Outline-handle scroll-to feedback. Triggered by the OutlinePanel's
+   TreeRow handle button via .add('bwc-outline-ping') for 1.6s, then
+   removed. A 0→8px copper-ring expansion + fade matches the existing
+   bwc-pulse-copper aesthetic but fires ONCE rather than looping.
+   Border-radius matches the editor frame's 12px so the ring hugs the
+   block edge. */
+@keyframes bwc-outline-ping {
+  0%   { box-shadow: 0 0 0 0 rgba(194, 133, 61, 0.55); }
+  40%  { box-shadow: 0 0 0 6px rgba(194, 133, 61, 0.22); }
+  100% { box-shadow: 0 0 0 14px rgba(194, 133, 61, 0); }
+}
+.bwc-outline-ping {
+  animation: bwc-outline-ping 1.6s ease-out;
+  border-radius: 14px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bwc-outline-ping {
+    animation: none;
+    outline: 2px solid var(--color-copper-400);
+    outline-offset: 4px;
+  }
+}
+
+/* Idle drift — 8px translateY oscillation (Anna's 10px tightened for
+   BWC's calmer feel). Use on small accent elements that benefit from
+   subtle life when the page is otherwise static. */
+@keyframes bwc-drift {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+/* Skeleton bg + animation bundle — not a Tailwind animation utility
+   (it pairs the animation with a gradient background). Named
+   `bwc-skeleton` (not `bwc-shimmer`) to disambiguate from the
+   `animate-bwc-shimmer` token: this utility is the FULL skeleton
+   surface (gradient background + animation), while
+   `animate-bwc-shimmer` is JUST the animation property for callers
+   that bring their own background (e.g. `components/inline-edit/
+   Shimmer.tsx` uses a copper-tinted bg-gradient + animate-bwc-shimmer). */
+@utility bwc-skeleton {
+  background: linear-gradient(to right, rgba(110, 102, 90, 0.06) 8%, rgba(110, 102, 90, 0.14) 18%, rgba(110, 102, 90, 0.06) 33%);
+  background-size: 800px 100px;
+  animation: bwc-shimmer var(--duration-shimmer) linear infinite;
+}
+
+/* Honest focus ring for every editor surface — replaces the default
+   amber-600 ring with the copper token to stay on-brand. */
+@layer base {
+  .bwc-focus-ring:focus-visible {
+    outline: 2px solid var(--color-copper-500);
+    outline-offset: 2px;
+  }
+
+  /* Global :focus-visible — replaces the browser-default Mac-blue
+     (rgb(0,95,204)) outline with the copper brand token on EVERY
+     focusable element. Tailwind v4 preflight sets `outline-color:
+     currentColor` on `*` selectors which has comparable specificity
+     to a bare `:focus-visible` — the per-element selector below
+     bumps specificity to win the cascade. The shorthand alone
+     resolved outline-color back to currentColor on header/footer
+     links (re-audit walkthrough finding). Tailwind's
+     `focus-visible:outline-none` utility on specific components
+     still wins (more specific + later in cascade), so components
+     that ship their own ring (focus-visible:ring-copper-…) keep
+     working as designed. Audit finding V5 (Chunk K). */
+  :focus-visible {
+    outline-style: solid;
+    outline-width: 2px;
+    /* !important because Tailwind v4 preflight's
+       `*, ::before, ::after { outline-color: currentColor }` wins
+       on outline-color despite my (:focus-visible) being more
+       specific — Tailwind ships its reset in a layer that the
+       browser resolves later. The shorthand `outline: 2px solid X`
+       lost outline-color back to currentColor across header/footer
+       links (re-audit walkthrough finding). !important on this ONE
+       property restores brand-accent focus universally. Component-
+       level `focus-visible:outline-none` (Tailwind utility) still
+       wins because outline-style: none beats this rule entirely. */
+    outline-color: var(--color-copper-500) !important;
+    outline-offset: 2px;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Public admin bar — single source of truth for bar height + sticky
+   SiteHeader offset.
+
+   PUBLIC CONTRACT: when the public admin bar renders, the root
+   layout sets `data-admin-bar` on <body> AND defines the CSS custom
+   property `--admin-bar-h` to the bar's current height. Any
+   sticky/fixed UI that needs to dock below the bar (the public site
+   header, future floating widgets) may read `var(--admin-bar-h)`
+   and apply it as a `top:` offset. Suppressed in print (the bar
+   itself is `print:hidden` — the offset would otherwise leave 40-44
+   px of empty space at the top of every printed page).
+
+   The bar itself is `position: fixed; top: 0` over an in-flow
+   placeholder that reserves layout space for normal-flow content.
+   SiteHeader is `position: sticky; top: 0` — sticky elements do
+   NOT participate in the placeholder's flow offset, so without
+   this rule SiteHeader would dock at viewport-top-0 and be
+   occluded by the bar at z-60.
+   ──────────────────────────────────────────────────────────────────────── */
+@theme {
+  --admin-bar-h: 2.75rem;
+  --admin-bar-h-md: 2.5rem;
+}
+
+/* NB: intentionally OUTSIDE @layer — Tailwind v4's utilities layer
+   wins over @layer base on specificity equality, so SiteHeader's
+   `top-0` utility would otherwise override this offset. Unlayered
+   CSS sits at the end of the cascade and beats every layered rule
+   for the same selector specificity.
+
+   Detection via `:has()` rather than a body data-attribute. The bar
+   is mounted in `app/template.tsx` (re-renders per navigation), so
+   we can't set a body attribute from a layout that doesn't
+   re-render. `:has()` reads the DOM directly — when the bar's
+   region element is present the rule fires; when it's absent (signed
+   out, /admin, login route) the rule doesn't apply and SiteHeader
+   stays at top:0. Browser support: Chrome 105+, Safari 15.4+,
+   Firefox 121+ — well within BWP's target browser matrix. */
+@media not print {
+  body:has(div[role="region"][aria-label="Site administration"]) [data-site-header] {
+    top: var(--admin-bar-h);
+  }
+  @media (min-width: 768px) {
+    body:has(div[role="region"][aria-label="Site administration"]) [data-site-header] {
+      top: var(--admin-bar-h-md);
+    }
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Reduced-motion floor — WCAG 2.3.3 / vestibular-safety baseline.
+
+   `motion-reduce:transition-none` Tailwind variants only fire where a
+   contributor remembered to add them. Infinite-loop animations
+   (bwc-pulse-copper, bwc-shimmer, bwc-drift) AND any raw `animate-bwc-*`
+   call site without the variant would otherwise still run for users who
+   set prefers-reduced-motion: reduce.
+
+   This rule is the floor: it collapses every animation + transition to
+   ~0ms when the user opts in. Per-component motion-reduce:* utilities
+   remain the nuanced escape hatch (e.g. disabling transform but keeping
+   opacity). The global rule guarantees nothing slips through.
+
+   `scroll-behavior: auto` re-enables jump scrolling so anchor links
+   don't smooth-scroll when the user opts out of motion.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   BWC LUXURY REDESIGN — fresh brand language @theme block.
+
+   Black + gold editorial system. COEXISTS with the legacy copper-on-
+   cream palette at the top of this file during the page-by-page
+   migration that starts with /contact. Legacy tokens stay defined
+   and renderable while their consuming pages are rebuilt one by one
+   on top of the new system. A cleanup pass removes the legacy
+   block once every page has migrated.
+
+   Token additions here flow through to Tailwind v4 as utilities:
+     --color-* → bg-*, text-*, border-*
+     --font-display / --font-body → font-display, font-body
+     --spacing-section-* → py-section-*, px-section-*, gap-section-*
+     --text-display-* / --text-body-* / --text-eyebrow → text-*
+     --leading-* → leading-*
+
+   designTokens.ts (lib/cms/designTokens.ts) is the JS/TS counterpart
+   that admin-bar pickers consume. Adding a new token requires editing
+   BOTH this file AND that one — they stay in sync by hand.
+   ════════════════════════════════════════════════════════════════════════ */
+@theme {
+  /* ─── Palette — six tokens. Luxury restraint. ──────────────────── */
+  --color-obsidian:     #050505;
+  --color-ivory:        #F5F1EA;
+  --color-champagne:    #C9A961;
+  --color-antique-gold: #8B6F3A;
+  --color-bone:         #E8E1D4;
+  /* --color-warm-stone is defined in the legacy @theme block above
+     (#6E665A) and serves both systems — no redefinition here. */
+
+  /* ─── Typography families — Playfair Display for titles/headings,
+     Montserrat for body/UI text. Matches the client's brand identity
+     (serif headline + sans body pairing used on their original site). */
+  --font-display: var(--font-playfair), Georgia, serif;
+  --font-body:    var(--font-montserrat), system-ui, -apple-system, sans-serif;
+
+  /* ─── Editorial spacing — section-level vertical padding scale.
+     These are aliases over Tailwind's generic --spacing-* tokens
+     with semantic names so block authors pick named stops, never
+     raw pixel/rem values. Drives `py-section-md`, `px-section-lg`,
+     `gap-section-xl` etc. */
+  --spacing-section-xs:  3rem;     /*  48px */
+  --spacing-section-sm:  4rem;     /*  64px */
+  --spacing-section-md:  6rem;     /*  96px */
+  --spacing-section-lg:  8rem;     /* 128px */
+  --spacing-section-xl:  10rem;    /* 160px */
+  --spacing-section-2xl: 12rem;    /* 192px */
+
+  /* ─── Editorial type scale — Fraunces display + Inter body.
+     Tailwind v4 picks these up and generates `text-display-2xl`,
+     `text-display-xl`, …, `text-body-md`, `text-eyebrow` utilities.
+     Block renderers translate a TextSizeToken from designTokens.ts
+     to the matching utility. */
+  --text-display-2xl: 5rem;        /*  80px — hero headline */
+  --text-display-xl:  4rem;        /*  64px — large display */
+  --text-display-lg:  3rem;        /*  48px — section heading */
+  --text-display-md:  2.25rem;     /*  36px — sub-section */
+  --text-display-sm:  1.75rem;     /*  28px — small display */
+  --text-body-lg:     1.25rem;     /*  20px — lead body */
+  --text-body-md:     1rem;        /*  16px — body */
+  --text-body-sm:     0.875rem;    /*  14px — small body */
+  --text-eyebrow:     0.75rem;     /*  12px — uppercase labels */
+
+  /* ─── Editorial leading — tuned for the type scale above.
+     Display sizes ride tight (1.05–1.2); body breathes (1.6). */
+  --leading-display: 1.05;
+  --leading-heading: 1.2;
+  --leading-body:    1.6;
+  --leading-tight:   1.25;
+
+  /* ─── Letter-spacing — bold Montserrat sits tighter than serif at
+     large sizes. Display tracks negative; badges (uppercase labels)
+     track positive for the wide-set "label" feel. */
+  --tracking-display: -0.025em;
+  --tracking-heading: -0.015em;
+  --tracking-body:    0;
+  --tracking-eyebrow: 0.18em;
+
+  /* ─── Luxury transition duration alias — used by lx_* renderers
+     for hover-state colour / border transitions (champagne accent
+     reveals, antique-gold deepening, arrow translations). Aliases
+     the legacy --duration-quick at 200ms so Tailwind v4 emits the
+     `duration-base` utility the luxury renderers reference. Without
+     this token Tailwind silently drops the class and transitions
+     run with the browser default. */
+  --duration-base: 200ms;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   LUXURY DEPTH UTILITIES — gradient blurs + icon glows + CTA pulse.
+
+   Per ~/.claude/CLAUDE.md: "Premium, luxury feel — NOT minimal.
+   Maximum elegance always.  No borders/border lines. Large icons
+   with glow effects, gradient blur backgrounds for depth, primary
+   color highlights."
+
+   These utilities supply the visual depth the no-borders constraint
+   takes away. Pages compose them as decorative atmospheric layers
+   (absolutely-positioned behind content) and as glow halos behind
+   icons / numbers.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Large champagne radial blur — atmospheric background "fog of gold".
+   Drop one absolutely-positioned behind a hero headline or a closing
+   CTA section. The huge blur radius + low alpha produces a soft
+   spotlight without any hard edge. pointer-events-none so it never
+   intercepts clicks. */
+@utility lx-glow-champagne {
+  background: radial-gradient(
+    circle at center,
+    rgba(201, 169, 97, 0.32) 0%,
+    rgba(201, 169, 97, 0.16) 30%,
+    rgba(201, 169, 97, 0) 70%
+  );
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+/* Smaller champagne halo for icons + numbers. Sits behind a lucide
+   icon or a count-up number to make it read as "lit from behind"
+   rather than a flat glyph on a flat surface. */
+@utility lx-glow-champagne-icon {
+  background: radial-gradient(
+    circle at center,
+    rgba(201, 169, 97, 0.4) 0%,
+    rgba(201, 169, 97, 0.18) 40%,
+    rgba(201, 169, 97, 0) 70%
+  );
+  filter: blur(20px);
+  pointer-events: none;
+}
+
+/* Antique-gold variant for hover/focus states — deeper, warmer, used
+   on active CTAs where the visual emphasis steps up. */
+@utility lx-glow-antique-gold {
+  background: radial-gradient(
+    circle at center,
+    rgba(139, 111, 58, 0.35) 0%,
+    rgba(139, 111, 58, 0.15) 40%,
+    rgba(139, 111, 58, 0) 70%
+  );
+  filter: blur(30px);
+  pointer-events: none;
+}
+
+/* Champagne pulse — for the primary luxury CTA. Pulses a soft
+   champagne halo outward from the button to draw attention without
+   being mechanical. 2.4s loop on the luxury easing curve so the
+   beat reads as deliberate, not anxious. */
+@keyframes lx-pulse-champagne {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(201, 169, 97, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 16px rgba(201, 169, 97, 0);
+  }
+}
+@utility lx-pulse-champagne {
+  animation: lx-pulse-champagne 2.4s var(--ease-luxury) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lx-pulse-champagne {
+    animation: none;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Dark-tone drawer form overrides. The EditDrawer flips the chrome to
+   near-black for a "purposeful, complete" feel; ZodForm's form controls
+   stay light by default (they're shared with admin panels) and get
+   contextual recoloring inside the dark drawer via this scoped block.
+   Single source of truth — every ZodForm input variant routes through
+   these selectors regardless of which FieldShape kind it represents.
+
+   Targets `[data-drawer-tone="dark"]` set by components/ui/Drawer.tsx.
+   ──────────────────────────────────────────────────────────────────────── */
+[data-drawer-tone="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-drawer-tone="dark"] textarea,
+[data-drawer-tone="dark"] select {
+  background-color: rgba(243, 233, 220, 0.06);
+  border-color: rgba(243, 233, 220, 0.18);
+  color: var(--color-cream-50);
+}
+[data-drawer-tone="dark"] input::placeholder,
+[data-drawer-tone="dark"] textarea::placeholder {
+  color: rgba(243, 233, 220, 0.35);
+}
+[data-drawer-tone="dark"] input:hover:not(:disabled):not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-drawer-tone="dark"] textarea:hover:not(:disabled),
+[data-drawer-tone="dark"] select:hover:not(:disabled) {
+  border-color: rgba(243, 233, 220, 0.32);
+}
+[data-drawer-tone="dark"] input:focus:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+[data-drawer-tone="dark"] textarea:focus,
+[data-drawer-tone="dark"] select:focus {
+  background-color: rgba(243, 233, 220, 0.1);
+  border-color: var(--color-copper-400);
+}
+
+/* Field labels (the uppercase pill above each input) keep the cream
+   tint instead of warm-stone (which muddies on near-black). */
+[data-drawer-tone="dark"] label > span:first-child {
+  color: rgba(243, 233, 220, 0.7);
+}
+
+/* Field grouping fieldsets (object-array buckets) — wrap dark-tone
+   container shells around grouped fields so nested forms read as
+   sub-cards inside the drawer rather than identical bg as their
+   parent. */
+[data-drawer-tone="dark"] fieldset {
+  background-color: rgba(243, 233, 220, 0.04);
+  border-color: rgba(243, 233, 220, 0.12);
+}
+
+/* The "Add another" pill buttons inside object_array / media_array.
+   We target by structural shape (rounded-full button inside a
+   fieldset in the drawer) rather than a Tailwind class substring —
+   the prior `[class*="bg-cream-50"]` selector silently broke if a
+   ZodForm refactor switched to bg-cream-100 / cream-200 / etc. */
+[data-drawer-tone="dark"] fieldset button[type="button"].rounded-full {
+  background-color: rgba(243, 233, 220, 0.06);
+  border-color: rgba(243, 233, 220, 0.25);
+  color: var(--color-cream-50);
+}
+[data-drawer-tone="dark"] fieldset button[type="button"].rounded-full:hover {
+  border-color: var(--color-copper-400);
+  color: var(--color-copper-300);
+}
+
+/* Empty-state placeholders (media slot, etc.) — flip the dashed
+   cream borders to a dark-friendly variant. */
+[data-drawer-tone="dark"] [class*="border-dashed"] {
+  border-color: rgba(243, 233, 220, 0.2);
+  background-color: rgba(243, 233, 220, 0.03);
+}
+
+/* Sticky section legends inside the EditDrawer — fieldset legends use
+   `bwc-sticky-legend` (see components/inline-edit/ZodForm.tsx) so the
+   section label stays pinned at the top of the scrolling drawer viewport
+   while long forms (media_array with 12 items, object_array with many
+   sub-fields) scroll underneath. Dark-drawer override swaps the cream
+   backdrop for an obsidian translucent one. */
+[data-drawer-tone="dark"] .bwc-sticky-legend {
+  background-color: rgba(5, 5, 5, 0.85);
+  color: rgba(243, 233, 220, 0.9);
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Repeater item cards (social_link_array / object_array / media_array)
+   render `bg-white` cards by default — bright islands inside the
+   obsidian drawer. Flip them to an obsidian-friendly card surface so
+   the repeater reads as a stack of dark sub-cards. The header strip
+   inside ObjectArrayField items gets a slightly darker shade for the
+   item-title row separation cue. */
+[data-drawer-tone="dark"] .bwc-repeater-item {
+  background-color: rgba(243, 233, 220, 0.045);
+  border-color: rgba(243, 233, 220, 0.14);
+  box-shadow: 0 1px 0 rgba(243, 233, 220, 0.04) inset;
+}
+[data-drawer-tone="dark"] .bwc-repeater-item-header {
+  border-bottom-color: rgba(243, 233, 220, 0.08);
+}
+
+/* Stepper / TagInput / RichTextEditor frames — these wrap an
+   `bg-cream-50/80` div around inner controls. The input rules above
+   only catch native <input>/<textarea>; the surrounding chrome needs
+   its own override. Targeting structural classes used by these
+   primitives keeps the rule from leaking onto unrelated cream
+   surfaces inside the drawer. */
+[data-drawer-tone="dark"] .bg-cream-50\/80 {
+  background-color: rgba(243, 233, 220, 0.05);
+  border-color: rgba(243, 233, 220, 0.18);
+  color: var(--color-cream-50);
+}
+[data-drawer-tone="dark"] .bg-cream-50\/60 {
+  background-color: rgba(243, 233, 220, 0.04);
+}
+[data-drawer-tone="dark"] .bg-cream-50\/40 {
+  background-color: rgba(243, 233, 220, 0.03);
+}
+/* The MediaPicker thumbnail well + progress track. The thumb well is
+   the inner image frame; the progress track is the uploader bar. */
+[data-drawer-tone="dark"] .bg-cream-100 {
+  background-color: rgba(243, 233, 220, 0.08);
+}
+[data-drawer-tone="dark"] .bg-cream-200 {
+  background-color: rgba(243, 233, 220, 0.12);
+}
+/* SocialLinkRow's platform-icon wrapper uses `bg-cream-50` (opaque). */
+[data-drawer-tone="dark"] .bg-cream-50 {
+  background-color: rgba(243, 233, 220, 0.06);
+  border-color: rgba(243, 233, 220, 0.18);
+  color: var(--color-cream-50);
+}
+/* MediaPicker empty zone hover lifts to `hover:bg-cream-50`. */
+[data-drawer-tone="dark"] .hover\:bg-cream-50:hover {
+  background-color: rgba(243, 233, 220, 0.08);
+}
+
+/* Text-colour overrides for the spots that hard-code `text-near-black`
+   on a surface that is now dark. Boolean Switch tiles previously kept
+   a deliberate light island; the labels became invisible under the
+   cascade, so the system is now uniformly dark and every text-near-black
+   inside the drawer flips to cream-50. */
+[data-drawer-tone="dark"]
+  :is(p, span, button, label, code, div):where(.text-near-black) {
+  color: var(--color-cream-50);
+}
+
+/* `text-warm-stone` (the help-line tint under Switch labels and similar)
+   muddies against the obsidian surface; flip to a warm-cream variant so
+   help copy stays readable without competing with the primary label. */
+[data-drawer-tone="dark"]
+  :is(p, span, button, label, code, div):where(.text-warm-stone) {
+  color: rgba(243, 233, 220, 0.55);
+}
+
+/* Item up/down/remove controls in repeater rows. Hover uses
+   `hover:bg-cream-100` + `hover:text-near-black` which becomes
+   invisible against the dark card. */
+[data-drawer-tone="dark"] .hover\:bg-cream-100:hover {
+  background-color: rgba(243, 233, 220, 0.08);
+}
+[data-drawer-tone="dark"] .hover\:text-near-black:hover {
+  color: var(--color-cream-50);
+}
+/* Default warm-stone foreground on those controls reads OK on dark
+   already (warm-stone is mid-tone) but the resting cream variant
+   matches the obsidian drawer better. */
+[data-drawer-tone="dark"] .bwc-repeater-item button.text-warm-stone {
+  color: rgba(243, 233, 220, 0.55);
+}
+
+/* Inline pill-buttons on dark fieldsets pick up the existing
+   `fieldset button[type="button"].rounded-full` rule above. The
+   MediaPicker Replace / Remove buttons sit OUTSIDE a fieldset so
+   need their own pass. */
+[data-drawer-tone="dark"] button.rounded-full {
+  color: var(--color-cream-50);
+}
+[data-drawer-tone="dark"] button.rounded-full.border-warm-stone\/30 {
+  border-color: rgba(243, 233, 220, 0.25);
+}
+[data-drawer-tone="dark"] button.rounded-full.border-warm-stone\/30:hover {
+  border-color: var(--color-copper-400);
+  color: var(--color-copper-300);
+}
+
+/* Switch (boolean toggle) inside fieldsets — CtaField / LinkField /
+   social-link-array embed a Switch outside the boolean-tile island.
+   Inside the dark drawer the default `text-near-black` label fades
+   into the obsidian fieldset; flip to cream. */
+[data-drawer-tone="dark"] [role="switch"] + span span.text-near-black,
+[data-drawer-tone="dark"] [role="switch"] ~ span span.text-near-black {
+  color: var(--color-cream-50);
+}
+
+/* MediaPicker's outer label ("Image") + drop-zone copy hard-code
+   text-near-black; the drop-zone "Drop an image here…" prompt and
+   the picker's primary p tag need cream against the dark drawer. */
+[data-drawer-tone="dark"] [class*="border-dashed"] p.text-near-black,
+[data-drawer-tone="dark"] [class*="border-dashed"] p.text-sm.font-medium {
+  color: var(--color-cream-50);
+}

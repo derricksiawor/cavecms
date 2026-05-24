@@ -1,0 +1,32 @@
+# Workspace packages. The migrator is a separate workspace package so
+# CI can produce a portable, symlink-free node_modules tree with
+# `pnpm --filter=@bwc/migrator deploy --prod <out-dir>`. That keeps the
+# rest of the monorepo (Next, sharp, drizzle-kit, vitest, playwright,
+# etc.) out of the deploy artifact, which keeps the production tarball
+# small and the migrator's blast radius narrow.
+#
+# NOTE: do NOT use `cp -r migrator/node_modules` in deploy workflows —
+# pnpm's default node-linker uses symlinks pointing back into the
+# repo-local `.pnpm/` virtual store. `cp -r` copies the symlinks
+# themselves, and the bundle would fail with MODULE_NOT_FOUND on the
+# droplet. `pnpm deploy` is the canonical command that materializes a
+# flat, portable tree at the target path.
+#
+# The migrator runs once at deploy time via deploy.sh:312 against
+# /opt/bwc/incoming/<sha>/migrator-bundle/run.js using a privileged
+# DDL principal (DATABASE_MIGRATOR_URL), then never runs again until
+# the next deploy. Keeping it as a separate package guarantees no app
+# code or transitive Next dependency ever loads the DDL principal's
+# credentials at runtime.
+packages:
+  - migrator
+
+# Allow native postinstall builds for the listed packages only. sharp
+# fetches its prebuilt binary, esbuild + @tailwindcss/oxide + unrs-resolver
+# all have native postinstalls. pnpm 10+ blocks postinstall by default
+# for supply-chain safety; this allowlist is the canonical opt-in.
+onlyBuiltDependencies:
+  - sharp
+  - esbuild
+  - "@tailwindcss/oxide"
+  - unrs-resolver

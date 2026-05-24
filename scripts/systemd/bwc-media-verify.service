@@ -1,0 +1,44 @@
+[Unit]
+Description=BWC weekly media-references verifier
+OnFailure=bwc-alert@%n.service
+
+[Service]
+Type=oneshot
+User=bwc
+# Belt-and-suspenders: verify-media-refs.ts hard-refuses to run unless
+# NODE_ENV=production. Setting it on the unit guarantees the gate
+# passes even if env.production is missing the line. EnvironmentFile=
+# entries override Environment= per systemd.exec(5), so env.production
+# still wins if it sets NODE_ENV — this is a floor, not a ceiling.
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/bwc/env.production
+# `-` prefix tolerates missing symlink pre-first-deploy.
+WorkingDirectory=-/opt/bwc/current
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+# DB-only verifier — reconciles media_references via SQL writes, but
+# touches no filesystem state outside structured-log output. The DB
+# isn't covered by ProtectSystem=strict; ReadWritePaths only relaxes
+# filesystem read-only mounts. /var/log/bwc here is for any future
+# direct logger that bypasses journal.
+ReadWritePaths=/var/log/bwc
+# Node + Drizzle baseline; verify-media-refs reads content_blocks
+# and rebuilds media_references — could accumulate state for a
+# large catalog. 768M caps the worst case without crowding the
+# runtime.
+MemoryMax=768M
+MemorySwapMax=0
+TasksMax=256
+ExecCondition=/usr/bin/test -x /opt/bwc/current/node_modules/.bin/tsx
+ExecStart=/opt/bwc/current/node_modules/.bin/tsx scripts/verify-media-refs.ts

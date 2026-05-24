@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" role="img" aria-label="Hero plus stats row plus testimonial schematic">
+  <rect width="320" height="180" fill="#0a0a0a"/>
+  <!-- Hero -->
+  <rect x="20" y="18" width="280" height="44" rx="3" fill="none" stroke="#3a3a3a" stroke-width="0.6"/>
+  <rect x="32" y="28" width="180" height="6" rx="1" fill="#c97f2c"/>
+  <rect x="32" y="40" width="200" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+  <rect x="32" y="47" width="160" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+  <!-- Stats row -->
+  <rect x="20" y="72" width="280" height="46" rx="3" fill="none" stroke="#3a3a3a" stroke-width="0.6"/>
+  <g fill="#c97f2c">
+    <rect x="44" y="84" width="36" height="14" rx="1"/>
+    <rect x="142" y="84" width="36" height="14" rx="1"/>
+    <rect x="240" y="84" width="36" height="14" rx="1"/>
+  </g>
+  <g fill="#cdc4b6" opacity="0.55">
+    <rect x="44" y="102" width="58" height="3" rx="1"/>
+    <rect x="142" y="102" width="58" height="3" rx="1"/>
+    <rect x="240" y="102" width="58" height="3" rx="1"/>
+  </g>
+  <!-- Testimonial -->
+  <rect x="20" y="128" width="280" height="40" rx="3" fill="none" stroke="#3a3a3a" stroke-width="0.6"/>
+  <text x="40" y="148" font-family="serif" font-size="24" fill="#c97f2c" opacity="0.7">“</text>
+  <rect x="60" y="138" width="220" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+  <rect x="60" y="146" width="180" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+  <rect x="60" y="154" width="140" height="3" rx="1" fill="#cdc4b6" opacity="0.55"/>
+</svg>

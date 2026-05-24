@@ -1,0 +1,42 @@
+[Unit]
+Description=BWC hourly disk-usage check
+# Without OnFailure, a disk-check script failure (stat / awk / write
+# permission lost) would silently never block deploys on a full
+# disk. Alert the operator.
+OnFailure=bwc-alert@%n.service
+
+[Service]
+Type=oneshot
+# Runs as root because it writes /var/lib/bwc/deploy.blocked when
+# disk crosses 90%.
+User=root
+# No WorkingDirectory= — disk-check.sh examines FS-level free space
+# via absolute paths; coupling the unit to /opt/bwc/current would
+# break the "detect a full disk" guarantee if a botched deploy
+# left the symlink dangling.
+# Sandbox even though we're root: limit blast radius if the script
+# is ever compromised (it lives in the release tarball, which is
+# writable by anyone with deploy access — the supply-chain trust
+# surface). ReadWritePaths constrains the only legitimate write
+# target (/var/lib/bwc/deploy.blocked).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/bwc /var/log/bwc
+# Per-path `df` calls (1-3 invocations across /, /opt/bwc, /backup/bwc),
+# bounded awk parses — minimal memory each.
+MemoryMax=64M
+MemorySwapMax=0
+TasksMax=64
+ExecCondition=/usr/bin/test -x /opt/bwc/current/scripts/disk-check.sh
+ExecStart=/opt/bwc/current/scripts/disk-check.sh
