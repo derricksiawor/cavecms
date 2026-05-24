@@ -121,10 +121,10 @@ export function AdminMobileNav({ role }: { role: Role }) {
             className="fixed inset-y-0 right-0 z-50 flex w-72 flex-col bg-near-black px-8 py-10 text-cream-50 shadow-2xl lg:hidden"
           >
             <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-400">
-              Best World
+              Admin
             </p>
             <p className="mt-2 font-serif text-2xl font-bold tracking-tight text-cream-50">
-              Properties
+              CaveCMS
             </p>
             <nav className="mt-12 flex flex-col gap-1 text-sm font-medium tracking-wide">
               {tree.map((node) => {

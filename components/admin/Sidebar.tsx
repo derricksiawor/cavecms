@@ -64,11 +64,11 @@ function NavRow({
 //               exceed the viewport.
 //   - Footer (Preview site) — pinned bottom, doesn't scroll.
 //
-// brandText is the same setting the public SiteHeader reads
-// (site_header.brandText), passed down from the admin layout so a
-// rename in /admin/settings flows through to both surfaces in one
-// edit. `role`-filtered NAV mirrors the rest of the admin chrome.
-export function AdminSidebar({ role, brandText }: { role: Role; brandText: string }) {
+// Brand label is hardcoded to "CaveCMS" — the admin chrome carries the
+// PRODUCT brand, not the operator's site brand (mirrors the way WordPress
+// admin always reads "WordPress" regardless of the configured site name).
+// `role`-filtered NAV mirrors the rest of the admin chrome.
+export function AdminSidebar({ role }: { role: Role }) {
   const pathname = usePathname() ?? '/admin'
   const items = NAV.filter((i) => i.roles.includes(role))
   const tree = buildNavTree(items)
@@ -93,7 +93,7 @@ export function AdminSidebar({ role, brandText }: { role: Role; brandText: strin
           Admin
         </p>
         <p className="mt-2 font-serif text-2xl font-bold leading-tight tracking-tight text-cream-50">
-          {brandText}
+          CaveCMS
         </p>
       </div>
 

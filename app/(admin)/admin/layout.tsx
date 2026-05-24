@@ -5,7 +5,6 @@ import { AdminSidebar } from '@/components/admin/Sidebar'
 import { AdminTopbar } from '@/components/admin/Topbar'
 import { ToastProvider } from '@/components/inline-edit/Toast'
 import { CommandPaletteProvider } from '@/components/admin/CommandPalette'
-import { getSetting } from '@/lib/cms/getSettings'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,11 +27,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
   if (ctx.pwp) redirect('/auth/rotate')
 
-  // Brand label for the admin sidebar header. Single source of truth
-  // is site_header.brandText (same field the public SiteHeader reads),
-  // so a rename in /admin/settings flows through to both surfaces.
-  const siteHeader = await getSetting('site_header').catch(() => ({ brandText: 'Admin' }))
-
   return (
     // No `overflow-hidden` on the outer wrapper: CSS spec says
     // `position: sticky` is silently broken when ANY ancestor has
@@ -50,7 +44,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <ToastProvider>
         <CommandPaletteProvider>
           <div className="relative z-10 flex min-h-screen">
-            <AdminSidebar role={ctx.role} brandText={siteHeader.brandText} />
+            <AdminSidebar role={ctx.role} />
             <div className="flex min-w-0 flex-1 flex-col">
               <AdminTopbar email={ctx.email} role={ctx.role} />
               <main className="flex-1 px-8 py-12 sm:px-12 lg:px-20 lg:py-20">

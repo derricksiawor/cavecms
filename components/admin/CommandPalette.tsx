@@ -333,7 +333,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
               <Hint k="↵" label="Open" />
               <Hint k="↑↓" label="Navigate" />
             </span>
-            <span className="hidden sm:inline">Best World Properties · admin</span>
+            <span className="hidden sm:inline">CaveCMS · admin</span>
           </div>
         </div>
       </Command.Dialog>
