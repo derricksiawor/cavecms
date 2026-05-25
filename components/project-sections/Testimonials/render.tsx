@@ -9,7 +9,7 @@ import type { TestimonialsData } from '../_shared/types'
 // advances every 7s, pauses on hover/focus, respects
 // prefers-reduced-motion (no auto-advance when reduced).
 //
-// Crossfade uses CSS `key`-based remount + `animate-bwc-fade-in` —
+// Crossfade uses CSS `key`-based remount + `animate-cavecms-fade-in` —
 // no framer-motion dependency. The Chunk D token system carries the
 // curve + duration, so the visual rhythm matches every other
 // project-section animation without a JS-side override.
@@ -93,9 +93,9 @@ export function TestimonialsSection({ data }: { data: TestimonialsData }) {
           {/* `key` forces a remount on slide change so the CSS
              entrance animation fires every time without needing
              framer-motion's AnimatePresence. The fill-mode: both on
-             animate-bwc-fade-in preserves the visible end-state once
+             animate-cavecms-fade-in preserves the visible end-state once
              the animation finishes. */}
-          <figure key={index} className="mt-6 animate-bwc-fade-in">
+          <figure key={index} className="mt-6 animate-cavecms-fade-in">
             <blockquote className="mx-auto max-w-3xl font-serif text-xl sm:text-2xl md:text-3xl font-medium leading-relaxed text-cream/95">
               &ldquo;{current.quote}&rdquo;
             </blockquote>

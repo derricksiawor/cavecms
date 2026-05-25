@@ -12,12 +12,32 @@ import { registry, type SettingsKey, type SettingsValue } from './settings-regis
 async function readSetting<K extends SettingsKey>(
   key: K,
 ): Promise<SettingsValue<K>> {
-  const rows = await db
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, key))
-  const row = rows[0]
   const def = registry[key].default as SettingsValue<K>
+  // DB-level errors (connection drop, pool exhaustion, statement
+  // timeout, table missing on a fresh deploy) must NEVER bubble up
+  // to a hot caller like `verifyCsrf` or `signSessionJwt` — those
+  // are auth-gating code paths where any throw becomes a 500 on
+  // the request. Fail-closed-to-default mirrors the parse-failure
+  // contract two stanzas down: a tampered DB cell becomes the
+  // renderer-safe default. Same discipline for an unreachable DB.
+  let rows: Array<{ value: unknown }>
+  try {
+    rows = await db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, key))
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'settings_db_read_failed',
+        key,
+        err: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      }),
+    )
+    return def
+  }
+  const row = rows[0]
   if (!row) return def
   // MariaDB aliases JSON to LONGTEXT, so mysql2 returns json columns
   // as strings (unlike MySQL native JSON which auto-parses). Drizzle's
@@ -72,7 +92,7 @@ async function readSetting<K extends SettingsKey>(
 // out-of-band fixes (operator runs the seed, raw SQL edit, etc.).
 const wrappers = new Map<SettingsKey, () => Promise<unknown>>()
 
-export function getSetting<K extends SettingsKey>(
+export async function getSetting<K extends SettingsKey>(
   key: K,
 ): Promise<SettingsValue<K>> {
   let fn = wrappers.get(key)
@@ -83,5 +103,19 @@ export function getSetting<K extends SettingsKey>(
     })
     wrappers.set(key, fn)
   }
-  return fn() as Promise<SettingsValue<K>>
+  try {
+    return (await fn()) as SettingsValue<K>
+  } catch (err) {
+    // `unstable_cache` throws an "incrementalCache missing" invariant
+    // when called outside a Next.js request context (vitest unit
+    // suites, CLI scripts, instrumentation boot path). Fall back to
+    // an UNCACHED direct read so callers get a usable value instead
+    // of crashing — at the cost of one extra DB round-trip per call
+    // until the request context is available.
+    const message = err instanceof Error ? err.message : ''
+    if (/incrementalCache|unstable_cache/.test(message)) {
+      return (await readSetting(key)) as SettingsValue<K>
+    }
+    throw err
+  }
 }

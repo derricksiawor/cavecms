@@ -45,7 +45,12 @@ export async function verifyCsrf(
   if (!/^(0|[1-9][0-9]*)$/.test(tsStr)) return false
   const ts = Number(tsStr)
   if (!Number.isSafeInteger(ts)) return false
-  if (Math.floor(Date.now() / 1000) - ts > env.CSRF_TTL_SECONDS) return false
+  // CSRF TTL comes from settings.session_config (DB-driven, cached
+  // by unstable_cache). Per-request overhead is microseconds after
+  // the first read.
+  const { getSetting } = await import('@/lib/cms/getSettings')
+  const sessCfg = await getSetting('session_config')
+  if (Math.floor(Date.now() / 1000) - ts > sessCfg.csrfTtlSec) return false
   const expectedMac = createHmac('sha256', KEY).update(macInput(nonce, ts, ctx.jti, ctx.sub)).digest()
   const actualMac = fromB64u(macB64)
   if (actualMac.length !== expectedMac.length) return false

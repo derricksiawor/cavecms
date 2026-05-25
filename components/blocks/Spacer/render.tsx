@@ -4,7 +4,7 @@
 //   - Style tab is INTENTIONALLY empty — the widget exists purely to
 //     inject vertical whitespace.
 //
-// BWC collapses Elementor's free-form pixel slider into the 6-tier
+// CaveCMS collapses Elementor's free-form pixel slider into the 6-tier
 // SPACING_TIERS scale from lib/cms/spacingTokens (xs/sm/md/lg/xl/2xl).
 // The 'none' tier from SPACING_TIERS is excluded — a zero-height spacer
 // is degenerate; if the operator wants no space they should remove the

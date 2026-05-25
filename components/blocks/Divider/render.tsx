@@ -8,7 +8,7 @@ import clsx from 'clsx'
 //   - weight: 1–10px slider
 //   - colour, align, look (none | text | icon), text, icon, gap
 //
-// BWC narrows the catalog: solid/dashed/dotted/double only — luxury-RE
+// CaveCMS narrows the catalog: solid/dashed/dotted/double only — luxury-RE
 // aesthetic favours hairline minimalism; squiggly dividers would read
 // as toy-like. Width is collapsed to 4 enum presets (full/half/quarter/
 // short). The text/icon embedding variants are out of scope — operators

@@ -9,11 +9,11 @@ const SWEEP_INTERVAL_MS = 60 * 1000
 // HMR doesn't replace the Map between page render (issuePreCsrf) and the
 // form POST (consumePreCsrf).
 declare global {
-  var __bwcPreCsrf: Map<string, number> | undefined
-  var __bwcPreCsrfSweep: NodeJS.Timeout | undefined
+  var __cavecmsPreCsrf: Map<string, number> | undefined
+  var __cavecmsPreCsrfSweep: NodeJS.Timeout | undefined
 }
-const store: Map<string, number> = globalThis.__bwcPreCsrf ?? new Map<string, number>()
-globalThis.__bwcPreCsrf = store
+const store: Map<string, number> = globalThis.__cavecmsPreCsrf ?? new Map<string, number>()
+globalThis.__cavecmsPreCsrf = store
 
 function sweepExpired(): void {
   const now = Date.now()
@@ -42,13 +42,13 @@ const __isBuildPhase = process.env['NEXT_PHASE'] === 'phase-production-build'
 if (
   process.env['NEXT_RUNTIME'] === 'nodejs' &&
   !__isBuildPhase &&
-  !globalThis.__bwcPreCsrfSweep
+  !globalThis.__cavecmsPreCsrfSweep
 ) {
-  globalThis.__bwcPreCsrfSweep = setInterval(() => {
+  globalThis.__cavecmsPreCsrfSweep = setInterval(() => {
     sweepExpired()
     evictOverflow()
   }, SWEEP_INTERVAL_MS)
-  globalThis.__bwcPreCsrfSweep.unref()
+  globalThis.__cavecmsPreCsrfSweep.unref()
 }
 
 export function issuePreCsrf(): string {

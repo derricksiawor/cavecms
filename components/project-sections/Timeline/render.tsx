@@ -6,7 +6,7 @@ import type { MediaMap, TimelineData } from '../_shared/types'
 // Vertical construction-progress timeline. Each entry: copper dot on
 // a vertical line, formatted date, milestone title, optional body
 // richtext, optional photo. Whole list cascade-staggers in via
-// .bwc-stagger-item.
+// .cavecms-stagger-item.
 //
 // The schema enforces ISO date strings (YYYY-MM-DD) at the Zod
 // gate, so the formatter below trusts the format. Locale-aware
@@ -67,7 +67,7 @@ export function TimelineSection({
           {data.entries.map((e, i) => (
             <li
               key={`${e.date}-${i}`}
-              className="bwc-stagger-item animate-bwc-slide-up relative"
+              className="cavecms-stagger-item animate-cavecms-slide-up relative"
               style={{ ['--stagger-index' as string]: i }}
             >
               {/* Dot on the rail */}

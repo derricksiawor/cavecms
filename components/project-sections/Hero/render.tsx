@@ -38,7 +38,7 @@ export function HeroSection({
     <section
       id="project-hero"
       className="relative isolate overflow-hidden bg-near-black text-cream"
-      // animate-bwc-rise reserved for hero entrances per Chunk D.
+      // animate-cavecms-rise reserved for hero entrances per Chunk D.
       // Applied to the inner block so the section background does not
       // flash from cream to near-black after the page paints.
     >
@@ -89,14 +89,14 @@ export function HeroSection({
           ].join(' ')}
         >
           <span
-            className="inline-block h-1.5 w-1.5 rounded-full bg-copper-400 animate-bwc-pulse-copper"
+            className="inline-block h-1.5 w-1.5 rounded-full bg-copper-400 animate-cavecms-pulse-copper"
             aria-hidden
           />
           {badge}
         </span>
       )}
 
-      <div className="relative z-10 mx-auto flex min-h-[78vh] max-w-7xl flex-col justify-end px-4 sm:px-6 lg:px-10 pb-16 sm:pb-20 lg:pb-24 pt-32 sm:pt-40 animate-bwc-rise">
+      <div className="relative z-10 mx-auto flex min-h-[78vh] max-w-7xl flex-col justify-end px-4 sm:px-6 lg:px-10 pb-16 sm:pb-20 lg:pb-24 pt-32 sm:pt-40 animate-cavecms-rise">
         <h2
           className={[
             'max-w-4xl font-serif font-semibold tracking-tight',

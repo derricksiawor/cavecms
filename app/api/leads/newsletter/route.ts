@@ -12,7 +12,6 @@ import {
 } from '@/lib/leads/spam'
 import { enqueueEmail } from '@/lib/email/queue'
 import { dispatchLeadToCrms } from '@/lib/crm/dispatch'
-import { env } from '@/lib/env'
 import { neutralResponse } from '@/lib/leads/neutralResponse'
 import { normalizeEmail } from '@/lib/leads/normalizeEmail'
 import { logEnqueueFailure } from '@/lib/leads/logEnqueueFailure'
@@ -99,6 +98,18 @@ export const POST = withError(async (req: Request) => {
   const normEmail = normalizeEmail(body.email)
   const token = newNewsletterToken()
 
+  // Pre-flight: refuse the subscribe entirely if no site URL is
+  // configured. Without an absolute origin we can't build a
+  // clickable confirm link in the email; if we INSERTed the
+  // pending row anyway, the visitor would be stuck in a
+  // dead-letter state forever (no link ever arrives, re-submit
+  // hits the ON DUPLICATE KEY branch without progress).
+  const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
+  const earlySiteOrigin = await getSiteOrigin()
+  if (!earlySiteOrigin) {
+    return neutralResponse()
+  }
+
   // Token rotation rules (see comment block above) wrapped in a
   // transaction with FOR UPDATE on the row. Without the lock,
   // a concurrent unsubscribe POST between the upsert and the
@@ -150,8 +161,9 @@ export const POST = withError(async (req: Request) => {
   // the security model is preserved.
   if (!emailLimit(normEmail)) return neutralResponse()
 
-  const confirmUrl = `${env.SITE_ORIGIN}/newsletter/confirm/${actualToken}`
-  const unsubUrl = `${env.SITE_ORIGIN}/unsubscribe?token=${actualToken}`
+  // siteOrigin already validated at the top of the handler.
+  const confirmUrl = `${earlySiteOrigin}/newsletter/confirm/${actualToken}`
+  const unsubUrl = `${earlySiteOrigin}/unsubscribe?token=${actualToken}`
   await enqueueEmail(
     newsletterConfirm(normEmail, confirmUrl, unsubUrl),
   ).catch((err) =>
@@ -165,7 +177,7 @@ export const POST = withError(async (req: Request) => {
   await dispatchLeadToCrms({
     leadId: 0,
     source: 'newsletter',
-    bwcFields: { email: normEmail },
+    cavecmsFields: { email: normEmail },
     hutk: headerObj['cookie']?.match(/(?:^|;\s*)hubspotutk=([^;]+)/)?.[1],
     pageUri: headerObj['referer'],
     ipAddress: ip,

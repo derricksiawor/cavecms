@@ -31,7 +31,7 @@ import { SavedBlocksPanel } from './SavedBlocksPanel'
 // on dark — so the four edit-mode floating surfaces (admin bar,
 // outline, widget picker, edit-mode pill) read as one chrome system.
 //
-// Open/collapsed preference persists to localStorage `bwc:picker-open`.
+// Open/collapsed preference persists to localStorage `cavecms:picker-open`.
 // SSR returns the "open by default" markup; the post-mount effect
 // applies the saved preference. <lg viewports default closed to keep
 // the canvas usable on iPad.
@@ -95,13 +95,13 @@ export function WidgetPicker({ pageId }: { pageId: number }) {
   // the OutlinePanel pattern so the two panels feel like siblings.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const saved = safeStorage.get('bwc:picker-open')
+    const saved = safeStorage.get('cavecms:picker-open')
     if (saved === 'true') setOpen(true)
     else if (saved === 'false') setOpen(false)
     else if (window.matchMedia('(max-width: 1023.98px)').matches) {
       setOpen(false)
     }
-    const savedTab = safeStorage.get('bwc:picker-tab')
+    const savedTab = safeStorage.get('cavecms:picker-tab')
     if (savedTab === 'saved') setTab('saved')
     setHasMounted(true)
   }, [])
@@ -117,7 +117,7 @@ export function WidgetPicker({ pageId }: { pageId: number }) {
       skipFirstTabPersistRef.current = false
       return
     }
-    safeStorage.set('bwc:picker-tab', tab)
+    safeStorage.set('cavecms:picker-tab', tab)
   }, [tab])
 
   // Persist on toggle. Skip the first effect so the read-effect's
@@ -129,7 +129,7 @@ export function WidgetPicker({ pageId }: { pageId: number }) {
       skipFirstPersistRef.current = false
       return
     }
-    safeStorage.set('bwc:picker-open', String(open))
+    safeStorage.set('cavecms:picker-open', String(open))
   }, [open])
 
   // Filtered + ranked entries. Recomputes only when the query or the

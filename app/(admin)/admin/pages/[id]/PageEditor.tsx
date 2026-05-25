@@ -1268,7 +1268,7 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
                     id={b.id}
                     index={i}
                     disabled={isFixed || isReadOnly}
-                    className="group/blockrow flex items-start gap-3 rounded-2xl border border-warm-stone/20 bg-cream-50 px-4 py-3 transition-all duration-quick ease-standard hover:border-warm-stone/40 hover:shadow-[0_12px_30px_-22px_rgba(5,5,5,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/40 motion-reduce:transition-none animate-bwc-rise"
+                    className="group/blockrow flex items-start gap-3 rounded-2xl border border-warm-stone/20 bg-cream-50 px-4 py-3 transition-all duration-quick ease-standard hover:border-warm-stone/40 hover:shadow-[0_12px_30px_-22px_rgba(5,5,5,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/40 motion-reduce:transition-none animate-cavecms-rise"
                   >
                     {({ dragAttributes, dragListeners, isDragging }) => (
                       <>
@@ -1666,7 +1666,7 @@ function AddBlockPopover({
           ref={panelRef}
           role="menu"
           className={clsx(
-            'absolute z-20 w-64 rounded-2xl border border-warm-stone/20 bg-cream-50 py-2 shadow-[0_20px_50px_-20px_rgba(5,5,5,0.4)] animate-bwc-fade-in',
+            'absolute z-20 w-64 rounded-2xl border border-warm-stone/20 bg-cream-50 py-2 shadow-[0_20px_50px_-20px_rgba(5,5,5,0.4)] animate-cavecms-fade-in',
             placement.h === 'right' ? 'right-0' : 'left-0',
             placement.v === 'down' ? 'mt-2' : 'bottom-full mb-2',
           )}

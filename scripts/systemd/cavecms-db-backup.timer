@@ -1,0 +1,15 @@
+[Unit]
+Description=CaveCMS nightly database backup timer
+
+[Timer]
+# 03:00 UTC ± 15m jitter. Random delay smears load across many
+# droplets so a shared NFS / S3 endpoint isn't hammered at the
+# top of the hour. `Persistent=true` makes systemd run a missed
+# backup at boot if the box was down at 03:00.
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=cavecms-db-backup.service
+
+[Install]
+WantedBy=timers.target

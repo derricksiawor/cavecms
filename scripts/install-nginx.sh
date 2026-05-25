@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/install-nginx.sh — installs the bwc nginx config from the
+# scripts/install-nginx.sh — installs the cavecms nginx config from the
 # template + snippets. Called by setup.sh on first provision; safe
 # to re-run after a Let's Encrypt cert has been issued (swaps the
 # bootstrap self-signed cert for the real one).
@@ -7,7 +7,7 @@
 # Usage: install-nginx.sh <apex-domain> <staging-host> <login-path>
 #
 # On first run (no LE cert yet) a 7-day self-signed cert is
-# generated under /etc/ssl/bwc-bootstrap/ so `nginx -t` passes and
+# generated under /etc/ssl/cavecms-bootstrap/ so `nginx -t` passes and
 # nginx can serve HTTP — required for certbot HTTP-01 / DNS-01 to
 # even run. Re-run after certbot succeeds to swap to the real cert.
 
@@ -42,10 +42,10 @@ install -d -o root -g root -m 755 \
   /etc/nginx/sites-available \
   /etc/nginx/sites-enabled
 
-install -m 644 "$HERE/nginx/snippets/bwc-proxy.conf"       /etc/nginx/snippets/bwc-proxy.conf
-install -m 644 "$HERE/nginx/snippets/bwc-tls.conf"         /etc/nginx/snippets/bwc-tls.conf
-install -m 644 "$HERE/nginx/snippets/bwc-compression.conf" /etc/nginx/snippets/bwc-compression.conf
-install -m 644 "$HERE/nginx/snippets/bwc-asset-headers.conf" /etc/nginx/snippets/bwc-asset-headers.conf
+install -m 644 "$HERE/nginx/snippets/cavecms-proxy.conf"       /etc/nginx/snippets/cavecms-proxy.conf
+install -m 644 "$HERE/nginx/snippets/cavecms-tls.conf"         /etc/nginx/snippets/cavecms-tls.conf
+install -m 644 "$HERE/nginx/snippets/cavecms-compression.conf" /etc/nginx/snippets/cavecms-compression.conf
+install -m 644 "$HERE/nginx/snippets/cavecms-asset-headers.conf" /etc/nginx/snippets/cavecms-asset-headers.conf
 
 # Staging allowlist seed lives in /etc/nginx/snippets/ (NOT
 # /etc/nginx/conf.d/) so it's only included where the template
@@ -53,14 +53,14 @@ install -m 644 "$HERE/nginx/snippets/bwc-asset-headers.conf" /etc/nginx/snippets
 # /etc/nginx/conf.d/*.conf at http{} scope — placing allowlist
 # rules there would inherit them across every server block,
 # including production apex.
-if [ ! -f /etc/nginx/snippets/bwc-staging-allow.conf ]; then
-  cat > /etc/nginx/snippets/bwc-staging-allow.conf <<'EOF'
+if [ ! -f /etc/nginx/snippets/cavecms-staging-allow.conf ]; then
+  cat > /etc/nginx/snippets/cavecms-staging-allow.conf <<'EOF'
 # Add 'allow <ip>;' lines here, one per office/dev IP.
 # Example:
 #   allow 203.0.113.42;
 #   allow 198.51.100.0/24;
 EOF
-  chmod 644 /etc/nginx/snippets/bwc-staging-allow.conf
+  chmod 644 /etc/nginx/snippets/cavecms-staging-allow.conf
 fi
 
 # Bootstrap self-signed cert when no Let's Encrypt cert is on disk
@@ -118,10 +118,10 @@ awk \
     gsub(/__STAGING__/, staging);
     gsub(/__LOGIN_PATH__/, lp);
     print
-  }' "$HERE/nginx/bwc.conf.template" > "$TMP"
+  }' "$HERE/nginx/cavecms.conf.template" > "$TMP"
 
-install -m 644 "$TMP" /etc/nginx/sites-available/bwc.conf
-ln -sfn /etc/nginx/sites-available/bwc.conf /etc/nginx/sites-enabled/bwc.conf
+install -m 644 "$TMP" /etc/nginx/sites-available/cavecms.conf
+ln -sfn /etc/nginx/sites-available/cavecms.conf /etc/nginx/sites-enabled/cavecms.conf
 
 # Validate BEFORE reloading — a syntax error here would tear down
 # the listener and 502 every site nginx serves.
@@ -132,4 +132,4 @@ nginx -t
 # fails on first install where the package shipped nginx stopped.
 systemctl reload-or-restart nginx
 
-echo "[install-nginx.sh] OK — bwc.conf installed and applied."
+echo "[install-nginx.sh] OK — cavecms.conf installed and applied."

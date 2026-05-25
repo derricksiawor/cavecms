@@ -220,7 +220,7 @@ export function MediaPicker({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={finalThumb} alt={value.alt || ''} className="h-full w-full object-cover" />
             ) : (
-              <div className="bwc-skeleton h-full w-full" />
+              <div className="cavecms-skeleton h-full w-full" />
             )}
           </div>
           <div className="flex-1 min-w-0 flex flex-col gap-2">

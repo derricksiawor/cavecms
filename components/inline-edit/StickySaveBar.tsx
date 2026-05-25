@@ -44,7 +44,7 @@ export function StickySaveBar({
             aria-hidden
             className={clsx(
               'inline-flex h-2 w-2 shrink-0 rounded-full transition-colors',
-              dirty ? 'bg-copper-500 animate-bwc-pulse-copper' : 'bg-warm-stone/30',
+              dirty ? 'bg-copper-500 animate-cavecms-pulse-copper' : 'bg-warm-stone/30',
             )}
           />
           <span className="truncate">

@@ -28,11 +28,11 @@ import type { BlockKind } from './blockMeta'
 // hour_bucket).
 const HYDRATE_NOTIFY_DEDUP_MS = 5 * 60 * 1000
 declare global {
-  var __bwcHydrateNotifyDedup: Map<string, number> | undefined
+  var __cavecmsHydrateNotifyDedup: Map<string, number> | undefined
 }
 const hydrateNotifyDedup: Map<string, number> =
-  globalThis.__bwcHydrateNotifyDedup ?? new Map<string, number>()
-globalThis.__bwcHydrateNotifyDedup = hydrateNotifyDedup
+  globalThis.__cavecmsHydrateNotifyDedup ?? new Map<string, number>()
+globalThis.__cavecmsHydrateNotifyDedup = hydrateNotifyDedup
 
 function shouldEmitNotify(key: string): boolean {
   const now = Date.now()

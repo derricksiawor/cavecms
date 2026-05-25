@@ -19,10 +19,10 @@ const MAX_ENTRIES = 10_000
 // Insertion-order Map gives FIFO eviction. Pinned to globalThis so dev HMR
 // doesn't reset the cache mid-request.
 declare global {
-  var __bwcUserCache: Map<number, CachedUser> | undefined
+  var __cavecmsUserCache: Map<number, CachedUser> | undefined
 }
-const cache: Map<number, CachedUser> = globalThis.__bwcUserCache ?? new Map()
-globalThis.__bwcUserCache = cache
+const cache: Map<number, CachedUser> = globalThis.__cavecmsUserCache ?? new Map()
+globalThis.__cavecmsUserCache = cache
 
 export type { CachedUser }
 

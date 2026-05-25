@@ -41,8 +41,8 @@ import { BlockSearchResults } from './BlockSearchResults'
 //   - 60% backdrop opacity tint (bg-near-black/60) so the operator's
 //     spatial context stays visible behind the palette.
 
-const PALETTE_ID = 'bwc-slash-palette'
-const RESULTS_ID = 'bwc-slash-palette-results'
+const PALETTE_ID = 'cavecms-slash-palette'
+const RESULTS_ID = 'cavecms-slash-palette-results'
 
 export function SlashCommandPalette() {
   const { close, pageId, state } = useSlashCommand()
@@ -171,12 +171,12 @@ export function SlashCommandPalette() {
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close({ restoreFocus: false })
       }}
-      className="fixed inset-0 z-[90] flex items-start justify-center bg-near-black/60 backdrop-blur-sm px-4 pt-[18vh] animate-bwc-fade-in motion-reduce:animate-none"
+      className="fixed inset-0 z-[90] flex items-start justify-center bg-near-black/60 backdrop-blur-sm px-4 pt-[18vh] animate-cavecms-fade-in motion-reduce:animate-none"
     >
       <div
         id={PALETTE_ID}
         onMouseDown={(e) => e.stopPropagation()}
-        className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-cream-50/12 bg-near-black/[0.97] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)] animate-bwc-scale-in motion-reduce:animate-none"
+        className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-cream-50/12 bg-near-black/[0.97] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)] animate-cavecms-scale-in motion-reduce:animate-none"
       >
         {/* Header — search input + close button + ⌘K hint. */}
         <div className="flex items-center gap-3 border-b border-cream-50/10 px-4 py-3.5">

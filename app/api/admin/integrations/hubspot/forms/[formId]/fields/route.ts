@@ -5,7 +5,7 @@ import { getHubspotCreds, getHubspotFormFields } from '@/lib/crm/hubspot'
 
 // GET /api/admin/integrations/hubspot/forms/[formId]/fields
 // Returns the form's field schema so the edit-drawer can render a
-// BWC-field → HubSpot-field mapping UI.
+// CaveCMS-field → HubSpot-field mapping UI.
 
 export const GET = withError(async (
   _req: Request,

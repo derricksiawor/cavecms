@@ -10,8 +10,8 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 //   - selected_icon, icon_align (icon before/after text — out of scope for Chunk F)
 //   - hover_animation (Elementor's named set — replaced by a single CSS transition)
 //
-// BWC swaps Elementor's semantic button_type (success/danger) for stylistic
-// variants (primary/secondary/ghost) because BWC pages are editorial sales
+// CaveCMS swaps Elementor's semantic button_type (success/danger) for stylistic
+// variants (primary/secondary/ghost) because CaveCMS pages are editorial sales
 // surfaces, not application UIs — green/yellow/red colour-coding carries no
 // luxury-RE meaning. The 5 size presets stay because they match Elementor's
 // curation; a free-form pixel knob is intentionally not exposed (operators

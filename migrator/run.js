@@ -2,16 +2,16 @@
 
 // Standalone DDL applier. The deploy story is operator-driven (no
 // GitHub Actions): build the standalone artifact locally, produce a
-// portable migrator bundle via `pnpm --filter=@bwc/migrator deploy
+// portable migrator bundle via `pnpm --filter=@cavecms/migrator deploy
 // --prod migrator-bundle` (which materializes a flat, symlink-free
 // node_modules), pack into a tarball, scp to the server (typically
 // via `~/connect/connect <server> upload …`), then either invoke
 // scripts/deploy.sh from the server or run the steps manually.
 //
 // scripts/deploy.sh, when used, extracts the tarball into
-// /opt/bwc/releases/<sha>/ and runs this script via
+// /opt/cavecms/releases/<sha>/ and runs this script via
 // `node migrator-bundle/run.js` with DATABASE_URL sourced from
-// DATABASE_MIGRATOR_URL in /etc/bwc/env.production (subshell-scoped
+// DATABASE_MIGRATOR_URL in /etc/cavecms/env.production (subshell-scoped
 // so the DDL principal's credentials never bleed into the
 // PM2-launched app process). Manual invocation works the same:
 // `DATABASE_URL=$DATABASE_MIGRATOR_URL node migrator-bundle/run.js`.
@@ -45,7 +45,7 @@ const path = require('node:path')
 // (parsed from DATABASE_URL after mysql2 connects) so a single MariaDB
 // instance hosting both staging and production schemas cannot deadlock
 // a deploy against the wrong env's serialization point.
-const ADVISORY_LOCK_PREFIX = 'bwc_migrator_lock'
+const ADVISORY_LOCK_PREFIX = 'cavecms_migrator_lock'
 const ADVISORY_LOCK_WAIT_SECONDS = 60
 
 // Drizzle-kit writes each generated migration with one or more

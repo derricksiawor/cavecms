@@ -11,11 +11,11 @@ import { env } from '@/lib/env'
 // stack on every reload (would trip MaxListenersExceededWarning) and
 // doesn't leak connections.
 declare global {
-  var __bwcMysqlPool: ReturnType<typeof mysql.createPool> | undefined
-  var __bwcMysqlPoolInit: true | undefined
+  var __cavecmsMysqlPool: ReturnType<typeof mysql.createPool> | undefined
+  var __cavecmsMysqlPoolInit: true | undefined
 }
 
-const pool = globalThis.__bwcMysqlPool ?? mysql.createPool({
+const pool = globalThis.__cavecmsMysqlPool ?? mysql.createPool({
   uri: env.DATABASE_URL,
   connectionLimit: env.DB_POOL_LIMIT,
   waitForConnections: true,
@@ -25,10 +25,10 @@ const pool = globalThis.__bwcMysqlPool ?? mysql.createPool({
   keepAliveInitialDelay: 30_000,
   timezone: '+00:00',
 })
-globalThis.__bwcMysqlPool = pool
+globalThis.__cavecmsMysqlPool = pool
 
-if (!globalThis.__bwcMysqlPoolInit) {
-  globalThis.__bwcMysqlPoolInit = true
+if (!globalThis.__cavecmsMysqlPoolInit) {
+  globalThis.__cavecmsMysqlPoolInit = true
   // Pool-level error handler — mysql2 emits 'error' events when the
   // pool itself (not an individual query) hits an unrecoverable state
   // (network reset on an idle conn, MaxScale failover, wait_timeout).

@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test'
 
 const BASE = 'http://localhost:3040'
 const LOGIN_PATH = process.env['LOGIN_PATH'] || 'baccess'
-const EMAIL = process.env['ADMIN_TEST_EMAIL'] || 'admin@bwc.test'
+const EMAIL = process.env['ADMIN_TEST_EMAIL'] || 'admin@cavecms.test'
 const PASSWORD = process.env['ADMIN_TEST_PASSWORD'] || 'TestAdmin123!'
 
 const log = (...args: unknown[]) => console.log('[editor]', ...args)

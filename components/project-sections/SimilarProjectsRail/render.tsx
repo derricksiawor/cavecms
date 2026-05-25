@@ -121,7 +121,7 @@ export async function SimilarProjectsRailSection({
           {items.map((p, i) => (
             <li
               key={p.slug}
-              className="bwc-stagger-item animate-bwc-fade-in"
+              className="cavecms-stagger-item animate-cavecms-fade-in"
               style={{ ['--stagger-index' as string]: i }}
             >
               <Link

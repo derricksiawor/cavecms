@@ -36,8 +36,8 @@ export type { LeadSource } from './types'
 export interface LeadPayload {
   leadId: number
   source: LeadSource
-  /** Raw BWC field values keyed by names operator maps against. */
-  bwcFields: Record<string, string | null | undefined>
+  /** Raw CaveCMS field values keyed by names operator maps against. */
+  cavecmsFields: Record<string, string | null | undefined>
   /** When the lead came from a contact_form block, the block id. */
   blockId?: number
   /** HubSpot visitor-attribution cookie. */
@@ -97,7 +97,7 @@ export async function dispatchLeadToCrms(payload: LeadPayload): Promise<void> {
     // response isn't delayed by 4× round-trips.
     const dispatches = destinations.map((d) => ({
       dest: d,
-      mappedFields: mapFields(payload.bwcFields, d.fieldMap),
+      mappedFields: mapFields(payload.cavecmsFields, d.fieldMap),
     }))
     const pendingIds = await Promise.all(
       dispatches.map((item) => insertPendingRow(payload, item.dest, item.mappedFields)),
@@ -327,12 +327,12 @@ async function loadBlockCrmDestinations(blockId: number): Promise<BlockDest[] | 
 }
 
 function mapFields(
-  bwcFields: Record<string, string | null | undefined>,
+  cavecmsFields: Record<string, string | null | undefined>,
   fieldMap: Record<string, string>,
 ): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [bwc, crm] of Object.entries(fieldMap)) {
-    const v = bwcFields[bwc]
+  for (const [cavecms, crm] of Object.entries(fieldMap)) {
+    const v = cavecmsFields[cavecms]
     if (v != null && v !== '') out[crm] = String(v)
   }
   return out

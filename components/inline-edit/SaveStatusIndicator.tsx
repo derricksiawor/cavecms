@@ -6,10 +6,10 @@ import { Check, Loader2, AlertCircle } from 'lucide-react'
 
 // Global save-status pill. Any save flow in the editor dispatches:
 //
-//   window.dispatchEvent(new CustomEvent('bwc:save-begin', {
+//   window.dispatchEvent(new CustomEvent('cavecms:save-begin', {
 //     detail: { id: 'unique-string' }
 //   }))
-//   window.dispatchEvent(new CustomEvent('bwc:save-end', {
+//   window.dispatchEvent(new CustomEvent('cavecms:save-end', {
 //     detail: { id: 'unique-string', ok: true | false }
 //   }))
 //
@@ -119,12 +119,12 @@ export function SaveStatusIndicator() {
       }
     }, SWEEP_INTERVAL_MS)
 
-    window.addEventListener('bwc:save-begin', onBegin as EventListener)
-    window.addEventListener('bwc:save-end', onEnd as EventListener)
+    window.addEventListener('cavecms:save-begin', onBegin as EventListener)
+    window.addEventListener('cavecms:save-end', onEnd as EventListener)
     return () => {
       clearInterval(sweep)
-      window.removeEventListener('bwc:save-begin', onBegin as EventListener)
-      window.removeEventListener('bwc:save-end', onEnd as EventListener)
+      window.removeEventListener('cavecms:save-begin', onBegin as EventListener)
+      window.removeEventListener('cavecms:save-end', onEnd as EventListener)
       clearFade()
     }
   }, [])
@@ -140,7 +140,7 @@ export function SaveStatusIndicator() {
         'pointer-events-none fixed bottom-24 right-6 z-30',
         'flex items-center gap-2 rounded-full px-4 py-2 shadow-[0_18px_40px_-20px_rgba(5,5,5,0.45)]',
         'text-xs font-semibold tracking-wide',
-        'animate-bwc-toast-in',
+        'animate-cavecms-toast-in',
         phase === 'saving' && 'bg-obsidian/95 text-ivory/95',
         phase === 'saved' && 'bg-obsidian/95 text-champagne',
         phase === 'error' && 'bg-red-600 text-cream-50',
@@ -184,13 +184,13 @@ export function SaveStatusIndicator() {
 export function emitSaveBegin(id: string): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(
-    new CustomEvent('bwc:save-begin', { detail: { id } }),
+    new CustomEvent('cavecms:save-begin', { detail: { id } }),
   )
 }
 
 export function emitSaveEnd(id: string, ok: boolean): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(
-    new CustomEvent('bwc:save-end', { detail: { id, ok } }),
+    new CustomEvent('cavecms:save-end', { detail: { id, ok } }),
   )
 }

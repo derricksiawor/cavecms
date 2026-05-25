@@ -5,6 +5,8 @@ import { Inbox, Mail, Building2, type LucideIcon } from 'lucide-react'
 import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { humaniseAuditAction, humaniseResourceType } from '@/lib/admin/humanise'
+import { UpdateAvailableCard } from '@/components/admin/UpdateAvailableCard'
+import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,7 +76,7 @@ const loadStats = unstable_cache(
 )
 
 export default async function AdminHome() {
-  await requireRoleOrRedirect(['admin', 'editor', 'viewer'])
+  const ctx = await requireRoleOrRedirect(['admin', 'editor', 'viewer'])
   const s = await loadStats()
   return (
     <div className="max-w-5xl">
@@ -84,6 +86,16 @@ export default async function AdminHome() {
       <h1 className="mt-4 font-serif text-4xl font-bold tracking-tight text-near-black sm:text-5xl">
         Dashboard
       </h1>
+
+      {/* Hero update card — only admins can act on updates. Server-
+          resolves the running version so the card can skip the
+          /check round-trip entirely on local-dev installs (where
+          updates are disabled anyway). */}
+      {ctx.role === 'admin' && (
+        <div className="mt-12">
+          <UpdateAvailableCard currentSha={getCurrentVersion().sha} />
+        </div>
+      )}
 
       <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <Card

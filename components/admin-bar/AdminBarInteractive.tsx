@@ -155,7 +155,7 @@ function BarInner({
         // Mode + enterprise lockdown profiles throw on storage access;
         // a failure here must NOT block the navigation.
         try {
-          window.localStorage.removeItem('bwc:clipboard')
+          window.localStorage.removeItem('cavecms:clipboard')
         } catch {
           // private browsing / locked storage — non-fatal
         }
@@ -169,7 +169,7 @@ function BarInner({
         // had no opportunity to revoke other live devices for the
         // same user — that would need a fresh-session re-login.
         try {
-          window.localStorage.removeItem('bwc:clipboard')
+          window.localStorage.removeItem('cavecms:clipboard')
         } catch {
           // private browsing / locked storage — non-fatal
         }
@@ -388,9 +388,9 @@ function BarInner({
 
 // OutlineTogglePill — toggles the OutlinePanel's dismiss state.
 //
-// State lives in localStorage `bwc:outline-dismissed` ('true' /
+// State lives in localStorage `cavecms:outline-dismissed` ('true' /
 // 'false'). The OutlinePanel reads the same key + listens for a
-// `bwc:outline-visibility` CustomEvent so toggling here re-mounts
+// `cavecms:outline-visibility` CustomEvent so toggling here re-mounts
 // it in the same tab (the native `storage` event only fires
 // cross-tab; same-tab needs the custom event).
 //
@@ -399,18 +399,18 @@ function BarInner({
 function OutlineTogglePill() {
   const [dismissed, setDismissed] = useState<boolean | null>(null)
   useEffect(() => {
-    setDismissed(safeStorage.get('bwc:outline-dismissed') === 'true')
+    setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent<{ dismissed?: boolean }>).detail
       if (detail && typeof detail.dismissed === 'boolean') {
         setDismissed(detail.dismissed)
       } else {
-        setDismissed(safeStorage.get('bwc:outline-dismissed') === 'true')
+        setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
       }
     }
-    window.addEventListener('bwc:outline-visibility', onChange)
+    window.addEventListener('cavecms:outline-visibility', onChange)
     return () =>
-      window.removeEventListener('bwc:outline-visibility', onChange)
+      window.removeEventListener('cavecms:outline-visibility', onChange)
   }, [])
   // SSR + first-render: render the pill in a stable state (treats
   // unknown as "visible" → label "Hide outline"). After mount the
@@ -420,9 +420,9 @@ function OutlineTogglePill() {
   const toggle = () => {
     if (typeof window === 'undefined') return
     const next = !isDismissed
-    safeStorage.set('bwc:outline-dismissed', String(next))
+    safeStorage.set('cavecms:outline-dismissed', String(next))
     window.dispatchEvent(
-      new CustomEvent('bwc:outline-visibility', {
+      new CustomEvent('cavecms:outline-visibility', {
         detail: { dismissed: next },
       }),
     )
@@ -708,7 +708,7 @@ function Dropdown({
                 left: layout.left,
                 width: layout.width,
               }}
-              className="z-[70] rounded-2xl border border-cream-50/15 bg-near-black/95 py-1.5 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.6)] backdrop-blur-md animate-bwc-fade-in motion-reduce:animate-none forced-colors:border-CanvasText forced-colors:bg-Canvas forced-colors:text-CanvasText"
+              className="z-[70] rounded-2xl border border-cream-50/15 bg-near-black/95 py-1.5 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.6)] backdrop-blur-md animate-cavecms-fade-in motion-reduce:animate-none forced-colors:border-CanvasText forced-colors:bg-Canvas forced-colors:text-CanvasText"
             >
               {items.map((item, idx) => {
                 if (item.kind === 'divider') {

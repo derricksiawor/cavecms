@@ -26,7 +26,7 @@ import { useSyncExternalStore } from 'react'
  * durations to ~0ms. GSAP uses requestAnimationFrame + inline
  * transform/opacity — NOT CSS animations — so that global rule does
  * NOT defence-in-depth GSAP. Each motion hook MUST check this flag
- * and short-circuit. The global CSS rule covers the bwc-* keyframes
+ * and short-circuit. The global CSS rule covers the cavecms-* keyframes
  * + Tailwind transitions only.
  */
 

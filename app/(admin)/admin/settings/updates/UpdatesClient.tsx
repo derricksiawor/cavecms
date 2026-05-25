@@ -1,0 +1,357 @@
+'use client'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Download,
+  CheckCircle2,
+  ShieldAlert,
+  Sparkles,
+  Clock,
+} from 'lucide-react'
+import { csrfFetch } from '@/lib/client/csrf'
+import { Button } from '@/components/ui/Button'
+import { ZodForm } from '@/components/inline-edit/ZodForm'
+import { useToast } from '@/components/inline-edit/Toast'
+import { structuralEqual } from '@/lib/structuralEqual'
+import { SETTINGS_SHAPES, SETTINGS_HELP } from '@/lib/cms/settings-shapes'
+import { UpdatesProgressModal } from '@/components/admin/UpdatesProgressModal'
+import {
+  humaniseRelease,
+  formatRelativeDays,
+  type HumanRelease,
+} from '@/lib/updates/humaniseRelease'
+import type { CurrentVersion } from '@/lib/updates/getCurrentVersion'
+
+// Settings → Updates surface.
+//
+// Copy rules: NO SHAs, NO GitHub commit URLs, NO raw timestamps. We
+// talk in "You're currently running CaveCMS, last updated 3 days ago"
+// and "A new version is available, released today" — semver versions
+// will replace the relative dates once cavecms.derricksiawor.com/releases ships its
+// manifest.
+
+interface SettingRow {
+  key: 'updates'
+  value: unknown
+  version: number
+  updatedAt: string
+}
+
+interface AvailableUpdate {
+  sha: string
+  ts: string
+  changelog: string
+  isSecurity: boolean
+}
+
+interface CheckResponse {
+  current: CurrentVersion
+  available: AvailableUpdate | null
+}
+
+// Lowercase relative-date formatter for inline-after-verb usage
+// ("Last updated 3 days ago"). Single shared implementation lives in
+// humaniseRelease.ts — passing `capitalise: false` gives us the
+// lowercase variant used here.
+function relativeDays(when: Date): string {
+  return formatRelativeDays(when, new Date(), { capitalise: false })
+}
+
+export function UpdatesClient({
+  initial,
+  currentVersion,
+}: {
+  initial: SettingRow
+  currentVersion: CurrentVersion
+}) {
+  const toast = useToast()
+  const [checking, setChecking] = useState(false)
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+  const [release, setRelease] = useState<HumanRelease | null>(null)
+  const [availableShaPrivate, setAvailableShaPrivate] = useState<string | null>(null)
+  const [current, setCurrent] = useState<CurrentVersion>(currentVersion)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [applying, setApplying] = useState(false)
+
+  const initialForm = useMemo(
+    () =>
+      initial.value && typeof initial.value === 'object'
+        ? (initial.value as Record<string, unknown>)
+        : {},
+    [initial.value],
+  )
+  const [form, setForm] = useState<Record<string, unknown>>(initialForm)
+  const [pristine, setPristine] = useState<Record<string, unknown>>(initialForm)
+  const [version, setVersion] = useState(initial.version)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const dirty = useMemo(
+    () => !structuralEqual(form, pristine),
+    [form, pristine],
+  )
+
+  // Auto-check on mount. We do NOT surface toasts here — the check is
+  // background machinery, not an operator-initiated action. The
+  // available-update card OR the "you're up to date" panel below is
+  // the visible signal. Errors stay silent except for network outage,
+  // which gets a one-time toast so the operator knows their machine
+  // can't reach the release server.
+  const handleCheck = useCallback(async () => {
+    if (checking) return
+    setChecking(true)
+    try {
+      const r = await csrfFetch('/api/admin/updates/check', { method: 'POST' })
+      if (r.status === 502) {
+        toast.error("Couldn't reach the CaveCMS release server.")
+        return
+      }
+      if (!r.ok) return
+      const j = (await r.json()) as CheckResponse
+      setCurrent(j.current)
+      setCheckedAt(new Date().toISOString())
+      if (!j.available) {
+        setRelease(null)
+        setAvailableShaPrivate(null)
+      } else {
+        setRelease(humaniseRelease(j.available))
+        // SHA stays in a private state slot — used only as the apply
+        // payload, never rendered.
+        setAvailableShaPrivate(j.available.sha)
+      }
+    } finally {
+      setChecking(false)
+    }
+  }, [checking, toast])
+
+  useEffect(() => {
+    void handleCheck()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleApply = useCallback(async () => {
+    if (!availableShaPrivate || applying) return
+    setApplying(true)
+    try {
+      const r = await csrfFetch('/api/admin/updates/apply', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetSha: availableShaPrivate }),
+      })
+      if (r.status === 409) {
+        toast.error('An update is already in progress.')
+        setModalOpen(true)
+        return
+      }
+      if (!r.ok) {
+        toast.error("Couldn't start the update — try again.")
+        return
+      }
+      setModalOpen(true)
+    } finally {
+      setApplying(false)
+    }
+  }, [availableShaPrivate, applying, toast])
+
+  const handleSaveSettings = useCallback(async () => {
+    if (savingSettings || !dirty) return
+    setSavingSettings(true)
+    try {
+      const r = await csrfFetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'updates', value: form, version }),
+      })
+      if (r.status === 400) {
+        toast.error('Some fields look off — check them and try again.')
+        return
+      }
+      if (r.status === 409) {
+        toast.error('Settings changed in another tab. Refresh to see them.')
+        return
+      }
+      if (!r.ok) {
+        toast.error("That didn't save. Try again in a moment.")
+        return
+      }
+      setVersion((v) => v + 1)
+      setPristine(form)
+      toast.success('Update settings saved.')
+    } finally {
+      setSavingSettings(false)
+    }
+  }, [savingSettings, dirty, form, version, toast])
+
+  const help = SETTINGS_HELP.updates
+  const shapes = SETTINGS_SHAPES.updates ?? []
+
+  const isDev = current.sha === 'dev'
+
+  // Friendly description of what's currently running.
+  const currentReleasedPhrase = current.ts
+    ? `Last updated ${relativeDays(new Date(current.ts))}`
+    : 'Running locally'
+
+  return (
+    <section className="mt-10 space-y-6">
+      {/* Current version card */}
+      <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
+        <header className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
+            Your CaveCMS
+          </p>
+          <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-near-black">
+            {isDev ? 'Running locally' : "You're running CaveCMS"}
+          </h2>
+          <p className="mt-2 flex items-center gap-2 text-sm text-warm-stone">
+            <Clock className="h-3.5 w-3.5" />
+            {currentReleasedPhrase}
+          </p>
+          {checking ? (
+            <p className="mt-1 text-xs text-warm-stone">
+              Checking for updates…
+            </p>
+          ) : checkedAt ? (
+            <p className="mt-1 text-xs text-warm-stone">
+              We check for updates automatically. Last checked{' '}
+              {relativeDays(new Date(checkedAt))}.
+            </p>
+          ) : null}
+        </header>
+      </article>
+
+      {/* Available update card (or up-to-date state) */}
+      {release ? (
+        <article
+          className={`relative overflow-hidden rounded-2xl border p-6 shadow-[0_24px_60px_-30px_rgba(184,115,51,0.45)] backdrop-blur-sm sm:p-8 ${
+            release.isSecurity
+              ? 'border-red-300/60 bg-red-50/40'
+              : 'border-copper-300/60 bg-cream-50/80'
+          }`}
+        >
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute -top-16 -right-12 h-48 w-48 rounded-full blur-3xl ${
+              release.isSecurity ? 'bg-red-300/30' : 'bg-copper-300/30'
+            }`}
+          />
+          <header className="relative flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p
+                className={`flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.28em] ${
+                  release.isSecurity ? 'text-red-700' : 'text-copper-700'
+                }`}
+              >
+                {release.isSecurity ? (
+                  <>
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Security update available
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Update available
+                  </>
+                )}
+              </p>
+              <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-near-black">
+                {release.title}
+              </h2>
+              <p className="mt-2 text-xs text-warm-stone">
+                {release.versionLabel} · {release.releasedAbsolute}
+              </p>
+            </div>
+            <Button
+              type="button"
+              onClick={() => void handleApply()}
+              disabled={applying || isDev}
+              title={
+                isDev ? 'In-app updates are disabled while running locally.' : undefined
+              }
+            >
+              <Download className="h-4 w-4" />
+              {applying ? 'Starting…' : 'Update now'}
+            </Button>
+          </header>
+          {release.body && (
+            <div className="relative mt-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
+                What&rsquo;s new
+              </p>
+              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-near-black">
+                {release.body}
+              </p>
+            </div>
+          )}
+        </article>
+      ) : (
+        !checking &&
+        checkedAt && (
+          <article className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-6 backdrop-blur-sm">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+              <div>
+                <h2 className="font-serif text-xl font-bold tracking-tight text-near-black">
+                  You&rsquo;re up to date
+                </h2>
+                <p className="mt-1 text-sm text-warm-stone">
+                  CaveCMS will keep checking for new releases on the schedule
+                  below.
+                </p>
+              </div>
+            </div>
+          </article>
+        )
+      )}
+
+      {/* Preferences */}
+      <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
+        <header>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
+            Preferences
+          </p>
+          <h2 className="mt-1 font-serif text-xl font-bold tracking-tight text-near-black">
+            How CaveCMS updates
+          </h2>
+          {help && (
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-warm-stone">
+              {help}
+            </p>
+          )}
+        </header>
+        <div className="mt-6">
+          <ZodForm shapes={shapes} value={form} onChange={setForm} />
+        </div>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void handleSaveSettings()}
+            disabled={savingSettings || !dirty}
+          >
+            {savingSettings ? 'Saving…' : 'Save'}
+          </Button>
+          {dirty && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setForm(pristine)}
+              disabled={savingSettings}
+            >
+              Undo changes
+            </Button>
+          )}
+          {dirty && (
+            <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-copper-700">
+              <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-cavecms-pulse-copper" />
+              Unsaved changes
+            </span>
+          )}
+        </div>
+      </article>
+
+      <UpdatesProgressModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+      />
+    </section>
+  )
+}

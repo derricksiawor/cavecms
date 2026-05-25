@@ -2,7 +2,7 @@
 
 // Cooperative body-scroll lock. Multiple modals (mobile drawer,
 // ConfirmModal, MediaPickerModal, …) can stack: we keep a counter on
-// `document.body.dataset.bwcScrollLocks` so the LAST modal closing is
+// `document.body.dataset.cavecmsScrollLocks` so the LAST modal closing is
 // the one that restores the original `overflow` value. Naive
 // save/restore inside each component races — the second modal's
 // "restore" overwrites the first modal's "set hidden".
@@ -11,16 +11,16 @@ let saved: string | null = null
 
 function readCount(): number {
   if (typeof document === 'undefined') return 0
-  const raw = document.body.dataset['bwcScrollLocks']
+  const raw = document.body.dataset['cavecmsScrollLocks']
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
 function writeCount(n: number) {
   if (n <= 0) {
-    delete document.body.dataset['bwcScrollLocks']
+    delete document.body.dataset['cavecmsScrollLocks']
   } else {
-    document.body.dataset['bwcScrollLocks'] = String(n)
+    document.body.dataset['cavecmsScrollLocks'] = String(n)
   }
 }
 

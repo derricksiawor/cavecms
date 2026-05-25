@@ -105,7 +105,7 @@ function stepSpacing(
 // dismisses on side A doesn't get re-prompted on side B in the same
 // edit session; survives navigation but resets on full reload (matches
 // the in-memory clipboard's lifecycle expectations).
-const NEGATIVE_HINT_KEY = 'bwc:spacing-negative-hint-seen'
+const NEGATIVE_HINT_KEY = 'cavecms:spacing-negative-hint-seen'
 
 export function SpacingStepper({
   sideLabel,
@@ -307,7 +307,7 @@ export function SpacingStepper({
           onClick={dismissHint}
           aria-label="Dismiss hint: press down for negative margin"
           title="Press down for negative margin. Click to dismiss."
-          className="inline-flex items-center gap-1 rounded-sm px-1 text-[8.5px] font-medium uppercase tracking-[0.18em] text-copper-300/75 transition-colors hover:text-copper-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 motion-safe:animate-bwc-fade-in"
+          className="inline-flex items-center gap-1 rounded-sm px-1 text-[8.5px] font-medium uppercase tracking-[0.18em] text-copper-300/75 transition-colors hover:text-copper-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 motion-safe:animate-cavecms-fade-in"
         >
           <ChevronDown size={9} strokeWidth={2.4} aria-hidden="true" />
           <span>negative</span>

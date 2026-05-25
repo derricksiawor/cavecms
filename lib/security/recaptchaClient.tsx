@@ -84,8 +84,8 @@ function fetchConfig(): Promise<Config> {
   return p
 }
 
-const V3_SCRIPT_ID = 'bwc-recaptcha-v3-lead'
-const V2_SCRIPT_ID = 'bwc-recaptcha-v2-lead'
+const V3_SCRIPT_ID = 'cavecms-recaptcha-v3-lead'
+const V2_SCRIPT_ID = 'cavecms-recaptcha-v2-lead'
 
 function injectScript(id: string, src: string): void {
   if (document.getElementById(id)) return

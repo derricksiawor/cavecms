@@ -8,10 +8,10 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 //   - header_size: h1 | h2 | h3 | h4 | h5 | h6 | div | span | p (default h2)
 //   - align: start | center | end | justify (default unset → left)
 //   - size: small | medium | large | xl | xxl (typography preset)
-// BWC collapses Elementor's `size` knob into `level` since semantic level
+// CaveCMS collapses Elementor's `size` knob into `level` since semantic level
 // + Tailwind type scale handle visual size implicitly. We keep `weight`
 // and `font` as additional knobs because Elementor's `typography` group
-// control would be overkill in the BWC drawer.
+// control would be overkill in the CaveCMS drawer.
 //
 // Default level is h2 (NOT h1) — every page already has an H1 in its
 // page-metadata block (Hero on home, page heading on inner pages). An

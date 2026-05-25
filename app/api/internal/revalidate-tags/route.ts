@@ -35,7 +35,7 @@ import { env } from '@/lib/env'
 //   - robots.txt emits `Disallow: /api/` (covers `/api/internal/*`).
 //
 // Defence in depth: nginx `location ^~ /api/internal/ { allow 127.0.0.1;
-// allow ::1; deny all; }` (see `scripts/nginx/bwc.conf.template`) drops
+// allow ::1; deny all; }` (see `scripts/nginx/cavecms.conf.template`) drops
 // external traffic at the edge so the bearer-token gate is the
 // SECONDARY layer, not the only one. A leaked secret OR an auth
 // regression in this handler does NOT become a remote cache-flush

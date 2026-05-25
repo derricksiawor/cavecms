@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/setup.sh — one-time-per-droplet bootstrap. Idempotent: safe
 # to re-run. Provisions everything a fresh Ubuntu 24.04 LTS box needs
-# to host the BWC app: system user, directories, MariaDB users, nginx,
+# to host the CaveCMS app: system user, directories, MariaDB users, nginx,
 # systemd timers, PM2 logrotate, firewall, env-file scaffolding.
 #
 # Run as root via:
@@ -14,7 +14,7 @@
 # A `command -v` preflight at the top of this script fails fast if
 # any of those is missing.
 #
-# DOES NOT touch /opt/bwc/incoming/<sha>.tar.zst — that's the deploy
+# DOES NOT touch /opt/cavecms/incoming/<sha>.tar.zst — that's the deploy
 # script's job. setup.sh only prepares the host shape that deploy.sh
 # assumes.
 
@@ -41,11 +41,11 @@ fi
 # State marker — short-circuit on re-run. Operator can delete the
 # marker to force re-provision but they take responsibility for
 # .cnf / env-file / DB password drift (see commentary below).
-STATE_MARKER=/etc/bwc/.setup-complete
+STATE_MARKER=/etc/cavecms/.setup-complete
 if [ -f "$STATE_MARKER" ]; then
   echo "[setup.sh] Box already provisioned ($STATE_MARKER exists)."
   echo "  - To rotate secrets: use a dedicated rotation script (TODO)."
-  echo "  - To re-provision from scratch: rm $STATE_MARKER (and clean DB + /opt/bwc + /etc/bwc manually first)."
+  echo "  - To re-provision from scratch: rm $STATE_MARKER (and clean DB + /opt/cavecms + /etc/cavecms manually first)."
   exit 0
 fi
 
@@ -164,7 +164,7 @@ fi
 # / ? / # / %). 32 hex chars = 128 bits of entropy — far above what
 # the runtime needs and avoids every documented password-injection
 # class for operator-typed passwords.
-BWC_PW="$(openssl rand -hex 32)"
+CAVECMS_PW="$(openssl rand -hex 32)"
 MIG_PW="$(openssl rand -hex 32)"
 BACKUP_PW="$(openssl rand -hex 32)"
 # Pre-generate the four app-runtime secrets so we can assert their
@@ -199,7 +199,7 @@ HEALTHZ_TOKEN_STAGING="$(openssl rand -hex 32)"
 # interpolation, SQL heredoc interpolation, and the .cnf parser all
 # depend on hex-only output. The JWT-family secrets are 96 hex chars
 # (48 bytes); the DB passwords are 64 hex chars (32 bytes).
-for pw in "$BWC_PW" "$MIG_PW" "$BACKUP_PW"; do
+for pw in "$CAVECMS_PW" "$MIG_PW" "$BACKUP_PW"; do
   [[ "$pw" =~ ^[0-9a-f]{64}$ ]] || { echo "[setup.sh] FAIL: generated DB password must be 64 hex chars" >&2; exit 1; }
 done
 for s in "$JWT_SECRET_PROD" "$CSRF_SECRET_PROD" "$PREVIEW_SECRET_PROD" "$BROCHURE_SECRET_PROD" \
@@ -223,7 +223,7 @@ done
 # Never expose root password via -p"$DB_ROOT_PW" on the command line.
 # `umask 077` ensures the file is born 0600 before we write secrets.
 # ---------------------------------------------------------------------------
-ROOT_CNF="$(mktemp /tmp/bwc-setup-root.XXXXXX.cnf)"
+ROOT_CNF="$(mktemp /tmp/cavecms-setup-root.XXXXXX.cnf)"
 chmod 600 "$ROOT_CNF"
 {
   printf '[client]\n'
@@ -236,7 +236,7 @@ trap 'rc=$?; shred -u "$ROOT_CNF" 2>/dev/null || rm -f "$ROOT_CNF"; [ "$rc" -ne 
 
 # Connectivity probe BEFORE any state mutation. If root creds are
 # wrong the operator gets a clear error before the script creates
-# the bwc user, dirs, etc. — re-running on a clean slate is then
+# the cavecms user, dirs, etc. — re-running on a clean slate is then
 # truly idempotent.
 if ! mysql --defaults-extra-file="$ROOT_CNF" -e 'SELECT 1' >/dev/null 2>&1; then
   echo "[setup.sh] FAIL: cannot connect to MariaDB with the supplied root credentials." >&2
@@ -248,106 +248,106 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # 1. App user + groups
 # ---------------------------------------------------------------------------
-# `bwc` is a system user that PM2 + the runtime + the timer scripts
+# `cavecms` is a system user that PM2 + the runtime + the timer scripts
 # run under. systemd's `User=` directive doesn't invoke a login shell,
 # so the user's login shell value doesn't matter for service contexts.
-# We still set `nologin` to lock out interactive ssh-as-bwc, and `-L`
+# We still set `nologin` to lock out interactive ssh-as-cavecms, and `-L`
 # to lock the password — defence-in-depth.
-if ! id bwc >/dev/null 2>&1; then
-  useradd --system --shell /usr/sbin/nologin --create-home --home-dir /home/bwc bwc
+if ! id cavecms >/dev/null 2>&1; then
+  useradd --system --shell /usr/sbin/nologin --create-home --home-dir /home/cavecms cavecms
 fi
-usermod -s /usr/sbin/nologin -L bwc
+usermod -s /usr/sbin/nologin -L cavecms
 if ! getent group backup >/dev/null; then
   groupadd --system backup
 fi
-# bwcstate is a DEDICATED group for /var/lib/bwc state files (markers,
+# cavecmsstate is a DEDICATED group for /var/lib/cavecms state files (markers,
 # locks, sentinels). It exists so the cluster-3 round-2 fix that grants
-# group rwx on /var/lib/bwc (so bwc-user services can write lock and
+# group rwx on /var/lib/cavecms (so cavecms-user services can write lock and
 # marker files) does NOT also extend that write surface to www-data.
-# www-data is intentionally a member of group `bwc` (next line down)
-# for nginx to serve /opt/bwc/uploads, but www-data is NOT added to
-# bwcstate — so an nginx-route RCE cannot plant /var/lib/bwc/deploy.blocked
+# www-data is intentionally a member of group `cavecms` (next line down)
+# for nginx to serve /opt/cavecms/uploads, but www-data is NOT added to
+# cavecmsstate — so an nginx-route RCE cannot plant /var/lib/cavecms/deploy.blocked
 # (DoS deploys), truncate the cron-purge health markers (mask backup
 # outages), or plant lock files (silent backup outage via flock contention).
-if ! getent group bwcstate >/dev/null; then
-  groupadd --system bwcstate
+if ! getent group cavecmsstate >/dev/null; then
+  groupadd --system cavecmsstate
 fi
-usermod -aG bwc www-data
-usermod -aG backup bwc
-usermod -aG bwcstate bwc
+usermod -aG cavecms www-data
+usermod -aG backup cavecms
+usermod -aG cavecmsstate cavecms
 
 # ---------------------------------------------------------------------------
 # 2. Directories — locked-down ownership.
 # ---------------------------------------------------------------------------
-# Uploads + releases at 750 so nginx (via the bwc group) and PM2
-# (via the bwc user) can read. /backup at 750 with the backup group
+# Uploads + releases at 750 so nginx (via the cavecms group) and PM2
+# (via the cavecms user) can read. /backup at 750 with the backup group
 # so off-site sync timers can list/copy without world-readable.
-# /etc/bwc is root:bwc 750 (group r-x so User=bwc services can read
-# the 0640 env + credential files inside). /var/lib/bwc is
-# root:bwcstate 2770 setgid (group rwx scoped to the dedicated
-# bwcstate group so bwc-user services can write lock + marker files
+# /etc/cavecms is root:cavecms 750 (group r-x so User=cavecms services can read
+# the 0640 env + credential files inside). /var/lib/cavecms is
+# root:cavecmsstate 2770 setgid (group rwx scoped to the dedicated
+# cavecmsstate group so cavecms-user services can write lock + marker files
 # WITHOUT extending that write surface to www-data which is in group
-# bwc for nginx). See the per-directory blocks below for the full
+# cavecms for nginx). See the per-directory blocks below for the full
 # rationale on each one.
-install -d -o bwc -g bwc -m 750 \
-  /opt/bwc \
-  /opt/bwc/releases \
-  /opt/bwc/incoming \
-  /opt/bwc/uploads \
-  /opt/bwc/uploads/originals \
-  /opt/bwc/uploads/variants \
-  /opt/bwc/uploads/brochures-private \
-  /opt/bwc/uploads/.tmp \
-  /opt/bwc/static-pool \
-  /opt/bwc/static-pool/.next \
-  /opt/bwc/static-pool/.next/static
-install -d -o bwc -g backup -m 750 \
+install -d -o cavecms -g cavecms -m 750 \
+  /opt/cavecms \
+  /opt/cavecms/releases \
+  /opt/cavecms/incoming \
+  /opt/cavecms/uploads \
+  /opt/cavecms/uploads/originals \
+  /opt/cavecms/uploads/variants \
+  /opt/cavecms/uploads/brochures-private \
+  /opt/cavecms/uploads/.tmp \
+  /opt/cavecms/static-pool \
+  /opt/cavecms/static-pool/.next \
+  /opt/cavecms/static-pool/.next/static
+install -d -o cavecms -g backup -m 750 \
   /backup \
-  /backup/bwc \
-  /backup/bwc/db \
-  /backup/bwc/uploads \
-  /backup/bwc/pre-deploy
-install -d -o bwc -g bwc -m 750 \
-  /var/log/bwc \
+  /backup/cavecms \
+  /backup/cavecms/db \
+  /backup/cavecms/uploads \
+  /backup/cavecms/pre-deploy
+install -d -o cavecms -g cavecms -m 750 \
+  /var/log/cavecms \
   /var/www
-# /etc/bwc is root:bwc 750 — owner root writes, group bwc has
-# `r-x` for traversal so `User=bwc` systemd services and the PM2
+# /etc/cavecms is root:cavecms 750 — owner root writes, group cavecms has
+# `r-x` for traversal so `User=cavecms` systemd services and the PM2
 # runtime can read the 0640 env file and .cnf credentials inside.
-# Without group=bwc here, every bwc service would 401 on
+# Without group=cavecms here, every cavecms service would 401 on
 # EnvironmentFile= even though the inner files are correctly perm'd.
-install -d -o root -g bwc -m 750 /etc/bwc
-# /var/lib/bwc is root:bwcstate 2770 — bwc systemd services need group
+install -d -o root -g cavecms -m 750 /etc/cavecms
+# /var/lib/cavecms is root:cavecmsstate 2770 — cavecms systemd services need group
 # rwx to create lock and marker files here (lock acquisition, marker
-# updates), but `bwc` group is shared with www-data (see the Section-1
-# usermod for nginx serving /opt/bwc/uploads), and we deliberately
+# updates), but `cavecms` group is shared with www-data (see the Section-1
+# usermod for nginx serving /opt/cavecms/uploads), and we deliberately
 # DO NOT want www-data to be able to plant deploy.blocked / lock
-# files / truncate health markers. The dedicated `bwcstate` group
-# scopes the rwx grant to {bwc, root} only.
+# files / truncate health markers. The dedicated `cavecmsstate` group
+# scopes the rwx grant to {cavecms, root} only.
 #
-# The setgid bit (2xxx) makes new files inside inherit group=bwcstate,
-# so files written by `User=bwc Group=backup` services (db-backup,
+# The setgid bit (2xxx) makes new files inside inherit group=cavecmsstate,
+# so files written by `User=cavecms Group=backup` services (db-backup,
 # uploads-backup) and by `User=root` services (disk-check,
 # restore-drill) all end up readable by any service running with
-# supplementary group bwcstate (e.g., cron-purge). Without setgid,
-# db-backup would write files as bwc:backup, restore-drill as
+# supplementary group cavecmsstate (e.g., cron-purge). Without setgid,
+# db-backup would write files as cavecms:backup, restore-drill as
 # root:root, and cross-service readability would break.
 #
-# bwc-user services that need to write here MUST declare
-# `SupplementaryGroups=bwcstate` in their unit (when Group= overrides
+# cavecms-user services that need to write here MUST declare
+# `SupplementaryGroups=cavecmsstate` in their unit (when Group= overrides
 # the user's default group). Otherwise the process runs with no
-# bwcstate group membership and gets "other" perms (---). See
-# scripts/systemd/bwc-{db,uploads}-backup.service and
-# scripts/systemd/bwc-cron-purge.service.
-install -d -o root -g bwcstate -m 2770 /var/lib/bwc
+# cavecmsstate group membership and gets "other" perms (---). See
+# scripts/systemd/cavecms-{db,uploads}-backup.service and
+# scripts/systemd/cavecms-cron-purge.service.
+install -d -o root -g cavecmsstate -m 2770 /var/lib/cavecms
 
 # Same-FS assertion: uploads-move semantics (originals → variants and
 # .tmp → originals on commit) require a single filesystem. If an
-# operator ever mounts /opt/bwc/uploads/originals onto separate storage
+# operator ever mounts /opt/cavecms/uploads/originals onto separate storage
 # the upload pipeline silently degrades to slow cross-device cp.
-D1=$(stat -c %d /opt/bwc/uploads/.tmp)
-for d in /opt/bwc/uploads/originals /opt/bwc/uploads/variants /opt/bwc/uploads/brochures-private; do
+D1=$(stat -c %d /opt/cavecms/uploads/.tmp)
+for d in /opt/cavecms/uploads/originals /opt/cavecms/uploads/variants /opt/cavecms/uploads/brochures-private; do
   if [ "$(stat -c %d "$d")" != "$D1" ]; then
-    echo "[setup.sh] FAIL: $d must share one filesystem with /opt/bwc/uploads/.tmp" >&2
+    echo "[setup.sh] FAIL: $d must share one filesystem with /opt/cavecms/uploads/.tmp" >&2
     exit 1
   fi
 done
@@ -363,8 +363,8 @@ if [ "$BACKUP_DEV" != "$ROOT_DEV" ]; then
   # Separate FS — verify perms applied (mount could have happened
   # after the install -d).
   BACKUP_OWNER=$(stat -c '%U:%G' /backup)
-  if [ "$BACKUP_OWNER" != "bwc:backup" ]; then
-    chown bwc:backup /backup
+  if [ "$BACKUP_OWNER" != "cavecms:backup" ]; then
+    chown cavecms:backup /backup
     chmod 750 /backup
   fi
 fi
@@ -373,13 +373,13 @@ fi
 # 3. MariaDB DB + principals
 # ---------------------------------------------------------------------------
 # Three principals, each least-privileged for its role:
-#   - bwc_user (runtime): DML only. No DDL, no LOCK TABLES, no
+#   - cavecms_user (runtime): DML only. No DDL, no LOCK TABLES, no
 #     TRIGGER/EVENT/SHOW VIEW — the runtime doesn't need them and
 #     limiting blast radius of a SQLi against the app code is the
 #     whole point of this split.
-#   - bwc_migrator (deploy): DDL + DML. Used by migrator-bundle/run.js
-#     and by rollback.sh's restore path (via /etc/bwc/bwc-migrate.cnf).
-#   - bwc_backup (dump): SELECT + LOCK TABLES + SHOW VIEW + EVENT +
+#   - cavecms_migrator (deploy): DDL + DML. Used by migrator-bundle/run.js
+#     and by rollback.sh's restore path (via /etc/cavecms/cavecms-migrate.cnf).
+#   - cavecms_backup (dump): SELECT + LOCK TABLES + SHOW VIEW + EVENT +
 #     TRIGGER. mysqldump --routines --triggers --events requires
 #     EVENT + TRIGGER privileges and SHOW VIEW (for views, if any).
 #     LOCK TABLES is included for MyISAM safety should any future
@@ -388,16 +388,16 @@ fi
 # All three bound to 127.0.0.1 — remote DB access is an operational
 # anti-pattern and would need separate principals.
 mysql --defaults-extra-file="$ROOT_CNF" <<SQL
-CREATE DATABASE IF NOT EXISTS bwc CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'bwc_user'@'127.0.0.1' IDENTIFIED BY '${BWC_PW}';
-ALTER USER 'bwc_user'@'127.0.0.1' IDENTIFIED BY '${BWC_PW}';
-GRANT SELECT, INSERT, UPDATE, DELETE ON bwc.* TO 'bwc_user'@'127.0.0.1';
-CREATE USER IF NOT EXISTS 'bwc_migrator'@'127.0.0.1' IDENTIFIED BY '${MIG_PW}';
-ALTER USER 'bwc_migrator'@'127.0.0.1' IDENTIFIED BY '${MIG_PW}';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES ON bwc.* TO 'bwc_migrator'@'127.0.0.1';
-CREATE USER IF NOT EXISTS 'bwc_backup'@'127.0.0.1' IDENTIFIED BY '${BACKUP_PW}';
-ALTER USER 'bwc_backup'@'127.0.0.1' IDENTIFIED BY '${BACKUP_PW}';
-GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER ON bwc.* TO 'bwc_backup'@'127.0.0.1';
+CREATE DATABASE IF NOT EXISTS cavecms CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'cavecms_user'@'127.0.0.1' IDENTIFIED BY '${CAVECMS_PW}';
+ALTER USER 'cavecms_user'@'127.0.0.1' IDENTIFIED BY '${CAVECMS_PW}';
+GRANT SELECT, INSERT, UPDATE, DELETE ON cavecms.* TO 'cavecms_user'@'127.0.0.1';
+CREATE USER IF NOT EXISTS 'cavecms_migrator'@'127.0.0.1' IDENTIFIED BY '${MIG_PW}';
+ALTER USER 'cavecms_migrator'@'127.0.0.1' IDENTIFIED BY '${MIG_PW}';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES ON cavecms.* TO 'cavecms_migrator'@'127.0.0.1';
+CREATE USER IF NOT EXISTS 'cavecms_backup'@'127.0.0.1' IDENTIFIED BY '${BACKUP_PW}';
+ALTER USER 'cavecms_backup'@'127.0.0.1' IDENTIFIED BY '${BACKUP_PW}';
+GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER ON cavecms.* TO 'cavecms_backup'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
 
@@ -407,22 +407,22 @@ SQL
 # age recipient public key is world-readable (it's a public key by
 # definition) — anyone can encrypt FOR us, only the private key
 # holder (off-box) can decrypt.
-install -m 644 /dev/null /etc/bwc/backup.pub
-printf '%s\n' "$AGE_PUB" > /etc/bwc/backup.pub
+install -m 644 /dev/null /etc/cavecms/backup.pub
+printf '%s\n' "$AGE_PUB" > /etc/cavecms/backup.pub
 
 # ---------------------------------------------------------------------------
 # 5. mysqldump credential files
 # ---------------------------------------------------------------------------
-# Two .cnf files live in /etc/bwc:
-#   - bwc-backup.cnf : bwc_backup creds. 0640 root:bwc — db-backup
-#     service runs as User=bwc, needs read.
-#   - bwc-migrate.cnf: bwc_migrator creds. 0600 root:root —
-#     rollback.sh runs as root via sudo, bwc readability not needed.
+# Two .cnf files live in /etc/cavecms:
+#   - cavecms-backup.cnf : cavecms_backup creds. 0640 root:cavecms — db-backup
+#     service runs as User=cavecms, needs read.
+#   - cavecms-migrate.cnf: cavecms_migrator creds. 0600 root:root —
+#     rollback.sh runs as root via sudo, cavecms readability not needed.
 #
-# Files placed in /etc/bwc (root:bwc 750) NOT /root (700) — /root
-# blocks bwc traversal entirely, breaking any User=bwc service that
-# needs to consume the backup credentials. The bwc group bit on
-# /etc/bwc gives the traversal needed for the 0640 group-read to
+# Files placed in /etc/cavecms (root:cavecms 750) NOT /root (700) — /root
+# blocks cavecms traversal entirely, breaking any User=cavecms service that
+# needs to consume the backup credentials. The cavecms group bit on
+# /etc/cavecms gives the traversal needed for the 0640 group-read to
 # apply.
 #
 # Atomic write via tempfile + mv: a SIGKILL / disk-full / power loss
@@ -430,27 +430,27 @@ printf '%s\n' "$AGE_PUB" > /etc/bwc/backup.pub
 # Pre-create with `install -m` to fix perms BEFORE the tempfile
 # is populated (eliminates the TOCTOU window mktemp's default 0600
 # would still leave at the chown step).
-install -m 640 -o root -g bwc /dev/null /etc/bwc/bwc-backup.cnf
-BWC_BACKUP_TMP="$(mktemp /etc/bwc/.bwc-backup.cnf.XXXXXX)"
-chmod 640 "$BWC_BACKUP_TMP"; chown root:bwc "$BWC_BACKUP_TMP"
+install -m 640 -o root -g cavecms /dev/null /etc/cavecms/cavecms-backup.cnf
+CAVECMS_BACKUP_TMP="$(mktemp /etc/cavecms/.cavecms-backup.cnf.XXXXXX)"
+chmod 640 "$CAVECMS_BACKUP_TMP"; chown root:cavecms "$CAVECMS_BACKUP_TMP"
 {
   printf '[client]\n'
   printf 'host=%s\n' "$DB_HOST"
-  printf 'user=bwc_backup\n'
+  printf 'user=cavecms_backup\n'
   printf 'password=%s\n' "$BACKUP_PW"
-} > "$BWC_BACKUP_TMP"
-mv -f "$BWC_BACKUP_TMP" /etc/bwc/bwc-backup.cnf
+} > "$CAVECMS_BACKUP_TMP"
+mv -f "$CAVECMS_BACKUP_TMP" /etc/cavecms/cavecms-backup.cnf
 
-install -m 600 -o root -g root /dev/null /etc/bwc/bwc-migrate.cnf
-BWC_MIGRATE_TMP="$(mktemp /etc/bwc/.bwc-migrate.cnf.XXXXXX)"
-chmod 600 "$BWC_MIGRATE_TMP"; chown root:root "$BWC_MIGRATE_TMP"
+install -m 600 -o root -g root /dev/null /etc/cavecms/cavecms-migrate.cnf
+CAVECMS_MIGRATE_TMP="$(mktemp /etc/cavecms/.cavecms-migrate.cnf.XXXXXX)"
+chmod 600 "$CAVECMS_MIGRATE_TMP"; chown root:root "$CAVECMS_MIGRATE_TMP"
 {
   printf '[client]\n'
   printf 'host=%s\n' "$DB_HOST"
-  printf 'user=bwc_migrator\n'
+  printf 'user=cavecms_migrator\n'
   printf 'password=%s\n' "$MIG_PW"
-} > "$BWC_MIGRATE_TMP"
-mv -f "$BWC_MIGRATE_TMP" /etc/bwc/bwc-migrate.cnf
+} > "$CAVECMS_MIGRATE_TMP"
+mv -f "$CAVECMS_MIGRATE_TMP" /etc/cavecms/cavecms-migrate.cnf
 
 # ---------------------------------------------------------------------------
 # 6. Maintenance page
@@ -460,7 +460,7 @@ mv -f "$BWC_MIGRATE_TMP" /etc/bwc/bwc-migrate.cnf
 # nginx can never observe a half-written file even if disk fills
 # mid-script. Overwritten on every setup re-run — re-running setup
 # is the documented way to update the maintenance page's branding.
-MAINT_TMP="$(mktemp /var/www/.bwc-maint.XXXXXX)"
+MAINT_TMP="$(mktemp /var/www/.cavecms-maint.XXXXXX)"
 cat > "$MAINT_TMP" <<'EOF'
 <!doctype html>
 <html lang="en">
@@ -483,9 +483,9 @@ cat > "$MAINT_TMP" <<'EOF'
 </body>
 </html>
 EOF
-test -s "$MAINT_TMP" || { rm -f "$MAINT_TMP"; echo "[setup.sh] FAIL: bwc-maint.html staging failed (disk full?)" >&2; exit 1; }
+test -s "$MAINT_TMP" || { rm -f "$MAINT_TMP"; echo "[setup.sh] FAIL: cavecms-maint.html staging failed (disk full?)" >&2; exit 1; }
 chmod 644 "$MAINT_TMP"
-mv -f "$MAINT_TMP" /var/www/bwc-maint.html
+mv -f "$MAINT_TMP" /var/www/cavecms-maint.html
 
 # ---------------------------------------------------------------------------
 # 7. nginx config (staging htpasswd written here, ahead of install)
@@ -501,19 +501,19 @@ mv -f "$MAINT_TMP" /var/www/bwc-maint.html
 # (defaults to 0644 = world-readable). The subshell forces umask 027
 # so the new inode is born 0640. The post-call chown reasserts the
 # group ownership in case rename retained the original.
-install -m 640 -o root -g www-data /dev/null /etc/nginx/.htpasswd-bwc-staging
-( umask 027; printf '%s' "$STAGING_PW" | htpasswd -iB /etc/nginx/.htpasswd-bwc-staging "$STAGING_USER" )
-chown root:www-data /etc/nginx/.htpasswd-bwc-staging
-chmod 640 /etc/nginx/.htpasswd-bwc-staging
+install -m 640 -o root -g www-data /dev/null /etc/nginx/.htpasswd-cavecms-staging
+( umask 027; printf '%s' "$STAGING_PW" | htpasswd -iB /etc/nginx/.htpasswd-cavecms-staging "$STAGING_USER" )
+chown root:www-data /etc/nginx/.htpasswd-cavecms-staging
+chmod 640 /etc/nginx/.htpasswd-cavecms-staging
 
 bash "$HERE/install-nginx.sh" "$APEX" "$STAGING" "$LOGIN_PATH"
 
 # Force a full restart (not reload) so the nginx master process
-# picks up the supplementary `bwc` group that `usermod -aG bwc
+# picks up the supplementary `cavecms` group that `usermod -aG cavecms
 # www-data` added earlier. SIGHUP reload only re-spawns workers
 # from the existing master, which keeps its old supplementary
-# group list — workers would then 403 on /opt/bwc/uploads/* (mode
-# 750, group bwc). One-time cost at setup; subsequent
+# group list — workers would then 403 on /opt/cavecms/uploads/* (mode
+# 750, group cavecms). One-time cost at setup; subsequent
 # install-nginx.sh runs (post-LE-cert swap) get reload-only.
 if systemctl is-active --quiet nginx; then
   systemctl restart nginx
@@ -548,48 +548,48 @@ bash "$HERE/install-systemd.sh"
 # preflight-verified pm2 binary that command -v already located.
 PM2_BIN="$(command -v pm2)"
 
-# `runuser -u bwc --` invokes commands without going through PAM
-# session/auth (unlike `sudo -u bwc`), so it works regardless of
+# `runuser -u cavecms --` invokes commands without going through PAM
+# session/auth (unlike `sudo -u cavecms`), so it works regardless of
 # the user's login shell or PAM account stack. PM2 modules install
-# into /home/bwc/.pm2.
-if ! runuser -u bwc -- "$PM2_BIN" install pm2-logrotate; then
+# into /home/cavecms/.pm2.
+if ! runuser -u cavecms -- "$PM2_BIN" install pm2-logrotate; then
   echo "[setup.sh] WARN: pm2-logrotate install failed. Re-run after fixing the cause:" >&2
-  echo "             sudo -u bwc $PM2_BIN install pm2-logrotate" >&2
+  echo "             sudo -u cavecms $PM2_BIN install pm2-logrotate" >&2
 fi
-# `pm2 set` writes to /home/bwc/.pm2/module_conf.json regardless of
+# `pm2 set` writes to /home/cavecms/.pm2/module_conf.json regardless of
 # whether the module is installed — values are picked up the next
 # time pm2-logrotate is actually installed.
-runuser -u bwc -- "$PM2_BIN" set pm2-logrotate:max_size 50M
-runuser -u bwc -- "$PM2_BIN" set pm2-logrotate:retain 30
-runuser -u bwc -- "$PM2_BIN" set pm2-logrotate:compress true
-runuser -u bwc -- "$PM2_BIN" set pm2-logrotate:rotateInterval '0 0 * * *'
+runuser -u cavecms -- "$PM2_BIN" set pm2-logrotate:max_size 50M
+runuser -u cavecms -- "$PM2_BIN" set pm2-logrotate:retain 30
+runuser -u cavecms -- "$PM2_BIN" set pm2-logrotate:compress true
+runuser -u cavecms -- "$PM2_BIN" set pm2-logrotate:rotateInterval '0 0 * * *'
 
 # `pm2 startup` PRINTS the systemd-unit install command and (in
 # recent PM2 versions) also executes it when run as root. To be
 # explicit and survive future PM2 behaviour changes, we capture
-# and eval the printed sudo line. The `--service-name pm2-bwc`
+# and eval the printed sudo line. The `--service-name pm2-cavecms`
 # pin makes the resulting unit name deterministic.
-if ! systemctl is-enabled pm2-bwc.service >/dev/null 2>&1; then
+if ! systemctl is-enabled pm2-cavecms.service >/dev/null 2>&1; then
   STARTUP_CMD="$(env PATH="$PATH:/usr/bin" "$PM2_BIN" startup systemd \
-    --service-name pm2-bwc -u bwc --hp /home/bwc 2>&1 | grep -E '^sudo ' | tail -1 || true)"
+    --service-name pm2-cavecms -u cavecms --hp /home/cavecms 2>&1 | grep -E '^sudo ' | tail -1 || true)"
   # Strict shape match: `sudo env PATH=<safe-chars> <path>/pm2 startup
-  # systemd --service-name pm2-bwc -u bwc --hp /home/bwc`. Anchored
+  # systemd --service-name pm2-cavecms -u cavecms --hp /home/cavecms`. Anchored
   # at BOTH ends — without the trailing `$`, a malicious or future
   # pm2 release could append `; rm -rf /` to a regex-matched prefix
   # and the eval would execute it. The full anchor constrains the
   # entire captured line.
-  if [[ "$STARTUP_CMD" =~ ^sudo[[:space:]]+env[[:space:]]+PATH=[A-Za-z0-9:/_.-]+[[:space:]]+[A-Za-z0-9/_.-]+/pm2[[:space:]]+startup[[:space:]]+systemd[[:space:]]+--service-name[[:space:]]+pm2-bwc[[:space:]]+-u[[:space:]]+bwc[[:space:]]+--hp[[:space:]]+/home/bwc[[:space:]]*$ ]]; then
+  if [[ "$STARTUP_CMD" =~ ^sudo[[:space:]]+env[[:space:]]+PATH=[A-Za-z0-9:/_.-]+[[:space:]]+[A-Za-z0-9/_.-]+/pm2[[:space:]]+startup[[:space:]]+systemd[[:space:]]+--service-name[[:space:]]+pm2-cavecms[[:space:]]+-u[[:space:]]+cavecms[[:space:]]+--hp[[:space:]]+/home/cavecms[[:space:]]*$ ]]; then
     # Strip the "sudo " prefix — we're already root.
     eval "${STARTUP_CMD#sudo }"
-    if ! systemctl is-enabled pm2-bwc.service >/dev/null 2>&1; then
-      echo "[setup.sh] WARN: pm2 startup eval did not produce an enabled pm2-bwc.service." >&2
+    if ! systemctl is-enabled pm2-cavecms.service >/dev/null 2>&1; then
+      echo "[setup.sh] WARN: pm2 startup eval did not produce an enabled pm2-cavecms.service." >&2
       echo "             Reboots will not auto-resurrect the app until you run:" >&2
-      echo "             sudo $PM2_BIN startup systemd --service-name pm2-bwc -u bwc --hp /home/bwc" >&2
+      echo "             sudo $PM2_BIN startup systemd --service-name pm2-cavecms -u cavecms --hp /home/cavecms" >&2
     fi
   else
     echo "[setup.sh] WARN: pm2 startup output did not match the expected shape; skipping eval." >&2
     echo "             Reboots will not auto-resurrect the app. Run manually:" >&2
-    echo "             sudo $PM2_BIN startup systemd --service-name pm2-bwc -u bwc --hp /home/bwc" >&2
+    echo "             sudo $PM2_BIN startup systemd --service-name pm2-cavecms -u cavecms --hp /home/cavecms" >&2
   fi
 fi
 
@@ -617,11 +617,11 @@ if ! ufw status numbered 2>/dev/null | grep -qE '22(/tcp)?[[:space:]]+ALLOW'; th
 fi
 
 # ---------------------------------------------------------------------------
-# 12. /etc/bwc/env.<env> templates
+# 12. /etc/cavecms/env.<env> templates
 # ---------------------------------------------------------------------------
 # Per-environment env files; PM2 picks one up via deploy.sh's
-# `ln -sfn /etc/bwc/env.$ENV_NAME $RELEASE_DIR/.env.local`.
-# 0640 root:bwc — bwc reads at PM2 launch time; nothing else needs
+# `ln -sfn /etc/cavecms/env.$ENV_NAME $RELEASE_DIR/.env.local`.
+# 0640 root:cavecms — cavecms reads at PM2 launch time; nothing else needs
 # access.
 #
 # IMPORTANT idempotency contract: the state marker at the top of
@@ -632,7 +632,7 @@ fi
 # "rotate some secrets and keep others" path here — that needs a
 # dedicated rotation script.
 for env_name in production staging; do
-  f="/etc/bwc/env.${env_name}"
+  f="/etc/cavecms/env.${env_name}"
   case "$env_name" in
     production)
       site_origin="https://${APEX}"
@@ -655,9 +655,9 @@ for env_name in production staging; do
   esac
   # Atomic write — see .cnf-file rationale above. mktemp in the same
   # dir so the final mv is rename-on-same-FS (truly atomic).
-  install -m 640 -o root -g bwc /dev/null "$f"
+  install -m 640 -o root -g cavecms /dev/null "$f"
   env_tmp="$(mktemp "${f}.XXXXXX")"
-  chmod 640 "$env_tmp"; chown root:bwc "$env_tmp"
+  chmod 640 "$env_tmp"; chown root:cavecms "$env_tmp"
   {
     cat <<EOF
 NODE_ENV=production
@@ -667,11 +667,11 @@ HOSTNAME=127.0.0.1
 # Path additions so systemd timer units can resolve tsx from the
 # release's node_modules (which deploy.sh installs as a production
 # dep) without a global npm install.
-PATH=/opt/bwc/current/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+PATH=/opt/cavecms/current/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 
 # Database — separate principals for runtime (DML) and migrator (DDL).
-DATABASE_URL=mysql://bwc_user:${BWC_PW}@${DB_HOST}:3306/bwc
-DATABASE_MIGRATOR_URL=mysql://bwc_migrator:${MIG_PW}@${DB_HOST}:3306/bwc
+DATABASE_URL=mysql://cavecms_user:${CAVECMS_PW}@${DB_HOST}:3306/cavecms
+DATABASE_MIGRATOR_URL=mysql://cavecms_migrator:${MIG_PW}@${DB_HOST}:3306/cavecms
 
 # Secrets — generated on setup. Rotate via the documented procedure
 # in README §Secret rotation; never edit one in place without bumping
@@ -701,8 +701,8 @@ SITE_ORIGIN=${site_origin}
 HEALTHZ_TOKEN=${healthz_token}
 
 # Build metadata — deploy.sh overrides these per-release.
-BWC_COMMIT=unknown
-BWC_RELEASE_TS=
+CAVECMS_COMMIT=unknown
+CAVECMS_RELEASE_TS=
 
 # SMTP — operator fills in post-setup. The app boots without these
 # but lead emails fall to notification_failures (queue_stale).
@@ -723,11 +723,11 @@ RECAPTCHA_MIN_SCORE=0.5
 # Backup
 BACKUP_AGE_RECIPIENT=${AGE_PUB}
 BACKUP_RCLONE_REMOTE=
-# Relocates rclone's config path off /home/bwc/.config/rclone/ which
+# Relocates rclone's config path off /home/cavecms/.config/rclone/ which
 # is hidden by ProtectHome=true in the backup systemd units. Without
 # this override, rclone runs with an empty config and the off-site
 # sync silently does nothing.
-RCLONE_CONFIG=/etc/bwc/rclone.conf
+RCLONE_CONFIG=/etc/cavecms/rclone.conf
 
 # Alerting
 ADMIN_ALERT_EMAIL=${ALERT}
@@ -737,23 +737,23 @@ EOF
   mv -f "$env_tmp" "$f"
 done
 
-# Dedicated alert env file — bwc-alert@.service reads ONLY this,
+# Dedicated alert env file — cavecms-alert@.service reads ONLY this,
 # not the full env.production. Limits the secret blast radius:
 # mailx and its subprocesses inherit ADMIN_ALERT_EMAIL only, never
-# JWT_SECRET / DATABASE_URL / SMTP_PASS. 0640 root:bwc — even
-# though bwc-alert@ runs as root (no User= directive), keeping this
-# group-readable means a future operator switching to User=bwc on
+# JWT_SECRET / DATABASE_URL / SMTP_PASS. 0640 root:cavecms — even
+# though cavecms-alert@ runs as root (no User= directive), keeping this
+# group-readable means a future operator switching to User=cavecms on
 # the alert template won't have to re-permission the file.
 # Placeholder rclone config — operator populates it during NEXT
-# STEPS. 640 root:bwc so backup services running as User=bwc can
+# STEPS. 640 root:cavecms so backup services running as User=cavecms can
 # read it.
-install -m 640 -o root -g bwc /dev/null /etc/bwc/rclone.conf
+install -m 640 -o root -g cavecms /dev/null /etc/cavecms/rclone.conf
 
-install -m 640 -o root -g bwc /dev/null /etc/bwc/alert.env
-alert_tmp="$(mktemp /etc/bwc/.alert.env.XXXXXX)"
-chmod 640 "$alert_tmp"; chown root:bwc "$alert_tmp"
+install -m 640 -o root -g cavecms /dev/null /etc/cavecms/alert.env
+alert_tmp="$(mktemp /etc/cavecms/.alert.env.XXXXXX)"
+chmod 640 "$alert_tmp"; chown root:cavecms "$alert_tmp"
 printf 'ADMIN_ALERT_EMAIL=%s\n' "$ALERT" > "$alert_tmp"
-mv -f "$alert_tmp" /etc/bwc/alert.env
+mv -f "$alert_tmp" /etc/cavecms/alert.env
 
 # ---------------------------------------------------------------------------
 # 13. Marker — provisioning complete
@@ -763,16 +763,16 @@ touch "$STATE_MARKER"
 echo "[setup.sh] OK — host provisioned."
 echo
 echo "NEXT STEPS:"
-echo "  1. Fill the following in /etc/bwc/env.production:"
+echo "  1. Fill the following in /etc/cavecms/env.production:"
 echo "       SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM"
 echo "       RECAPTCHA_SECRET_KEY / NEXT_PUBLIC_RECAPTCHA_SITE_KEY (REQUIRED — app refuses to boot without these)"
 echo "       BACKUP_RCLONE_REMOTE (REQUIRED for production off-site backups)"
-echo "  1b. Populate /etc/bwc/rclone.conf with the remote auth config"
+echo "  1b. Populate /etc/cavecms/rclone.conf with the remote auth config"
 echo "      (run \`rclone config\` then copy ~/.config/rclone/rclone.conf"
-echo "       to /etc/bwc/rclone.conf and chown root:bwc, chmod 640)"
-echo "  1c. OPTIONAL — install the age PRIVATE key at /etc/bwc/age-identity"
+echo "       to /etc/cavecms/rclone.conf and chown root:cavecms, chmod 640)"
+echo "  1c. OPTIONAL — install the age PRIVATE key at /etc/cavecms/age-identity"
 echo "      (mode 0600 owned by root) to enable the weekly restore-drill."
-echo "      Skipping this leaves bwc-restore-drill.timer firing as a no-op"
+echo "      Skipping this leaves cavecms-restore-drill.timer firing as a no-op"
 echo "      (skip-with-notice in journal). Installing the private key on prod"
 echo "      is a security trade-off: a host compromise immediately reveals"
 echo "      every encrypted backup. Without it, you have no automated"
@@ -784,5 +784,5 @@ echo "         -d ${APEX} -d www.${APEX} -d ${STAGING}"
 echo "     (Single combined cert under /etc/letsencrypt/live/${APEX}/ covers all three SANs.)"
 echo "  3. Re-run scripts/install-nginx.sh ${APEX} ${STAGING} ${LOGIN_PATH}"
 echo "     to swap the bootstrap self-signed cert for the LE cert."
-echo "  4. First deploy: ssh deployer@host sudo /opt/bwc/current/scripts/deploy.sh <sha> production"
+echo "  4. First deploy: ssh deployer@host sudo /opt/cavecms/current/scripts/deploy.sh <sha> production"
 echo "  5. Seed the initial admin: pnpm db:seed on the release directory"

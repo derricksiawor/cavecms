@@ -53,7 +53,7 @@ export function Switch({
         disabled={disabled}
         onClick={toggle}
         className={clsx(
-          'relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all duration-standard ease-standard bwc-focus-ring shadow-inner',
+          'relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all duration-standard ease-standard cavecms-focus-ring shadow-inner',
           checked
             ? 'bg-copper-500 border-copper-600'
             : 'bg-cream-100 border-warm-stone/30',

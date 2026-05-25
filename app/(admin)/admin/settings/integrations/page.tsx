@@ -63,6 +63,30 @@ function redactCredentials(key: string, value: unknown): { value: unknown; isSet
     isSet[f] = typeof v[f] === 'string' && (v[f] as string).length > 0
     if (isSet[f]) v[f] = ''
   }
+  // Zoho `formSourceMap.*.webformAuthToken` — the xnQsjsdp token
+  // that ships in public Zoho webforms. Lower impact than the
+  // OAuth secrets above (it's already publicly visible in any
+  // legitimate Zoho webform), but redact for consistency so an
+  // admin-side XSS / stolen-session attacker can't enumerate the
+  // operator's token via the admin page payload.
+  if (key === 'integrations_zoho_crm') {
+    const fsm = v.formSourceMap
+    if (fsm && typeof fsm === 'object' && !Array.isArray(fsm)) {
+      const cleanFsm: Record<string, unknown> = {}
+      for (const [source, dest] of Object.entries(fsm as Record<string, unknown>)) {
+        if (dest && typeof dest === 'object' && !Array.isArray(dest)) {
+          const d = { ...(dest as Record<string, unknown>) }
+          if (typeof d.webformAuthToken === 'string' && d.webformAuthToken.length > 0) {
+            d.webformAuthToken = ''
+          }
+          cleanFsm[source] = d
+        } else {
+          cleanFsm[source] = dest
+        }
+      }
+      v.formSourceMap = cleanFsm
+    }
+  }
   return { value: v, isSet }
 }
 

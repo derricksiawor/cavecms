@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/Input'
 // connected, surfaces a deep-link to /admin/settings/integrations
 // instead of an empty picker.
 
-const BWC_FIELDS_BY_SOURCE: Record<string, string[]> = {
+const CAVECMS_FIELDS_BY_SOURCE: Record<string, string[]> = {
   contact: ['name', 'email', 'phone', 'message', 'enquiry_type', 'tour_date', 'tour_time', 'brochure_project'],
 }
 const ZOHO_MODULES = ['Leads', 'Contacts', 'Deals'] as const
@@ -44,13 +44,13 @@ interface HubspotFormField { name: string; label: string; fieldType: string }
 interface Props {
   /** Source key — for contact_form blocks this is 'contact'. Drives
    *  the left column of the field-map UI. */
-  bwcSource?: string
+  cavecmsSource?: string
   destinations: Destination[]
   onChange: (next: Destination[]) => void
 }
 
-export function CrmDestinationsPanel({ bwcSource = 'contact', destinations, onChange }: Props) {
-  const bwcFields = BWC_FIELDS_BY_SOURCE[bwcSource] ?? BWC_FIELDS_BY_SOURCE.contact ?? []
+export function CrmDestinationsPanel({ cavecmsSource = 'contact', destinations, onChange }: Props) {
+  const cavecmsFields = CAVECMS_FIELDS_BY_SOURCE[cavecmsSource] ?? CAVECMS_FIELDS_BY_SOURCE.contact ?? []
 
   // Fetch operator's HubSpot forms once on mount. Empty list means
   // either HubSpot isn't connected OR the operator has no forms —
@@ -131,13 +131,13 @@ export function CrmDestinationsPanel({ bwcSource = 'contact', destinations, onCh
               <HubspotDestEditor
                 value={d}
                 forms={hubspotForms ?? []}
-                bwcFields={bwcFields}
+                cavecmsFields={cavecmsFields}
                 onChange={(next) => updateAt(i, next)}
               />
             ) : (
               <ZohoDestEditor
                 value={d}
-                bwcFields={bwcFields}
+                cavecmsFields={cavecmsFields}
                 onChange={(next) => updateAt(i, next)}
               />
             )}
@@ -160,11 +160,11 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 }
 
 function HubspotDestEditor({
-  value, forms, bwcFields, onChange,
+  value, forms, cavecmsFields, onChange,
 }: {
   value: HubspotDest
   forms: HubspotFormSummary[]
-  bwcFields: string[]
+  cavecmsFields: string[]
   onChange: (v: HubspotDest) => void
 }) {
   const [fields, setFields] = useState<HubspotFormField[]>([])
@@ -202,20 +202,20 @@ function HubspotDestEditor({
         </select>
       </label>
       <div>
-        <FieldLabel>Field map (BWC → HubSpot)</FieldLabel>
+        <FieldLabel>Field map (CaveCMS → HubSpot)</FieldLabel>
         <div className="mt-2 space-y-1.5">
-          {bwcFields.map((bwc) => (
-            <div key={bwc} className="flex items-center gap-2">
-              <code className="w-32 shrink-0 text-xs font-mono text-cream-50/60">{bwc}</code>
+          {cavecmsFields.map((cavecms) => (
+            <div key={cavecms} className="flex items-center gap-2">
+              <code className="w-32 shrink-0 text-xs font-mono text-cream-50/60">{cavecms}</code>
               <span className="text-cream-50/30">→</span>
               {fields.length > 0 ? (
                 <select
                   className="flex-1 rounded-xl border border-cream-50/15 bg-near-black/40 px-3 py-2 text-sm text-cream-50 focus:outline-none focus:ring-2 focus:ring-copper-400/40"
-                  value={value.fieldMap[bwc] ?? ''}
+                  value={value.fieldMap[cavecms] ?? ''}
                   onChange={(e) => {
                     const next = { ...value.fieldMap }
-                    if (e.target.value) next[bwc] = e.target.value
-                    else delete next[bwc]
+                    if (e.target.value) next[cavecms] = e.target.value
+                    else delete next[cavecms]
                     onChange({ ...value, fieldMap: next })
                   }}
                 >
@@ -225,12 +225,12 @@ function HubspotDestEditor({
               ) : (
                 <Input
                   className="flex-1"
-                  value={value.fieldMap[bwc] ?? ''}
+                  value={value.fieldMap[cavecms] ?? ''}
                   placeholder={loadingFields ? 'loading…' : 'hubspot_property_name'}
                   onChange={(e) => {
                     const next = { ...value.fieldMap }
-                    if (e.target.value.trim()) next[bwc] = e.target.value.trim()
-                    else delete next[bwc]
+                    if (e.target.value.trim()) next[cavecms] = e.target.value.trim()
+                    else delete next[cavecms]
                     onChange({ ...value, fieldMap: next })
                   }}
                 />
@@ -244,10 +244,10 @@ function HubspotDestEditor({
 }
 
 function ZohoDestEditor({
-  value, bwcFields, onChange,
+  value, cavecmsFields, onChange,
 }: {
   value: ZohoDest
-  bwcFields: string[]
+  cavecmsFields: string[]
   onChange: (v: ZohoDest) => void
 }) {
   return (
@@ -293,19 +293,19 @@ function ZohoDestEditor({
         />
       </label>
       <div>
-        <FieldLabel>Field map (BWC → Zoho)</FieldLabel>
+        <FieldLabel>Field map (CaveCMS → Zoho)</FieldLabel>
         <div className="mt-2 space-y-1.5">
-          {bwcFields.map((bwc) => (
-            <div key={bwc} className="flex items-center gap-2">
-              <code className="w-32 shrink-0 text-xs font-mono text-cream-50/60">{bwc}</code>
+          {cavecmsFields.map((cavecms) => (
+            <div key={cavecms} className="flex items-center gap-2">
+              <code className="w-32 shrink-0 text-xs font-mono text-cream-50/60">{cavecms}</code>
               <span className="text-cream-50/30">→</span>
               <Input className="flex-1"
-                value={value.fieldMap[bwc] ?? ''}
+                value={value.fieldMap[cavecms] ?? ''}
                 placeholder="Zoho_API_Name"
                 onChange={(e) => {
                   const next = { ...value.fieldMap }
-                  if (e.target.value.trim()) next[bwc] = e.target.value.trim()
-                  else delete next[bwc]
+                  if (e.target.value.trim()) next[cavecms] = e.target.value.trim()
+                  else delete next[cavecms]
                   onChange({ ...value, fieldMap: next })
                 }}
               />

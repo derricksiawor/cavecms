@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# scripts/disk-check.sh — hourly disk-usage gate for the BWC deploy pipeline.
+# scripts/disk-check.sh — hourly disk-usage gate for the CaveCMS deploy pipeline.
 #
-# Invoked by systemd: bwc-disk-check.timer → bwc-disk-check.service.
-# Runs as root with ReadWritePaths=/var/lib/bwc /var/log/bwc and
-# MemoryMax=64M (per scripts/systemd/bwc-disk-check.service). All other
+# Invoked by systemd: cavecms-disk-check.timer → cavecms-disk-check.service.
+# Runs as root with ReadWritePaths=/var/lib/cavecms /var/log/cavecms and
+# MemoryMax=64M (per scripts/systemd/cavecms-disk-check.service). All other
 # paths are read-only thanks to ProtectSystem=strict.
 #
 # Behaviour:
 #   1. Polls % used on each monitored filesystem (deduped by mount source).
 #   2. At >=90% on ANY monitored FS, writes a single-line reason to
-#      /var/lib/bwc/deploy.blocked (preflight.sh:93 consumes this).
+#      /var/lib/cavecms/deploy.blocked (preflight.sh:93 consumes this).
 #   3. When EVERY monitored FS is <85%, removes the sentinel. The 5-point
 #      hysteresis gap prevents flapping when usage oscillates around the
 #      threshold (e.g. log rotation freeing 3% then refilling).
@@ -23,31 +23,31 @@
 #   the EMPTY FILE — is treated as operator-set and will not be overwritten
 #   or removed. preflight.sh:98 explicitly accommodates an empty sentinel
 #   (`: "${reason:=<empty>}"`), which makes
-#     sudo touch /var/lib/bwc/deploy.blocked
+#     sudo touch /var/lib/cavecms/deploy.blocked
 #   a supported manual-block workflow. This script must therefore never
 #   auto-clear a zero-byte sentinel.
 #
 # Filesystems monitored:
 #   /             — root FS (small droplets keep everything here)
-#   /opt/bwc      — release tree, uploads, static-pool, incoming tarballs
-#   /backup/bwc   — pre-deploy snapshots + db-backup outputs
-# Missing /opt/bwc or /backup/bwc is gracefully skipped (fresh-box state
+#   /opt/cavecms      — release tree, uploads, static-pool, incoming tarballs
+#   /backup/cavecms   — pre-deploy snapshots + db-backup outputs
+# Missing /opt/cavecms or /backup/cavecms is gracefully skipped (fresh-box state
 # pre-setup.sh, or pre-first-backup state). Root is always monitored.
 #
-# Concurrency: a non-blocking flock at /var/lib/bwc/.disk-check.lock
+# Concurrency: a non-blocking flock at /var/lib/cavecms/.disk-check.lock
 # rejects a second invocation that overlaps the first (timer + manual
 # `systemctl start` race). Skipped runs exit 0 — duplicate work isn't
 # a failure. The lock file is a zero-byte regular file intentionally
-# left on disk across runs (same pattern as /var/lock/bwc-deploy.lock
+# left on disk across runs (same pattern as /var/lock/cavecms-deploy.lock
 # used by deploy.sh / rollback.sh) — DO NOT delete it as an "operator
 # cleanup". Unlinking under a live fd would let a concurrent
 # open(O_CREAT) create a fresh inode at the same path and acquire an
 # independent lock, defeating mutual exclusion. See the inline INVARIANT
 # block at the flock site for the full rationale.
 #
-# Side effects: only writes / unlinks /var/lib/bwc/deploy.blocked (plus
-# the flock + tempfile inside /var/lib/bwc). Logs to stdout/stderr —
-# systemd journal captures both. The unit's OnFailure=bwc-alert@%n.service
+# Side effects: only writes / unlinks /var/lib/cavecms/deploy.blocked (plus
+# the flock + tempfile inside /var/lib/cavecms). Logs to stdout/stderr —
+# systemd journal captures both. The unit's OnFailure=cavecms-alert@%n.service
 # handles non-zero exits, so this script carries no alert logic of its own.
 #
 # Exit codes:
@@ -94,7 +94,7 @@ if [ $# -ne 0 ]; then
   exit 2
 fi
 
-SENTINEL_DIR=/var/lib/bwc
+SENTINEL_DIR=/var/lib/cavecms
 SENTINEL=$SENTINEL_DIR/deploy.blocked
 LOCK_FILE=$SENTINEL_DIR/.disk-check.lock
 # Identifies sentinels written by this script. Exact-leading-segment match
@@ -109,10 +109,10 @@ HIGH=90
 LOW=85
 
 # Cluster-1 invariant: setup.sh creates $SENTINEL_DIR mode 2770
-# root:bwcstate (cluster-3 cohesive audit changed this from 750 root:bwc
-# to enable bwc-user backup scripts to write lock/marker files here,
-# with the dedicated bwcstate group scoping write access AWAY from
-# www-data which is in group bwc for nginx). Without the directory we
+# root:cavecmsstate (cluster-3 cohesive audit changed this from 750 root:cavecms
+# to enable cavecms-user backup scripts to write lock/marker files here,
+# with the dedicated cavecmsstate group scoping write access AWAY from
+# www-data which is in group cavecms for nginx). Without the directory we
 # can't write the sentinel — refuse rather than silently fail later.
 if [ ! -d "$SENTINEL_DIR" ]; then
   echo "[disk-check.sh] $SENTINEL_DIR missing — run scripts/setup.sh first" >&2
@@ -120,17 +120,17 @@ if [ ! -d "$SENTINEL_DIR" ]; then
 fi
 
 # Symlink prechecks: refuse to operate against a $SENTINEL or $LOCK_FILE
-# that is a symlink. Within the cluster-3 trust model (2770 root:bwcstate
-# on /var/lib/bwc, so root + bwcstate-group members — currently just the
-# `bwc` user — can plant, write, AND truncate files) this is
+# that is a symlink. Within the cluster-3 trust model (2770 root:cavecmsstate
+# on /var/lib/cavecms, so root + cavecmsstate-group members — currently just the
+# `cavecms` user — can plant, write, AND truncate files) this is
 # defence-in-depth: it closes TOCTOU windows where an attacker holding
-# the bwc uid could redirect operations into other writable paths via
+# the cavecms uid could redirect operations into other writable paths via
 # a symlink.
 #
 # Particular concern for $LOCK_FILE: `exec 9>$LOCK_FILE` would otherwise
 # follow a symlink and O_TRUNC the target — e.g. a symlink at
-# .disk-check.lock pointing to /var/lib/bwc/deploy.blocked would let a
-# bwc-group user truncate the sentinel via this script's privilege.
+# .disk-check.lock pointing to /var/lib/cavecms/deploy.blocked would let a
+# cavecms-group user truncate the sentinel via this script's privilege.
 for f in "$SENTINEL" "$LOCK_FILE"; do
   if [ -L "$f" ]; then
     echo "[disk-check.sh] refusing: $f is a symlink (expected regular file or absent)" >&2
@@ -154,7 +154,7 @@ done
 # fd 9 is conventional for advisory locks; release is automatic on
 # process exit (no explicit `flock -u` needed). The lock file itself is
 # intentionally left on disk across runs — consistent with
-# deploy.sh:159 / rollback.sh:128 which both keep /var/lock/bwc-deploy.lock
+# deploy.sh:159 / rollback.sh:128 which both keep /var/lock/cavecms-deploy.lock
 # in place. Unlinking a lock file under a live fd would let a concurrent
 # `open(O_CREAT)` create a fresh inode at the same path and acquire a
 # second independent lock, defeating mutual exclusion.
@@ -224,11 +224,11 @@ df_pct() {
 # Build the candidate list. / is the only mandatory target; the others
 # may legitimately not exist on a fresh box mid-setup.
 candidate_paths=(/)
-[ -d /opt/bwc ] && candidate_paths+=(/opt/bwc)
-[ -d /backup/bwc ] && candidate_paths+=(/backup/bwc)
+[ -d /opt/cavecms ] && candidate_paths+=(/opt/cavecms)
+[ -d /backup/cavecms ] && candidate_paths+=(/backup/cavecms)
 
 # Collect (source, pct) rows, deduping by mount source. Two monitored
-# paths on the same FS (common on small droplets where /opt/bwc and /
+# paths on the same FS (common on small droplets where /opt/cavecms and /
 # share a volume) only score once.
 declare -A seen_src=()
 worst=-1
@@ -280,7 +280,7 @@ fi
 # is_ours returns 0 ONLY when the reason starts with the literal
 # "disk-check:" prefix. Returns 1 for empty string AND for any other
 # non-prefixed content. An EMPTY sentinel is operator-owned
-# (sudo touch /var/lib/bwc/deploy.blocked is the supported manual-block
+# (sudo touch /var/lib/cavecms/deploy.blocked is the supported manual-block
 # workflow — preflight.sh:98 explicitly handles the empty case).
 # The caller handles the no-sentinel case explicitly via $sentinel_present
 # BEFORE calling is_ours (see the `sentinel_present -eq 0 || is_ours` and
@@ -291,24 +291,24 @@ is_ours() {
 }
 
 # Atomic write into the sentinel. Tempfile (mktemp, O_EXCL-safe) in same
-# dir → mv is rename(2), atomic on the same filesystem. Mode 640 root:bwc
-# lets preflight (root) read directly and any bwc-group member read it
-# too — useful for a `cat /var/lib/bwc/deploy.blocked` diagnostic by the
+# dir → mv is rename(2), atomic on the same filesystem. Mode 640 root:cavecms
+# lets preflight (root) read directly and any cavecms-group member read it
+# too — useful for a `cat /var/lib/cavecms/deploy.blocked` diagnostic by the
 # deploy user.
 write_sentinel() {
   local content="$1"
   printf '%s\n' "$content" > "$TMPFILE"
   chmod 640 "$TMPFILE"
-  # Group bwc is a cluster-1 invariant. If it's missing we have bigger
+  # Group cavecms is a cluster-1 invariant. If it's missing we have bigger
   # problems but the sentinel is still functional at root:root — fall
   # back without failing.
-  if ! chown root:bwc "$TMPFILE" 2>/dev/null; then
-    echo "[disk-check.sh] WARN: chown root:bwc $TMPFILE failed; sentinel will be root:root" >&2
+  if ! chown root:cavecms "$TMPFILE" 2>/dev/null; then
+    echo "[disk-check.sh] WARN: chown root:cavecms $TMPFILE failed; sentinel will be root:root" >&2
   fi
   # Re-check the sentinel target right before the rename, defending
   # against an attacker who planted a symlink between the precheck at
   # the top of the script and now. Flock prevents script-internal
-  # interleaving; this guards against external bwc-group manipulation.
+  # interleaving; this guards against external cavecms-group manipulation.
   if [ -L "$SENTINEL" ]; then
     echo "[disk-check.sh] refusing: $SENTINEL became a symlink mid-run" >&2
     exit 1

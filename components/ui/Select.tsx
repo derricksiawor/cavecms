@@ -80,7 +80,7 @@ export function Select({
   'aria-labelledby': ariaLabelledby,
 }: SelectProps) {
   const generatedId = useId()
-  const triggerId = id ?? `bwc-select-${generatedId}`
+  const triggerId = id ?? `cavecms-select-${generatedId}`
   const listboxId = `${triggerId}-listbox`
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listboxRef = useRef<HTMLUListElement>(null)
@@ -301,7 +301,7 @@ export function Select({
   )
 
   const listboxClass = clsx(
-    'overflow-auto rounded-xl border py-1.5 shadow-[0_20px_50px_-15px_rgba(5,5,5,0.55)] focus:outline-none animate-bwc-fade-in motion-reduce:animate-none',
+    'overflow-auto rounded-xl border py-1.5 shadow-[0_20px_50px_-15px_rgba(5,5,5,0.55)] focus:outline-none animate-cavecms-fade-in motion-reduce:animate-none',
     isDark
       ? 'border-cream-50/15 bg-near-black/95 text-cream-50 backdrop-blur-md'
       : 'border-warm-stone/25 bg-cream-50/98 text-near-black backdrop-blur-md',

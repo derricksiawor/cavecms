@@ -38,10 +38,10 @@ async function hashPasswordLocal(pw: string): Promise<string> {
 }
 
 // Use a dedicated editor email for the blog suite so it doesn't
-// collide with projects.spec's `editor@bwc.test` if the two specs
+// collide with projects.spec's `editor@cavecms.test` if the two specs
 // run in parallel against the same database.
 const TEST_SLUGS = ['blog-test', 'blog-test-renamed'] as const
-const BLOG_EDITOR_EMAIL = 'blog-editor@bwc.test'
+const BLOG_EDITOR_EMAIL = 'blog-editor@cavecms.test'
 const BLOG_EDITOR_PASSWORD = 'CorrectHorseBattery0!'
 
 function refuseRemoteDb(dsn: string): boolean {
@@ -133,8 +133,8 @@ async function purgeBlogEditorAuditRows(): Promise<void> {
 // state survives across suite runs while `pnpm dev` is reused, so
 // only auth.spec.ts hits /api/auth/login. Every other spec uses JWT
 // injection.
-const JWT_ISS_SESSION = 'bwc.cms'
-const JWT_AUD_SESSION = 'bwc.web'
+const JWT_ISS_SESSION = 'cavecms.cms'
+const JWT_AUD_SESSION = 'cavecms.web'
 
 async function signSessionJwtForTest(userId: number): Promise<string> {
   const secret = process.env['JWT_SECRET']
@@ -201,9 +201,9 @@ test.describe.serial('Plan 06 — Blog', () => {
       try {
         const [adminRows] = (await conn.query(
           'SELECT id FROM users WHERE email = ?',
-          ['admin@bwc.test'],
+          ['admin@cavecms.test'],
         )) as unknown as [Array<{ id: number }>, unknown]
-        if (!adminRows[0]) throw new Error('admin@bwc.test missing — run db:seed')
+        if (!adminRows[0]) throw new Error('admin@cavecms.test missing — run db:seed')
         adminId = adminRows[0].id
         const [editorRows] = (await conn.query(
           'SELECT id FROM users WHERE email = ?',

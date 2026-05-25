@@ -18,7 +18,7 @@ export const Button = forwardRef<
     <button
       ref={ref}
       className={clsx(
-        'inline-flex items-center justify-center gap-2 rounded-full font-semibold uppercase tracking-[0.22em] transition-all duration-standard ease-standard disabled:opacity-40 disabled:cursor-not-allowed bwc-focus-ring select-none w-fit',
+        'inline-flex items-center justify-center gap-2 rounded-full font-semibold uppercase tracking-[0.22em] transition-all duration-standard ease-standard disabled:opacity-40 disabled:cursor-not-allowed cavecms-focus-ring select-none w-fit',
         size === 'sm' && 'px-4 py-2 text-[10px] min-h-[36px]',
         size === 'md' && 'px-6 py-3 text-[11px] min-h-[44px]',
         size === 'lg' && 'px-8 py-4 text-xs min-h-[52px]',

@@ -11,11 +11,11 @@ import { Popover } from './Popover'
 // popover listing every family — each option styled in ITS OWN FACE
 // so the operator picks visually, not by name.
 //
-// BWC ships two families (display + body) but both currently resolve
+// CaveCMS ships two families (display + body) but both currently resolve
 // to Montserrat (per globals.css comment "hierarchy is built via
 // weight"). The picker still surfaces both because future brand
 // expansion may diverge. Elementor exposes 1000+ Google Fonts; the
-// BWC luxury system is intentionally tight — token-locked, no
+// CaveCMS luxury system is intentionally tight — token-locked, no
 // arbitrary Google Font picker.
 //
 // `value` is undefined when the block uses its render-default family.

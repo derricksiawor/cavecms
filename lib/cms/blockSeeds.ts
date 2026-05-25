@@ -595,7 +595,7 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   // first and POSTs with the chosen media_id; this fallback exists
   // for the SEED_DATA invariant test, where it's never reached at
   // runtime because the picker overrides with the MediaPicker result.
-  // The placeholder media_id=1 is the BWC system "missing image"
+  // The placeholder media_id=1 is the CaveCMS system "missing image"
   // placeholder seeded in db/seed.ts.
   lx_figure: { image: { media_id: 1, alt: '' } },
 

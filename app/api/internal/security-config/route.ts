@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { env } from '@/lib/env'
 import { getSetting } from '@/lib/cms/getSettings'
 import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
+import { isInstalled } from '@/lib/install/installState'
 
 // Internal middleware-feeding endpoint. Middleware runs on the Edge
 // runtime and CANNOT call Drizzle/MariaDB directly. It hits this
@@ -95,6 +96,7 @@ export async function GET(req: Request): Promise<Response> {
     hotjar,
     salesiq,
     hubspot,
+    installed,
   ] = await Promise.all([
     getResolvedLoginPath(),
     getSetting('security_ip_lists'),
@@ -106,11 +108,15 @@ export async function GET(req: Request): Promise<Response> {
     getSetting('integrations_hotjar'),
     getSetting('integrations_zoho_salesiq'),
     getSetting('integrations_hubspot'),
+    // Install state — middleware uses this to redirect fresh deploys
+    // to /install instead of serving a half-broken site.
+    isInstalled(),
   ])
 
   return jsonResponse(
     {
       loginPath: loginPath.toLowerCase(),
+      installed,
       ipAllowlist: ipLists.allowlist,
       ipBlocklist: ipLists.blocklist,
       maintenance: {

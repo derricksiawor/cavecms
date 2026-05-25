@@ -2,9 +2,8 @@ import 'server-only'
 import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { env } from '@/lib/env'
 import { normalizeEmail } from '@/lib/leads/normalizeEmail'
-import { getTransporter, stripCrLf } from './transport'
+import { getTransporter, getActiveSmtpConfig, getFromHeader, stripCrLf } from './transport'
 
 // Persist-on-enqueue email queue.
 //
@@ -43,19 +42,19 @@ const EMAIL_BODY_MAX = 200_000
 
 // Pin to globalThis so HMR doesn't reset the breaker state mid-dev.
 declare global {
-  var __bwcEmailBreaker:
+  var __cavecmsEmailBreaker:
     | { consecutiveFailures: number; openUntil: number }
     | undefined
-  var __bwcEmailSweep: NodeJS.Timeout | undefined
+  var __cavecmsEmailSweep: NodeJS.Timeout | undefined
   // Promise gate so concurrent kickers (queueMicrotask + the 30s
   // setInterval) can't both run claim() in parallel and pick up
   // overlapping batches in the same process. `undefined` when
   // idle; `Promise<void>` when in-flight. `.finally` clears it.
-  var __bwcEmailRunOncePromise: Promise<void> | undefined
+  var __cavecmsEmailRunOncePromise: Promise<void> | undefined
 }
 const breaker: { consecutiveFailures: number; openUntil: number } =
-  globalThis.__bwcEmailBreaker ?? { consecutiveFailures: 0, openUntil: 0 }
-globalThis.__bwcEmailBreaker = breaker
+  globalThis.__cavecmsEmailBreaker ?? { consecutiveFailures: 0, openUntil: 0 }
+globalThis.__cavecmsEmailBreaker = breaker
 
 interface InsertResult {
   insertId: number
@@ -213,16 +212,22 @@ async function markFailed(
 }
 
 async function doRunOnce(): Promise<void> {
-  if (!env.SMTP_HOST) return
   if (Date.now() < breaker.openUntil) return
-  const transporter = getTransporter()
+  // SMTP config is DB-first, env-fallback. If neither is set the
+  // active config resolves to null and we short-circuit — pending
+  // emails stay queued for replay once the operator wires up SMTP
+  // via Settings → Email.
+  const activeCfg = await getActiveSmtpConfig()
+  if (!activeCfg) return
+  const transporter = await getTransporter()
   if (!transporter) return
+  const from = (await getFromHeader()) ?? activeCfg.fromAddress
 
   const rows = await claim()
   for (const row of rows) {
     try {
       await transporter.sendMail({
-        from: env.SMTP_FROM,
+        from,
         to: row.to_email,
         subject: row.subject,
         html: row.html_body,
@@ -307,13 +312,13 @@ async function doRunOnce(): Promise<void> {
  * gates. Documented in the queue.ts header.
  */
 export async function runOnce(): Promise<void> {
-  if (globalThis.__bwcEmailRunOncePromise) {
-    return globalThis.__bwcEmailRunOncePromise
+  if (globalThis.__cavecmsEmailRunOncePromise) {
+    return globalThis.__cavecmsEmailRunOncePromise
   }
   const p = doRunOnce().finally(() => {
-    globalThis.__bwcEmailRunOncePromise = undefined
+    globalThis.__cavecmsEmailRunOncePromise = undefined
   })
-  globalThis.__bwcEmailRunOncePromise = p
+  globalThis.__cavecmsEmailRunOncePromise = p
   return p
 }
 
@@ -325,13 +330,17 @@ export async function runOnce(): Promise<void> {
 // connections from a non-server context.
 const SWEEP_INTERVAL_MS = 30_000
 const isBuildPhase = process.env['NEXT_PHASE'] === 'phase-production-build'
+// Always start the sweeper in Node runtime — `doRunOnce` itself
+// short-circuits when neither DB nor env SMTP config resolves, so
+// the loop is harmless when email is disabled at boot AND
+// automatically activates once an operator saves their SMTP
+// credentials in Settings → Email (no restart needed).
 if (
   process.env['NEXT_RUNTIME'] === 'nodejs' &&
   !isBuildPhase &&
-  !globalThis.__bwcEmailSweep &&
-  env.SMTP_HOST
+  !globalThis.__cavecmsEmailSweep
 ) {
-  globalThis.__bwcEmailSweep = setInterval(() => {
+  globalThis.__cavecmsEmailSweep = setInterval(() => {
     runOnce().catch((err: unknown) => {
       console.error(JSON.stringify({
         level: 'error',
@@ -340,7 +349,7 @@ if (
       }))
     })
   }, SWEEP_INTERVAL_MS)
-  globalThis.__bwcEmailSweep.unref()
+  globalThis.__cavecmsEmailSweep.unref()
   // Kick once at startup so a dev reload doesn't have to wait 30s
   // for the first sweep.
   setImmediate(() => {

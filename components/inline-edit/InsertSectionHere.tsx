@@ -173,7 +173,7 @@ export function InsertSectionHere({
         <div
           role="menu"
           aria-label="Pick a section shape"
-          className="relative w-full max-w-2xl rounded-2xl border border-warm-stone/20 bg-cream-50 p-4 shadow-[0_24px_56px_-26px_rgba(5,5,5,0.4)] animate-bwc-fade-in"
+          className="relative w-full max-w-2xl rounded-2xl border border-warm-stone/20 bg-cream-50 p-4 shadow-[0_24px_56px_-26px_rgba(5,5,5,0.4)] animate-cavecms-fade-in"
         >
           <div className="mb-3 flex items-center gap-2 px-1">
             <Columns3 size={12} strokeWidth={2.2} className="text-copper-500" />

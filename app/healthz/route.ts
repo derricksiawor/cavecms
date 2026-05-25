@@ -92,7 +92,7 @@ export async function GET(req: Request): Promise<Response> {
   const body = verbose
     ? {
         status: dbPing === 'ok' ? 'ok' : 'degraded',
-        commit: env.BWC_COMMIT,
+        commit: env.CAVECMS_COMMIT,
         db_ping: dbPing,
         pool_free: poolFree,
         uptime_s: Math.floor((Date.now() - STARTED_AT) / 1000),

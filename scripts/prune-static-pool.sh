@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# scripts/prune-static-pool.sh — daily pruner for the BWC static-asset pool.
+# scripts/prune-static-pool.sh — daily pruner for the CaveCMS static-asset pool.
 #
-# Invoked by systemd: bwc-static-prune.timer → bwc-static-prune.service.
-# Runs as the bwc user with ReadWritePaths=/opt/bwc/static-pool /var/log/bwc,
+# Invoked by systemd: cavecms-static-prune.timer → cavecms-static-prune.service.
+# Runs as the cavecms user with ReadWritePaths=/opt/cavecms/static-pool /var/log/cavecms,
 # ProtectSystem=strict, PrivateTmp=true, MemoryMax=128M (per
-# scripts/systemd/bwc-static-prune.service).
+# scripts/systemd/cavecms-static-prune.service).
 #
 # Why this script exists:
 #   deploy.sh rsyncs every release's .next/static tree INTO the shared pool
-#   at /opt/bwc/static-pool/.next/static/ additively — never deleting old
+#   at /opt/cavecms/static-pool/.next/static/ additively — never deleting old
 #   chunks. Nginx aliases /_next/static to that pool. The additive policy
 #   means a client browser still holding a stale HTML page can fetch its
 #   referenced chunks even after a new release ships. Over time the pool
@@ -17,10 +17,10 @@
 #
 # Algorithm:
 #   1. Build a KEEP set: every relative chunk path referenced by
-#        /opt/bwc/current/.next/static/                   (active release)
-#        /opt/bwc/current/.next/standalone/.next/static/  (standalone copy)
+#        /opt/cavecms/current/.next/static/                   (active release)
+#        /opt/cavecms/current/.next/standalone/.next/static/  (standalone copy)
 #        AND the same two subpaths under each of the 5 most-recently-touched
-#        /opt/bwc/releases/* directories (matching deploy.sh's keep-last-5
+#        /opt/cavecms/releases/* directories (matching deploy.sh's keep-last-5
 #        rotation at deploy.sh:167-191).
 #   2. Walk the pool. For each file:
 #        delete iff (NOT in KEEP) AND (ctime older than GRACE_DAYS).
@@ -33,29 +33,29 @@
 #
 # Safety rails:
 #   - REFUSE to prune if the KEEP set ends up empty (would wipe the pool).
-#     An empty KEEP can only happen when /opt/bwc/current is dangling AND
-#     /opt/bwc/releases is empty — that's a broken-deploy state, not a
+#     An empty KEEP can only happen when /opt/cavecms/current is dangling AND
+#     /opt/cavecms/releases is empty — that's a broken-deploy state, not a
 #     normal pruning condition.
-#   - REFUSE to prune if /opt/bwc/static-pool/.next/static is missing or
+#   - REFUSE to prune if /opt/cavecms/static-pool/.next/static is missing or
 #     not a directory (pre-first-deploy state — nothing to prune anyway).
 #   - The release rotation here MUST match deploy.sh's rotation gate
 #     (5 most-recently-touched dirs by mtime). If deploy.sh's KEEP_LAST
 #     ever changes, this script's KEEP_LAST must change too — both are
 #     hard-coded constants. See deploy.sh:167 for the parent decision.
 #
-# Concurrency: a non-blocking flock at /var/log/bwc/.prune-static-pool.lock
+# Concurrency: a non-blocking flock at /var/log/cavecms/.prune-static-pool.lock
 # rejects an overlapping invocation (daily timer + manual `systemctl start`
 # race). Skipped runs exit 0 — duplicate work isn't a failure. The lock
 # file is a zero-byte regular file intentionally left on disk across runs
-# (same pattern as /var/lock/bwc-deploy.lock used by deploy.sh / rollback.sh
-# and /var/lib/bwc/.disk-check.lock used by disk-check.sh) — DO NOT delete
+# (same pattern as /var/lock/cavecms-deploy.lock used by deploy.sh / rollback.sh
+# and /var/lib/cavecms/.disk-check.lock used by disk-check.sh) — DO NOT delete
 # it as an "operator cleanup". Unlinking under a live fd would let a
 # concurrent open(O_CREAT) create a fresh inode at the same path and acquire
 # an independent lock, defeating mutual exclusion.
 #
-# Side effects: writes only to /opt/bwc/static-pool (deletions) and
-# /var/log/bwc (lock file, tempfiles). Logs to stdout/stderr — systemd
-# journal captures both. OnFailure=bwc-alert@%n.service handles non-zero
+# Side effects: writes only to /opt/cavecms/static-pool (deletions) and
+# /var/log/cavecms (lock file, tempfiles). Logs to stdout/stderr — systemd
+# journal captures both. OnFailure=cavecms-alert@%n.service handles non-zero
 # exits; this script carries no alert logic.
 #
 # Exit codes:
@@ -100,7 +100,7 @@ for cmd in awk comm find flock head mapfile mktemp printf rm sort tr; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     # `command -v` recognises bash builtins (mapfile, printf), so this
     # check fires only when an external is missing — which on a sandboxed
-    # bwc-user invocation usually means a busted release artifact.
+    # cavecms-user invocation usually means a busted release artifact.
     echo "[prune-static-pool.sh] required command missing: $cmd" >&2
     exit 1
   fi
@@ -112,10 +112,10 @@ if [ $# -ne 0 ]; then
   exit 2
 fi
 
-POOL=/opt/bwc/static-pool/.next/static
-CURRENT=/opt/bwc/current
-RELEASES_DIR=/opt/bwc/releases
-LOCK_FILE=/var/log/bwc/.prune-static-pool.lock
+POOL=/opt/cavecms/static-pool/.next/static
+CURRENT=/opt/cavecms/current
+RELEASES_DIR=/opt/cavecms/releases
+LOCK_FILE=/var/log/cavecms/.prune-static-pool.lock
 # KEEP_LAST must match deploy.sh's keep-last-5 rotation (deploy.sh:167-191).
 KEEP_LAST=5
 # Grace period: files newer than this are kept regardless of KEEP-set
@@ -129,9 +129,9 @@ if [ ! -d "$POOL" ]; then
 fi
 
 # Symlink prechecks on $LOCK_FILE. flock's `exec 9>` would otherwise follow
-# a symlink and O_TRUNC the target — a bwc-group attacker (the unit runs
-# as the bwc user, but /var/log/bwc is bwc-writable by design) could plant
-# .prune-static-pool.lock → /var/log/bwc/<sensitive>.log and have this
+# a symlink and O_TRUNC the target — a cavecms-group attacker (the unit runs
+# as the cavecms user, but /var/log/cavecms is cavecms-writable by design) could plant
+# .prune-static-pool.lock → /var/log/cavecms/<sensitive>.log and have this
 # script truncate it.
 if [ -L "$LOCK_FILE" ]; then
   echo "[prune-static-pool.sh] refusing: $LOCK_FILE is a symlink (expected regular file or absent)" >&2
@@ -151,13 +151,13 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# Tempfiles under /var/log/bwc (in the unit's ReadWritePaths) — PrivateTmp
-# would give us /tmp too, but /var/log/bwc keeps everything in one bwc-
+# Tempfiles under /var/log/cavecms (in the unit's ReadWritePaths) — PrivateTmp
+# would give us /tmp too, but /var/log/cavecms keeps everything in one cavecms-
 # readable place for post-mortem inspection if a prune misbehaves.
 # mktemp uses O_CREAT|O_EXCL, so it refuses to follow attacker-planted
 # symlinks.
-KEEP_FILE=$(mktemp /var/log/bwc/.prune-keep.XXXXXX)
-POOL_FILE=$(mktemp /var/log/bwc/.prune-pool.XXXXXX)
+KEEP_FILE=$(mktemp /var/log/cavecms/.prune-keep.XXXXXX)
+POOL_FILE=$(mktemp /var/log/cavecms/.prune-pool.XXXXXX)
 # shellcheck disable=SC2064  # expand the tempfile names NOW so the trap survives variable scope changes.
 trap "rm -f -- \"$KEEP_FILE\" \"$POOL_FILE\"" EXIT
 # Signal traps re-raise conventional 128+signo exit codes.
@@ -172,7 +172,7 @@ trap 'exit 129' HUP
 # ---------------------------------------------------------------------------
 declare -a keep_dirs=()
 
-# /opt/bwc/current is a symlink in normal operation. `-d` follows the link
+# /opt/cavecms/current is a symlink in normal operation. `-d` follows the link
 # and only succeeds when the target exists, so a dangling symlink (left
 # behind by an aborted deploy) cleanly skips current rather than failing.
 if [ -L "$CURRENT" ] && [ -d "$CURRENT" ]; then
@@ -199,7 +199,7 @@ if [ -d "$RELEASES_DIR" ]; then
   for r in "${recent_releases[@]}"; do
     [ -n "$r" ] || continue
     # Defence in depth: refuse to honour any release path that didn't
-    # come from /opt/bwc/releases/. find with the rooted -mindepth/-maxdepth
+    # come from /opt/cavecms/releases/. find with the rooted -mindepth/-maxdepth
     # above can't emit anything else today, but a future refactor of the
     # find could; this gate is cheap and traps that class of regression.
     case "$r" in
@@ -233,7 +233,7 @@ fi
 } | sort -u > "$KEEP_FILE"
 
 # Empty KEEP would mean "no monitorable releases" — usually a dangling
-# /opt/bwc/current AND an empty /opt/bwc/releases. In that state, every
+# /opt/cavecms/current AND an empty /opt/cavecms/releases. In that state, every
 # pool file would be unreferenced and the script would wipe the pool.
 # That's wrong: a broken deploy state shouldn't trigger reclamation.
 if [ ! -s "$KEEP_FILE" ]; then

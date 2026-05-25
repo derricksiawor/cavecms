@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { renderMarkdown } from '@/lib/cms/markdown'
 import { blogPostingLd } from '@/lib/seo/jsonLd'
+import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 
@@ -98,6 +99,7 @@ export default async function BlogPost({ params }: { params: Params }) {
     ? new Date(post.published_at)
     : new Date()
 
+  const siteOrigin = await getSiteOrigin()
   const ld = blogPostingLd({
     title: post.title,
     slug: post.slug,
@@ -105,6 +107,7 @@ export default async function BlogPost({ params }: { params: Params }) {
     excerpt: post.excerpt,
     heroImage: heroVariants?.lg ?? null,
     author: post.author_name ?? 'Best World Properties',
+    siteOrigin,
   })
 
   return (

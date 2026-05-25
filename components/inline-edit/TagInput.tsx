@@ -55,7 +55,7 @@ export function TagInput({
       {value.map((tag, i) => (
         <span
           key={`${tag}-${i}`}
-          className="inline-flex items-center gap-1.5 rounded-full bg-copper-100 px-3 py-1 text-xs font-medium text-copper-800 animate-bwc-fade-in"
+          className="inline-flex items-center gap-1.5 rounded-full bg-copper-100 px-3 py-1 text-xs font-medium text-copper-800 animate-cavecms-fade-in"
         >
           <span className="max-w-[24ch] truncate">{tag}</span>
           {!disabled && (

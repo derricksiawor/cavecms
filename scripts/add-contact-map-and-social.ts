@@ -27,15 +27,15 @@
 
 // Defence-in-depth NODE_ENV guard — this is a one-shot data migration.
 // Even though the body is idempotent, prod operators should opt-in
-// explicitly (via BWC_DATAMIGRATION_OK=1) so accidental invocations
+// explicitly (via CAVECMS_DATAMIGRATION_OK=1) so accidental invocations
 // from a shared shell session can't fire against the live DB.
 if (
   process.env['NODE_ENV'] === 'production' &&
-  process.env['BWC_DATAMIGRATION_OK'] !== '1'
+  process.env['CAVECMS_DATAMIGRATION_OK'] !== '1'
 ) {
   console.error(
     '[add-contact-map-and-social] refusing to run with NODE_ENV=production. ' +
-      'Set BWC_DATAMIGRATION_OK=1 to override.',
+      'Set CAVECMS_DATAMIGRATION_OK=1 to override.',
   )
   process.exit(1)
 }

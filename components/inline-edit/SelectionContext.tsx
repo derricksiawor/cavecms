@@ -32,7 +32,7 @@ import {
 // in the editor (drawer save, toolbar verbs, DnD). Without persistence,
 // the operator's selection vanishes after every save — the toolbar
 // collapses and they have to click the block again to keep editing.
-// sessionStorage keyed `bwc-selected:${pageId}` preserves the cursor
+// sessionStorage keyed `cavecms-selected:${pageId}` preserves the cursor
 // across the refresh boundary AND scopes it per-page so cross-page
 // navigation (Home → About) doesn't drag a stale id over.
 
@@ -45,7 +45,7 @@ export interface SelectionApi {
 const Ctx = createContext<SelectionApi | null>(null)
 
 function storageKey(pageId: number): string {
-  return `bwc-selected:${pageId}`
+  return `cavecms-selected:${pageId}`
 }
 
 function readPersisted(pageId: number): number | null {
@@ -133,7 +133,7 @@ export function SelectionProvider({ pageId, children }: ProviderProps) {
       // affordances acting ON the current selection, not deselects.
       if (
         target.closest(
-          '[data-edit-toolbar],[data-bwc-admin-chrome],[role="dialog"],[role="menu"],[role="alertdialog"]',
+          '[data-edit-toolbar],[data-cavecms-admin-chrome],[role="dialog"],[role="menu"],[role="alertdialog"]',
         )
       ) {
         return

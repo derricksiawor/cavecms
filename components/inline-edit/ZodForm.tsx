@@ -535,7 +535,7 @@ function VisibilityField({
     flags.hideOnMobile && flags.hideOnTablet && flags.hideOnDesktop
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
-      <legend className="bwc-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{label}</FieldLabel>
       </legend>
       {help && <FieldHelp>{help}</FieldHelp>}
@@ -585,7 +585,7 @@ function SocialLinkArrayField({
   const canAdd = shape.maxItems === undefined || arr.length < shape.maxItems
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
-      <legend className="bwc-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{shape.label}</FieldLabel>
       </legend>
       {shape.help && <FieldHelp>{shape.help}</FieldHelp>}
@@ -604,7 +604,7 @@ function SocialLinkArrayField({
           onChange={(next) => onChange(next)}
           getId={(item, i) => item.__id ?? `s-${item.platform}-${i}`}
           renderItem={(item, i, helpers) => (
-            <div className="bwc-repeater-item flex items-start gap-2 rounded-xl border border-warm-stone/20 bg-white p-3 shadow-[0_4px_14px_-10px_rgba(5,5,5,0.18)]">
+            <div className="cavecms-repeater-item flex items-start gap-2 rounded-xl border border-warm-stone/20 bg-white p-3 shadow-[0_4px_14px_-10px_rgba(5,5,5,0.18)]">
               <DragHandle handleProps={helpers.handleProps} />
               <div className="flex-1 min-w-0">
                 <SocialLinkRow
@@ -667,7 +667,7 @@ function ObjectArrayField({
   const canAdd = shape.maxItems === undefined || arr.length < shape.maxItems
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
-      <legend className="bwc-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{shape.label}</FieldLabel>
       </legend>
       {shape.help && <FieldHelp>{shape.help}</FieldHelp>}
@@ -692,8 +692,8 @@ function ObjectArrayField({
           onChange={(next) => onChange(next)}
           getId={(item, i) => (item.__id as string) || `i-${i}`}
           renderItem={(item, i, helpers) => (
-            <div className="bwc-repeater-item rounded-xl border border-warm-stone/20 bg-white shadow-[0_4px_14px_-10px_rgba(5,5,5,0.18)]">
-              <div className="bwc-repeater-item-header flex items-center gap-2 border-b border-warm-stone/10 px-2 py-2">
+            <div className="cavecms-repeater-item rounded-xl border border-warm-stone/20 bg-white shadow-[0_4px_14px_-10px_rgba(5,5,5,0.18)]">
+              <div className="cavecms-repeater-item-header flex items-center gap-2 border-b border-warm-stone/10 px-2 py-2">
                 <DragHandle handleProps={helpers.handleProps} />
                 <span className="flex-1 truncate text-[11px] font-medium uppercase tracking-[0.18em] text-warm-stone">
                   {shape.itemTitle
@@ -813,7 +813,7 @@ function CtaField({
   const v: CtaValue = value ?? { text: '', href: '', openInNew: false }
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
-      <legend className="bwc-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{label}</FieldLabel>
       </legend>
       <label className="block">
@@ -882,7 +882,7 @@ function LinkField({
   }
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
-      <legend className="bwc-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{label}</FieldLabel>
       </legend>
       {help && <FieldHelp>{help}</FieldHelp>}
@@ -930,7 +930,7 @@ function MediaArrayField({
   const arr = Array.isArray(value) ? value : []
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
-      <legend className="bwc-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{shape.label}</FieldLabel>
       </legend>
       {shape.help && <FieldHelp>{shape.help}</FieldHelp>}
@@ -947,7 +947,7 @@ function MediaArrayField({
           onChange={(next) => onChange(next)}
           getId={(item, i) => item.__id ?? `m-${item.media_id}-${i}`}
           renderItem={(item, i, helpers) => (
-            <div className="bwc-repeater-item flex items-stretch gap-2 rounded-xl border border-warm-stone/20 bg-white p-2 shadow-[0_4px_14px_-10px_rgba(5,5,5,0.18)]">
+            <div className="cavecms-repeater-item flex items-stretch gap-2 rounded-xl border border-warm-stone/20 bg-white p-2 shadow-[0_4px_14px_-10px_rgba(5,5,5,0.18)]">
               <DragHandle handleProps={helpers.handleProps} />
               <div className="flex-1 min-w-0">
                 <MediaPicker

@@ -249,7 +249,7 @@ export function InsertBlockHere({
         <div
           role="menu"
           aria-label="Pick a block type"
-          className="relative w-full max-w-sm rounded-2xl border border-warm-stone/20 bg-cream-50 p-3 shadow-[0_22px_56px_-26px_rgba(5,5,5,0.4)] animate-bwc-fade-in"
+          className="relative w-full max-w-sm rounded-2xl border border-warm-stone/20 bg-cream-50 p-3 shadow-[0_22px_56px_-26px_rgba(5,5,5,0.4)] animate-cavecms-fade-in"
         >
           <p className="mb-2 px-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-warm-stone">
             Insert a block

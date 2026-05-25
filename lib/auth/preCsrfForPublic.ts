@@ -3,7 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { env } from '@/lib/env'
 
 // Public-form CSRF strategy. Authenticated CMS routes use the
-// double-submit __Host-bwc_csrf cookie + header; public lead forms
+// double-submit __Host-cavecms_csrf cookie + header; public lead forms
 // have no session yet so we issue a server-bound nonce embedded in
 // the rendered HTML form.
 //

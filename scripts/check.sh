@@ -4,7 +4,7 @@
 # requiring a release artifact. Operator runs this on the target
 # server BEFORE the first deploy to confirm setup is complete:
 #
-#   sudo /opt/bwc/current/scripts/check.sh
+#   sudo /opt/cavecms/current/scripts/check.sh
 #
 # Or on a freshly-provisioned shared server right after running
 # setup-shared.sh, to see what manual steps remain:
@@ -35,7 +35,7 @@ warn() {
 }
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "[check.sh] Run as root to inspect /etc/bwc + system users." >&2
+  echo "[check.sh] Run as root to inspect /etc/cavecms + system users." >&2
   exit 2
 fi
 
@@ -45,59 +45,59 @@ case "$ENV_NAME" in
   *) echo "[check.sh] usage: check.sh [production|staging]" >&2; exit 2 ;;
 esac
 
-ENV_FILE="/etc/bwc/env.${ENV_NAME}"
+ENV_FILE="/etc/cavecms/env.${ENV_NAME}"
 
 echo "[check.sh] checking ${ENV_NAME} preconditions"
 
 # 1. System users + groups
 echo "Users + groups:"
-if id bwc >/dev/null 2>&1; then ok "user bwc exists"; else fail "user bwc missing (run setup-shared.sh)"; fi
-if getent group bwc >/dev/null; then ok "group bwc exists"; else fail "group bwc missing"; fi
-if getent group bwcstate >/dev/null; then ok "group bwcstate exists"; else fail "group bwcstate missing"; fi
-if id -nG www-data 2>/dev/null | tr ' ' '\n' | grep -qx bwc; then
-  ok "www-data is in group bwc (nginx can read /opt/bwc/uploads)"
+if id cavecms >/dev/null 2>&1; then ok "user cavecms exists"; else fail "user cavecms missing (run setup-shared.sh)"; fi
+if getent group cavecms >/dev/null; then ok "group cavecms exists"; else fail "group cavecms missing"; fi
+if getent group cavecmsstate >/dev/null; then ok "group cavecmsstate exists"; else fail "group cavecmsstate missing"; fi
+if id -nG www-data 2>/dev/null | tr ' ' '\n' | grep -qx cavecms; then
+  ok "www-data is in group cavecms (nginx can read /opt/cavecms/uploads)"
 else
-  warn "www-data is NOT in group bwc — nginx can't read /opt/bwc/uploads. Fix: usermod -aG bwc www-data"
+  warn "www-data is NOT in group cavecms — nginx can't read /opt/cavecms/uploads. Fix: usermod -aG cavecms www-data"
 fi
 
 # 2. Filesystem layout
 echo "Filesystem:"
-for d in /opt/bwc /opt/bwc/releases /opt/bwc/incoming /opt/bwc/uploads \
-         /opt/bwc/uploads/originals /opt/bwc/uploads/variants \
-         /opt/bwc/uploads/brochures-private /opt/bwc/uploads/.tmp \
-         /opt/bwc/static-pool/.next/static; do
+for d in /opt/cavecms /opt/cavecms/releases /opt/cavecms/incoming /opt/cavecms/uploads \
+         /opt/cavecms/uploads/originals /opt/cavecms/uploads/variants \
+         /opt/cavecms/uploads/brochures-private /opt/cavecms/uploads/.tmp \
+         /opt/cavecms/static-pool/.next/static; do
   if [ -d "$d" ]; then ok "$d"; else fail "$d missing (re-run setup-shared.sh's filesystem block)"; fi
 done
-for d in /backup/bwc/db /backup/bwc/uploads /backup/bwc/pre-deploy; do
+for d in /backup/cavecms/db /backup/cavecms/uploads /backup/cavecms/pre-deploy; do
   if [ -d "$d" ]; then ok "$d"; else fail "$d missing"; fi
 done
-if [ -d /var/lib/bwc ]; then
-  mode=$(stat -c %a /var/lib/bwc)
-  owner=$(stat -c %U:%G /var/lib/bwc)
-  if [ "$mode" = "2770" ] && [ "$owner" = "root:bwcstate" ]; then
-    ok "/var/lib/bwc mode 2770 root:bwcstate"
+if [ -d /var/lib/cavecms ]; then
+  mode=$(stat -c %a /var/lib/cavecms)
+  owner=$(stat -c %U:%G /var/lib/cavecms)
+  if [ "$mode" = "2770" ] && [ "$owner" = "root:cavecmsstate" ]; then
+    ok "/var/lib/cavecms mode 2770 root:cavecmsstate"
   else
-    fail "/var/lib/bwc has mode=$mode owner=$owner (expected 2770 root:bwcstate)"
+    fail "/var/lib/cavecms has mode=$mode owner=$owner (expected 2770 root:cavecmsstate)"
   fi
 else
-  fail "/var/lib/bwc missing — cron-purge marker contract broken"
+  fail "/var/lib/cavecms missing — cron-purge marker contract broken"
 fi
 
 # 3. age key
 echo "Age key:"
-if [ -f /etc/bwc/backup.pub ]; then
-  if grep -qE '^age1[0-9a-z]{58}$' /etc/bwc/backup.pub; then
-    ok "/etc/bwc/backup.pub valid age recipient"
+if [ -f /etc/cavecms/backup.pub ]; then
+  if grep -qE '^age1[0-9a-z]{58}$' /etc/cavecms/backup.pub; then
+    ok "/etc/cavecms/backup.pub valid age recipient"
   else
-    fail "/etc/bwc/backup.pub exists but isn't a valid age recipient"
+    fail "/etc/cavecms/backup.pub exists but isn't a valid age recipient"
   fi
 else
-  fail "/etc/bwc/backup.pub missing — db-backup.sh and uploads-backup.sh refuse without it"
+  fail "/etc/cavecms/backup.pub missing — db-backup.sh and uploads-backup.sh refuse without it"
 fi
-if [ -f /etc/bwc/age-identity ]; then
-  ok "/etc/bwc/age-identity present (automated restore-drill enabled)"
+if [ -f /etc/cavecms/age-identity ]; then
+  ok "/etc/cavecms/age-identity present (automated restore-drill enabled)"
 else
-  warn "/etc/bwc/age-identity not on box — automated restore-drill timer will skip; off-box drill required"
+  warn "/etc/cavecms/age-identity not on box — automated restore-drill timer will skip; off-box drill required"
 fi
 
 # 4. env file
@@ -151,18 +151,18 @@ fi
 
 # 7. systemd timers (optional but recommended)
 echo "Systemd timers:"
-TIMER_COUNT=$(systemctl list-unit-files 'bwc-*.timer' --no-legend 2>/dev/null | wc -l)
+TIMER_COUNT=$(systemctl list-unit-files 'cavecms-*.timer' --no-legend 2>/dev/null | wc -l)
 if [ "$TIMER_COUNT" -gt 0 ]; then
-  ok "$TIMER_COUNT bwc-*.timer unit(s) installed"
+  ok "$TIMER_COUNT cavecms-*.timer unit(s) installed"
 else
-  warn "no bwc-*.timer units installed — run scripts/install-systemd.sh to enable backups + cron-purge"
+  warn "no cavecms-*.timer units installed — run scripts/install-systemd.sh to enable backups + cron-purge"
 fi
 
 # 8. deploy.blocked sentinel
 echo "Deploy sentinels:"
-if [ -f /var/lib/bwc/deploy.blocked ]; then
-  reason=$(head -c 256 /var/lib/bwc/deploy.blocked 2>/dev/null | tr '\n' ' ')
-  fail "/var/lib/bwc/deploy.blocked is set: ${reason:-<empty>}"
+if [ -f /var/lib/cavecms/deploy.blocked ]; then
+  reason=$(head -c 256 /var/lib/cavecms/deploy.blocked 2>/dev/null | tr '\n' ' ')
+  fail "/var/lib/cavecms/deploy.blocked is set: ${reason:-<empty>}"
 else
   ok "no deploy block"
 fi

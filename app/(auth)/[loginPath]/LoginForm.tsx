@@ -17,8 +17,8 @@ type GrecaptchaV2Api = GrecaptchaShared & {
   getResponse: NonNullable<GrecaptchaShared['getResponse']>
 }
 
-const SCRIPT_ID_V3 = 'bwc-recaptcha-v3'
-const SCRIPT_ID_V2 = 'bwc-recaptcha-v2'
+const SCRIPT_ID_V3 = 'cavecms-recaptcha-v3'
+const SCRIPT_ID_V2 = 'cavecms-recaptcha-v2'
 const easeLuxury = [0.19, 0.91, 0.38, 0.98] as const
 
 function loadRecaptchaV3(siteKey: string): Promise<GrecaptchaV3Api> {
@@ -276,13 +276,13 @@ export function LoginForm({
 
             <div className="space-y-2">
               <label
-                htmlFor="bwc-email"
+                htmlFor="cavecms-email"
                 className="block text-[11px] font-semibold tracking-[0.22em] uppercase text-near-black"
               >
                 Email
               </label>
               <input
-                id="bwc-email"
+                id="cavecms-email"
                 name="email"
                 type="email"
                 required
@@ -294,13 +294,13 @@ export function LoginForm({
 
             <div className="space-y-2">
               <label
-                htmlFor="bwc-password"
+                htmlFor="cavecms-password"
                 className="block text-[11px] font-semibold tracking-[0.22em] uppercase text-near-black"
               >
                 Password
               </label>
               <input
-                id="bwc-password"
+                id="cavecms-password"
                 name="password"
                 type="password"
                 required

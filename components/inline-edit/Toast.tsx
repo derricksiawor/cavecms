@@ -301,7 +301,7 @@ function ToastCard({
       onFocusCapture={onPause}
       onBlurCapture={onResume}
       className={clsx(
-        'pointer-events-auto flex items-start gap-3 rounded-2xl border bg-cream-50 px-4 py-3 shadow-[0_18px_40px_-20px_rgba(5,5,5,0.4)] backdrop-blur-sm animate-bwc-toast-in min-w-[260px]',
+        'pointer-events-auto flex items-start gap-3 rounded-2xl border bg-cream-50 px-4 py-3 shadow-[0_18px_40px_-20px_rgba(5,5,5,0.4)] backdrop-blur-sm animate-cavecms-toast-in min-w-[260px]',
         item.intent === 'success' && 'border-copper-300/60',
         item.intent === 'error' && 'border-red-400/60',
         item.intent === 'info' && 'border-warm-stone/30',

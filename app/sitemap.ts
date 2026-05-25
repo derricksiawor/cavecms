@@ -27,8 +27,8 @@ const STATIC_LISTING_PATHS = ['/projects', '/blog']
 // Build-time constant for static-path lastModified, validated at
 // boot via lib/env.ts. Using `new Date()` per request would lie to
 // crawlers ("everything changed!") and burn crawl budget; pinning
-// to BWC_RELEASE_TS stays stable across the lifetime of a release.
-const RELEASE_LAST_MOD = new Date(env.BWC_RELEASE_TS)
+// to CAVECMS_RELEASE_TS stays stable across the lifetime of a release.
+const RELEASE_LAST_MOD = new Date(env.CAVECMS_RELEASE_TS)
 
 // Hard cap matching the sitemap spec recommendation (50k per file)
 // but lower for crawl-budget hygiene. When `pages` grows past this,
@@ -42,10 +42,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // access etc. all serve an empty sitemap so a non-production
   // origin can never leak production URLs as canonical to a
   // crawler that happens to find it.
+  // Site URL is operator-configured (Settings → General). Until the
+  // operator sets it, we return an empty sitemap — better than
+  // emitting URLs against the wrong origin.
+  const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
+  const configuredOrigin = await getSiteOrigin()
+  if (!configuredOrigin) return []
   const host = (await headers()).get('host') ?? ''
-  const apexHost = new URL(env.SITE_ORIGIN).host
+  const apexHost = new URL(configuredOrigin).host
   if (host !== apexHost) return []
-  const origin = env.SITE_ORIGIN
+  const origin = configuredOrigin
 
   // Parallel reads via Promise.allSettled — one query rejecting (a
   // slow lock on projects, a transient pages query) must NOT take

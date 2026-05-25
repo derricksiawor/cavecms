@@ -24,7 +24,7 @@ export const POST = withError(async (req: Request) => {
     c.set(EDIT_MODE_COOKIE, '1', cookieFlags(EDIT_MODE_TTL_SECONDS))
   } else {
     // `cookies().delete(name)` emits a bare deletion cookie without
-    // Secure/Path/SameSite. The production cookie is `__Host-bwc_edit_mode`
+    // Secure/Path/SameSite. The production cookie is `__Host-cavecms_edit_mode`
     // and the `__Host-` prefix REQUIRES the deletion cookie to carry
     // matching Secure=true + Path=/ flags or the browser silently
     // rejects the deletion. Result: cookie persists, page stays editable.

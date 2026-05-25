@@ -170,9 +170,9 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
           type="button"
           aria-label="Close"
           onClick={() => setOpen(false)}
-          className="absolute inset-0 bg-near-black/40 backdrop-blur-[2px] animate-bwc-fade-in"
+          className="absolute inset-0 bg-near-black/40 backdrop-blur-[2px] animate-cavecms-fade-in"
         />
-        <div className="relative mt-[8vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-warm-stone/25 bg-cream-50 shadow-[0_40px_80px_-30px_rgba(5,5,5,0.55)] animate-bwc-fade-in">
+        <div className="relative mt-[8vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-warm-stone/25 bg-cream-50 shadow-[0_40px_80px_-30px_rgba(5,5,5,0.55)] animate-cavecms-fade-in">
           <div className="flex items-center gap-3 border-b border-warm-stone/15 px-5 py-4">
             <Search size={16} strokeWidth={2.2} className="text-copper-600" />
             <Command.Input

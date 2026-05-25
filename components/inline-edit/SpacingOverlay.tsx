@@ -5,7 +5,7 @@ import type { SpacingMeta } from '@/lib/cms/spacingClasses'
 
 // Translucent copper paint on the affected edges of the targeted
 // container. Mounted by SpacingToolbar while the popover is open;
-// fades in on mount, fades out on unmount via animate-bwc-fade-in
+// fades in on mount, fades out on unmount via animate-cavecms-fade-in
 // (Chunk D motion tokens).
 //
 // The overlay is positioned ABSOLUTELY relative to the toolbar's
@@ -81,7 +81,7 @@ export function SpacingOverlay({ targetRef, meta }: SpacingOverlayProps) {
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-10 animate-bwc-fade-in"
+      className="pointer-events-none absolute inset-0 z-10 animate-cavecms-fade-in"
     >
       {hasTop && (
         <div

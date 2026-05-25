@@ -1,5 +1,5 @@
 {
-  "name": "@bwc/migrator",
+  "name": "@cavecms/migrator",
   "version": "1.0.0",
   "private": true,
   "description": "Standalone DDL applier — applies db/migrations/*.sql in order, idempotent, deploy-time only.",

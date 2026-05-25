@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # scripts/db-backup.sh — daily encrypted MariaDB backup with off-site copy.
 #
-# Invoked by systemd: bwc-db-backup.timer → bwc-db-backup.service.
-# Runs as bwc:backup with IOSchedulingClass=idle, MemoryMax=256M,
-# ReadWritePaths=/backup /var/log/bwc /var/lib/bwc, ProtectSystem=strict,
-# PrivateTmp=true, EnvironmentFile=/etc/bwc/env.production (per
-# scripts/systemd/bwc-db-backup.service).
+# Invoked by systemd: cavecms-db-backup.timer → cavecms-db-backup.service.
+# Runs as cavecms:backup with IOSchedulingClass=idle, MemoryMax=256M,
+# ReadWritePaths=/backup /var/log/cavecms /var/lib/cavecms, ProtectSystem=strict,
+# PrivateTmp=true, EnvironmentFile=/etc/cavecms/env.production (per
+# scripts/systemd/cavecms-db-backup.service).
 #
 # Format INVARIANT (cross-script contract):
 #   mysqldump → gzip → age encrypt → <date-utc>.sql.age
@@ -21,7 +21,7 @@
 #
 # Off-site backups are MANDATORY:
 #   Per project standards handoff and Plan 09 cluster-3 brief, production backups
-#   MUST land off-site. BACKUP_RCLONE_REMOTE in /etc/bwc/env.production
+#   MUST land off-site. BACKUP_RCLONE_REMOTE in /etc/cavecms/env.production
 #   names the rclone target (operator populates during cluster-1 setup
 #   second-stage; setup.sh's NEXT STEPS block documents the requirement).
 #   If the env var
@@ -29,7 +29,7 @@
 #   run rather than producing a local-only backup that gives a false
 #   sense of safety.
 #
-# Output: /backup/bwc/db/<YYYY-MM-DD-UTC>.sql.age
+# Output: /backup/cavecms/db/<YYYY-MM-DD-UTC>.sql.age
 #   - Same-day re-runs OVERWRITE today's file via .partial → mv -f. The
 #     previous day's file is preserved by the date-based filename.
 #   - Local retention: files older than 30 days are deleted at the end of
@@ -39,15 +39,15 @@
 #     for the prune step we log it and still exit success, because the
 #     copy step (which already succeeded) is the load-bearing operation.
 #
-# Concurrency: persistent flock at /var/lib/bwc/.bwc-db-backup.lock.
+# Concurrency: persistent flock at /var/lib/cavecms/.cavecms-db-backup.lock.
 # Same persistent-lock pattern as disk-check.sh / deploy.sh / rollback.sh
 # / prune-static-pool.sh — see INVARIANT block below the flock site for
 # the full "don't unlink the lock file" rationale.
 #
-# Side effects: writes /backup/bwc/db/*.sql.age and the lock file; reads
-# /etc/bwc/{backup.pub,bwc-backup.cnf,rclone.conf,env.production}. Logs
+# Side effects: writes /backup/cavecms/db/*.sql.age and the lock file; reads
+# /etc/cavecms/{backup.pub,cavecms-backup.cnf,rclone.conf,env.production}. Logs
 # to stdout/stderr — systemd journal captures both. OnFailure=
-# bwc-alert@%n.service alerts on non-zero exits; this script carries no
+# cavecms-alert@%n.service alerts on non-zero exits; this script carries no
 # alert logic of its own.
 #
 # Exit codes:
@@ -99,18 +99,18 @@ fi
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
-BACKUP_DIR=/backup/bwc/db
-LOCK_FILE=/var/lib/bwc/.bwc-db-backup.lock
+BACKUP_DIR=/backup/cavecms/db
+LOCK_FILE=/var/lib/cavecms/.cavecms-db-backup.lock
 # Health marker — `: > $HEALTH_MARKER` truncate-writes follow symlinks
 # (open(O_CREAT|O_WRONLY|O_TRUNC) doesn't honor symlink-safety unless
 # explicitly using O_NOFOLLOW, which shell `>` doesn't). Precheck the
-# path for a planted symlink to prevent a bwc-uid attacker (e.g., via
+# path for a planted symlink to prevent a cavecms-uid attacker (e.g., via
 # a compromised PM2 worker) from redirecting the truncate into
-# /var/lib/bwc/deploy.blocked (DoS deploy pipeline) or another
-# bwc-writable file in /var/log/bwc.
-HEALTH_MARKER=/var/lib/bwc/last-db-backup.ok
-DEFAULTS_FILE=/etc/bwc/bwc-backup.cnf
-RECIPIENT_FILE=/etc/bwc/backup.pub
+# /var/lib/cavecms/deploy.blocked (DoS deploy pipeline) or another
+# cavecms-writable file in /var/log/cavecms.
+HEALTH_MARKER=/var/lib/cavecms/last-db-backup.ok
+DEFAULTS_FILE=/etc/cavecms/cavecms-backup.cnf
+RECIPIENT_FILE=/etc/cavecms/backup.pub
 DATE=$(date -u +%F)
 OUT=$BACKUP_DIR/$DATE.sql.age
 # Local retention: 30 days. Plenty for forensic rollback while still
@@ -130,12 +130,12 @@ RETENTION_OFFSITE_DAYS=90
 SIZE_FLOOR_RATIO_NUM=1   # numerator of the floor ratio (1/2 → 50%)
 SIZE_FLOOR_RATIO_DEN=2
 # Absolute floor: refuse anything under 1 KiB on the very first run when
-# we have no prior to ratio-compare against. A real bwc dump is hundreds
+# we have no prior to ratio-compare against. A real cavecms dump is hundreds
 # of KB minimum even with empty content tables (schema + routines).
 SIZE_FLOOR_BYTES_ABS=1024
 
 # ---------------------------------------------------------------------------
-# Validate env (from /etc/bwc/env.production via EnvironmentFile)
+# Validate env (from /etc/cavecms/env.production via EnvironmentFile)
 # ---------------------------------------------------------------------------
 # BACKUP_RCLONE_REMOTE is MANDATORY — refuse to run without an off-site
 # target. The placeholder in env.production (setup.sh's env.production
@@ -144,11 +144,11 @@ SIZE_FLOOR_BYTES_ABS=1024
 # loud rather than silently producing local-only backups.
 if [ -z "${BACKUP_RCLONE_REMOTE:-}" ]; then
   echo "[db-backup.sh] BACKUP_RCLONE_REMOTE is empty — production backups MUST be off-site." >&2
-  echo "[db-backup.sh]   Populate BACKUP_RCLONE_REMOTE in /etc/bwc/env.production (see setup.sh's NEXT STEPS instruction)." >&2
+  echo "[db-backup.sh]   Populate BACKUP_RCLONE_REMOTE in /etc/cavecms/env.production (see setup.sh's NEXT STEPS instruction)." >&2
   exit 2
 fi
 # Strip CR/LF/TAB the operator may have introduced via a heredoc or
-# copy-paste in /etc/bwc/env.production. Spaces and quotes are
+# copy-paste in /etc/cavecms/env.production. Spaces and quotes are
 # intentionally left intact: rclone remote names per its config grammar
 # do not contain whitespace, and a literal `"` in the value is operator
 # error worth surfacing loudly via the downstream rclone failure rather
@@ -168,7 +168,7 @@ done
 # operator-supplied value first.
 BACKUP_RCLONE_REMOTE=$(printf '%s' "$BACKUP_RCLONE_REMOTE" | sanitize)
 if [ -z "$BACKUP_RCLONE_REMOTE" ]; then
-  echo "[db-backup.sh] BACKUP_RCLONE_REMOTE collapsed to empty after canonicalization — check /etc/bwc/env.production" >&2
+  echo "[db-backup.sh] BACKUP_RCLONE_REMOTE collapsed to empty after canonicalization — check /etc/cavecms/env.production" >&2
   exit 2
 fi
 # Reject a leading `-` so a tampered or typo'd env.production cannot
@@ -183,13 +183,13 @@ esac
 
 # RCLONE_CONFIG should be set by env.production (setup.sh's env.production
 # write block emits
-# RCLONE_CONFIG=/etc/bwc/rclone.conf). If missing or pointing at an
+# RCLONE_CONFIG=/etc/cavecms/rclone.conf). If missing or pointing at an
 # unreadable path, rclone falls back to ~/.config/rclone/rclone.conf —
-# but as the bwc system user that path doesn't exist, so rclone would
+# but as the cavecms system user that path doesn't exist, so rclone would
 # proceed with an empty config and the off-site copy would silently go
 # nowhere. Verify the config path before doing the expensive mysqldump.
 if [ -z "${RCLONE_CONFIG:-}" ]; then
-  echo "[db-backup.sh] RCLONE_CONFIG is empty — expected /etc/bwc/rclone.conf via env.production" >&2
+  echo "[db-backup.sh] RCLONE_CONFIG is empty — expected /etc/cavecms/rclone.conf via env.production" >&2
   exit 2
 fi
 if [ ! -r "$RCLONE_CONFIG" ]; then
@@ -208,12 +208,12 @@ fi
 # ---------------------------------------------------------------------------
 # Validate mysqldump credentials + age recipient
 # ---------------------------------------------------------------------------
-# bwc-backup.cnf is mode 0640 root:bwc per setup.sh's bwc-backup.cnf
-# install block. The bwc system
+# cavecms-backup.cnf is mode 0640 root:cavecms per setup.sh's cavecms-backup.cnf
+# install block. The cavecms system
 # user reads it as group member; if the file isn't readable from here,
 # the systemd unit's User= directive or the file's perms have drifted.
 if [ ! -r "$DEFAULTS_FILE" ]; then
-  echo "[db-backup.sh] $DEFAULTS_FILE not readable as user $(id -un) — check setup.sh perms (640 root:bwc)" >&2
+  echo "[db-backup.sh] $DEFAULTS_FILE not readable as user $(id -un) — check setup.sh perms (640 root:cavecms)" >&2
   exit 2
 fi
 
@@ -233,7 +233,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Ensure local backup dir exists (cluster-1 invariant — setup.sh creates
-# /backup/bwc/db at 750 bwc:backup). install -d is idempotent and a
+# /backup/cavecms/db at 750 cavecms:backup). install -d is idempotent and a
 # no-op when the dir already has the right ownership/mode.
 # ---------------------------------------------------------------------------
 if [ ! -d "$BACKUP_DIR" ]; then
@@ -242,9 +242,9 @@ if [ ! -d "$BACKUP_DIR" ]; then
 fi
 
 # Symlink precheck on $LOCK_FILE. `exec 9>` would otherwise follow a
-# symlink and O_TRUNC the target — a bwc-group attacker (we run AS bwc,
-# so anything in /var/lib/bwc that the bwc user can write is in-scope)
-# could plant .bwc-db-backup.lock → /var/lib/bwc/<sensitive> and have
+# symlink and O_TRUNC the target — a cavecms-group attacker (we run AS cavecms,
+# so anything in /var/lib/cavecms that the cavecms user can write is in-scope)
+# could plant .cavecms-db-backup.lock → /var/lib/cavecms/<sensitive> and have
 # this script truncate it.
 for f in "$LOCK_FILE" "$HEALTH_MARKER"; do
   if [ -L "$f" ]; then
@@ -269,7 +269,7 @@ fi
 # attacker-planted symlinks. Name pattern `<date>.sql.age.partial.XXXXXX`
 # combines the cluster `.partial` convention from deploy.sh:265 with
 # mktemp's randomized suffix for O_EXCL safety. The name is visible in
-# plain `ls /backup/bwc/db` (no leading dot) so operators can spot
+# plain `ls /backup/cavecms/db` (no leading dot) so operators can spot
 # aborted runs at a glance. The trailing `.partial.XXXXXX` keeps it
 # distinct from the canonical `*.sql.age` glob used by retention prune
 # at the end of this script.
@@ -304,7 +304,7 @@ fi
 #   --quick              → row-by-row streaming, low memory footprint
 #   --skip-lock-tables   → don't request LOCK TABLES (single-transaction
 #                          handles consistency without blocking writes)
-#   --routines/--triggers/--events → cover all DB-side artifacts; bwc_backup
+#   --routines/--triggers/--events → cover all DB-side artifacts; cavecms_backup
 #                          principal has SELECT+TRIGGER+EVENT+SHOW VIEW+
 #                          LOCK TABLES grants (cluster-1 setup.sh).
 # NOTE: --set-gtid-purged is MySQL-only — MariaDB exits 2 on unknown
@@ -313,7 +313,7 @@ fi
 echo "[db-backup.sh] writing snapshot to $OUT..."
 if ! mysqldump --defaults-extra-file="$DEFAULTS_FILE" \
        --single-transaction --quick --skip-lock-tables \
-       --routines --triggers --events bwc \
+       --routines --triggers --events cavecms \
      | gzip \
      | age -r "$AGE_PUB" > "$SNAP_TMP"; then
   # Capture PIPESTATUS on the line IMMEDIATELY after the pipeline so a
@@ -339,7 +339,7 @@ new_size=$(stat -c %s "$SNAP_TMP")
 # Absolute floor (covers first-ever-run when there's no prior to compare).
 if [ "$new_size" -lt "$SIZE_FLOOR_BYTES_ABS" ]; then
   echo "[db-backup.sh] size anomaly: new=${new_size}B < absolute floor ${SIZE_FLOOR_BYTES_ABS}B" >&2
-  echo "[db-backup.sh]   refusing to accept — a real bwc dump is much larger than ${SIZE_FLOOR_BYTES_ABS}B" >&2
+  echo "[db-backup.sh]   refusing to accept — a real cavecms dump is much larger than ${SIZE_FLOOR_BYTES_ABS}B" >&2
   exit 1
 fi
 # Ratio floor (compare against largest existing dump). preflight.sh:163-171
@@ -363,7 +363,7 @@ if [ "$largest" -gt 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Commit locally: atomic rename. mode 0640 bwc:backup so operators in
+# Commit locally: atomic rename. mode 0640 cavecms:backup so operators in
 # the backup group can read for restore-drill / forensic purposes.
 # mv -f tolerates an existing target (same-day re-run).
 #
@@ -375,13 +375,13 @@ fi
 # diff doesn't treat this as a regression.
 # ---------------------------------------------------------------------------
 chmod 640 "$SNAP_TMP"
-# Group `backup` (not `bwc`) matches the cluster-1 chown convention used
+# Group `backup` (not `cavecms`) matches the cluster-1 chown convention used
 # by deploy.sh:297 on its pre-deploy snapshot. If chown fails (group
 # missing — shouldn't happen given cluster-1 invariants), fall back
 # without failing the run; the file stays at mktemp's default
-# bwc:bwc 600 which the bwc user can still read.
-if ! chown bwc:backup "$SNAP_TMP" 2>/dev/null; then
-  echo "[db-backup.sh] WARN: chown bwc:backup $SNAP_TMP failed; snapshot will be bwc:bwc" >&2
+# cavecms:cavecms 600 which the cavecms user can still read.
+if ! chown cavecms:backup "$SNAP_TMP" 2>/dev/null; then
+  echo "[db-backup.sh] WARN: chown cavecms:backup $SNAP_TMP failed; snapshot will be cavecms:cavecms" >&2
 fi
 mv -f -- "$SNAP_TMP" "$OUT"
 # mv consumed $SNAP_TMP; the EXIT trap captured the original mktemp path
@@ -437,10 +437,10 @@ fi
 
 # Touch a state marker for operators / cron-purge orchestration. Same
 # idiom as uploads-backup.sh will use (T8b adds
-# /var/lib/bwc/last-uploads-backup.ok); a future health-monitor script
+# /var/lib/cavecms/last-uploads-backup.ok); a future health-monitor script
 # can `stat -c %Y` this and alert if it falls behind a fresh 24h.
 #
-# Best-effort: if /var/lib/bwc drifted (operator cleaned, FS unmounted,
+# Best-effort: if /var/lib/cavecms drifted (operator cleaned, FS unmounted,
 # etc.), don't fail the run after a successful backup + copy. Marker is
 # observability, not a load-bearing operation.
 if ! : > "$HEALTH_MARKER" 2>/dev/null; then

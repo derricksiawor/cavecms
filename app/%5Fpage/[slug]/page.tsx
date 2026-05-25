@@ -21,7 +21,6 @@ import { notFound, permanentRedirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { env } from '@/lib/env'
 import { hydratePage } from '@/lib/cms/hydrate'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
@@ -287,7 +286,8 @@ async function renderResolvedPage(
   const { blocks, media, projects } = hydrated
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
 
-  const ld = jsonLdForPage({ page, baseUrl: env.SITE_ORIGIN })
+  const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
+  const ld = jsonLdForPage({ page, baseUrl: (await getSiteOrigin()) ?? '' })
 
   return (
     <EditableMain

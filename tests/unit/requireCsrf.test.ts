@@ -33,10 +33,10 @@ describe('requireCsrf', () => {
 
   it('uses CSRF_COOKIE (dev name in test env, never the hardcoded prod name)', () => {
     // Sanity check: tests run with NODE_ENV !== 'production', so the
-    // double-submit happens against `bwc_csrf`, NOT `__Host-bwc_csrf`. The
+    // double-submit happens against `cavecms_csrf`, NOT `__Host-cavecms_csrf`. The
     // hardcoded-name bug in Plan 02 snippets would have broken every dev
     // and test request — this assertion is the canary.
-    expect(CSRF_COOKIE).toBe('bwc_csrf')
+    expect(CSRF_COOKIE).toBe('cavecms_csrf')
   })
 
   it('throws 403 when header is missing', async () => {

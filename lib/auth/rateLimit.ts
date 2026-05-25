@@ -5,10 +5,10 @@ const MAX_ENTRIES = 100_000
 
 // Pinned to globalThis so HMR doesn't reset rate-limit state between requests in dev.
 declare global {
-  var __bwcRateLimitStores: Map<string, Map<string, Bucket>> | undefined
+  var __cavecmsRateLimitStores: Map<string, Map<string, Bucket>> | undefined
 }
-const stores: Map<string, Map<string, Bucket>> = globalThis.__bwcRateLimitStores ?? new Map()
-globalThis.__bwcRateLimitStores = stores
+const stores: Map<string, Map<string, Bucket>> = globalThis.__cavecmsRateLimitStores ?? new Map()
+globalThis.__cavecmsRateLimitStores = stores
 
 function getStore(bucket: string): Map<string, Bucket> {
   let s = stores.get(bucket)
@@ -89,15 +89,15 @@ export function rateLimitDyn(
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000
 const ENTRY_MAX_AGE_MS = 24 * 60 * 60 * 1000
 declare global {
-  var __bwcRateLimitSweep: NodeJS.Timeout | undefined
+  var __cavecmsRateLimitSweep: NodeJS.Timeout | undefined
 }
 const __isBuildPhase = process.env['NEXT_PHASE'] === 'phase-production-build'
 if (
   process.env['NEXT_RUNTIME'] === 'nodejs' &&
   !__isBuildPhase &&
-  !globalThis.__bwcRateLimitSweep
+  !globalThis.__cavecmsRateLimitSweep
 ) {
-  globalThis.__bwcRateLimitSweep = setInterval(() => {
+  globalThis.__cavecmsRateLimitSweep = setInterval(() => {
     const now = Date.now()
     for (const store of stores.values()) {
       for (const [k, b] of store) {
@@ -105,5 +105,5 @@ if (
       }
     }
   }, SWEEP_INTERVAL_MS)
-  globalThis.__bwcRateLimitSweep.unref()
+  globalThis.__cavecmsRateLimitSweep.unref()
 }

@@ -9,7 +9,7 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 // social cards include the mailto: / tel: / https: action.
 //
 // Shape ported from the boxxticket /contact reference: rounded-3xl
-// dark-on-dark card with internal padding-8. BWC tokens map dark-on-
+// dark-on-dark card with internal padding-8. CaveCMS tokens map dark-on-
 // dark → cream-50 fill with warm-stone/20 ring on top of the surrounding
 // cream-100 section bg. Copper action link replaces boxxticket's gold.
 //

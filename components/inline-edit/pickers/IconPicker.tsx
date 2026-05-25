@@ -29,13 +29,13 @@ import { IconByName } from '@/components/project-sections/_shared/IconByName'
 //  - Footer: Insert (primary) / Cancel — Insert disabled until pick
 //
 // Performance: bounded render. We render up to MAX_VISIBLE_RESULTS
-// tiles at once. Default view (no search) shows recents + the BWC
+// tiles at once. Default view (no search) shows recents + the CaveCMS
 // common set (~50 names) — well under the cap. Switch to "All" with
 // no search → first 240 names alphabetically; operator searches to
 // refine. Each visible tile uses `DynamicIcon` which lazy-imports
 // the icon module — only the visible icons pay the cost.
 
-const RECENT_ICONS_KEY = 'bwc.editor.recentIcons'
+const RECENT_ICONS_KEY = 'cavecms.editor.recentIcons'
 const MAX_RECENTS = 12
 const MAX_VISIBLE_RESULTS = 240
 
@@ -54,7 +54,7 @@ const LUCIDE_NAME_SET: ReadonlySet<string> = new Set(
 // non-kebab strings into editor state.
 const ICON_NAME_RE = /^[a-z][a-z0-9-]{0,59}$/
 
-// Curated BWC "common" icons — drawn from the amenity registry plus
+// Curated CaveCMS "common" icons — drawn from the amenity registry plus
 // editorial/UI staples. Kebab-case (matches Lucide's dynamicIconImports
 // keys). Mirrors components/project-sections/_shared/amenityIcons.ts.
 const COMMON_ICON_NAMES_RAW: ReadonlyArray<IconName> = [
@@ -409,7 +409,7 @@ export function IconPickerModal({
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-near-black/65 backdrop-blur-md animate-bwc-fade-in motion-reduce:animate-none"
+        className="absolute inset-0 bg-near-black/65 backdrop-blur-md animate-cavecms-fade-in motion-reduce:animate-none"
         onClick={onClose}
         aria-hidden
       />
@@ -419,7 +419,7 @@ export function IconPickerModal({
         className={
           'relative z-[81] flex w-full max-w-[820px] flex-col overflow-hidden bg-near-black text-cream-50 shadow-[0_24px_60px_-12px_rgba(5,5,5,0.65)] ' +
           'h-full sm:h-[640px] sm:max-h-[85vh] sm:rounded-2xl sm:border sm:border-cream-50/12 ' +
-          'animate-bwc-slide-up motion-reduce:animate-none'
+          'animate-cavecms-slide-up motion-reduce:animate-none'
         }
       >
         {/* Header */}

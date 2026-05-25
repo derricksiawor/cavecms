@@ -28,7 +28,7 @@ const ZOHO_REGIONS = ['com', 'eu', 'in', 'com.au', 'jp'] as const
 const HUBSPOT_LEAD_SOURCES = ['contact', 'newsletter', 'brochure', 'inquiry'] as const
 const ZOHO_MODULES = ['Leads', 'Contacts', 'Deals'] as const
 
-// BWC field shapes per lead source. Used to seed the left column of
+// CaveCMS field shapes per lead source. Used to seed the left column of
 // the per-source field-map editor so operators see the field names
 // they're mapping FROM. Mirrors the Zod Body schemas in the lead
 // submit handlers (app/api/leads/*/route.ts).
@@ -264,7 +264,7 @@ function CardShell({
         )}
         {dirty && (
           <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-copper-700">
-            <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-bwc-pulse-copper" />
+            <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-cavecms-pulse-copper" />
             Unsaved changes
           </span>
         )}
@@ -730,12 +730,12 @@ function FieldMapEditor({
   fieldMap: Record<string, string>
   onChange: (m: Record<string, string>) => void
 }) {
-  const bwcFields = SOURCE_FIELDS[source]
+  const cavecmsFields = SOURCE_FIELDS[source]
   return (
     <div className="space-y-1.5">
-      <FieldLabel>Field map (BWC → CRM)</FieldLabel>
+      <FieldLabel>Field map (CaveCMS → CRM)</FieldLabel>
       <div className="space-y-1.5">
-        {bwcFields.map((f) => (
+        {cavecmsFields.map((f) => (
           <div key={f} className="flex items-center gap-2">
             <code className="w-32 shrink-0 text-xs font-mono text-warm-stone">{f}</code>
             <span className="text-warm-stone/50">→</span>

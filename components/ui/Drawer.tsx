@@ -64,7 +64,7 @@ export function Drawer({
   }, [open])
 
   const maxWidth = width === 'xl' ? 640 : width === 'lg' ? 560 : 480
-  const storageKey = resizeStorageKey ?? `bwc:drawer-width:${width}`
+  const storageKey = resizeStorageKey ?? `cavecms:drawer-width:${width}`
 
   // Saved width is clamped on read so a stale entry from a wider
   // bucket (operator switched a drawer's `width` prop in code) can't
@@ -308,16 +308,16 @@ export function Drawer({
           mark the drawer as the active focus surface without obscuring
           the block being edited. */}
       <div
-        className="fixed inset-0 z-40 bg-near-black/20 animate-bwc-fade-in"
+        className="fixed inset-0 z-40 bg-near-black/20 animate-cavecms-fade-in"
         onClick={overlayClick}
       />
       <aside
         // Entry animation + positioning are responsive:
         //   - Desktop: 480/560/640 px side-anchored panel, slides from
-        //     the right (or left) using bwc-drawer-in.
+        //     the right (or left) using cavecms-drawer-in.
         //   - Mobile: 85vh bottom-sheet — slides up from the bottom
         //     with rounded top corners + a drag-grip pill at the
-        //     top. Uses bwc-slide-up so the entrance reads as a
+        //     top. Uses cavecms-slide-up so the entrance reads as a
         //     phone-native sheet, not a horizontal drawer.
         // `data-drawer-tone` lets globals.css cascade form-control
         // colour overrides for dark drawers without forcing every
@@ -326,8 +326,8 @@ export function Drawer({
         style={asideStyle}
         className={
           isDesktop
-            ? `fixed top-0 z-50 h-full ${widthClass} ${side === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_24px_60px_-12px_rgba(5,5,5,0.45)] overflow-auto animate-bwc-drawer-in motion-reduce:animate-none`
-            : `fixed inset-x-0 bottom-0 z-50 h-[85vh] max-h-[85vh] w-full rounded-t-3xl border-t ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_-24px_60px_-12px_rgba(5,5,5,0.45)] overflow-auto animate-bwc-slide-up motion-reduce:animate-none`
+            ? `fixed top-0 z-50 h-full ${widthClass} ${side === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_24px_60px_-12px_rgba(5,5,5,0.45)] overflow-auto animate-cavecms-drawer-in motion-reduce:animate-none`
+            : `fixed inset-x-0 bottom-0 z-50 h-[85vh] max-h-[85vh] w-full rounded-t-3xl border-t ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_-24px_60px_-12px_rgba(5,5,5,0.45)] overflow-auto animate-cavecms-slide-up motion-reduce:animate-none`
         }
         role="dialog"
         aria-modal="true"

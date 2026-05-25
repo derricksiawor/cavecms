@@ -1,0 +1,35 @@
+// Resolve the currently-running CaveCMS revision from build-time env.
+//
+// `CAVECMS_COMMIT` is written by `scripts/deploy.sh` into the per-env file
+// (`/etc/cavecms/env.<env-name>`) on every production deploy, and is the
+// short SHA of the release that the running pm2 process loaded.
+// `CAVECMS_RELEASE_TS` is the matching ISO timestamp for that deploy.
+//
+// Local dev never sets these — Zod in `lib/env.ts` falls back to the
+// string `"unknown"` for the commit. From the Updates UI's perspective
+// that should surface as "you are on dev — there's nothing to update
+// against".
+
+export interface CurrentVersion {
+  /** Short git SHA (or `'dev'` when running locally / pre-deploy). */
+  sha: string
+  /** ISO timestamp of the deploy. `null` when running locally. */
+  ts: string | null
+}
+
+export function getCurrentVersion(): CurrentVersion {
+  // Read directly off process.env (NOT through lib/env.ts) so the
+  // Updates feature can run inside a freshly-spawned test process or
+  // CLI script without dragging the full env validator in. The env
+  // validator already covers the deploy-time enforcement.
+  const rawSha = process.env.CAVECMS_COMMIT
+  const rawTs = process.env.CAVECMS_RELEASE_TS
+
+  if (!rawSha || rawSha === 'unknown') {
+    return { sha: 'dev', ts: null }
+  }
+  return {
+    sha: rawSha,
+    ts: rawTs ?? null,
+  }
+}

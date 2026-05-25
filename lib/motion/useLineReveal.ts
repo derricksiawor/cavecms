@@ -104,7 +104,7 @@ export function useLineReveal<T extends HTMLElement = HTMLHeadingElement>(
 
       split = SplitText.create(el, {
         type: 'lines',
-        linesClass: 'bwc-line',
+        linesClass: 'cavecms-line',
         mask: 'lines',
         autoSplit: true,
       })

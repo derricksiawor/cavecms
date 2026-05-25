@@ -160,7 +160,7 @@ export function Popover({
       }
     }
     const onDoc = (e: PointerEvent) => {
-      if (document.body.dataset.bwcPopoverSuppressOutside === '1') return
+      if (document.body.dataset.cavecmsPopoverSuppressOutside === '1') return
       const target = e.target as Node | null
       if (!target) return
       if (surfaceRef.current?.contains(target)) return
@@ -230,7 +230,7 @@ export function Popover({
       }}
       className={
         surfaceClassName ??
-        'z-[60] rounded-2xl border border-cream-50/15 bg-near-black/95 backdrop-blur-md p-4 shadow-[0_24px_60px_-12px_rgba(5,5,5,0.65)] text-cream-50 animate-bwc-fade-in motion-reduce:animate-none'
+        'z-[60] rounded-2xl border border-cream-50/15 bg-near-black/95 backdrop-blur-md p-4 shadow-[0_24px_60px_-12px_rgba(5,5,5,0.65)] text-cream-50 animate-cavecms-fade-in motion-reduce:animate-none'
       }
     >
       {children}

@@ -271,7 +271,7 @@ export function MediaPickerModal({
                       type="button"
                       onClick={() => onPick({ media_id: m.id, alt: m.alt_text })}
                       className={clsx(
-                        'group relative overflow-hidden rounded-xl border bg-cream-50 transition-all duration-quick bwc-focus-ring',
+                        'group relative overflow-hidden rounded-xl border bg-cream-50 transition-all duration-quick cavecms-focus-ring',
                         isCurrent
                           ? 'border-copper-500 ring-2 ring-copper-300/50'
                           : 'border-warm-stone/15 hover:border-copper-400',
@@ -289,7 +289,7 @@ export function MediaPickerModal({
                             className="h-full w-full object-cover transition-transform duration-standard group-hover:scale-105"
                           />
                         ) : (
-                          <div className="bwc-skeleton h-full w-full" />
+                          <div className="cavecms-skeleton h-full w-full" />
                         )}
                       </div>
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-near-black/85 to-transparent px-2 pt-6 pb-2">

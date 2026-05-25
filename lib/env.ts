@@ -108,7 +108,7 @@ const Env = z.object({
   // disabled in production. Generate with: openssl rand -hex 32
   HEALTHZ_TOKEN: z.string().min(32).optional(),
   // Used by healthz for build-info exposure. Set in deploy script.
-  BWC_COMMIT: z.string().default('unknown'),
+  CAVECMS_COMMIT: z.string().default('unknown'),
   // Lockout tunables. Three tiers: failures-in-window → minutes-locked.
   LOCKOUT_THRESHOLDS: z.string().default('3,6,9'),
   LOCKOUT_DURATIONS_MIN: z.string().default('30,180,1440'),
@@ -120,11 +120,11 @@ const Env = z.object({
   RECAPTCHA_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
   // Filesystem root for media uploads. setup.sh (Plan 09) provisions
   // {originals,variants,brochures-private,.tmp} under this path with
-  // ownership `bwc:bwc 750`. Plan 02 media pipeline asserts every subdir
+  // ownership `cavecms:cavecms 750`. Plan 02 media pipeline asserts every subdir
   // lives on the same filesystem (rename(2) is atomic only within an fs).
   // In production, must be absolute (refused at boot otherwise — see
   // superRefine below). Dev may point at a local writable path.
-  UPLOADS_ROOT: z.string().min(1).default('/opt/bwc/uploads'),
+  UPLOADS_ROOT: z.string().min(1).default('/opt/cavecms/uploads'),
   // Site URL moved to `settings.site_general.siteUrl` — configured
   // via Settings → General in the dashboard, set during the install
   // wizard's "Site" step. No env fallback (rule: operators don't
@@ -135,7 +135,7 @@ const Env = z.object({
   // every fetch" and burning crawl budget. Must parse as a valid
   // ISO 8601 date — boot fails loud on a typo'd value rather than
   // letting sitemap.xml 500 the first time it's fetched.
-  BWC_RELEASE_TS: z
+  CAVECMS_RELEASE_TS: z
     .string()
     .refine(
       (s) => !Number.isNaN(Date.parse(s)),
@@ -170,15 +170,15 @@ const Env = z.object({
     })
   }
   const isBuildPhase = process.env['NEXT_PHASE'] === 'phase-production-build'
-  // Loud warning (not blocking) when BWC_COMMIT defaults to 'unknown' in
+  // Loud warning (not blocking) when CAVECMS_COMMIT defaults to 'unknown' in
   // production — a deploy script that forgot to set it leaves /healthz and
   // post-mortem tooling with no way to tie a running PID to a commit.
   // Gated by !isBuildPhase so the warning fires once on the SERVER start,
   // not seven times during `next build`'s per-route static analysis.
-  if (e.NODE_ENV === 'production' && !isBuildPhase && e.BWC_COMMIT === 'unknown') {
+  if (e.NODE_ENV === 'production' && !isBuildPhase && e.CAVECMS_COMMIT === 'unknown') {
     console.warn(JSON.stringify({
       level: 'warn',
-      msg: 'BWC_COMMIT is "unknown" in production — set it in the deploy script (e.g. BWC_COMMIT=$(git rev-parse --short HEAD))',
+      msg: 'CAVECMS_COMMIT is "unknown" in production — set it in the deploy script (e.g. CAVECMS_COMMIT=$(git rev-parse --short HEAD))',
     }))
   }
   // Production refuses a relative UPLOADS_ROOT. rename(2) crossing a CWD that

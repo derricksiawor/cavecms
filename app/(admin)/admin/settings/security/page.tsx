@@ -72,11 +72,28 @@ export default async function SecuritySettingsPage() {
         : r.value,
   }))
 
+  // Credential redaction — strip `security_recaptcha.secretKey`
+  // server-side before the value reaches the client form. Mirrors
+  // the HubSpot / Zoho CRM / SMTP redaction pattern: the form
+  // arrives with an empty string and re-submits as empty when the
+  // operator doesn't touch the input; the PATCH route's credential-
+  // preserving merge restores the stored value at write time so the
+  // saved secret is never clobbered.
+  function redactRecaptchaSecret(row: SettingRow): SettingRow {
+    if (row.key !== 'security_recaptcha') return row
+    if (!row.value || typeof row.value !== 'object') return row
+    const v = { ...(row.value as Record<string, unknown>) }
+    if (typeof v.secretKey === 'string' && (v.secretKey as string).length > 0) {
+      v.secretKey = ''
+    }
+    return { ...row, value: v }
+  }
+
   const byKey = new Map(parsed.map((r) => [r.key, r]))
   const synthesizedNow = new Date()
   const rows = SECURITY_KEYS.map((k) => {
     const existing = byKey.get(k)
-    if (existing) return existing
+    if (existing) return redactRecaptchaSecret(existing)
     return {
       key: k,
       value: registry[k].default,

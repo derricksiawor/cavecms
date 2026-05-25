@@ -20,15 +20,15 @@
 // would expose the upstream to internal interfaces.
 //
 // CWD points at the standalone output that Next 15 produces under
-// `.next/standalone`. The release symlink at /opt/bwc/current is
+// `.next/standalone`. The release symlink at /opt/cavecms/current is
 // flipped by scripts/deploy.sh — PM2 picks up the new binary on
 // `pm2 startOrReload` because the cwd resolves through the symlink.
 
 module.exports = {
   apps: [{
-    name: 'bwc',
+    name: 'cavecms',
     script: 'server.js',
-    cwd: '/opt/bwc/current/.next/standalone',
+    cwd: '/opt/cavecms/current/.next/standalone',
     instances: 1,
     exec_mode: 'fork',
     node_args: '--max-old-space-size=768',
@@ -52,8 +52,8 @@ module.exports = {
     wait_ready: false,
     max_restarts: 10,
     min_uptime: 60000,
-    out_file: '/var/log/bwc/out.log',
-    error_file: '/var/log/bwc/err.log',
+    out_file: '/var/log/cavecms/out.log',
+    error_file: '/var/log/cavecms/err.log',
     merge_logs: true,
     time: true,
   }],

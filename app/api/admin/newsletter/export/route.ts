@@ -133,7 +133,7 @@ export const GET = withError(async (req: Request) => {
     status: 200,
     headers: {
       'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="bwc-newsletter-${today}.csv"`,
+      'content-disposition': `attachment; filename="cavecms-newsletter-${today}.csv"`,
       'x-accel-buffering': 'no',
       'cache-control': 'private, no-store',
     },

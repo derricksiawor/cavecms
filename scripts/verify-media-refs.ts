@@ -1,4 +1,4 @@
-// Weekly media_references reconciler. Invoked by bwc-media-verify.timer.
+// Weekly media_references reconciler. Invoked by cavecms-media-verify.timer.
 // Rebuilds the reverse index from authoritative sources and reconciles
 // any drift, writing an audit_log row when a delta is found.
 //
@@ -14,7 +14,7 @@
 // db/schema/ (verified during cluster-4 pre-work: db/schema/ holds
 // audit/auth/content/leads/media/notifications/posts/projects/settings/
 // users — no team). Including a SELECT against it would crash this
-// script with "Table 'bwc.team_members' doesn't exist" the first time
+// script with "Table 'cavecms.team_members' doesn't exist" the first time
 // it runs. Skipped outright with this note; if a future feature adds
 // the table, extend this script then so the rebuild stays exhaustive.
 //

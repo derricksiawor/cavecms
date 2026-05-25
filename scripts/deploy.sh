@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
 # scripts/deploy.sh — production deploy orchestrator. Invoked by CI (or
 # an operator with a hand-placed artifact) AFTER CI has scp'd
-# /opt/bwc/incoming/<sha>.tar.zst onto the droplet.
+# /opt/cavecms/incoming/<sha>.tar.zst onto the droplet.
 #
 # Flow:
-#   1. flock /var/lock/bwc-deploy.lock (mutex vs concurrent deploy/rollback)
-#   2. Rotate /opt/bwc/releases/ keeping the last 5
+#   1. flock /var/lock/cavecms-deploy.lock (mutex vs concurrent deploy/rollback)
+#   2. Rotate /opt/cavecms/releases/ keeping the last 5
 #   3. tar --use-compress-program=zstd -xf incoming → releases/<sha>/
-#   4. ln -sfn /etc/bwc/env.<env> $RELEASE_DIR/.env.local (audit trail)
+#   4. ln -sfn /etc/cavecms/env.<env> $RELEASE_DIR/.env.local (audit trail)
 #   5. bash $RELEASE_DIR/scripts/preflight.sh <sha>
-#   6. Pre-deploy mysqldump → gzip → age encrypt → /backup/bwc/pre-deploy/<sha>.sql.age
+#   6. Pre-deploy mysqldump → gzip → age encrypt → /backup/cavecms/pre-deploy/<sha>.sql.age
 #      (writer order matches rollback.sh's reader)
 #   7. node migrator-bundle/run.js (uses DATABASE_MIGRATOR_URL from env file)
 #   8. Verify $RELEASE_DIR/db/schema-fingerprint.txt matches the
 #      schema_fingerprint table row written by the migrator
-#   9. Atomically rewrite /etc/bwc/env.<env> with BWC_COMMIT + BWC_RELEASE_TS
-#  10. rsync .next/static into /opt/bwc/static-pool (additive — preserves
+#   9. Atomically rewrite /etc/cavecms/env.<env> with CAVECMS_COMMIT + CAVECMS_RELEASE_TS
+#  10. rsync .next/static into /opt/cavecms/static-pool (additive — preserves
 #      old hashed chunks for clients still on the previous bundle)
-#  11. Atomic symlink swap: ln -sfn $RELEASE_DIR /opt/bwc/current
-#  12. PM2 startOrReload via runuser bwc (cluster-1 idiom, NOT sudo)
+#  11. Atomic symlink swap: ln -sfn $RELEASE_DIR /opt/cavecms/current
+#  12. PM2 startOrReload via runuser cavecms (cluster-1 idiom, NOT sudo)
 #  13. Healthz poll: 3 consecutive 200s, ~60s wall-clock budget, body
 #      `commit` field must equal $SHA when HEALTHZ_TOKEN set
 #  14. On healthz fail: invoke rollback.sh with AUTO_ROLLBACK=1
 #  15. PM2 save (durable across reboot)
-#  16. Append "<sha> ok <iso>" to /opt/bwc/releases-history.log
-#  17. First-deploy ONLY: systemctl start bwc-*.timer
-#  18. Clean up /opt/bwc/incoming/<sha>.tar.zst
+#  16. Append "<sha> ok <iso>" to /opt/cavecms/releases-history.log
+#  17. First-deploy ONLY: systemctl start cavecms-*.timer
+#  18. Clean up /opt/cavecms/incoming/<sha>.tar.zst
 #
 # Usage:
 #   sudo bash scripts/deploy.sh <git-sha> [production|staging]
 #
 # Env vars consumed:
 #   ALLOW_CONTRACT=1   forwarded to preflight (acknowledge destructive migration)
-#   HEALTHZ_TOKEN      MUST be set in /etc/bwc/env.<env-name>; deploy
+#   HEALTHZ_TOKEN      MUST be set in /etc/cavecms/env.<env-name>; deploy
 #                      refuses without it so the post-reload commit
 #                      verification works AND so auto-rollback's
 #                      mandatory token check passes.
@@ -83,19 +83,19 @@ case "$ENV_NAME" in
   production|staging) ;;
   *) echo "[deploy.sh] env must be 'production' or 'staging' (got '$ENV_NAME')" >&2; exit 2 ;;
 esac
-ENV_FILE="/etc/bwc/env.$ENV_NAME"
+ENV_FILE="/etc/cavecms/env.$ENV_NAME"
 if [ ! -f "$ENV_FILE" ]; then
   echo "[deploy.sh] env file missing: $ENV_FILE — run setup.sh first" >&2
   exit 2
 fi
 
-TARBALL="/opt/bwc/incoming/$SHA.tar.zst"
+TARBALL="/opt/cavecms/incoming/$SHA.tar.zst"
 if [ ! -f "$TARBALL" ]; then
   echo "[deploy.sh] artifact missing: $TARBALL — CI should scp it before invoking deploy" >&2
   exit 2
 fi
-RELEASE_DIR="/opt/bwc/releases/$SHA"
-HISTORY_LOG=/opt/bwc/releases-history.log
+RELEASE_DIR="/opt/cavecms/releases/$SHA"
+HISTORY_LOG=/opt/cavecms/releases-history.log
 
 # HEALTHZ_TOKEN is REQUIRED. Without it the auto-rollback path (which
 # this script invokes on healthz fail) refuses, and the operator cannot
@@ -130,15 +130,15 @@ fi
 
 # Validate the age recipient public key format up front. age accepts a
 # line beginning with `-` as a flag — a tampered or zero-byte
-# /etc/bwc/backup.pub could inject options into the snapshot pipeline.
+# /etc/cavecms/backup.pub could inject options into the snapshot pipeline.
 # Cluster-1 setup.sh writes one age1-prefixed line; reject anything else.
-if [ ! -r /etc/bwc/backup.pub ]; then
-  echo "[deploy.sh] /etc/bwc/backup.pub not readable — age recipient missing" >&2
+if [ ! -r /etc/cavecms/backup.pub ]; then
+  echo "[deploy.sh] /etc/cavecms/backup.pub not readable — age recipient missing" >&2
   exit 2
 fi
-AGE_PUB=$(head -n 1 /etc/bwc/backup.pub | tr -d '[:space:]')
+AGE_PUB=$(head -n 1 /etc/cavecms/backup.pub | tr -d '[:space:]')
 if [[ ! "$AGE_PUB" =~ ^age1[0-9a-z]+$ ]]; then
-  echo "[deploy.sh] /etc/bwc/backup.pub: first line is not a valid age1-prefixed recipient" >&2
+  echo "[deploy.sh] /etc/cavecms/backup.pub: first line is not a valid age1-prefixed recipient" >&2
   exit 2
 fi
 
@@ -156,7 +156,7 @@ done
 # ---------------------------------------------------------------------------
 # Mutex
 # ---------------------------------------------------------------------------
-LOCK_FILE=/var/lock/bwc-deploy.lock
+LOCK_FILE=/var/lock/cavecms-deploy.lock
 exec 9<>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "[deploy.sh] another deploy/rollback holds $LOCK_FILE — refusing" >&2
@@ -171,7 +171,7 @@ fi
 # release immediately prior to current is always retained, which is the
 # only one rollback.sh actually needs in the happy path.
 # ---------------------------------------------------------------------------
-if [ -d /opt/bwc/releases ]; then
+if [ -d /opt/cavecms/releases ]; then
   # mapfile + find -print0 to handle any path edge case (release dirs
   # are SHA-named hex so embedded newlines won't occur in practice, but
   # the defensive read avoids relying on that invariant).
@@ -179,13 +179,13 @@ if [ -d /opt/bwc/releases ]; then
   # differently and would silently break rotation. Cluster-1 ships
   # gawk via Ubuntu defaults; a future minimal image swapping in mawk
   # would need this re-evaluated.
-  mapfile -d '' -t old_releases < <(find /opt/bwc/releases -mindepth 1 -maxdepth 1 -type d -printf '%T@\t%p\0' \
+  mapfile -d '' -t old_releases < <(find /opt/cavecms/releases -mindepth 1 -maxdepth 1 -type d -printf '%T@\t%p\0' \
     | sort -zrn | tail -zn +6 | awk -v RS='\0' -v ORS='\0' '{sub(/^[^\t]+\t/, ""); print}')
   for d in "${old_releases[@]}"; do
     [ -n "$d" ] || continue
-    # Defense in depth: refuse to rm anything outside /opt/bwc/releases/.
+    # Defense in depth: refuse to rm anything outside /opt/cavecms/releases/.
     case "$d" in
-      /opt/bwc/releases/*) rm -rf "$d" ;;
+      /opt/cavecms/releases/*) rm -rf "$d" ;;
       *) echo "[deploy.sh] rotate refused suspicious path: $d" >&2; exit 1 ;;
     esac
   done
@@ -193,14 +193,14 @@ fi
 
 # ---------------------------------------------------------------------------
 # Unpack artifact. tar -xf with same-owner is fine when running as root;
-# we then chown to bwc:bwc 750 to match cluster-1's expected layout.
+# we then chown to cavecms:cavecms 750 to match cluster-1's expected layout.
 # `--no-same-owner` because the tarball was built in CI with whoever's
 # uid runs the build runner — don't trust those uids on the droplet.
 # ---------------------------------------------------------------------------
 # Wipe-then-recreate $RELEASE_DIR so a same-SHA retry from a failed
 # prior attempt does not silently merge half-unpacked content.
 rm -rf "$RELEASE_DIR"
-install -d -m 750 -o bwc -g bwc "$RELEASE_DIR"
+install -d -m 750 -o cavecms -g cavecms "$RELEASE_DIR"
 # tar hardening: --no-same-owner refuses to honor the tarball's uids
 # (CI's runner uid is meaningless on the droplet); --no-same-permissions
 # defers to our explicit chmod -R below; --no-overwrite-dir refuses to
@@ -216,13 +216,13 @@ if ! tar --use-compress-program=zstd \
   rm -rf "$RELEASE_DIR"
   exit 1
 fi
-chown -R bwc:bwc "$RELEASE_DIR"
+chown -R cavecms:cavecms "$RELEASE_DIR"
 chmod -R u=rwX,g=rX,o= "$RELEASE_DIR"
 
 # ---------------------------------------------------------------------------
 # .env.local symlink — audit trail only. Next 15 standalone server.js
 # does NOT auto-source .env.local at runtime; PM2 reload sources the
-# env file directly in the bwc subshell (see PM2 step below). The
+# env file directly in the cavecms subshell (see PM2 step below). The
 # symlink lets an operator running `ls -la $RELEASE_DIR` immediately
 # see which env file the release is tied to.
 # ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ fi
 # order changes here, rollback.sh's `age decrypt | gunzip | mysql`
 # pipeline produces nothing parseable.
 #
-# `bwc_backup` user (cluster-1 grant: SELECT+TRIGGER+EVENT+SHOW VIEW+
+# `cavecms_backup` user (cluster-1 grant: SELECT+TRIGGER+EVENT+SHOW VIEW+
 # LOCK TABLES) covers --routines/--triggers/--events.
 #
 # MariaDB note: the plan template included --set-gtid-purged=OFF, which
@@ -254,14 +254,14 @@ fi
 # consistent snapshot without blocking writes from the still-running
 # release.
 # ---------------------------------------------------------------------------
-install -d -m 750 -o bwc -g backup /backup/bwc/pre-deploy 2>/dev/null || true
+install -d -m 750 -o cavecms -g backup /backup/cavecms/pre-deploy 2>/dev/null || true
 # Snapshot file name pinned to SHA so rollback.sh's
-# /backup/bwc/pre-deploy/<current-sha>.sql.age lookup works. On a
+# /backup/cavecms/pre-deploy/<current-sha>.sql.age lookup works. On a
 # same-SHA retry, the PRIOR snapshot (genuinely pre-deploy) is
 # preserved by refusing to overwrite — otherwise the second attempt
 # would replace the genuine pre-deploy artifact with a post-migrator
 # snapshot, breaking rollback semantics for that SHA.
-SNAP_FILE="/backup/bwc/pre-deploy/$SHA.sql.age"
+SNAP_FILE="/backup/cavecms/pre-deploy/$SHA.sql.age"
 SNAP_TMP="${SNAP_FILE}.partial"
 if [ -f "$SNAP_FILE" ]; then
   echo "[deploy.sh] $SNAP_FILE already exists — same-SHA retry would clobber the genuine pre-deploy snapshot; refusing" >&2
@@ -270,7 +270,7 @@ if [ -f "$SNAP_FILE" ]; then
 fi
 # Cleanup .partial on any exit path (including signal). Registered
 # BEFORE the pipeline so a kill mid-pipe doesn't leave the half-written
-# file in /backup/bwc/pre-deploy.
+# file in /backup/cavecms/pre-deploy.
 # shellcheck disable=SC2064
 trap "rm -f '$SNAP_TMP'" EXIT
 trap 'exit 130' INT
@@ -279,9 +279,9 @@ echo "[deploy.sh] writing pre-deploy snapshot to $SNAP_FILE..." >&2
 # PIPESTATUS captured on the line IMMEDIATELY after the pipeline,
 # before any other simple command can clobber it. AGE_PUB is the
 # validated recipient from the up-front age1-prefix check.
-if ! mysqldump --defaults-extra-file=/etc/bwc/bwc-backup.cnf \
+if ! mysqldump --defaults-extra-file=/etc/cavecms/cavecms-backup.cnf \
        --single-transaction --quick --skip-lock-tables \
-       --routines --triggers --events bwc \
+       --routines --triggers --events cavecms \
      | gzip \
      | age -r "$AGE_PUB" > "$SNAP_TMP"; then
   pipestatus=("${PIPESTATUS[@]}")
@@ -294,13 +294,13 @@ mv -f "$SNAP_TMP" "$SNAP_FILE"
 # chmod before chown matches the cluster-1 idiom used elsewhere
 # (mktemp → trap → chmod → chown); only style consistency.
 chmod 640 "$SNAP_FILE"
-chown bwc:backup "$SNAP_FILE"
+chown cavecms:backup "$SNAP_FILE"
 
 # ---------------------------------------------------------------------------
 # Pre-migrate asserts (spec §1.5). Runs BEFORE the migrator. Catches
 # conditions that would crash the migration mid-way (orphan
 # content_blocks, duplicate (resource_type, old_slug) rows, MariaDB
-# version < 10.6). Read-only SELECTs via the bwc app principal — no
+# version < 10.6). Read-only SELECTs via the cavecms app principal — no
 # DDL grant needed. Failure here halts BEFORE any DDL executes; the
 # pre-deploy snapshot already exists, the old binary keeps serving,
 # nothing to roll back.
@@ -323,7 +323,7 @@ if [ -z "$ASSERT_DB_URL" ]; then
   exit 1
 fi
 echo "[deploy.sh] running pre-migrate asserts..." >&2
-if ! ( cd "$RELEASE_DIR" && DATABASE_URL="$ASSERT_DB_URL" runuser -u bwc -- node --import tsx scripts/pre-migrate-asserts.ts ); then
+if ! ( cd "$RELEASE_DIR" && DATABASE_URL="$ASSERT_DB_URL" runuser -u cavecms -- node --import tsx scripts/pre-migrate-asserts.ts ); then
   echo "[deploy.sh] pre-migrate-asserts FAILED — halting before migrator runs" >&2
   echo "[deploy.sh]   no DDL was executed; the old binary keeps serving" >&2
   echo "[deploy.sh]   resolve the assert message (orphan blocks / duplicate redirects / MariaDB < 10.6), then re-deploy" >&2
@@ -332,7 +332,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Run the migrator. The bundle is shipped in the release tarball and
-# uses DATABASE_MIGRATOR_URL (bwc_migrator principal with DDL grant).
+# uses DATABASE_MIGRATOR_URL (cavecms_migrator principal with DDL grant).
 # Source the env file in a SUBSHELL so the script's own env isn't
 # polluted by the keys.
 # ---------------------------------------------------------------------------
@@ -347,14 +347,14 @@ if [ ! -f "$RELEASE_DIR/migrator-bundle/run.js" ]; then
   echo "[deploy.sh] migrator bundle missing: $RELEASE_DIR/migrator-bundle/run.js — CI build incomplete?" >&2
   exit 1
 fi
-# Run as bwc — even though migrator credentials come from the env, we
+# Run as cavecms — even though migrator credentials come from the env, we
 # don't need root for node + tcp connect to 127.0.0.1:3306.
-if ! ( cd "$RELEASE_DIR" && DATABASE_URL="$DATABASE_URL" runuser -u bwc -- node migrator-bundle/run.js ); then
+if ! ( cd "$RELEASE_DIR" && DATABASE_URL="$DATABASE_URL" runuser -u cavecms -- node migrator-bundle/run.js ); then
   echo "[deploy.sh] migrator FAILED — DB may be in a partial state" >&2
   echo "[deploy.sh]   if the migrator runs each migration in its own transaction, prior migrations are committed" >&2
-  echo "[deploy.sh]   /opt/bwc/current still points to the prior release; the running app may now mismatch the DB" >&2
+  echo "[deploy.sh]   /opt/cavecms/current still points to the prior release; the running app may now mismatch the DB" >&2
   echo "[deploy.sh]   manual recovery (DB-only, do NOT run rollback.sh — current symlink is still good):" >&2
-  echo "[deploy.sh]     age --decrypt -i <age-key> $SNAP_FILE | gunzip | mysql --defaults-extra-file=/etc/bwc/bwc-migrate.cnf bwc" >&2
+  echo "[deploy.sh]     age --decrypt -i <age-key> $SNAP_FILE | gunzip | mysql --defaults-extra-file=/etc/cavecms/cavecms-migrate.cnf cavecms" >&2
   exit 1
 fi
 
@@ -367,16 +367,16 @@ fi
 # Recovery options below.
 # ---------------------------------------------------------------------------
 echo "[deploy.sh] running post-migrate asserts..." >&2
-if ! ( cd "$RELEASE_DIR" && DATABASE_URL="$ASSERT_DB_URL" runuser -u bwc -- node --import tsx scripts/post-migrate-asserts.ts ); then
+if ! ( cd "$RELEASE_DIR" && DATABASE_URL="$ASSERT_DB_URL" runuser -u cavecms -- node --import tsx scripts/post-migrate-asserts.ts ); then
   echo "[deploy.sh] post-migrate-asserts FAILED — halting before fingerprint+symlink flip" >&2
   echo "[deploy.sh]   migrator already ran; the schema is forward of the running binary" >&2
-  echo "[deploy.sh]   /opt/bwc/current still points to the prior release — the running app reads OK (forward-compat)" >&2
+  echo "[deploy.sh]   /opt/cavecms/current still points to the prior release — the running app reads OK (forward-compat)" >&2
   echo "[deploy.sh]   recovery options:" >&2
   echo "[deploy.sh]     1. read the assert message; manually fix the specific invariant; re-deploy" >&2
   echo "[deploy.sh]     2. roll the DB back to the pre-deploy snapshot via rollback.sh interactive:" >&2
   echo "[deploy.sh]          sudo bash $RELEASE_DIR/scripts/rollback.sh $ENV_NAME" >&2
   echo "[deploy.sh]        rollback.sh detects the fingerprint mismatch, prompts for the age key, restores" >&2
-  echo "[deploy.sh]        the snapshot, and leaves /opt/bwc/current pointing at the last-known-good release" >&2
+  echo "[deploy.sh]        the snapshot, and leaves /opt/cavecms/current pointing at the last-known-good release" >&2
   exit 1
 fi
 
@@ -403,10 +403,10 @@ if [[ ! "$expected_fp" =~ ^[0-9a-f]{32,128}$ ]]; then
   echo "[deploy.sh] $FP_FILE is not a hex digest — CI build corrupt" >&2
   exit 1
 fi
-# Query schema_fingerprint table via mysql. bwc_backup has SELECT. Drop
+# Query schema_fingerprint table via mysql. cavecms_backup has SELECT. Drop
 # the `|| true` so a mysql failure (auth, network) surfaces via the ERR
 # trap rather than being misreported as "table empty."
-actual_fp=$(mysql --defaults-extra-file=/etc/bwc/bwc-backup.cnf -N -B bwc \
+actual_fp=$(mysql --defaults-extra-file=/etc/cavecms/cavecms-backup.cnf -N -B cavecms \
   -e 'SELECT fingerprint FROM schema_fingerprint WHERE id = 1' \
   | tr -d '[:space:]')
 if [ -z "$actual_fp" ]; then
@@ -417,20 +417,20 @@ fi
 if [ "$expected_fp" != "$actual_fp" ]; then
   echo "[deploy.sh] schema fingerprint mismatch — file=$expected_fp DB=$actual_fp" >&2
   echo "[deploy.sh]   migrator and CI baseline disagree; refusing to PM2-reload onto drift" >&2
-  echo "[deploy.sh]   /opt/bwc/current still points to the prior release; the running app may now mismatch the DB" >&2
+  echo "[deploy.sh]   /opt/cavecms/current still points to the prior release; the running app may now mismatch the DB" >&2
   echo "[deploy.sh]   manual recovery (DB-only, do NOT run rollback.sh — current symlink is still good):" >&2
-  echo "[deploy.sh]     age --decrypt -i <age-key> $SNAP_FILE | gunzip | mysql --defaults-extra-file=/etc/bwc/bwc-migrate.cnf bwc" >&2
+  echo "[deploy.sh]     age --decrypt -i <age-key> $SNAP_FILE | gunzip | mysql --defaults-extra-file=/etc/cavecms/cavecms-migrate.cnf cavecms" >&2
   exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# Atomically update env file (BWC_COMMIT + BWC_RELEASE_TS). After this
+# Atomically update env file (CAVECMS_COMMIT + CAVECMS_RELEASE_TS). After this
 # point a system reboot brings up PM2 resurrect against the NEW SHA
 # even if subsequent steps fail. rollback.sh's same-pattern rewrite
 # will reverse it if/when invoked.
 # ---------------------------------------------------------------------------
 NOW_ISO=$(date -u +%FT%TZ)
-ENV_TMP=$(mktemp "/etc/bwc/.env.$ENV_NAME.deploy.XXXXXX")
+ENV_TMP=$(mktemp "/etc/cavecms/.env.$ENV_NAME.deploy.XXXXXX")
 # Chain ENV_TMP cleanup with the pre-existing SNAP_TMP cleanup so both
 # files get scrubbed on any exit path. The prior trap (registered at
 # the snapshot block) only knew about SNAP_TMP; without re-registration
@@ -446,22 +446,22 @@ trap "rm -f '$SNAP_TMP' '$ENV_TMP'" EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 chmod 640 "$ENV_TMP"
-chown root:bwc "$ENV_TMP"
+chown root:cavecms "$ENV_TMP"
 awk -v sha="$SHA" -v ts="$NOW_ISO" '
-  /^BWC_COMMIT=/      { print "BWC_COMMIT=" sha; seen_commit=1; next }
-  /^BWC_RELEASE_TS=/  { print "BWC_RELEASE_TS=" ts; seen_ts=1; next }
+  /^CAVECMS_COMMIT=/      { print "CAVECMS_COMMIT=" sha; seen_commit=1; next }
+  /^CAVECMS_RELEASE_TS=/  { print "CAVECMS_RELEASE_TS=" ts; seen_ts=1; next }
   { print }
   END {
-    if (!seen_commit) print "BWC_COMMIT=" sha
-    if (!seen_ts)     print "BWC_RELEASE_TS=" ts
+    if (!seen_commit) print "CAVECMS_COMMIT=" sha
+    if (!seen_ts)     print "CAVECMS_RELEASE_TS=" ts
   }
 ' "$ENV_FILE" > "$ENV_TMP"
-if ! grep -q "^BWC_COMMIT=$SHA\$" "$ENV_TMP"; then
-  echo "[deploy.sh] env rewrite did not produce BWC_COMMIT=$SHA" >&2
+if ! grep -q "^CAVECMS_COMMIT=$SHA\$" "$ENV_TMP"; then
+  echo "[deploy.sh] env rewrite did not produce CAVECMS_COMMIT=$SHA" >&2
   exit 1
 fi
-if ! grep -q "^BWC_RELEASE_TS=$NOW_ISO\$" "$ENV_TMP"; then
-  echo "[deploy.sh] env rewrite did not produce BWC_RELEASE_TS=$NOW_ISO" >&2
+if ! grep -q "^CAVECMS_RELEASE_TS=$NOW_ISO\$" "$ENV_TMP"; then
+  echo "[deploy.sh] env rewrite did not produce CAVECMS_RELEASE_TS=$NOW_ISO" >&2
   exit 1
 fi
 mv -f "$ENV_TMP" "$ENV_FILE"
@@ -473,38 +473,38 @@ mv -f "$ENV_TMP" "$ENV_FILE"
 # during the transition window. The pool is the nginx-served root for
 # /_next/static (see cluster-1 nginx config).
 # ---------------------------------------------------------------------------
-install -d -m 750 -o bwc -g bwc /opt/bwc/static-pool/.next/static
+install -d -m 750 -o cavecms -g cavecms /opt/cavecms/static-pool/.next/static
 # Two source trees: Next 15 standalone copies a subset into
 # .next/standalone/.next/static; the FULL set is at .next/static (these
 # directories are NOT the same when next.config has client-side assets
 # Next decided to skip from the standalone copy). Sync both to the
 # pool with the FULL set winning on conflict.
 if [ -d "$RELEASE_DIR/.next/standalone/.next/static" ]; then
-  rsync -a "$RELEASE_DIR/.next/standalone/.next/static/" /opt/bwc/static-pool/.next/static/
+  rsync -a "$RELEASE_DIR/.next/standalone/.next/static/" /opt/cavecms/static-pool/.next/static/
 fi
 if [ -d "$RELEASE_DIR/.next/static" ]; then
-  rsync -a "$RELEASE_DIR/.next/static/" /opt/bwc/static-pool/.next/static/
+  rsync -a "$RELEASE_DIR/.next/static/" /opt/cavecms/static-pool/.next/static/
 fi
-chown -R bwc:bwc /opt/bwc/static-pool/.next/static
+chown -R cavecms:cavecms /opt/cavecms/static-pool/.next/static
 
 # ---------------------------------------------------------------------------
 # Atomic symlink swap
 # ---------------------------------------------------------------------------
-ln -sfn "$RELEASE_DIR" /opt/bwc/current
+ln -sfn "$RELEASE_DIR" /opt/cavecms/current
 
 # ---------------------------------------------------------------------------
 # PM2 reload. Same runuser + positional-args pattern as rollback.sh.
-# Source env file inside the bwc subshell so PM2's --update-env picks
-# up BWC_COMMIT, DATABASE_URL, JWT_SECRET, HEALTHZ_TOKEN, etc.
+# Source env file inside the cavecms subshell so PM2's --update-env picks
+# up CAVECMS_COMMIT, DATABASE_URL, JWT_SECRET, HEALTHZ_TOKEN, etc.
 # ---------------------------------------------------------------------------
 PM2_BIN="$(command -v pm2)"
 if [ -z "$PM2_BIN" ]; then
   echo "[deploy.sh] pm2 not in root's PATH — install pm2 globally" >&2
   exit 1
 fi
-ECO="/opt/bwc/current/ecosystem.config.cjs"
+ECO="/opt/cavecms/current/ecosystem.config.cjs"
 # shellcheck disable=SC2016  # $1/$2/$3 are positional args for the inner bash; intentional.
-runuser -u bwc -- bash -c '
+runuser -u cavecms -- bash -c '
   set -a
   . "$1"
   set +a
@@ -561,9 +561,9 @@ if [ "$ok" -lt 3 ]; then
   if AUTO_ROLLBACK=1 HEALTHZ_TOKEN="$HEALTHZ_TOKEN" bash "$RELEASE_DIR/scripts/rollback.sh" "$ENV_NAME"; then
     echo "[deploy.sh] ROLLBACK ok — current restored to previous release" >&2
   else
-    echo "[deploy.sh] ROLLBACK FAILED — SITE IS LIKELY DOWN, /opt/bwc/current and $ENV_FILE both point at the failing release" >&2
+    echo "[deploy.sh] ROLLBACK FAILED — SITE IS LIKELY DOWN, /opt/cavecms/current and $ENV_FILE both point at the failing release" >&2
     echo "[deploy.sh]   if schema changed in this deploy, AUTO_ROLLBACK refuses without operator DB-restore confirmation" >&2
-    echo "[deploy.sh]   recover: sudo bash /opt/bwc/current/scripts/rollback.sh $ENV_NAME  (interactively, will prompt for age key)" >&2
+    echo "[deploy.sh]   recover: sudo bash /opt/cavecms/current/scripts/rollback.sh $ENV_NAME  (interactively, will prompt for age key)" >&2
   fi
   exit 1
 fi
@@ -572,9 +572,9 @@ fi
 # Persist PM2 state — see rollback.sh comment for why this is fatal on
 # failure (resurrect would otherwise come back stale on reboot).
 # ---------------------------------------------------------------------------
-if ! runuser -u bwc -- "$PM2_BIN" save >/dev/null; then
+if ! runuser -u cavecms -- "$PM2_BIN" save >/dev/null; then
   echo "[deploy.sh] pm2 save failed — running state is correct but resurrect-on-reboot is stale" >&2
-  echo "[deploy.sh]   investigate: ls -lh /home/bwc/.pm2/ ; df -h /home/bwc" >&2
+  echo "[deploy.sh]   investigate: ls -lh /home/cavecms/.pm2/ ; df -h /home/cavecms" >&2
   exit 1
 fi
 
@@ -600,21 +600,21 @@ echo "$SHA ok $NOW_ISO" >> "$HISTORY_LOG"
 # the units cluster-1 installed.
 # ---------------------------------------------------------------------------
 if [ "$FIRST_DEPLOY" = "1" ]; then
-  echo "[deploy.sh] first successful deploy — activating bwc-*.timer units" >&2
-  # Enumerate installed bwc-*.timer units and start each individually.
-  # The previous `systemctl start 'bwc-*.timer'` literal-glob form
+  echo "[deploy.sh] first successful deploy — activating cavecms-*.timer units" >&2
+  # Enumerate installed cavecms-*.timer units and start each individually.
+  # The previous `systemctl start 'cavecms-*.timer'` literal-glob form
   # returned non-zero on a cherry-picked install where install-systemd.sh
-  # hadn't been run (zero matches → "Unit bwc-*.timer not found"), even
+  # hadn't been run (zero matches → "Unit cavecms-*.timer not found"), even
   # though `|| WARN` softened the error. Listing first gives a clean
   # silent no-op when there are no units to start.
-  timer_units=$(systemctl list-unit-files 'bwc-*.timer' --no-legend 2>/dev/null | awk '{print $1}' | grep -E '^bwc-' || true)
+  timer_units=$(systemctl list-unit-files 'cavecms-*.timer' --no-legend 2>/dev/null | awk '{print $1}' | grep -E '^cavecms-' || true)
   if [ -n "$timer_units" ]; then
     while IFS= read -r unit; do
       [ -z "$unit" ] && continue
       systemctl start "$unit" || echo "[deploy.sh] WARN: systemctl start $unit returned non-zero" >&2
     done <<< "$timer_units"
   else
-    echo "[deploy.sh] no bwc-*.timer units installed — skipping (run install-systemd.sh if backups/cron-purge are expected)" >&2
+    echo "[deploy.sh] no cavecms-*.timer units installed — skipping (run install-systemd.sh if backups/cron-purge are expected)" >&2
   fi
 fi
 

@@ -43,16 +43,16 @@ const Ctx = createContext<PickerCtx | null>(null)
 // `globalThis` pinning makes HMR-survivable in dev too.
 const THUMB_LRU_MAX = 500
 declare global {
-  var __bwcMediaThumbLRU: Map<number, string> | undefined
-  var __bwcMediaThumbInFlight: Map<number, Promise<string | null>> | undefined
+  var __cavecmsMediaThumbLRU: Map<number, string> | undefined
+  var __cavecmsMediaThumbInFlight: Map<number, Promise<string | null>> | undefined
 }
 const moduleThumbCache: Map<number, string> =
-  globalThis.__bwcMediaThumbLRU ?? new Map<number, string>()
-globalThis.__bwcMediaThumbLRU = moduleThumbCache
+  globalThis.__cavecmsMediaThumbLRU ?? new Map<number, string>()
+globalThis.__cavecmsMediaThumbLRU = moduleThumbCache
 const moduleInFlight: Map<number, Promise<string | null>> =
-  globalThis.__bwcMediaThumbInFlight ??
+  globalThis.__cavecmsMediaThumbInFlight ??
   new Map<number, Promise<string | null>>()
-globalThis.__bwcMediaThumbInFlight = moduleInFlight
+globalThis.__cavecmsMediaThumbInFlight = moduleInFlight
 
 function lruSet(id: number, url: string): void {
   // Map preserves insertion order — delete + set moves to most-recent.

@@ -319,7 +319,7 @@ export const blockSchemas = {
   // to prevent SEO H1 collisions with the page metadata's own H1.
   // Justified alignment ships per Elementor parity (researcher confirmed
   // `start | center | end | justify` is canonical). Width/font/weight
-  // are BWC-curated knobs — Elementor exposes `typography` as a global
+  // are CaveCMS-curated knobs — Elementor exposes `typography` as a global
   // control group; we narrow to a select to keep the operator UI quiet.
   heading: z.object({
     // NOTE: text uses .min(1) so an operator who clears the field via
@@ -337,7 +337,7 @@ export const blockSchemas = {
   // Standalone CTA button. The href reuses CTA_HREF_RE for the same
   // scheme allowlist the embedded Cta uses (http/https/mailto/tel/
   // same-origin-paths). Size scale matches Elementor's 5 named presets;
-  // BWC swaps semantic colours (info/success/danger) for stylistic
+  // CaveCMS swaps semantic colours (info/success/danger) for stylistic
   // variants (primary/secondary/ghost) — see Button render comment.
   button: z.object({
     // .min(1) — an empty-text button is a zero-width click target with
@@ -408,7 +408,7 @@ export const blockSchemas = {
   // (default) and a "list" variant that renders every item visible at
   // once, separated by horizontal divider lines and stripped of the
   // chevron + interactive <details>/<summary>. The list variant is the
-  // BWC-Contact-style FAQ shape — operators flip between the two
+  // CaveCMS-Contact-style FAQ shape — operators flip between the two
   // without changing their item data. See components/blocks/Accordion/
   // render.tsx for the visual treatment of each branch.
   accordion: z.object({
@@ -484,7 +484,7 @@ export const blockSchemas = {
   // Status banner. Variant drives the icon + accent; copper-only palette
   // (no Bootstrap candy reds/greens) per research. `dismissible=true`
   // promotes the renderer to a client component that persists dismissal
-  // in localStorage keyed on `bwc:alert:${blockId}:${contentHash}` -
+  // in localStorage keyed on `cavecms:alert:${blockId}:${contentHash}` -
   // see AlertDismissible.tsx for the exact scheme. The blockId pins
   // dismissal to a specific block row (no cross-block collisions); the
   // content hash invalidates dismissal whenever the operator edits the
@@ -625,7 +625,7 @@ export const blockSchemas = {
   // accent line that sits above a hero h1, above a section h2, or as
   // a tiny LABEL on top of a card. Not a heading element semantically
   // — emits a <p> so screen readers don't announce "heading" for what
-  // is visually a label. Three color tokens map to the BWC palette
+  // is visually a label. Three color tokens map to the CaveCMS palette
   // (copper accent, warm-stone muted, near-black solid).
   eyebrow: z.object({
     // .min(1) — empty eyebrow is a zero-content paragraph; inline edit

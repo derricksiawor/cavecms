@@ -25,6 +25,10 @@ vi.mock('@/lib/cms/getSettings', () => {
         },
         footer: { tagline: 't', columns: [] },
         social_links: [],
+        site_general: {
+          siteUrl: 'https://bestworldcompany.com',
+          siteName: 'CaveCMS',
+        },
       }
       return map[key]
     }),
@@ -90,11 +94,29 @@ describe('JSON-LD builders', () => {
     expect((ld.address as { streetAddress: string }).streetAddress).toBe('A')
   })
 
-  it('residenceLd uses absolute URL', () => {
-    const ld = residenceLd({ name: 'X', slug: 'x', tagline: 't', heroImage: '/h.jpg' })
+  it('residenceLd uses absolute URL when siteOrigin is provided', () => {
+    const ld = residenceLd({
+      name: 'X',
+      slug: 'x',
+      tagline: 't',
+      heroImage: '/h.jpg',
+      siteOrigin: 'https://bestworldcompany.com',
+    })
     expect(ld['@type']).toBe('Residence')
     expect(ld.url).toBe('https://bestworldcompany.com/projects/x')
     expect(ld.description).toBe('t')
+  })
+
+  it('residenceLd omits url when siteOrigin is null (operator hasn’t set Settings → General)', () => {
+    const ld = residenceLd({
+      name: 'X',
+      slug: 'x',
+      tagline: 't',
+      heroImage: '/h.jpg',
+      siteOrigin: null,
+    })
+    expect(ld['@type']).toBe('Residence')
+    expect(ld.url).toBeUndefined()
   })
 
   it('breadcrumbLd indexes items from position 1', () => {

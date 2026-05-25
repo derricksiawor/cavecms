@@ -74,7 +74,7 @@ export function Testimonial({
 }) {
   const isCentered = data.alignment === 'center'
   const photo = data.image ? media.get(data.image.media_id) ?? null : null
-  // Variant fallback chain spans the full BWC variant set. The media
+  // Variant fallback chain spans the full CaveCMS variant set. The media
   // pipeline can produce {sm,md,lg,xl} or a subset depending on source
   // dimensions; we accept any available variant rather than dropping
   // the avatar when the canonical 'md' isn't present.

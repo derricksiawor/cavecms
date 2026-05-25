@@ -1,4 +1,4 @@
-// Daily purge. Invoked by bwc-cron-purge.timer @ 06:00 UTC. Runs the
+// Daily purge. Invoked by cavecms-cron-purge.timer @ 06:00 UTC. Runs the
 // quiet-time bookkeeping the live request path can't afford:
 //
 //   * Hard-deletes soft-deleted content_blocks past retention
@@ -12,14 +12,14 @@
 //
 // CONTRACTS THIS SCRIPT CONSUMES (from cluster-3):
 //
-//   /var/lib/bwc/last-uploads-backup.ok must be ≤24h old. If
+//   /var/lib/cavecms/last-uploads-backup.ok must be ≤24h old. If
 //   uploads-backup hasn't run successfully today we refuse to purge
 //   — a file we hard-delete on disk has no recovery path otherwise.
-//   This is the contract documented in bwc-cron-purge.service:9.
+//   This is the contract documented in cavecms-cron-purge.service:9.
 //   The plan template (docs/.../plan-09:1029) omitted this gate; it
 //   is added here per cluster-3 → cluster-4 handoff.
 //
-//   /var/lib/bwc/deploy.blocked: NOT consumed here. disk-check writes
+//   /var/lib/cavecms/deploy.blocked: NOT consumed here. disk-check writes
 //   it for the preflight to read; cron-purge does not gate on it
 //   (low-disk during purge is still safer than letting tables grow
 //   unboundedly).
@@ -74,7 +74,7 @@ for (const [name, value] of [
   }
 }
 
-const UPLOADS_BACKUP_MARKER = '/var/lib/bwc/last-uploads-backup.ok'
+const UPLOADS_BACKUP_MARKER = '/var/lib/cavecms/last-uploads-backup.ok'
 const MAX_BACKUP_AGE_SEC = 24 * 60 * 60
 
 // Bounded for-update SELECT page size. A single TX scanning the full
@@ -108,8 +108,8 @@ async function assertUploadsBackupFresh(): Promise<void> {
   try {
     // lstat (not stat) so a symlink at the marker path is detected
     // rather than silently followed. Defence-in-depth: the marker
-    // lives in /var/lib/bwc (2770 root:bwcstate). If the directory
-    // perms are ever loosened or another bwcstate-group service is
+    // lives in /var/lib/cavecms (2770 root:cavecmsstate). If the directory
+    // perms are ever loosened or another cavecmsstate-group service is
     // added, a swapped symlink could forge freshness against an
     // unrelated frequently-touched file.
     s = await lstat(UPLOADS_BACKUP_MARKER)

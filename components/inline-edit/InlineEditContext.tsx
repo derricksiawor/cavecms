@@ -196,7 +196,7 @@ const DispatchContext = createContext<Dispatch<InlineEditAction> | null>(null)
 // wipes this key BEFORE the hard navigation, so editor B logging in
 // on the same browser after editor A logged out doesn't inherit A's
 // clipboard slot. See components/admin-bar/AdminBarInteractive.tsx.
-export const CLIPBOARD_STORAGE_KEY = 'bwc:clipboard'
+export const CLIPBOARD_STORAGE_KEY = 'cavecms:clipboard'
 const CLIPBOARD_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 function isClipboardSlotShape(value: unknown): value is ClipboardSlot {

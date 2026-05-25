@@ -14,7 +14,7 @@ import { AlertDismissible } from './AlertDismissible'
 //   - per-state typography + colour tokens
 //   - alignment (left | right)
 //
-// BWC ships a copper-on-near-black palette - NEVER Bootstrap candy
+// CaveCMS ships a copper-on-near-black palette - NEVER Bootstrap candy
 // colours per researcher's luxury default. The variant drives the
 // ICON only; surface remains the same near-black card with copper
 // left-border accent. Reserved for listing-status banners ("Under
@@ -24,7 +24,7 @@ import { AlertDismissible } from './AlertDismissible'
 //   - dismissible=false (default) -> static server-rendered alert.
 //   - dismissible=true -> AlertDismissible client component reads
 //     localStorage on mount and hides if previously dismissed.
-//   - Storage key is `bwc:alert:${blockId}:${contentHash}`. blockId
+//   - Storage key is `cavecms:alert:${blockId}:${contentHash}`. blockId
 //     scopes the dismissal to ONE specific block row, so two distinct
 //     Alert blocks with identical text don't share a dismissal slot.
 //     contentHash invalidates dismissal whenever the operator edits

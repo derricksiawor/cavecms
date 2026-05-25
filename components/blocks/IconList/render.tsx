@@ -11,7 +11,7 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 //   - dividers between items (switcher + style + weight + width + colour)
 //   - per-item link target
 //
-// BWC narrows: no per-item link (icon-list items are not navigation
+// CaveCMS narrows: no per-item link (icon-list items are not navigation
 // targets in editorial luxury-RE pages — operators reach for the Icon
 // Box widget when they need an icon-with-link). No dividers between rows
 // — whitespace separates them; Tailwind's gap-* on the parent handles

@@ -49,7 +49,7 @@ const CONFIG = {
 //   These don't override strong-direction characters; they only
 //   affect rendering of weak/neutral characters next to them.
 //   Required for legitimate mixed-script content (English + Arabic
-//   / Hebrew). BWC is English-only today but stripping these would
+//   / Hebrew). CaveCMS is English-only today but stripping these would
 //   mangle any future RTL content. Marks alone cannot spoof
 //   "evil.com" — the strong-LTR characters are unaffected.
 //

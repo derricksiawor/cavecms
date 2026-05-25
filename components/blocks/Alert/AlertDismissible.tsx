@@ -9,7 +9,7 @@ import { ALERT_SECTION_CLASS } from './render'
 // blockId + content combination; if so, renders nothing.
 //
 // Storage layout:
-//   key:   `bwc:alert:${contentKey}` where contentKey is
+//   key:   `cavecms:alert:${contentKey}` where contentKey is
 //          `${blockId}:${djb2:fnv-1a-content-hash}` composed by the
 //          server-side Alert renderer (lib/blocks/Alert/render.tsx).
 //   value: '1' (string) when dismissed.
@@ -48,7 +48,7 @@ export function AlertDismissible({ contentKey, outerClass, children }: Props) {
   // Initial state: visible. The mount effect may flip it to dismissed
   // immediately if localStorage says so.
   const [dismissed, setDismissed] = useState(false)
-  const storageKey = `bwc:alert:${contentKey}`
+  const storageKey = `cavecms:alert:${contentKey}`
 
   useEffect(() => {
     // Wrapped in try/catch because localStorage access throws in some

@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Eye } from 'lucide-react'
+import { Wordmark } from '@/components/Wordmark'
 import type { Role } from '@/lib/auth/requireRole'
 import { NAV, isActive, buildNavTree, type NavItem } from './nav'
 
@@ -92,9 +93,9 @@ export function AdminSidebar({ role }: { role: Role }) {
         <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-400">
           Admin
         </p>
-        <p className="mt-2 font-serif text-2xl font-bold leading-tight tracking-tight text-cream-50">
-          CaveCMS
-        </p>
+        <div className="mt-2">
+          <Wordmark label="CaveCMS" />
+        </div>
       </div>
 
       {/* Scrolling middle. flex-1 takes all remaining vertical space

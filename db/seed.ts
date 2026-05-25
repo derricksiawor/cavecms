@@ -44,7 +44,7 @@ export async function seedAdminIfEmpty(
 // Pulls from settings-registry so any newly-added key gets a row on
 // the next deploy without touching this file. A handful of project-
 // specific overrides (real contact info, footer tagline) sit on top
-// so a fresh BWC install isn't generic out of the box.
+// so a fresh CaveCMS install isn't generic out of the box.
 import { registry } from '@/lib/cms/settings-registry'
 
 const PROJECT_OVERRIDES: Partial<Record<keyof typeof registry, unknown>> = {
@@ -68,7 +68,7 @@ const PROJECT_OVERRIDES: Partial<Record<keyof typeof registry, unknown>> = {
 // Built lazily inside the function so a future registry edit whose
 // `default` throws (typo, regex slip, etc.) surfaces inside runCli's
 // try/finally — instead of at module-load time, where it would crash
-// before the `BWC_SEED_OK=1` production guard or the pool-cleanup
+// before the `CAVECMS_SEED_OK=1` production guard or the pool-cleanup
 // finally block ever runs.
 function buildSettingsDefaults(): Record<string, unknown> {
   return Object.fromEntries(
@@ -91,9 +91,9 @@ export async function seedSettingsIfEmpty(): Promise<void> {
 }
 
 async function readEnvOrPrompt(): Promise<{ email: string; name: string; password: string }> {
-  const envEmail = process.env['BWC_ADMIN_EMAIL']
-  const envName = process.env['BWC_ADMIN_NAME']
-  const envPassword = process.env['BWC_ADMIN_PASSWORD']
+  const envEmail = process.env['CAVECMS_ADMIN_EMAIL']
+  const envName = process.env['CAVECMS_ADMIN_NAME']
+  const envPassword = process.env['CAVECMS_ADMIN_PASSWORD']
   if (envEmail && envName && envPassword) {
     return { email: envEmail.trim().toLowerCase(), name: envName.trim(), password: envPassword }
   }
@@ -162,16 +162,16 @@ async function runCli(): Promise<void> {
   // hitting `pnpm db:seed` against the live DB shouldn't be possible
   // without an explicit opt-in. Defence in depth on top of the
   // table-empty / INSERT-IGNORE guards inside the seed functions.
-  // Operator override: BWC_SEED_OK=1 pnpm db:seed
+  // Operator override: CAVECMS_SEED_OK=1 pnpm db:seed
   if (
     process.env['NODE_ENV'] === 'production' &&
-    process.env['BWC_SEED_OK'] !== '1'
+    process.env['CAVECMS_SEED_OK'] !== '1'
   ) {
     console.error(
       '[db:seed] refusing to run with NODE_ENV=production without explicit opt-in.',
     )
     console.error(
-      '[db:seed]   first-deploy bootstrap: BWC_SEED_OK=1 BWC_ADMIN_EMAIL=… BWC_ADMIN_NAME=… BWC_ADMIN_PASSWORD=… pnpm db:seed',
+      '[db:seed]   first-deploy bootstrap: CAVECMS_SEED_OK=1 CAVECMS_ADMIN_EMAIL=… CAVECMS_ADMIN_NAME=… CAVECMS_ADMIN_PASSWORD=… pnpm db:seed',
     )
     process.exit(1)
   }

@@ -12,7 +12,7 @@ export default function RouteError({
   useEffect(() => {
     // Server-side errors are logged via structured console.error in route handlers.
     // Capture client-side occurrence for telemetry.
-    console.error('[bwc] route error:', error.name, error.digest)
+    console.error('[cavecms] route error:', error.name, error.digest)
   }, [error])
 
   return (

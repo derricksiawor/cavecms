@@ -259,7 +259,7 @@ export function SpacingPopover({
         // the viewport bottom.
         placeAbove ? 'bottom-full mb-2' : 'top-full mt-2',
         'rounded-2xl bg-near-black/98 p-4 text-cream-50 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.6)] backdrop-blur-sm',
-        'animate-bwc-fade-in',
+        'animate-cavecms-fade-in',
       )}
       style={
         edgeShift !== 0

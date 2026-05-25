@@ -2,7 +2,7 @@
 import clsx from 'clsx'
 import type { CSSProperties } from 'react'
 
-// Copper-tinted skeleton block. The shimmer keyframe (`bwc-shimmer`)
+// Copper-tinted skeleton block. The shimmer keyframe (`cavecms-shimmer`)
 // is defined in globals.css. Use this everywhere we previously
 // printed "Loading…" — readers should never see a plain text
 // placeholder again.
@@ -30,7 +30,7 @@ export function Shimmer({
     <span
       aria-hidden="true"
       className={clsx(
-        'block bg-gradient-to-r from-cream-50 via-warm-stone/15 to-cream-50 bg-[length:200%_100%] animate-bwc-shimmer',
+        'block bg-gradient-to-r from-cream-50 via-warm-stone/15 to-cream-50 bg-[length:200%_100%] animate-cavecms-shimmer',
         r,
         className,
       )}

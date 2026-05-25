@@ -11,7 +11,7 @@
 // migrate-on-first-run, etc.) live here too. Skip the entire script
 // in production — production relies on scripts/setup.sh having
 // provisioned everything already, and we don't want this script
-// silently masking a misconfigured /etc/bwc/env.production at boot.
+// silently masking a misconfigured /etc/cavecms/env.production at boot.
 //
 // Invoked from package.json predev / prebuild / prestart lifecycle
 // hooks via `node --env-file-if-exists=.env.local scripts/dev-bootstrap.mjs`
@@ -27,23 +27,23 @@ import { createConnection } from 'node:net'
 if (process.env.NODE_ENV === 'production') {
   // Refuse to fire in production — setup.sh owns the dir layout and
   // ownership/permissions on the live box. A blind mkdir here could
-  // create dirs as the wrong user, break bwc:bwc 750 ownership, or
+  // create dirs as the wrong user, break cavecms:cavecms 750 ownership, or
   // mask a real misconfiguration. Exit cleanly so pnpm start still
   // launches.
   process.exit(0)
 }
 
-const root = process.env.UPLOADS_ROOT || '/opt/bwc/uploads'
+const root = process.env.UPLOADS_ROOT || '/opt/cavecms/uploads'
 const resolvedRoot = resolve(root)
 
-// Defence in depth: in dev, refuse to mkdir under /opt/bwc/* by accident
+// Defence in depth: in dev, refuse to mkdir under /opt/cavecms/* by accident
 // (e.g. a contributor copied the prod .env.production by mistake). The
 // canonical dev path is something like ./.test-uploads or /tmp/...
-// — never under /opt/bwc. If a dev legitimately wants to point at
-// /opt/bwc, they can set BWC_DEV_BOOTSTRAP_ALLOW_PROD_PATH=1.
+// — never under /opt/cavecms. If a dev legitimately wants to point at
+// /opt/cavecms, they can set CAVECMS_DEV_BOOTSTRAP_ALLOW_PROD_PATH=1.
 if (
-  resolvedRoot.startsWith('/opt/bwc') &&
-  process.env.BWC_DEV_BOOTSTRAP_ALLOW_PROD_PATH !== '1'
+  resolvedRoot.startsWith('/opt/cavecms') &&
+  process.env.CAVECMS_DEV_BOOTSTRAP_ALLOW_PROD_PATH !== '1'
 ) {
   console.error(
     `[dev-bootstrap] refusing to mkdir under ${resolvedRoot} in non-production.`,
@@ -52,7 +52,7 @@ if (
     '[dev-bootstrap]   Set UPLOADS_ROOT to a dev path (e.g. ./.test-uploads) in .env.local,',
   )
   console.error(
-    '[dev-bootstrap]   or override with BWC_DEV_BOOTSTRAP_ALLOW_PROD_PATH=1 if you really mean it.',
+    '[dev-bootstrap]   or override with CAVECMS_DEV_BOOTSTRAP_ALLOW_PROD_PATH=1 if you really mean it.',
   )
   process.exit(1)
 }
@@ -81,7 +81,7 @@ for (const sub of subdirs) {
 // via nginx) need a static path under Next's `public/` directory.
 // Symlink `public/uploads` → resolvedRoot so a `pnpm dev` install
 // can render images without an nginx in front. Skipped in production
-// (setup.sh provisions /opt/bwc/uploads, nginx fronts the URL).
+// (setup.sh provisions /opt/cavecms/uploads, nginx fronts the URL).
 if (process.env['NODE_ENV'] !== 'production') {
   const here = dirname(fileURLToPath(import.meta.url))
   const repoRoot = resolve(here, '..')
@@ -122,7 +122,7 @@ process.stderr.write(
 //      docker-compose.dev.yml up -d --wait` so the next `next dev`
 //      starts against a live DB instead of crash-looping on connect.
 //   3. Skip the whole branch when:
-//        - BWC_SKIP_DOCKER=1            (operator opts out: "I have a
+//        - CAVECMS_SKIP_DOCKER=1            (operator opts out: "I have a
 //                                       host MariaDB but no Docker")
 //        - the docker CLI isn't installed (silent skip + warn)
 //        - `docker compose` returns non-zero (warn + continue; the
@@ -153,11 +153,11 @@ async function probePort(host, port, timeoutMs) {
 // 3040 and the new dev didn't actually start). Defensive detection
 // here: probe port 3040 BEFORE the rest of the bootstrap. If it's
 // already bound, surface loudly so the operator kills the orphan
-// (or sets BWC_SKIP_PORT_CHECK=1 to bypass for legitimate cases like
+// (or sets CAVECMS_SKIP_PORT_CHECK=1 to bypass for legitimate cases like
 // `pnpm start` against an existing pnpm dev).
 const PORT_RAW = process.env['PORT'] ?? '3040'
 const PORT = Number.isFinite(Number(PORT_RAW)) ? Number(PORT_RAW) : 3040
-if (process.env['BWC_SKIP_PORT_CHECK'] !== '1') {
+if (process.env['CAVECMS_SKIP_PORT_CHECK'] !== '1') {
   // 600ms matches the MariaDB probe budget below — long enough to
   // survive a momentarily-loaded loopback (CPU pegged on a parallel
   // build, swap pressure) without false-negative; short enough that
@@ -176,13 +176,13 @@ if (process.env['BWC_SKIP_PORT_CHECK'] !== '1') {
       `[dev-bootstrap]   Run \`pkill -f "next dev"\` (or kill the PID from \`lsof -i :${PORT}\`) then re-run.`,
     )
     console.error(
-      `[dev-bootstrap]   Set BWC_SKIP_PORT_CHECK=1 to bypass (e.g. running pnpm start against an existing dev).`,
+      `[dev-bootstrap]   Set CAVECMS_SKIP_PORT_CHECK=1 to bypass (e.g. running pnpm start against an existing dev).`,
     )
     process.exit(1)
   }
 }
 
-if (process.env['BWC_SKIP_DOCKER'] !== '1') {
+if (process.env['CAVECMS_SKIP_DOCKER'] !== '1') {
   const reachable = await probePort('127.0.0.1', 3306, 600)
   if (!reachable) {
     // Check `docker` is installed before invoking compose. `command -v
@@ -198,7 +198,7 @@ if (process.env['BWC_SKIP_DOCKER'] !== '1') {
         '[dev-bootstrap]   Set up a host MariaDB OR install Docker (see docker-compose.dev.yml),',
       )
       console.warn(
-        '[dev-bootstrap]   OR set BWC_SKIP_DOCKER=1 to silence this warning.',
+        '[dev-bootstrap]   OR set CAVECMS_SKIP_DOCKER=1 to silence this warning.',
       )
     } else {
       const here = dirname(fileURLToPath(import.meta.url))

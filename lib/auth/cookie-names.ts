@@ -10,13 +10,13 @@
 export const IS_PROD = process.env.NODE_ENV === 'production'
 const PROD = IS_PROD
 
-export const SESSION_COOKIE_NAME = PROD ? '__Host-bwc_session' : 'bwc_session'
-export const CSRF_COOKIE_NAME = PROD ? '__Host-bwc_csrf' : 'bwc_csrf'
-export const EDIT_MODE_COOKIE_NAME = PROD ? '__Host-bwc_edit_mode' : 'bwc_edit_mode'
+export const SESSION_COOKIE_NAME = PROD ? '__Host-cavecms_session' : 'cavecms_session'
+export const CSRF_COOKIE_NAME = PROD ? '__Host-cavecms_csrf' : 'cavecms_csrf'
+export const EDIT_MODE_COOKIE_NAME = PROD ? '__Host-cavecms_edit_mode' : 'cavecms_edit_mode'
 // Step-up reauth (Plan 08): admin proves they hold the password again
 // before mutating users / settings. Lifetime is short (5 min); cookie
 // stores a unix-seconds timestamp the server compares against NOW().
-export const REAUTH_COOKIE_NAME = PROD ? '__Host-bwc_reauth' : 'bwc_reauth'
+export const REAUTH_COOKIE_NAME = PROD ? '__Host-cavecms_reauth' : 'cavecms_reauth'
 // Companion cookie carrying the session JWT's `jti` claim in clear
 // text (NOT httpOnly — the FE needs to read it from JS to derive the
 // HMAC key that signs/verifies the pages-CMS localStorage draft
@@ -36,4 +36,4 @@ export const REAUTH_COOKIE_NAME = PROD ? '__Host-bwc_reauth' : 'bwc_reauth'
 // key (extensions, sibling tabs pre-CSP, stored-XSS that fires after
 // jti rotation). Live in-context XSS is covered upstream by the
 // CSP nonce + strict-dynamic + DOMPurify pipeline.
-export const JTI_COOKIE_NAME = PROD ? '__Host-bwc_session_jti' : 'bwc_session_jti'
+export const JTI_COOKIE_NAME = PROD ? '__Host-cavecms_session_jti' : 'cavecms_session_jti'

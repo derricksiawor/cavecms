@@ -16,10 +16,10 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 // **The classic Icon Box has NO separate CTA button field — the single
 // `link` makes the entire box a clickable navigation target.** Operators
 // who want an icon-headline-body-button composition use Spacer + Heading
-// + Text + Button instead. BWC matches this exactly to keep the widget
+// + Text + Button instead. CaveCMS matches this exactly to keep the widget
 // catalog narrow and the composition predictable.
 //
-// BWC collapses Elementor's view+shape+colour triplet into three named
+// CaveCMS collapses Elementor's view+shape+colour triplet into three named
 // presets that map to the brand palette:
 //   - copper-filled: solid copper circle with cream icon (high-emphasis)
 //   - copper-outline: thin copper ring with copper icon (default)

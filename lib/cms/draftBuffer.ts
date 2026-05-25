@@ -7,7 +7,7 @@
 // DOMPurify.
 //
 // HKDF derivation (LOCKED):
-//   IKM    = jti-bytes (UUIDv4 ASCII from the __Host-bwc_session_jti cookie)
+//   IKM    = jti-bytes (UUIDv4 ASCII from the __Host-cavecms_session_jti cookie)
 //   info   = "pages-cms-draft:HMAC-SHA256-v1:page-" || pageId-be-bytes
 //   salt   = empty (per RFC 5869 §3.1: salt length should ≥ hash output;
 //                   a 4-byte pageId-as-salt collides in low bits across

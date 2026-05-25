@@ -5,7 +5,7 @@ import { issueCsrf } from '@/lib/auth/csrf'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { CSRF_COOKIE, csrfCookieFlags } from '@/lib/auth/cookies'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
-import { env } from '@/lib/env'
+import { getSetting } from '@/lib/cms/getSettings'
 
 // Gold-Standard rule (project standards "Security Standards"): "Rate limit the
 // CSRF endpoint itself (30 req/min per IP)." Two buckets so a stolen
@@ -25,7 +25,8 @@ export const GET = withError(async () => {
   }
   const csrf = await issueCsrf({ jti: ctx.jti, sub: String(ctx.userId) })
   const c = await cookies()
-  c.set(CSRF_COOKIE, csrf, csrfCookieFlags(env.CSRF_TTL_SECONDS))
+  const sessCfg = await getSetting('session_config')
+  c.set(CSRF_COOKIE, csrf, csrfCookieFlags(sessCfg.csrfTtlSec))
   return new Response(JSON.stringify({ csrf }), {
     status: 200,
     headers: { 'cache-control': 'private, no-store' },

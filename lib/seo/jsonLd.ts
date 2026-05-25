@@ -1,6 +1,6 @@
 import 'server-only'
 import { getSetting } from '@/lib/cms/getSettings'
-import { env } from '@/lib/env'
+import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 
 // JSON-LD builders. Every public route emits at least one
 // <script type="application/ld+json">. The shapes here mirror
@@ -8,16 +8,18 @@ import { env } from '@/lib/env'
 // JSON.stringify in safeJsonForScript (lib/seo/escape.ts) before
 // inlining via dangerouslySetInnerHTML.
 //
-// SITE_ORIGIN comes from env so staging deploys can override it via
-// the deploy environment without code change. Without env override,
-// the apex is the canonical production host.
+// The operator's public site URL comes from Settings → General →
+// Site URL (DB-stored). When unset, absolute URLs are omitted from
+// the emitted JSON-LD — search engines tolerate that better than
+// being given a wrong canonical.
 
 export async function organizationLd(): Promise<Record<string, unknown>> {
-  // Both settings are independent; await in parallel. Sequential
-  // awaits added one DB round-trip per public CMS page render.
-  const [org, contact] = await Promise.all([
+  // Both settings + site origin are independent; await in parallel.
+  // Sequential awaits added one DB round-trip per public CMS render.
+  const [org, contact, siteOrigin] = await Promise.all([
     getSetting('organization_json_ld'),
     getSetting('contact_info'),
+    getSiteOrigin(),
   ])
   return {
     '@context': 'https://schema.org',
@@ -26,7 +28,9 @@ export async function organizationLd(): Promise<Record<string, unknown>> {
     alternateName: org.altName,
     logo: org.logoUrl.startsWith('http')
       ? org.logoUrl
-      : `${env.SITE_ORIGIN}${org.logoUrl}`,
+      : siteOrigin
+        ? `${siteOrigin}${org.logoUrl}`
+        : org.logoUrl,
     address: {
       '@type': 'PostalAddress',
       streetAddress: contact.address,
@@ -59,14 +63,20 @@ export function residenceLd(p: {
   priceMin?: number
   priceMax?: number
   priceCurrency?: string
+  /** Operator's site URL from Settings → General. When null, the
+   *  `url` field is omitted entirely (a wrong URL is worse than no
+   *  URL for indexers). */
+  siteOrigin?: string | null
 }): Record<string, unknown> {
   const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'Residence',
     name: p.name,
     description: p.tagline ?? undefined,
-    url: `${env.SITE_ORIGIN}/projects/${p.slug}`,
     image: p.heroImage ?? undefined,
+  }
+  if (p.siteOrigin) {
+    ld.url = `${p.siteOrigin}/projects/${p.slug}`
   }
   if (p.location && p.location.trim()) {
     ld.address = {
@@ -99,8 +109,11 @@ export function blogPostingLd(p: {
   excerpt?: string | null
   heroImage?: string | null
   author: string
+  /** Operator's site URL from Settings → General. Omits
+   *  `mainEntityOfPage` when null. */
+  siteOrigin?: string | null
 }): Record<string, unknown> {
-  return {
+  const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'BlogPosting',
     headline: p.title,
@@ -108,8 +121,11 @@ export function blogPostingLd(p: {
     description: p.excerpt ?? undefined,
     image: p.heroImage ?? undefined,
     author: { '@type': 'Person', name: p.author },
-    mainEntityOfPage: `${env.SITE_ORIGIN}/blog/${p.slug}`,
   }
+  if (p.siteOrigin) {
+    ld.mainEntityOfPage = `${p.siteOrigin}/blog/${p.slug}`
+  }
+  return ld
 }
 
 export function breadcrumbLd(

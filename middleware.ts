@@ -53,6 +53,9 @@ interface SecurityConfig {
   }
   integrations?: IntegrationsCspFlags
   disableIpAllowlist: boolean
+  /** True once an admin user has been created via the install wizard.
+   *  False on a fresh deploy → middleware redirects to /install. */
+  installed: boolean
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
@@ -65,7 +68,7 @@ interface ConfigCache {
 // Pinned to globalThis so HMR doesn't reset the cache between requests
 // in dev (the rate-limit module uses the same trick).
 declare global {
-  var __bwcSecurityCfg: ConfigCache | undefined
+  var __cavecmsSecurityCfg: ConfigCache | undefined
 }
 
 // Cold-start bootstrap when neither cache nor a successful fetch are
@@ -98,11 +101,24 @@ function bootstrapSecurityConfig(): SecurityConfig {
     disableIpAllowlist:
       process.env['SECURITY_DISABLE_IP_ALLOWLIST'] === '1' ||
       process.env['SECURITY_DISABLE_IP_ALLOWLIST']?.toLowerCase() === 'true',
+    // Bootstrap conservatively as `installed: true` — an existing
+    // production site momentarily failing security-config fetch
+    // (DB hiccup, internal route cold-compile) must NOT show the
+    // install wizard to live visitors. The real install_state row
+    // is the canonical signal; missing config is a sign of an
+    // existing install where we just can't read it right now.
+    // The downside: a fresh deploy whose security-config fetch
+    // fails (e.g. INTERNAL_REVALIDATE_SECRET unset) would NOT
+    // redirect to /install on the bootstrap path. That's still
+    // the right trade — fresh deploys quickly succeed at the
+    // first cfg fetch, and /install + the wizard endpoints remain
+    // reachable directly if the operator types the URL.
+    installed: true,
   }
 }
 
 async function getSecurityConfig(_req: NextRequest): Promise<SecurityConfig | null> {
-  const cached = globalThis.__bwcSecurityCfg
+  const cached = globalThis.__cavecmsSecurityCfg
   if (cached && Date.now() - cached.ts < SECURITY_CACHE_TTL_MS) return cached.data
   const secret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
   // Empty secret would always 401 — short-circuit so we don't burn a
@@ -110,12 +126,12 @@ async function getSecurityConfig(_req: NextRequest): Promise<SecurityConfig | nu
   // env setup. Returns last-known good or bootstrap fallback.
   if (!secret) {
     const fallback = cached?.data ?? bootstrapSecurityConfig()
-    globalThis.__bwcSecurityCfg = { ts: Date.now(), data: fallback }
+    globalThis.__cavecmsSecurityCfg = { ts: Date.now(), data: fallback }
     return fallback
   }
   // Loopback target — NOT the public origin. Using `req.nextUrl.origin`
   // would resolve to the public HTTPS hostname, hit nginx, and 403 at
-  // the `/api/internal/` loopback gate (scripts/nginx/bwc.conf.template
+  // the `/api/internal/` loopback gate (scripts/nginx/cavecms.conf.template
   // restricts that location to 127.0.0.1 / ::1). Every middleware call
   // would silently fail-open. Drive the URL straight to the local Node
   // listener instead, matching the pattern in scripts/cron-purge.ts.
@@ -146,15 +162,15 @@ async function getSecurityConfig(_req: NextRequest): Promise<SecurityConfig | nu
       // (env-derived) config — site stays reachable, gates open
       // until DB recovers. Documented trade-off.
       const fallback = cached?.data ?? bootstrapSecurityConfig()
-      globalThis.__bwcSecurityCfg = { ts: Date.now(), data: fallback }
+      globalThis.__cavecmsSecurityCfg = { ts: Date.now(), data: fallback }
       return fallback
     }
     const data = (await res.json()) as SecurityConfig
-    globalThis.__bwcSecurityCfg = { ts: Date.now(), data }
+    globalThis.__cavecmsSecurityCfg = { ts: Date.now(), data }
     return data
   } catch {
     const fallback = cached?.data ?? bootstrapSecurityConfig()
-    globalThis.__bwcSecurityCfg = { ts: Date.now(), data: fallback }
+    globalThis.__cavecmsSecurityCfg = { ts: Date.now(), data: fallback }
     return fallback
   }
 }
@@ -277,6 +293,36 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // short-circuit as "no enforcement" — fail-open so a transient DB
   // hiccup doesn't shutter the site.
   const cfg = await getSecurityConfig(req)
+
+  // ─── First-boot install gate (WordPress-style) ────────────────
+  //
+  // Fresh deploy with no admin user → redirect EVERYTHING to /install
+  // except the wizard itself, its endpoints, Next.js internals, and
+  // /healthz (uptime monitors).
+  //
+  // We don't fail-open here: when the config read itself fails (cfg
+  // === null) the most-likely cause IS a fresh deploy (no DB yet),
+  // so the safe default is to assume not-installed and route to
+  // /install rather than serving the half-broken default site.
+  const installed = cfg?.installed === true
+  if (
+    !installed &&
+    !pathname.startsWith('/install') &&
+    !pathname.startsWith('/api/install') &&
+    !pathname.startsWith('/_next/') &&
+    !pathname.startsWith('/uploads/') &&
+    pathname !== '/healthz' &&
+    pathname !== '/favicon.ico'
+  ) {
+    return NextResponse.redirect(new URL('/install', req.url))
+  }
+  // If already installed, /install is permanently 404 — not a
+  // redirect. A 307/308 to /admin would leak the admin path to any
+  // crawler probing /install on a CaveCMS install. Hidden-admin
+  // policy applies here too.
+  if (installed && pathname.startsWith('/install')) {
+    return notFoundResponse()
+  }
 
   // Resolve the saver IP once — used by blocklist, maintenance bypass,
   // and any future per-IP logic. clientIpFromRequest returns '0.0.0.0'

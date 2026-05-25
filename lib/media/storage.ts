@@ -4,7 +4,7 @@ import path from 'node:path'
 import { env } from '@/lib/env'
 
 // Filesystem layout, anchored at UPLOADS_ROOT (env-validated). setup.sh
-// (Plan 09) provisions the four subdirs under `bwc:bwc 750`. The same-fs
+// (Plan 09) provisions the four subdirs under `cavecms:cavecms 750`. The same-fs
 // assertion catches a misconfigured production mount before any upload —
 // rename(2) is atomic only when source and dest share a filesystem.
 //

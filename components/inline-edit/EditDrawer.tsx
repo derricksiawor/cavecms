@@ -327,7 +327,7 @@ export function EditDrawer({
   // draft from a previous save cycle doesn't resurrect; the sweep
   // effect below removes the prior key on every advance.
   const draftKey = useMemo(
-    () => `bwc:draft:${blockId}:${versions.blockVersion}`,
+    () => `cavecms:draft:${blockId}:${versions.blockVersion}`,
     [blockId, versions.blockVersion],
   )
   // F7 — explicit-discard sentinel. The Discard button writes the
@@ -336,7 +336,7 @@ export function EditDrawer({
   // absent when discardedAt is newer than the draft's savedAt. The
   // key is per-block (NOT per-version) so a discard on v3 still
   // suppresses a stale v3 draft after the page hot-reloads.
-  const discardKey = useMemo(() => `bwc:discarded:${blockId}`, [blockId])
+  const discardKey = useMemo(() => `cavecms:discarded:${blockId}`, [blockId])
 
   const [data, setData] = useState<Record<string, unknown>>(() => {
     if (typeof window === 'undefined') return initialData as Record<string, unknown>
@@ -490,7 +490,7 @@ export function EditDrawer({
   draftKeyRef.current = draftKey
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const prefix = `bwc:draft:${blockId}:`
+    const prefix = `cavecms:draft:${blockId}:`
     const current = draftKeyRef.current
     const stale: string[] = []
     for (let i = 0; i < window.localStorage.length; i++) {
@@ -995,7 +995,7 @@ export function EditDrawer({
       width="lg"
       tone="dark"
       resizable
-      resizeStorageKey="bwc:drawer-width:edit"
+      resizeStorageKey="cavecms:drawer-width:edit"
     >
       {/* Header — bold, copper eyebrow + serif title + block-type pill.
          Dark-tone restyle: cream/near-black flipped, copper accent
@@ -1165,7 +1165,7 @@ export function EditDrawer({
         <div className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.16em]">
           {dirty ? (
             <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-copper-300">
-              <span className="inline-flex h-2 w-2 rounded-full bg-copper-400 animate-bwc-pulse-copper" />
+              <span className="inline-flex h-2 w-2 rounded-full bg-copper-400 animate-cavecms-pulse-copper" />
               Unsaved
             </span>
           ) : lastSavedAt !== null ? (

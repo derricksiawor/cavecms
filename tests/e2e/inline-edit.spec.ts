@@ -95,7 +95,7 @@ async function purgeAllBlocks(): Promise<void> {
 
 async function doLogin(page: import('@playwright/test').Page) {
   await page.goto(`/${LOGIN_PATH}`, { waitUntil: 'networkidle' })
-  await page.fill('input[name=email]', 'admin@bwc.test')
+  await page.fill('input[name=email]', 'admin@cavecms.test')
   await page.fill('input[name=password]', 'CorrectHorseBattery0!')
   const [resp] = await Promise.all([
     page.waitForResponse(

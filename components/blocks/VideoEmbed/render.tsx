@@ -11,7 +11,7 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 //   - aspect_ratio (16:9 | 21:9 | 4:3 | 3:2 | 1:1 | 9:16)
 //   - image_overlay (custom poster) + lightbox + lazy_load
 //
-// BWC ships a CURATED subset: youtube + vimeo only (dailymotion is
+// CaveCMS ships a CURATED subset: youtube + vimeo only (dailymotion is
 // negligible traffic; hosted/self-hosted needs storage infra that
 // the master spec defers). NO autoplay, NO loop - autoplay-with-sound
 // is a usability anti-pattern; muted-autoplay is unreliable in iframe

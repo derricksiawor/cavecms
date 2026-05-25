@@ -5,7 +5,7 @@ import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 
 // Elementor parity: Counter (single tile) + Stats Row (multi-counter
-// row). BWC merges them into ONE block_type `stats_row` because the
+// row). CaveCMS merges them into ONE block_type `stats_row` because the
 // renderer dispatches purely on `items.length` + `layout` - the
 // schema doesn't change between the two picker entry points.
 //

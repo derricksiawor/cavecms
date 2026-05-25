@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# scripts/rollback.sh — re-target /opt/bwc/current to the last-known-good
+# scripts/rollback.sh — re-target /opt/cavecms/current to the last-known-good
 # release. Invoked TWO ways:
 #
 #   1. By deploy.sh after healthz fails:
 #        AUTO_ROLLBACK=1 bash $RELEASE_DIR/scripts/rollback.sh [env]
-#      deploy.sh holds /var/lock/bwc-deploy.lock when calling — rollback
+#      deploy.sh holds /var/lock/cavecms-deploy.lock when calling — rollback
 #      SKIPS its own flock acquisition under AUTO_ROLLBACK=1 (the parent
 #      lock keeps a concurrent deploy out). deploy.sh passes the script
 #      path from the FAILED-but-unpacked release dir; the script is
@@ -15,7 +15,7 @@
 #      deploy.
 #
 #   2. By the operator from the shell:
-#        sudo bash /opt/bwc/current/scripts/rollback.sh [env]
+#        sudo bash /opt/cavecms/current/scripts/rollback.sh [env]
 #      Acquires flock itself. Prompts on /dev/tty when fingerprints
 #      differ and optionally restores the pre-deploy DB snapshot via
 #      age + mysql.
@@ -69,7 +69,7 @@ case "$ENV_NAME" in
   production|staging) ;;
   *) echo "[rollback.sh] env must be 'production' or 'staging' (got '$ENV_NAME')" >&2; exit 2 ;;
 esac
-ENV_FILE="/etc/bwc/env.$ENV_NAME"
+ENV_FILE="/etc/cavecms/env.$ENV_NAME"
 if [ ! -f "$ENV_FILE" ]; then
   echo "[rollback.sh] env file missing: $ENV_FILE — run setup.sh first" >&2
   exit 2
@@ -96,7 +96,7 @@ if [ "$AUTO_ROLLBACK" = "1" ]; then
   # interpretation — the parent env may have it but the spawned PM2
   # worker won't. We source the file in a SUBSHELL so the test mirrors
   # exactly what `set -a; . "$ENV_FILE"; set +a` will produce inside
-  # the bwc subshell at PM2 reload time. Subshell isolation prevents
+  # the cavecms subshell at PM2 reload time. Subshell isolation prevents
   # the env file's keys from polluting this script's environment.
   # shellcheck disable=SC1090  # source target is dynamic (production|staging) — intentional.
   if ! ( set -a; . "$ENV_FILE"; set +a; [ -n "${HEALTHZ_TOKEN:-}" ] ); then
@@ -106,13 +106,13 @@ if [ "$AUTO_ROLLBACK" = "1" ]; then
 fi
 
 # Preconditions
-HISTORY_LOG=/opt/bwc/releases-history.log
+HISTORY_LOG=/opt/cavecms/releases-history.log
 if [ ! -f "$HISTORY_LOG" ]; then
   echo "[rollback.sh] no $HISTORY_LOG — nothing to roll back to" >&2
   exit 2
 fi
-if [ ! -L /opt/bwc/current ]; then
-  echo "[rollback.sh] /opt/bwc/current is not a symlink — first deploy never landed?" >&2
+if [ ! -L /opt/cavecms/current ]; then
+  echo "[rollback.sh] /opt/cavecms/current is not a symlink — first deploy never landed?" >&2
   exit 2
 fi
 
@@ -125,7 +125,7 @@ fi
 # parent → would always exit 3. Skip flock acquisition in that case;
 # the parent's lock continues to keep concurrent deploys out for the
 # duration of rollback.
-LOCK_FILE=/var/lock/bwc-deploy.lock
+LOCK_FILE=/var/lock/cavecms-deploy.lock
 if [ "$AUTO_ROLLBACK" != "1" ]; then
   exec 9<>"$LOCK_FILE"
   if ! flock -n 9; then
@@ -137,7 +137,7 @@ fi
 # ---------------------------------------------------------------------------
 # Resolve current SHA + last-known-good SHA
 # ---------------------------------------------------------------------------
-CURRENT_TARGET=$(readlink /opt/bwc/current)
+CURRENT_TARGET=$(readlink /opt/cavecms/current)
 CURRENT_SHA=$(basename "$CURRENT_TARGET")
 if [[ ! "$CURRENT_SHA" =~ ^[0-9a-f]{7,64}$ ]]; then
   echo "[rollback.sh] current symlink target malformed: $CURRENT_TARGET" >&2
@@ -155,7 +155,7 @@ if [ -z "$LAST_OK_SHA" ]; then
   echo "[rollback.sh] no prior 'ok' release in $HISTORY_LOG (current=$CURRENT_SHA)" >&2
   exit 1
 fi
-LAST_OK_DIR="/opt/bwc/releases/$LAST_OK_SHA"
+LAST_OK_DIR="/opt/cavecms/releases/$LAST_OK_SHA"
 if [ ! -d "$LAST_OK_DIR" ]; then
   echo "[rollback.sh] rollback target pruned: $LAST_OK_DIR — keep-last-N rotation removed it" >&2
   exit 1
@@ -182,7 +182,7 @@ read_fp() {
     tr -d '[:space:]' <"$file"
   fi
 }
-CUR_FP_FILE="/opt/bwc/releases/$CURRENT_SHA/db/schema-fingerprint.txt"
+CUR_FP_FILE="/opt/cavecms/releases/$CURRENT_SHA/db/schema-fingerprint.txt"
 LAST_FP_FILE="$LAST_OK_DIR/db/schema-fingerprint.txt"
 CUR_FP="$(read_fp "$CUR_FP_FILE")"
 LAST_FP="$(read_fp "$LAST_FP_FILE")"
@@ -202,7 +202,7 @@ if [ -z "$CUR_FP" ] || [ -z "$LAST_FP" ] || [ "$CUR_FP" != "$LAST_FP" ]; then
     echo "[rollback.sh] no TTY for confirmation prompt; re-run interactively" >&2
     exit 1
   fi
-  SNAP_FILE="/backup/bwc/pre-deploy/$CURRENT_SHA.sql.age"
+  SNAP_FILE="/backup/cavecms/pre-deploy/$CURRENT_SHA.sql.age"
   if [ ! -f "$SNAP_FILE" ]; then
     echo "[rollback.sh] pre-deploy snapshot missing: $SNAP_FILE" >&2
     echo "[rollback.sh]   cannot safely roll back across schema change without DB restore" >&2
@@ -213,7 +213,7 @@ if [ -z "$CUR_FP" ] || [ -z "$LAST_FP" ] || [ "$CUR_FP" != "$LAST_FP" ]; then
   echo "  current SHA:   $CURRENT_SHA (fp ${CUR_FP:-<missing>})" >&2
   echo "  rollback to:   $LAST_OK_SHA (fp ${LAST_FP:-<missing>})" >&2
   echo "  snapshot file: $SNAP_FILE" >&2
-  echo "  Restoring will reload the bwc DB to the pre-deploy state." >&2
+  echo "  Restoring will reload the cavecms DB to the pre-deploy state." >&2
   printf '\n' >&2
   read -r -p "Restore pre-deploy DB snapshot? (yes/no): " ans </dev/tty
   case "$ans" in
@@ -233,7 +233,7 @@ if [ -z "$CUR_FP" ] || [ -z "$LAST_FP" ] || [ "$CUR_FP" != "$LAST_FP" ]; then
       # key in /tmp with default umask — better to fail loud than
       # restore using a key the host considers world-readable. Also
       # require root ownership: root can read anything, so a 0600 key
-      # owned by `bwc` is unsafe to trust as the canonical restore key.
+      # owned by `cavecms` is unsafe to trust as the canonical restore key.
       # `stat -c '%a'` GNU stat — Linux guard at top covers portability.
       # `%a` can return 3 OR 4 chars depending on setuid/setgid/sticky
       # bits — take the last 3 to compare just the permission triplet.
@@ -272,12 +272,12 @@ fi
 if [ "$DB_RESTORE" = "1" ]; then
   # Pre-flight: verify the mysql defaults file is readable before we
   # touch the age key or stream plaintext SQL. Without this, a missing
-  # /etc/bwc/bwc-migrate.cnf surfaces as a mid-pipeline failure with
+  # /etc/cavecms/cavecms-migrate.cnf surfaces as a mid-pipeline failure with
   # plaintext SQL already buffered through gunzip — diagnosable, but
   # the error message is "Access denied; using password: NO" which
   # mis-leads the operator. Fail-fast here.
-  if [ ! -r /etc/bwc/bwc-migrate.cnf ]; then
-    echo "[rollback.sh] /etc/bwc/bwc-migrate.cnf not readable — DDL credentials missing, cannot restore" >&2
+  if [ ! -r /etc/cavecms/cavecms-migrate.cnf ]; then
+    echo "[rollback.sh] /etc/cavecms/cavecms-migrate.cnf not readable — DDL credentials missing, cannot restore" >&2
     exit 1
   fi
   echo "[rollback.sh] restoring DB snapshot from $SNAP_FILE..." >&2
@@ -295,7 +295,7 @@ if [ "$DB_RESTORE" = "1" ]; then
   # failure branch. PIPESTATUS must be captured into a local array on
   # the VERY NEXT line after the pipeline — any intervening simple
   # command (including `echo`) overwrites it.
-  if ! age --decrypt -i "$AGE_KEY_PATH" "$SNAP_FILE" | gunzip | mysql --defaults-extra-file=/etc/bwc/bwc-migrate.cnf bwc; then
+  if ! age --decrypt -i "$AGE_KEY_PATH" "$SNAP_FILE" | gunzip | mysql --defaults-extra-file=/etc/cavecms/cavecms-migrate.cnf cavecms; then
     pipestatus=("${PIPESTATUS[@]}")
     echo "[rollback.sh] DB restore FAILED — DB may be in an inconsistent state. Manual recovery required." >&2
     # Force space-separated join regardless of IFS=$'\n\t' so the
@@ -308,43 +308,43 @@ if [ "$DB_RESTORE" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Atomically update env file (BWC_COMMIT, BWC_RELEASE_TS) so a future
+# Atomically update env file (CAVECMS_COMMIT, CAVECMS_RELEASE_TS) so a future
 # pm2 resurrect (system reboot) brings up the rolled-back SHA, and the
 # PM2 --update-env reload below picks them up immediately.
 # mktemp + register-trap-IMMEDIATELY-after sequence: any signal between
 # mktemp and the trap registration would otherwise leak the temp file.
 # ---------------------------------------------------------------------------
 NOW_ISO=$(date -u +%FT%TZ)
-ENV_TMP=$(mktemp "/etc/bwc/.env.$ENV_NAME.rollback.XXXXXX")
+ENV_TMP=$(mktemp "/etc/cavecms/.env.$ENV_NAME.rollback.XXXXXX")
 # shellcheck disable=SC2064
 trap "rm -f '$ENV_TMP'" EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 chmod 640 "$ENV_TMP"
-chown root:bwc "$ENV_TMP"
+chown root:cavecms "$ENV_TMP"
 # awk substitution; sed is project-banned (project standards #0.15).
 # `seen_*` flags allow the END block to append a missing key rather
 # than silently dropping the substitution — guards against a future
 # setup.sh template that omits these keys.
 awk -v sha="$LAST_OK_SHA" -v ts="$NOW_ISO" '
-  /^BWC_COMMIT=/      { print "BWC_COMMIT=" sha; seen_commit=1; next }
-  /^BWC_RELEASE_TS=/  { print "BWC_RELEASE_TS=" ts; seen_ts=1; next }
+  /^CAVECMS_COMMIT=/      { print "CAVECMS_COMMIT=" sha; seen_commit=1; next }
+  /^CAVECMS_RELEASE_TS=/  { print "CAVECMS_RELEASE_TS=" ts; seen_ts=1; next }
   { print }
   END {
-    if (!seen_commit) print "BWC_COMMIT=" sha
-    if (!seen_ts)     print "BWC_RELEASE_TS=" ts
+    if (!seen_commit) print "CAVECMS_COMMIT=" sha
+    if (!seen_ts)     print "CAVECMS_RELEASE_TS=" ts
   }
 ' "$ENV_FILE" > "$ENV_TMP"
 # Verify both substitutions made it into the new file.
-if ! grep -q "^BWC_COMMIT=$LAST_OK_SHA\$" "$ENV_TMP"; then
-  echo "[rollback.sh] env rewrite did not produce BWC_COMMIT=$LAST_OK_SHA in $ENV_FILE" >&2
+if ! grep -q "^CAVECMS_COMMIT=$LAST_OK_SHA\$" "$ENV_TMP"; then
+  echo "[rollback.sh] env rewrite did not produce CAVECMS_COMMIT=$LAST_OK_SHA in $ENV_FILE" >&2
   exit 1
 fi
-if ! grep -q "^BWC_RELEASE_TS=$NOW_ISO\$" "$ENV_TMP"; then
-  echo "[rollback.sh] env rewrite did not produce BWC_RELEASE_TS=$NOW_ISO in $ENV_FILE" >&2
+if ! grep -q "^CAVECMS_RELEASE_TS=$NOW_ISO\$" "$ENV_TMP"; then
+  echo "[rollback.sh] env rewrite did not produce CAVECMS_RELEASE_TS=$NOW_ISO in $ENV_FILE" >&2
   exit 1
 fi
-# Atomic rename on the same filesystem (/etc/bwc) — mode + owner from
+# Atomic rename on the same filesystem (/etc/cavecms) — mode + owner from
 # the temp file survive. ACLs and xattrs are NOT preserved (mv writes
 # a new inode). Cluster-1's env files have no ACLs, so this is fine.
 mv -f "$ENV_TMP" "$ENV_FILE"
@@ -352,7 +352,7 @@ mv -f "$ENV_TMP" "$ENV_FILE"
 # ---------------------------------------------------------------------------
 # Atomic symlink swap
 # ---------------------------------------------------------------------------
-ln -sfn "$LAST_OK_DIR" /opt/bwc/current
+ln -sfn "$LAST_OK_DIR" /opt/cavecms/current
 
 # ---------------------------------------------------------------------------
 # PM2 reload — runuser (cluster-1 idiom from setup.sh's PM2-runuser block) rather than
@@ -365,23 +365,23 @@ if [ -z "$PM2_BIN" ]; then
   echo "[rollback.sh] pm2 not in root's PATH — install pm2 globally or symlink into /usr/local/bin" >&2
   exit 1
 fi
-ECO="/opt/bwc/current/ecosystem.config.cjs"
+ECO="/opt/cavecms/current/ecosystem.config.cjs"
 # shellcheck disable=SC2016  # $1/$2/$3 are positional args for the inner bash; intentional no-expansion in parent.
-runuser -u bwc -- bash -c '
+runuser -u cavecms -- bash -c '
   set -a
   . "$1"
   set +a
   "$2" startOrReload "$3" --update-env
 ' _ "$ENV_FILE" "$PM2_BIN" "$ECO"
-# pm2 save persists ~bwc/.pm2/dump.pm2 for `pm2 resurrect` on system
-# reboot. If save fails (e.g., disk full on /home/bwc), the running
+# pm2 save persists ~cavecms/.pm2/dump.pm2 for `pm2 resurrect` on system
+# reboot. If save fails (e.g., disk full on /home/cavecms), the running
 # state is still correct — but the next reboot would bring up the bad
 # SHA. Treat failure as fatal so the operator addresses the underlying
 # cause (and the history-log audit row is NOT written until success,
 # keeping the audit trail honest about what's durable).
-if ! runuser -u bwc -- "$PM2_BIN" save >/dev/null; then
+if ! runuser -u cavecms -- "$PM2_BIN" save >/dev/null; then
   echo "[rollback.sh] pm2 save failed — running state is rolled back but resurrect-on-reboot is stale" >&2
-  echo "[rollback.sh]   investigate: ls -lh /home/bwc/.pm2/ ; df -h /home/bwc" >&2
+  echo "[rollback.sh]   investigate: ls -lh /home/cavecms/.pm2/ ; df -h /home/cavecms" >&2
   exit 1
 fi
 
@@ -452,7 +452,7 @@ while [ "$SECONDS" -lt "$HEALTHZ_DEADLINE" ]; do
 done
 if [ "$ok" -lt 3 ]; then
   echo "[rollback.sh] healthz did not reach 3 consecutive 200s within 60s — rolled-back release is also unhealthy" >&2
-  echo "[rollback.sh]   diagnose: runuser -u bwc -- pm2 logs bwc --lines 100 && curl -i $HEALTHZ_URL" >&2
+  echo "[rollback.sh]   diagnose: runuser -u cavecms -- pm2 logs cavecms --lines 100 && curl -i $HEALTHZ_URL" >&2
   exit 1
 fi
 

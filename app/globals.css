@@ -2,7 +2,7 @@
 @plugin "@tailwindcss/typography";
 
 /* ────────────────────────────────────────────────────────────────────────
-   BWC luxury palette + type system.
+   CaveCMS luxury palette + type system.
    Palette is a working set until the formal brand-audit step (later plan)
    produces lib/theme/tokens.ts. Copper accent on warm cream + deep
    near-black text per the luxury-ui-design guide.
@@ -40,7 +40,7 @@
      ~90% of interactive transitions.
 
      --ease-luxury — RESERVED. Allowed callers:
-       1. bwc-rise keyframe (page-level hero intros)
+       1. cavecms-rise keyframe (page-level hero intros)
        2. EditModePill drop-in
        3. Section-template hero reveals (Chunk C, when landed)
      Anything else uses --ease-standard. New --ease-luxury call sites
@@ -49,7 +49,7 @@
      Tailwind v4 picks these up automatically and emits:
        ease-{standard|decelerate|inout|accelerate|luxury}
        duration-{quick|standard|drawer|reveal|elegant|shimmer|ambient|drift}
-       animate-bwc-{rise|fade-in|slide-up|scale-in|toast-in|toast-out|
+       animate-cavecms-{rise|fade-in|slide-up|scale-in|toast-in|toast-out|
                     pulse-copper|shimmer|drift|drawer-in|drawer-out}
      ─────────────────────────────────────────────────────────────────── */
   --ease-standard:    cubic-bezier(0.4, 0, 0.2, 1);
@@ -67,20 +67,20 @@
   --duration-ambient:  2000ms;
   --duration-drift:    3000ms;
 
-  --animate-bwc-rise:         bwc-rise         var(--duration-elegant)  var(--ease-luxury)     both;
-  --animate-bwc-fade-in:      bwc-fade-in      var(--duration-standard) var(--ease-standard)   both;
-  --animate-bwc-slide-up:     bwc-slide-up     var(--duration-reveal)   var(--ease-standard)   both;
-  --animate-bwc-scale-in:     bwc-scale-in     var(--duration-standard) var(--ease-standard)   both;
-  --animate-bwc-toast-in:     bwc-toast-in     var(--duration-standard) var(--ease-standard)   both;
-  --animate-bwc-toast-out:    bwc-toast-out    var(--duration-quick)    var(--ease-accelerate) both;
-  --animate-bwc-pulse-copper: bwc-pulse-copper var(--duration-ambient)  var(--ease-inout)      infinite;
-  --animate-bwc-shimmer:      bwc-shimmer      var(--duration-shimmer)  linear                 infinite;
-  --animate-bwc-drift:        bwc-drift        var(--duration-drift)    var(--ease-inout)      infinite;
-  --animate-bwc-drawer-in:    bwc-drawer-in    var(--duration-drawer)   var(--ease-decelerate) both;
-  --animate-bwc-drawer-out:   bwc-drawer-out   var(--duration-quick)    var(--ease-accelerate) both;
+  --animate-cavecms-rise:         cavecms-rise         var(--duration-elegant)  var(--ease-luxury)     both;
+  --animate-cavecms-fade-in:      cavecms-fade-in      var(--duration-standard) var(--ease-standard)   both;
+  --animate-cavecms-slide-up:     cavecms-slide-up     var(--duration-reveal)   var(--ease-standard)   both;
+  --animate-cavecms-scale-in:     cavecms-scale-in     var(--duration-standard) var(--ease-standard)   both;
+  --animate-cavecms-toast-in:     cavecms-toast-in     var(--duration-standard) var(--ease-standard)   both;
+  --animate-cavecms-toast-out:    cavecms-toast-out    var(--duration-quick)    var(--ease-accelerate) both;
+  --animate-cavecms-pulse-copper: cavecms-pulse-copper var(--duration-ambient)  var(--ease-inout)      infinite;
+  --animate-cavecms-shimmer:      cavecms-shimmer      var(--duration-shimmer)  linear                 infinite;
+  --animate-cavecms-drift:        cavecms-drift        var(--duration-drift)    var(--ease-inout)      infinite;
+  --animate-cavecms-drawer-in:    cavecms-drawer-in    var(--duration-drawer)   var(--ease-decelerate) both;
+  --animate-cavecms-drawer-out:   cavecms-drawer-out   var(--duration-quick)    var(--ease-accelerate) both;
 
   /* Stagger tokens — promoted to @theme so a global override is
-     possible without editing the .bwc-stagger-item rule. The calc() in
+     possible without editing the .cavecms-stagger-item rule. The calc() in
      that rule retains 50ms fallbacks in case a future @theme override
      unsets them (defence in depth). */
   --stagger-base: 50ms;
@@ -92,7 +92,7 @@
    inline style: `style={{ '--stagger-index': i }}`. Combine with any
    `animate-*` utility — the delay piles onto the existing animation
    without rewriting the keyframe pipeline. */
-.bwc-stagger-item {
+.cavecms-stagger-item {
   animation-delay: calc(var(--stagger-base, 50ms) + var(--stagger-index, 0) * var(--stagger-step, 50ms));
 }
 
@@ -116,50 +116,50 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────
-   Luxury keyframes — picked up by `--animate-bwc-*` tokens in @theme
-   above which generate the `animate-bwc-*` Tailwind utilities.
+   Luxury keyframes — picked up by `--animate-cavecms-*` tokens in @theme
+   above which generate the `animate-cavecms-*` Tailwind utilities.
 
    Animation definitions (duration + curve + fill-mode) live in @theme;
    keep this block focused on geometric definitions only.
    ──────────────────────────────────────────────────────────────────────── */
 
-/* Hero-tier entrance — preserved with BWC's soft-overshoot luxury curve.
+/* Hero-tier entrance — preserved with CaveCMS's soft-overshoot luxury curve.
    Used for page-level intros and the EditModePill drop-in; everything
    else uses Anna's slideUp / scaleIn / fadeIn at standard duration. */
-@keyframes bwc-rise {
+@keyframes cavecms-rise {
   0% { opacity: 0; transform: translateY(24px); filter: blur(8px); }
   100% { opacity: 1; transform: translateY(0); filter: blur(0); }
 }
 
 /* Micro-entrance — small UI elements (toolbar pills, dropdowns).
    4px translateY for a subtle settle vs. slideUp's 20px hero reveal. */
-@keyframes bwc-fade-in {
+@keyframes cavecms-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 /* Standard reveal — Anna's primary entrance keyframe.
    20px lift + opacity fade, 500ms `--ease-standard`. Pair with the
-   `.bwc-stagger-item` class + `--stagger-index` for cascading lists. */
-@keyframes bwc-slide-up {
+   `.cavecms-stagger-item` class + `--stagger-index` for cascading lists. */
+@keyframes cavecms-slide-up {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 /* Micro-reveal — small interactive surfaces (cards, icons settling
    into place). Anna's scaleIn at 0.94 vs. her 0.9; tighter pop. */
-@keyframes bwc-scale-in {
+@keyframes cavecms-scale-in {
   from { opacity: 0; transform: scale(0.94); }
   to   { opacity: 1; transform: scale(1); }
 }
 
 /* Toast in/out — vertical settle + scale, with --ease-accelerate
    carrying the exit (steep at start = quicker dismissal). */
-@keyframes bwc-toast-in {
+@keyframes cavecms-toast-in {
   from { opacity: 0; transform: translateY(16px) scale(0.96); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-@keyframes bwc-toast-out {
+@keyframes cavecms-toast-out {
   from { opacity: 1; transform: translateY(0) scale(1); }
   to   { opacity: 0; transform: translateY(16px) scale(0.96); }
 }
@@ -168,45 +168,45 @@
    on entry (slow-stop as it settles into place), accelerate on exit
    (snap-leave as it slides off-screen). 400ms entry feels considered;
    200ms exit feels responsive. */
-@keyframes bwc-drawer-in {
+@keyframes cavecms-drawer-in {
   from { transform: translateX(100%); }
   to   { transform: translateX(0); }
 }
-@keyframes bwc-drawer-out {
+@keyframes cavecms-drawer-out {
   from { transform: translateX(0); }
   to   { transform: translateX(100%); }
 }
 
 /* Skeleton shimmer — 1.5s loop (consolidated with `--duration-shimmer`). */
-@keyframes bwc-shimmer {
+@keyframes cavecms-shimmer {
   0%   { background-position: -468px 0; }
   100% { background-position:  468px 0; }
 }
 
-/* Copper-pulse halo — replaces Anaarkutu's `goldPulse` with BWC's
+/* Copper-pulse halo — replaces Anaarkutu's `goldPulse` with CaveCMS's
    copper-500 alpha. 2s loop on `--ease-inout`. */
-@keyframes bwc-pulse-copper {
+@keyframes cavecms-pulse-copper {
   0%, 100% { box-shadow: 0 0 0 0 rgba(184, 115, 51, 0.4); }
   50%      { box-shadow: 0 0 0 8px rgba(184, 115, 51, 0); }
 }
 
 /* Outline-handle scroll-to feedback. Triggered by the OutlinePanel's
-   TreeRow handle button via .add('bwc-outline-ping') for 1.6s, then
+   TreeRow handle button via .add('cavecms-outline-ping') for 1.6s, then
    removed. A 0→8px copper-ring expansion + fade matches the existing
-   bwc-pulse-copper aesthetic but fires ONCE rather than looping.
+   cavecms-pulse-copper aesthetic but fires ONCE rather than looping.
    Border-radius matches the editor frame's 12px so the ring hugs the
    block edge. */
-@keyframes bwc-outline-ping {
+@keyframes cavecms-outline-ping {
   0%   { box-shadow: 0 0 0 0 rgba(194, 133, 61, 0.55); }
   40%  { box-shadow: 0 0 0 6px rgba(194, 133, 61, 0.22); }
   100% { box-shadow: 0 0 0 14px rgba(194, 133, 61, 0); }
 }
-.bwc-outline-ping {
-  animation: bwc-outline-ping 1.6s ease-out;
+.cavecms-outline-ping {
+  animation: cavecms-outline-ping 1.6s ease-out;
   border-radius: 14px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .bwc-outline-ping {
+  .cavecms-outline-ping {
     animation: none;
     outline: 2px solid var(--color-copper-400);
     outline-offset: 4px;
@@ -214,31 +214,31 @@
 }
 
 /* Idle drift — 8px translateY oscillation (Anna's 10px tightened for
-   BWC's calmer feel). Use on small accent elements that benefit from
+   CaveCMS's calmer feel). Use on small accent elements that benefit from
    subtle life when the page is otherwise static. */
-@keyframes bwc-drift {
+@keyframes cavecms-drift {
   0%, 100% { transform: translateY(0); }
   50%      { transform: translateY(-8px); }
 }
 
 /* Skeleton bg + animation bundle — not a Tailwind animation utility
    (it pairs the animation with a gradient background). Named
-   `bwc-skeleton` (not `bwc-shimmer`) to disambiguate from the
-   `animate-bwc-shimmer` token: this utility is the FULL skeleton
+   `cavecms-skeleton` (not `cavecms-shimmer`) to disambiguate from the
+   `animate-cavecms-shimmer` token: this utility is the FULL skeleton
    surface (gradient background + animation), while
-   `animate-bwc-shimmer` is JUST the animation property for callers
+   `animate-cavecms-shimmer` is JUST the animation property for callers
    that bring their own background (e.g. `components/inline-edit/
-   Shimmer.tsx` uses a copper-tinted bg-gradient + animate-bwc-shimmer). */
-@utility bwc-skeleton {
+   Shimmer.tsx` uses a copper-tinted bg-gradient + animate-cavecms-shimmer). */
+@utility cavecms-skeleton {
   background: linear-gradient(to right, rgba(110, 102, 90, 0.06) 8%, rgba(110, 102, 90, 0.14) 18%, rgba(110, 102, 90, 0.06) 33%);
   background-size: 800px 100px;
-  animation: bwc-shimmer var(--duration-shimmer) linear infinite;
+  animation: cavecms-shimmer var(--duration-shimmer) linear infinite;
 }
 
 /* Honest focus ring for every editor surface — replaces the default
    amber-600 ring with the copper token to stay on-brand. */
 @layer base {
-  .bwc-focus-ring:focus-visible {
+  .cavecms-focus-ring:focus-visible {
     outline: 2px solid var(--color-copper-500);
     outline-offset: 2px;
   }
@@ -328,7 +328,7 @@
 
    `motion-reduce:transition-none` Tailwind variants only fire where a
    contributor remembered to add them. Infinite-loop animations
-   (bwc-pulse-copper, bwc-shimmer, bwc-drift) AND any raw `animate-bwc-*`
+   (cavecms-pulse-copper, cavecms-shimmer, cavecms-drift) AND any raw `animate-cavecms-*`
    call site without the variant would otherwise still run for users who
    set prefers-reduced-motion: reduce.
 
@@ -352,7 +352,7 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   BWC LUXURY REDESIGN — fresh brand language @theme block.
+   CaveCMS LUXURY REDESIGN — fresh brand language @theme block.
 
    Black + gold editorial system. COEXISTS with the legacy copper-on-
    cream palette at the top of this file during the page-by-page
@@ -589,12 +589,12 @@
 }
 
 /* Sticky section legends inside the EditDrawer — fieldset legends use
-   `bwc-sticky-legend` (see components/inline-edit/ZodForm.tsx) so the
+   `cavecms-sticky-legend` (see components/inline-edit/ZodForm.tsx) so the
    section label stays pinned at the top of the scrolling drawer viewport
    while long forms (media_array with 12 items, object_array with many
    sub-fields) scroll underneath. Dark-drawer override swaps the cream
    backdrop for an obsidian translucent one. */
-[data-drawer-tone="dark"] .bwc-sticky-legend {
+[data-drawer-tone="dark"] .cavecms-sticky-legend {
   background-color: rgba(5, 5, 5, 0.85);
   color: rgba(243, 233, 220, 0.9);
 }
@@ -606,12 +606,12 @@
    the repeater reads as a stack of dark sub-cards. The header strip
    inside ObjectArrayField items gets a slightly darker shade for the
    item-title row separation cue. */
-[data-drawer-tone="dark"] .bwc-repeater-item {
+[data-drawer-tone="dark"] .cavecms-repeater-item {
   background-color: rgba(243, 233, 220, 0.045);
   border-color: rgba(243, 233, 220, 0.14);
   box-shadow: 0 1px 0 rgba(243, 233, 220, 0.04) inset;
 }
-[data-drawer-tone="dark"] .bwc-repeater-item-header {
+[data-drawer-tone="dark"] .cavecms-repeater-item-header {
   border-bottom-color: rgba(243, 233, 220, 0.08);
 }
 
@@ -681,7 +681,7 @@
 /* Default warm-stone foreground on those controls reads OK on dark
    already (warm-stone is mid-tone) but the resting cream variant
    matches the obsidian drawer better. */
-[data-drawer-tone="dark"] .bwc-repeater-item button.text-warm-stone {
+[data-drawer-tone="dark"] .cavecms-repeater-item button.text-warm-stone {
   color: rgba(243, 233, 220, 0.55);
 }
 

@@ -4,12 +4,12 @@ import type { BlockData } from '@/lib/cms/block-registry'
 
 // Elementor-parity Star Rating widget. Canonical fields per
 // `includes/widgets/star-rating.php`:
-//   - rating_scale (5 | 10) — BWC ships 5 only; the 10-scale is rare
+//   - rating_scale (5 | 10) — CaveCMS ships 5 only; the 10-scale is rare
 //     in luxury real-estate and would force layout reflow.
 //   - rating (decimal allowed — e.g. 4.5)
 //   - title (optional label, e.g. "Client Rating")
-//   - icon (FA star | Unicode ★) — BWC uses lucide Star; one source.
-//   - unmarked_style (Solid | Outline) — BWC always outline (the
+//   - icon (FA star | Unicode ★) — CaveCMS uses lucide Star; one source.
+//   - unmarked_style (Solid | Outline) — CaveCMS always outline (the
 //     researcher's luxury default).
 //   - alignment, stars_color, unmarked_color, stars_size, stars_gap
 //

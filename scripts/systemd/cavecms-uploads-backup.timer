@@ -1,0 +1,13 @@
+[Unit]
+Description=CaveCMS uploads backup timer
+
+[Timer]
+# 04:30 UTC — after db-backup (03:00) so a single overlap window
+# can't double-strain the disk. Same jitter strategy.
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=cavecms-uploads-backup.service
+
+[Install]
+WantedBy=timers.target

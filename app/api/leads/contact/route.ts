@@ -11,7 +11,6 @@ import {
   HONEYPOT_FIELD,
 } from '@/lib/leads/spam'
 import { enqueueEmail } from '@/lib/email/queue'
-import { env } from '@/lib/env'
 import { neutralResponse } from '@/lib/leads/neutralResponse'
 import { normalizeEmail } from '@/lib/leads/normalizeEmail'
 import { logEnqueueFailure } from '@/lib/leads/logEnqueueFailure'
@@ -145,7 +144,8 @@ export const POST = withError(async (req: Request) => {
   // 08 inbox de-dupe) — see lib/leads/normalizeEmail.
   const normEmail = normalizeEmail(body.email)
   const userAgent = (headerObj['user-agent'] ?? '').slice(0, 255)
-  const salesTo = env.SALES_EMAIL || env.SMTP_FROM || ''
+  const { getLeadNotificationRecipient } = await import('@/lib/email/transport')
+  const salesTo = await getLeadNotificationRecipient()
 
   const msgVal = body.message?.trim() || null
   const tourDateVal = body.tour_date?.trim() || null
@@ -180,7 +180,7 @@ export const POST = withError(async (req: Request) => {
     await dispatchLeadToCrms({
       leadId,
       source: 'contact',
-      bwcFields: {
+      cavecmsFields: {
         name: body.name,
         email: normEmail,
         phone: body.phone,

@@ -14,7 +14,7 @@ test('unauthenticated /admin redirects to /', async ({ page }) => {
 
 test('login → dashboard flow', async ({ page }) => {
   await page.goto(`/${LOGIN_PATH}`)
-  await page.fill('input[name=email]', 'admin@bwc.test')
+  await page.fill('input[name=email]', 'admin@cavecms.test')
   await page.fill('input[name=password]', 'CorrectHorseBattery0!')
   const [resp] = await Promise.all([
     page.waitForResponse((r) => r.url().includes('/api/auth/login') && r.request().method() === 'POST'),

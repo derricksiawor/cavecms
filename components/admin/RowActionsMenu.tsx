@@ -249,7 +249,7 @@ export function RowActionsMenu({
               left: coords.left,
               maxHeight: coords.maxHeight,
             }}
-            className="z-50 w-56 overflow-y-auto rounded-2xl border border-warm-stone/20 bg-cream-50 py-1.5 shadow-[0_20px_50px_-20px_rgba(5,5,5,0.4)] animate-bwc-fade-in"
+            className="z-50 w-56 overflow-y-auto rounded-2xl border border-warm-stone/20 bg-cream-50 py-1.5 shadow-[0_20px_50px_-20px_rgba(5,5,5,0.4)] animate-cavecms-fade-in"
           >
             {items.map((item) => {
               const Icon = item.icon

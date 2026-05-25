@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # scripts/uploads-backup.sh — daily encrypted uploads backup with off-site copy.
 #
-# Invoked by systemd: bwc-uploads-backup.timer → bwc-uploads-backup.service.
-# Runs as bwc:backup with IOSchedulingClass=idle, MemoryMax=256M,
-# ReadWritePaths=/backup /var/log/bwc /var/lib/bwc, ProtectSystem=strict,
-# PrivateTmp=true, EnvironmentFile=/etc/bwc/env.production (per
-# scripts/systemd/bwc-uploads-backup.service).
+# Invoked by systemd: cavecms-uploads-backup.timer → cavecms-uploads-backup.service.
+# Runs as cavecms:backup with IOSchedulingClass=idle, MemoryMax=256M,
+# ReadWritePaths=/backup /var/log/cavecms /var/lib/cavecms, ProtectSystem=strict,
+# PrivateTmp=true, EnvironmentFile=/etc/cavecms/env.production (per
+# scripts/systemd/cavecms-uploads-backup.service).
 #
 # What's backed up:
-#   /opt/bwc/uploads/originals/         — full-resolution source images
-#   /opt/bwc/uploads/variants/          — generated derivative variants
-#   /opt/bwc/uploads/brochures-private/ — PII-bearing private documents
+#   /opt/cavecms/uploads/originals/         — full-resolution source images
+#   /opt/cavecms/uploads/variants/          — generated derivative variants
+#   /opt/cavecms/uploads/brochures-private/ — PII-bearing private documents
 #
 # What's excluded:
-#   /opt/bwc/uploads/.tmp/              — work-in-flight uploads (the
+#   /opt/cavecms/uploads/.tmp/              — work-in-flight uploads (the
 #                                         tarball selects the three
 #                                         canonical subdirs by name, so
 #                                         .tmp is excluded by selection;
@@ -28,7 +28,7 @@
 #   end-to-end with the cluster-1 age public key, so plaintext PII never
 #   leaves the box.
 #
-# Format: tar → gzip → age encrypt → /backup/bwc/uploads/<YYYY-MM-DD-UTC>.tar.age.
+# Format: tar → gzip → age encrypt → /backup/cavecms/uploads/<YYYY-MM-DD-UTC>.tar.age.
 # This is a SEPARATE invariant from db-backup.sh's mysqldump→gzip→age
 # format. There is no consumer that reads both — restore-drill.sh
 # operates on db dumps only. The on-disk shape of an uploads backup is
@@ -36,7 +36,7 @@
 #   age decrypt -i <identity> file.tar.age | gunzip | tar -xf - -C <target>
 #
 # Skip-if-no-changes:
-#   Compares /var/lib/bwc/last-uploads-backup.ok mtime against the
+#   Compares /var/lib/cavecms/last-uploads-backup.ok mtime against the
 #   newest file mtime in the three tracked subdirs. If nothing in
 #   uploads has changed since the last successful backup, skip the run
 #   entirely — daily backups of an unchanged 10GB tree are wasteful
@@ -52,36 +52,36 @@
 #   any file-write that raced the tar pipeline, silently dropping
 #   those files from every future backup — the bug this scheme avoids.
 #
-#   A separate $HEALTH_MARKER (visible /var/lib/bwc/last-uploads-backup.ok)
+#   A separate $HEALTH_MARKER (visible /var/lib/cavecms/last-uploads-backup.ok)
 #   is touched on every successful exit, including the no-changes skip
-#   path. bwc-cron-purge (cluster 4) reads this marker and aborts if
+#   path. cavecms-cron-purge (cluster 4) reads this marker and aborts if
 #   it's older than 24h — so on a no-upload-activity day the script
 #   must STILL refresh the health marker, even though it doesn't touch
 #   the scan marker.
 #
 # Off-site backups are MANDATORY:
 #   Per project standards handoff and Plan 09 cluster-3 brief, production backups
-#   MUST land off-site. BACKUP_RCLONE_REMOTE in /etc/bwc/env.production
+#   MUST land off-site. BACKUP_RCLONE_REMOTE in /etc/cavecms/env.production
 #   names the rclone target. If unset OR rclone cannot reach the target,
 #   refuse the run. db-backup.sh runs daily with a full rclone pre-flight,
 #   so cross-script monitoring catches an off-site outage within 24h even
 #   if uploads-backup skipped on no-changes that day.
 #
-# Output: /backup/bwc/uploads/<YYYY-MM-DD-UTC>.tar.age
+# Output: /backup/cavecms/uploads/<YYYY-MM-DD-UTC>.tar.age
 #   - Same-day re-runs OVERWRITE today's file via .partial → mv -f.
 #   - Local retention: files older than 30 days are deleted at the end
 #     of each successful run.
 #   - Off-site retention: rclone delete --min-age 90d (best-effort).
 #
-# Concurrency: persistent flock at /var/lib/bwc/.bwc-uploads-backup.lock.
+# Concurrency: persistent flock at /var/lib/cavecms/.cavecms-uploads-backup.lock.
 # Same persistent-lock pattern as disk-check.sh / db-backup.sh — lock
 # file lives across runs (see disk-check.sh:135-149 for the full
 # rationale).
 #
-# Side effects: writes /backup/bwc/uploads/*.tar.age and the lock file;
-# reads /opt/bwc/uploads/{originals,variants,brochures-private}; touches
-# /var/lib/bwc/last-uploads-backup.ok on success. Logs to stdout/stderr
-# (systemd journal). OnFailure=bwc-alert@%n.service.
+# Side effects: writes /backup/cavecms/uploads/*.tar.age and the lock file;
+# reads /opt/cavecms/uploads/{originals,variants,brochures-private}; touches
+# /var/lib/cavecms/last-uploads-backup.ok on success. Logs to stdout/stderr
+# (systemd journal). OnFailure=cavecms-alert@%n.service.
 #
 # Exit codes:
 #   0  — backup completed and off-site copy succeeded, OR no-changes
@@ -119,13 +119,13 @@ fi
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
-UPLOADS_ROOT=/opt/bwc/uploads
+UPLOADS_ROOT=/opt/cavecms/uploads
 # The three canonical subdirs from cluster-1 setup.sh's uploads-tree
 # install -d block (originals + variants + brochures-private). .tmp is
 # DELIBERATELY NOT in this list — work-in-flight uploads must not be
 # captured in a backup.
 SUBDIRS=(originals variants brochures-private)
-BACKUP_DIR=/backup/bwc/uploads
+BACKUP_DIR=/backup/cavecms/uploads
 # Two separate markers with two distinct semantics:
 #   SCAN_MARKER (hidden, mtime = tar-start time):
 #     - Used by find -newer in the skip-if-no-changes gate.
@@ -134,7 +134,7 @@ BACKUP_DIR=/backup/bwc/uploads
 #       run's find would compare against "today" and miss every upload
 #       finalized before that touch.
 #   HEALTH_MARKER (visible, mtime = "last successful run"):
-#     - Consumed by bwc-cron-purge (see bwc-cron-purge.service header:
+#     - Consumed by cavecms-cron-purge (see cavecms-cron-purge.service header:
 #       "cron-purge.ts ... aborts if the marker is older than 24h").
 #     - Updated on EVERY successful exit, including the no-changes skip
 #       path. On a low-activity week with daily no-op runs, cron-purge
@@ -142,16 +142,16 @@ BACKUP_DIR=/backup/bwc/uploads
 #       cleanup is deferred indefinitely.
 # These two semantics CONFLICTED when both were collapsed onto a single
 # file. They are split here.
-SCAN_MARKER=/var/lib/bwc/.last-uploads-backup.scan
-HEALTH_MARKER=/var/lib/bwc/last-uploads-backup.ok
-LOCK_FILE=/var/lib/bwc/.bwc-uploads-backup.lock
-RECIPIENT_FILE=/etc/bwc/backup.pub
+SCAN_MARKER=/var/lib/cavecms/.last-uploads-backup.scan
+HEALTH_MARKER=/var/lib/cavecms/last-uploads-backup.ok
+LOCK_FILE=/var/lib/cavecms/.cavecms-uploads-backup.lock
+RECIPIENT_FILE=/etc/cavecms/backup.pub
 DATE=$(date -u +%F)
 OUT=$BACKUP_DIR/$DATE.tar.age
 RETENTION_LOCAL_DAYS=30
 RETENTION_OFFSITE_DAYS=90
 # Size floors. tar's worst-case compressed empty archive is around 50
-# bytes (just the EOF blocks). A real BWC uploads archive — even on a
+# bytes (just the EOF blocks). A real CaveCMS uploads archive — even on a
 # brand-new install with stock seed media — is hundreds of KB. The
 # absolute floor catches catastrophic truncation; the ratio floor
 # catches "new < half of largest prior", flagging both corruption and
@@ -165,7 +165,7 @@ SIZE_FLOOR_BYTES_ABS=1024
 # ---------------------------------------------------------------------------
 if [ -z "${BACKUP_RCLONE_REMOTE:-}" ]; then
   echo "[uploads-backup.sh] BACKUP_RCLONE_REMOTE is empty — production backups MUST be off-site." >&2
-  echo "[uploads-backup.sh]   Populate BACKUP_RCLONE_REMOTE in /etc/bwc/env.production (see setup.sh's NEXT STEPS instruction)." >&2
+  echo "[uploads-backup.sh]   Populate BACKUP_RCLONE_REMOTE in /etc/cavecms/env.production (see setup.sh's NEXT STEPS instruction)." >&2
   exit 2
 fi
 BACKUP_RCLONE_REMOTE=${BACKUP_RCLONE_REMOTE//[$'\r\n\t']/}
@@ -174,7 +174,7 @@ while [ "${BACKUP_RCLONE_REMOTE: -1}" = "/" ]; do
 done
 BACKUP_RCLONE_REMOTE=$(printf '%s' "$BACKUP_RCLONE_REMOTE" | sanitize)
 if [ -z "$BACKUP_RCLONE_REMOTE" ]; then
-  echo "[uploads-backup.sh] BACKUP_RCLONE_REMOTE collapsed to empty after canonicalization — check /etc/bwc/env.production" >&2
+  echo "[uploads-backup.sh] BACKUP_RCLONE_REMOTE collapsed to empty after canonicalization — check /etc/cavecms/env.production" >&2
   exit 2
 fi
 # Reject leading `-` — see db-backup.sh for the rationale (rclone flag
@@ -184,7 +184,7 @@ case "$BACKUP_RCLONE_REMOTE" in
 esac
 
 if [ -z "${RCLONE_CONFIG:-}" ]; then
-  echo "[uploads-backup.sh] RCLONE_CONFIG is empty — expected /etc/bwc/rclone.conf via env.production" >&2
+  echo "[uploads-backup.sh] RCLONE_CONFIG is empty — expected /etc/cavecms/rclone.conf via env.production" >&2
   exit 2
 fi
 if [ ! -r "$RCLONE_CONFIG" ]; then
@@ -247,8 +247,8 @@ fi
 # Symlink prechecks — MUST run BEFORE the skip-if-no-changes gate below,
 # because the skip path also writes $HEALTH_MARKER via `: > "$HEALTH_MARKER"`
 # (truncate-write follows symlinks). Without this guard placed first, a
-# bwc-uid attacker could pre-plant $HEALTH_MARKER as a symlink to
-# /var/lib/bwc/deploy.blocked (writable via group bwcstate per the
+# cavecms-uid attacker could pre-plant $HEALTH_MARKER as a symlink to
+# /var/lib/cavecms/deploy.blocked (writable via group cavecmsstate per the
 # cluster-3 perm fix) → the next no-changes tick's skip-path HEALTH
 # touch would truncate the sentinel → empty sentinel = "operator-
 # owned" per disk-check's is_ours semantics → preflight refuses every
@@ -269,7 +269,7 @@ done
 if [ -f "$SCAN_MARKER" ]; then
   # find -newer compares mtimes by the kernel's nanosecond clock; no
   # ambiguity from "same second" edge cases. We pass all three subdirs
-  # so find never sees /opt/bwc/uploads/.tmp.
+  # so find never sees /opt/cavecms/uploads/.tmp.
   #
   # Fail-OPEN on find error: a permission drift on a subdir would
   # otherwise silently skip backups indefinitely (the scan marker
@@ -281,8 +281,8 @@ if [ -f "$SCAN_MARKER" ]; then
     if [ -z "$newer" ]; then
       echo "[uploads-backup.sh] no upload changes since $(stat -c %y "$SCAN_MARKER" | sanitize) — skipping"
       # CRITICAL: refresh the HEALTH marker even on the skip path so
-      # bwc-cron-purge doesn't see a stale marker on no-activity days.
-      # See bwc-cron-purge.service header — it aborts if this marker
+      # cavecms-cron-purge doesn't see a stale marker on no-activity days.
+      # See cavecms-cron-purge.service header — it aborts if this marker
       # is older than 24h. The scan marker is intentionally left
       # untouched so the find-newer gate keeps comparing against the
       # actual tar-start time.
@@ -350,11 +350,11 @@ fi
 # tar flags:
 #   -C $UPLOADS_ROOT     change to uploads root so paths in the archive
 #                        are subdir-relative (originals/foo.jpg, not
-#                        /opt/bwc/uploads/originals/foo.jpg). Decoding
+#                        /opt/cavecms/uploads/originals/foo.jpg). Decoding
 #                        to a fresh target dir gives a clean tree.
 #   --exclude '.tmp'     defence-in-depth — already excluded by NOT
 #                        passing .tmp to the SUBDIRS list, but if a
-#                        future maintainer adds /opt/bwc/uploads/<sub>/.tmp/
+#                        future maintainer adds /opt/cavecms/uploads/<sub>/.tmp/
 #                        the exclude rule keeps work-in-flight uploads
 #                        out of the backup. tar's --exclude with this
 #                        pattern is path-component-anchored and applies
@@ -363,7 +363,7 @@ fi
 #                        so a separate `--exclude='.tmp/*'` is redundant.
 #   --warning=no-file-removed: similar — a file that was deleted between
 #                        tar's stat and read (concurrent cleanup of an
-#                        orphan in /opt/bwc/uploads) would otherwise
+#                        orphan in /opt/cavecms/uploads) would otherwise
 #                        produce a "file vanished" warning + exit 1.
 #                        The skip-if-no-changes scheme's self-healing
 #                        property covers this: if the file genuinely
@@ -450,8 +450,8 @@ fi
 # file for the comment on why this differs from deploy.sh's mv-first order).
 # ---------------------------------------------------------------------------
 chmod 640 "$SNAP_TMP"
-if ! chown bwc:backup "$SNAP_TMP" 2>/dev/null; then
-  echo "[uploads-backup.sh] WARN: chown bwc:backup $SNAP_TMP failed; snapshot will be bwc:bwc" >&2
+if ! chown cavecms:backup "$SNAP_TMP" 2>/dev/null; then
+  echo "[uploads-backup.sh] WARN: chown cavecms:backup $SNAP_TMP failed; snapshot will be cavecms:cavecms" >&2
 fi
 mv -f -- "$SNAP_TMP" "$OUT"
 
@@ -489,7 +489,7 @@ fi
 # silently dropped).
 #
 # $HEALTH_MARKER is a separate file with "now" mtime — consumed by
-# bwc-cron-purge as a "uploads-backup ran successfully today" signal.
+# cavecms-cron-purge as a "uploads-backup ran successfully today" signal.
 # Touched on both the skip path (above) and here on the full-backup
 # path, so cron-purge always sees a fresh marker on a healthy schedule.
 #

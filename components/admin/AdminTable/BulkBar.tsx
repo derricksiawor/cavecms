@@ -28,7 +28,7 @@ export function BulkBar<Row>({
     <div
       role="region"
       aria-label="Bulk actions"
-      className="flex flex-wrap items-center gap-3 rounded-2xl border border-copper-300/40 bg-copper-50/40 px-4 py-3 animate-bwc-fade-in"
+      className="flex flex-wrap items-center gap-3 rounded-2xl border border-copper-300/40 bg-copper-50/40 px-4 py-3 animate-cavecms-fade-in"
     >
       <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-near-black">
         {count} {count === 1 ? 'item' : 'items'} {selectionLabel ?? 'selected'}

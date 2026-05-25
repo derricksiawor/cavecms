@@ -11,7 +11,7 @@ import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 //   - type: horizontal | vertical
 //   - tabs_align_horizontal/vertical (start / center / end / stretch)
 //
-// BWC narrows for v1: horizontal-only (vertical adds layout-shift
+// CaveCMS narrows for v1: horizontal-only (vertical adds layout-shift
 // complexity the catalog doesn't justify yet — operators compose
 // vertical tabs with a Section + 2 columns when they need it). The
 // active-tab tracking is IDENTITY-based (we remember which item is
@@ -49,7 +49,7 @@ interface TabsData {
   default_tab_index?: number
 }
 
-// Tailwind Typography prose overrides matching the BWC palette — without
+// Tailwind Typography prose overrides matching the CaveCMS palette — without
 // these, anchor links inside rich text render in default prose blue and
 // strong/em fall back to greyscale, breaking the editorial copper accent.
 const PROSE_PALETTE =

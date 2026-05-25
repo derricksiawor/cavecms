@@ -1,5 +1,5 @@
 /**
- * BWC luxury redesign — single source of truth for design tokens.
+ * CaveCMS luxury redesign — single source of truth for design tokens.
  *
  * Admin-bar pickers (color swatches, type-size selector, spacing
  * slider, animation preset dropdown) read from THIS file. Operators
@@ -218,7 +218,7 @@ export const ANIMATION_PRESETS: Record<
 
 // ──────────────────────────────────────────────────────────────────
 // Motion timing — sourced from the existing @theme block in
-// globals.css so callers stay consistent with bwc-* animations.
+// globals.css so callers stay consistent with cavecms-* animations.
 // ──────────────────────────────────────────────────────────────────
 
 export type EaseToken = 'standard' | 'decelerate' | 'inout' | 'accelerate' | 'luxury'

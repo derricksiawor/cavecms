@@ -71,7 +71,7 @@ test.describe('customer walkthrough — measured', () => {
     const inquiryForm = page.locator('form').filter({ has: page.locator('textarea[name="message"]') }).first()
     if (await inquiryForm.count() > 0) {
       await inquiryForm.locator('input[name="name"]').fill('Walkthrough Test')
-      await inquiryForm.locator('input[name="email"]').fill('walkthrough@bwc.test')
+      await inquiryForm.locator('input[name="email"]').fill('walkthrough@cavecms.test')
       await inquiryForm.locator('input[name="phone"]').fill('+233 24 000 0000')
       await inquiryForm.locator('textarea[name="message"]').fill('Automated walkthrough verification. Please ignore.')
       const submitBtn = inquiryForm.getByRole('button', { name: /Send inquiry|Submit/i })
@@ -88,7 +88,7 @@ test.describe('customer walkthrough — measured', () => {
     await page.waitForLoadState('networkidle')
     const contactForm = page.locator('form').filter({ has: page.locator('textarea[name="message"]') }).first()
     await contactForm.locator('input[name="name"]').fill('Walk Customer')
-    await contactForm.locator('input[name="email"]').fill('customer@bwc.test')
+    await contactForm.locator('input[name="email"]').fill('customer@cavecms.test')
     await contactForm.locator('input[name="phone"]').fill('+233 24 000 1111')
     await contactForm.locator('textarea[name="message"]').fill('Hello from customer walkthrough.')
     await contactForm.getByRole('button', { name: /Send message/i }).click()

@@ -193,7 +193,7 @@ interface OutlineApi {
 
 // Viewport-class detection for the open/close persistence per-viewport
 // fix (F5 — Tablet collapse-persist leak). The previous implementation
-// persisted a single `bwc:outline-open` value, so a tablet visit
+// persisted a single `cavecms:outline-open` value, so a tablet visit
 // writing `false` leaked into the next desktop visit. Splitting the
 // key per viewport-class fixes the leak without giving up the saved
 // preference within each class.
@@ -248,7 +248,7 @@ function useViewportClass(): ViewportClass {
 // Saved values live in three buckets so a tablet collapse no longer
 // leaks into the next desktop visit. F5.
 function outlineOpenStorageKey(vc: ViewportClass): string {
-  return `bwc:outline-open:${vc}`
+  return `cavecms:outline-open:${vc}`
 }
 
 // `inert` fallback for older Safari (≤16 has partial support, <14 has
@@ -287,11 +287,11 @@ function useInertFallback(
       // its tabIndex attribute entirely so the natural keyboard
       // order resumes.
       focusables.forEach((el) => {
-        const prior = el.getAttribute('data-bwc-prev-tabindex')
+        const prior = el.getAttribute('data-cavecms-prev-tabindex')
         if (prior !== null) {
           if (prior === 'NONE') el.removeAttribute('tabindex')
           else el.setAttribute('tabindex', prior)
-          el.removeAttribute('data-bwc-prev-tabindex')
+          el.removeAttribute('data-cavecms-prev-tabindex')
         }
       })
       return
@@ -299,9 +299,9 @@ function useInertFallback(
     focusables.forEach((el) => {
       // Already-stamped descendants stay as-is on re-runs (parent
       // re-render with disabled=true). The stamp is idempotent.
-      if (el.hasAttribute('data-bwc-prev-tabindex')) return
+      if (el.hasAttribute('data-cavecms-prev-tabindex')) return
       const prior = el.getAttribute('tabindex')
-      el.setAttribute('data-bwc-prev-tabindex', prior ?? 'NONE')
+      el.setAttribute('data-cavecms-prev-tabindex', prior ?? 'NONE')
       el.setAttribute('tabindex', '-1')
     })
   }, [ref, disabled])
@@ -338,12 +338,12 @@ export function OutlinePanel({
 
   // Dismissable: the operator can close the outline panel entirely
   // (X button in the header). Persisted to localStorage
-  // `bwc:outline-dismissed` so the choice survives reload. To bring
+  // `cavecms:outline-dismissed` so the choice survives reload. To bring
   // the outline back, click the "Outline" pill in the admin bar
   // (only shown in edit mode — see AdminBarInteractive).
   //
   // The admin-bar toggle writes the same localStorage key + dispatches
-  // a `bwc:outline-visibility` custom event. localStorage's native
+  // a `cavecms:outline-visibility` custom event. localStorage's native
   // `storage` event only fires CROSS-tab, so the custom event handles
   // same-tab coordination (admin-bar click → outline re-mounts).
   //
@@ -360,27 +360,27 @@ export function OutlinePanel({
   const [hasMounted, setHasMounted] = useState(false)
   useEffect(() => {
     if (typeof window === 'undefined') return
-    setDismissed(safeStorage.get('bwc:outline-dismissed') === 'true')
+    setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
     setHasMounted(true)
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent<{ dismissed?: boolean }>).detail
       if (detail && typeof detail.dismissed === 'boolean') {
         setDismissed(detail.dismissed)
       } else {
-        setDismissed(safeStorage.get('bwc:outline-dismissed') === 'true')
+        setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
       }
     }
-    window.addEventListener('bwc:outline-visibility', onChange)
-    return () => window.removeEventListener('bwc:outline-visibility', onChange)
+    window.addEventListener('cavecms:outline-visibility', onChange)
+    return () => window.removeEventListener('cavecms:outline-visibility', onChange)
   }, [])
 
   // Open/collapsed preference is persisted PER VIEWPORT CLASS across
   // sessions so the operator's last choice survives reload + page
   // navigation. A tablet visit's collapse no longer leaks into the
   // next desktop visit (F5). localStorage keys:
-  //   - bwc:outline-open:mobile
-  //   - bwc:outline-open:tablet
-  //   - bwc:outline-open:desktop
+  //   - cavecms:outline-open:mobile
+  //   - cavecms:outline-open:tablet
+  //   - cavecms:outline-open:desktop
   // SSR returns the "blocks-present default" so the markup matches
   // the un-customised render; the post-mount effect re-reads the
   // matching key for the current viewport class.
@@ -668,9 +668,9 @@ export function OutlinePanel({
 
   const dismiss = () => {
     if (typeof window === 'undefined') return
-    safeStorage.set('bwc:outline-dismissed', 'true')
+    safeStorage.set('cavecms:outline-dismissed', 'true')
     window.dispatchEvent(
-      new CustomEvent('bwc:outline-visibility', {
+      new CustomEvent('cavecms:outline-visibility', {
         detail: { dismissed: true },
       }),
     )
@@ -1002,12 +1002,12 @@ function TreeRow({
       clearTimeout(pingTimerRef.current)
       pingTimerRef.current = null
     }
-    el.classList.remove('bwc-outline-ping')
+    el.classList.remove('cavecms-outline-ping')
     // Force reflow so the next class add restarts the animation.
     void el.offsetWidth
-    el.classList.add('bwc-outline-ping')
+    el.classList.add('cavecms-outline-ping')
     pingTimerRef.current = setTimeout(() => {
-      el.classList.remove('bwc-outline-ping')
+      el.classList.remove('cavecms-outline-ping')
       pingTimerRef.current = null
     }, 1600)
   }, [node.block.id, node.block.kind])

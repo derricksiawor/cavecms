@@ -43,7 +43,7 @@ import { BlockSearchResults } from './BlockSearchResults'
 //   gets the new block as a sibling AFTER the source; the empty
 //   paragraph stays and they can delete it via the context menu.
 
-const RESULTS_ID = 'bwc-slash-inline-results'
+const RESULTS_ID = 'cavecms-slash-inline-results'
 
 interface Props {
   anchor: SlashCommandInlineAnchor
@@ -226,7 +226,7 @@ export function SlashCommandInline({ anchor }: Props) {
         left: pos?.x ?? 0,
         visibility: visible ? 'visible' : 'hidden',
       }}
-      className="z-[85] w-[320px] max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-cream-50/12 bg-near-black/[0.97] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] backdrop-blur-md animate-bwc-scale-in motion-reduce:animate-none"
+      className="z-[85] w-[320px] max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-cream-50/12 bg-near-black/[0.97] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] backdrop-blur-md animate-cavecms-scale-in motion-reduce:animate-none"
     >
       <div className="flex items-center gap-2 border-b border-cream-50/10 px-3 py-2.5">
         <span

@@ -5,7 +5,7 @@ import { ChevronDown } from 'lucide-react'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 
-// Tailwind Typography prose overrides matching the BWC palette — without
+// Tailwind Typography prose overrides matching the CaveCMS palette — without
 // these, anchor links inside rich text render in default prose blue and
 // strong/em fall back to greyscale, breaking the editorial copper accent.
 const PROSE_PALETTE =
@@ -23,7 +23,7 @@ const PROSE_PALETTE =
 // and NO "default open item" control.** Behaviour is single-open,
 // first-item-closed-on-load, driven by client JS.
 //
-// BWC ships BOTH knobs intentionally — they serve the SEO/no-JS render
+// CaveCMS ships BOTH knobs intentionally — they serve the SEO/no-JS render
 // architecture, not Elementor parity for parity's sake:
 //   - default_open_index lets operators pre-expand a key item so search
 //     crawlers see that body content as visible on first paint. Without

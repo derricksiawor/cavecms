@@ -69,7 +69,7 @@ export function StickyHeader({
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-10">
         <div className="flex min-w-0 items-center gap-3">
           <span
-            className="inline-flex h-2 w-2 shrink-0 rounded-full bg-copper-500 animate-bwc-pulse-copper"
+            className="inline-flex h-2 w-2 shrink-0 rounded-full bg-copper-500 animate-cavecms-pulse-copper"
             aria-hidden
           />
           <p className="min-w-0 truncate font-serif text-base font-semibold tracking-tight text-near-black sm:text-lg">

@@ -189,7 +189,7 @@ function readSiblings(
 }
 
 // Highlight ring duration for the post-duplicate ping. Matches the
-// OutlinePanel `bwc-outline-ping` animation (1.6s) so the visual
+// OutlinePanel `cavecms-outline-ping` animation (1.6s) so the visual
 // language is identical regardless of which surface introduced the
 // new block.
 const DUPLICATE_HIGHLIGHT_MS = 1600
@@ -522,11 +522,11 @@ export function EditableBlock(p: EditableBlockProps) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       // Cleanup any prior pulse from a quick re-click before re-adding,
       // otherwise the animation doesn't restart (mirror of OutlinePanel).
-      el.classList.remove('bwc-outline-ping')
+      el.classList.remove('cavecms-outline-ping')
       void el.offsetWidth
-      el.classList.add('bwc-outline-ping')
+      el.classList.add('cavecms-outline-ping')
       window.setTimeout(() => {
-        el.classList.remove('bwc-outline-ping')
+        el.classList.remove('cavecms-outline-ping')
       }, DUPLICATE_HIGHLIGHT_MS)
       // Select the new block too so the operator can edit immediately
       // without a follow-up click.

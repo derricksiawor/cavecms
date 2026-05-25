@@ -322,7 +322,7 @@ function MobileCtaCard({
         )}
         {dirty && (
           <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-copper-700">
-            <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-bwc-pulse-copper" />
+            <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-cavecms-pulse-copper" />
             Unsaved changes
           </span>
         )}
@@ -402,7 +402,7 @@ function SettingCard({
         )}
         {dirty && (
           <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-copper-700">
-            <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-bwc-pulse-copper" />
+            <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-cavecms-pulse-copper" />
             Unsaved changes
           </span>
         )}

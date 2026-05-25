@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/install-systemd.sh — installs every bwc-*.service /
-# bwc-*.timer under /etc/systemd/system, reloads the systemd daemon,
+# scripts/install-systemd.sh — installs every cavecms-*.service /
+# cavecms-*.timer under /etc/systemd/system, reloads the systemd daemon,
 # and enables the timer units for boot-persistence. Called by
 # setup.sh on first provision; safe to re-run when units are edited.
 #
@@ -8,7 +8,7 @@
 # (immediate activation) — see the per-timer loop body for the
 # rationale on each call. The `start` is idempotent on already-
 # active timers, and each timer's underlying service has an
-# ExecCondition= check on `/opt/bwc/current/scripts/<script>.sh`
+# ExecCondition= check on `/opt/cavecms/current/scripts/<script>.sh`
 # existing — before the first deploy.sh run, ExecCondition fails
 # and the service exits 0 (a "skipped" run is not a failure). This
 # lets us activate timers immediately without spamming OnFailure
@@ -39,16 +39,16 @@ systemctl daemon-reload
 # `enable` installs the boot-time symlink so the timer survives reboots.
 # `start` (further down in this loop) activates the timer immediately
 # so we don't have to wait for a reboot or for deploy.sh's first-deploy
-# `systemctl start 'bwc-*.timer'` to fire. Both calls are idempotent.
+# `systemctl start 'cavecms-*.timer'` to fire. Both calls are idempotent.
 for t in \
-  bwc-db-backup \
-  bwc-uploads-backup \
-  bwc-restore-drill \
-  bwc-cron-purge \
-  bwc-cron-crm-retry \
-  bwc-disk-check \
-  bwc-media-verify \
-  bwc-static-prune \
+  cavecms-db-backup \
+  cavecms-uploads-backup \
+  cavecms-restore-drill \
+  cavecms-cron-purge \
+  cavecms-cron-crm-retry \
+  cavecms-disk-check \
+  cavecms-media-verify \
+  cavecms-static-prune \
 ; do
   systemctl enable "${t}.timer"
   # try-restart applies any OnCalendar edits from this re-run to a
@@ -56,7 +56,7 @@ for t in \
   systemctl try-restart "${t}.timer" 2>/dev/null || true
   # `start` activates a never-started timer (e.g., a new timer added
   # in a cluster-3 upgrade to a post-first-deploy box where deploy.sh's
-  # initial `systemctl start 'bwc-*.timer'` already fired without
+  # initial `systemctl start 'cavecms-*.timer'` already fired without
   # picking up the new unit name). No-op when the timer is already
   # active. ExecCondition on the underlying service still gates
   # pre-first-deploy ticks so this won't spam OnFailure alerts.

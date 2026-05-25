@@ -55,7 +55,7 @@ export function Accordion({
       <button
         type="button"
         onClick={() => onToggle(!open)}
-        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-cream-100/60 bwc-focus-ring rounded-2xl"
+        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-cream-100/60 cavecms-focus-ring rounded-2xl"
         aria-expanded={open}
       >
         <span className="flex items-center gap-3 min-w-0">

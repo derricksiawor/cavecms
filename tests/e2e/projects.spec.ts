@@ -44,7 +44,7 @@ async function hashPasswordLocal(pw: string): Promise<string> {
 // runs; the editor user is inserted in beforeAll so the RBAC test
 // has a real session to drive against (no longer skipped).
 const TEST_SLUGS = ['the-test', 'the-test-renamed', 'preview-me'] as const
-const EDITOR_EMAIL = 'editor@bwc.test'
+const EDITOR_EMAIL = 'editor@cavecms.test'
 const EDITOR_PASSWORD = 'CorrectHorseBattery0!'
 
 function refuseRemoteDb(dsn: string): boolean {
@@ -175,8 +175,8 @@ async function contextForUser(
 //   - CSRF_COOKIE → minted by GET /api/csrf once the session is
 //     valid (so the editor's CSRF token is bound to the editor's
 //     jti, not the admin's)
-const JWT_ISS_SESSION = 'bwc.cms'
-const JWT_AUD_SESSION = 'bwc.web'
+const JWT_ISS_SESSION = 'cavecms.cms'
+const JWT_AUD_SESSION = 'cavecms.web'
 
 async function signSessionJwtForTest(userId: number): Promise<string> {
   const secret = process.env['JWT_SECRET']
@@ -225,9 +225,9 @@ test.describe.serial('Plan 04 — Projects', () => {
       try {
         const [adminRows] = (await conn.query(
           'SELECT id FROM users WHERE email = ?',
-          ['admin@bwc.test'],
+          ['admin@cavecms.test'],
         )) as unknown as [Array<{ id: number }>, unknown]
-        if (!adminRows[0]) throw new Error('admin@bwc.test missing — run db:seed')
+        if (!adminRows[0]) throw new Error('admin@cavecms.test missing — run db:seed')
         adminId = adminRows[0].id
         const [editorRows] = (await conn.query(
           'SELECT id FROM users WHERE email = ?',

@@ -9,7 +9,7 @@ import type { BlockData } from '@/lib/cms/block-registry'
 //   - icon_size, icon_padding, icon_spacing
 //   - hover_animation
 //
-// BWC ships a CURATED platform allowlist (7 entries) matching the
+// CaveCMS ships a CURATED platform allowlist (7 entries) matching the
 // brand-mark SVGs we host under public/icons/social/ — never a
 // freeform icon picker. project standards #0.57 forbids hand-rolled brand
 // marks; sourcing icons from a controlled allowlist guarantees every

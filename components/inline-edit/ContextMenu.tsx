@@ -265,7 +265,7 @@ export function ContextMenu({ items, ctx, coords, ariaLabel }: Props) {
         left: pos?.x ?? 0,
         visibility: visible ? 'visible' : 'hidden',
       }}
-      className="z-[80] w-[240px] max-w-[calc(100vw-16px)] rounded-2xl border border-cream-50/12 bg-near-black/[0.97] p-1.5 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] backdrop-blur-md animate-bwc-fade-in motion-reduce:animate-none"
+      className="z-[80] w-[240px] max-w-[calc(100vw-16px)] rounded-2xl border border-cream-50/12 bg-near-black/[0.97] p-1.5 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] backdrop-blur-md animate-cavecms-fade-in motion-reduce:animate-none"
     >
       <ul className="flex flex-col gap-0.5">
         {resolved.map(({ item: it, disabled: isDisabled }, i) => {

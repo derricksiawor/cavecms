@@ -66,7 +66,7 @@ export async function csrfFetch(
   // covers Safari Private Mode + locked-down enterprise browsers.
   if (res.status === 401) {
     try {
-      window.localStorage.removeItem('bwc:clipboard')
+      window.localStorage.removeItem('cavecms:clipboard')
     } catch {
       // ignore — Safari Private Mode / disabled storage
     }

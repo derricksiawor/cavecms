@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
+import { HttpError } from '@/lib/auth/requireRole'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { consumePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
@@ -12,7 +13,6 @@ import {
 } from '@/lib/leads/spam'
 import { enqueueEmail } from '@/lib/email/queue'
 import { dispatchLeadToCrms } from '@/lib/crm/dispatch'
-import { env } from '@/lib/env'
 import { neutralResponse } from '@/lib/leads/neutralResponse'
 import { normalizeEmail } from '@/lib/leads/normalizeEmail'
 import { logEnqueueFailure } from '@/lib/leads/logEnqueueFailure'
@@ -109,7 +109,8 @@ export const POST = withError(async (req: Request) => {
 
   const normEmail = normalizeEmail(body.email)
   const userAgent = (headerObj['user-agent'] ?? '').slice(0, 255)
-  const salesTo = env.SALES_EMAIL || env.SMTP_FROM || ''
+  const { getLeadNotificationRecipient } = await import('@/lib/email/transport')
+  const salesTo = await getLeadNotificationRecipient()
 
   // Lead row FIRST and capture insertId. Single statement —
   // committed before email enqueues so a downstream enqueue
@@ -140,7 +141,16 @@ export const POST = withError(async (req: Request) => {
     lead_id: leadId,
     project_id: project.id,
   })
-  const url = `${env.SITE_ORIGIN}/api/brochure/${token}`
+  const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
+  const siteOrigin = await getSiteOrigin()
+  if (!siteOrigin) {
+    // Without a configured site URL, the brochure link in the email
+    // would be relative — unclickable from an email client. Fail
+    // loud so the operator notices their Settings → General is
+    // unconfigured.
+    throw new HttpError(503, 'site_url_not_configured')
+  }
+  const url = `${siteOrigin}/api/brochure/${token}`
 
   // CRM dispatch — fire-and-forget. Uses
   // integrations_*.formSourceMap.brochure (no per-instance config
@@ -148,7 +158,7 @@ export const POST = withError(async (req: Request) => {
   await dispatchLeadToCrms({
     leadId,
     source: 'brochure',
-    bwcFields: {
+    cavecmsFields: {
       name: body.name,
       email: normEmail,
       phone: body.phone ?? '',

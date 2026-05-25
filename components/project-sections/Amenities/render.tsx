@@ -5,7 +5,7 @@ import type { AmenitiesData } from '../_shared/types'
 
 // Amenities grid. Each chip = circular copper icon + label, with a
 // hover lift + copper underline. Cascade-staggers the chip entrance
-// using the .bwc-stagger-item utility (Anna's 50ms-per-item).
+// using the .cavecms-stagger-item utility (Anna's 50ms-per-item).
 //
 // The Zod cap is 60 amenities; the visual cap is 24 — anything past
 // 24 indicates an over-stuffed list and would crush the grid. We
@@ -47,7 +47,7 @@ export function AmenitiesSection({ data }: { data: AmenitiesData }): ReactNode {
             return (
               <li
                 key={`${it.label}-${i}`}
-                className="bwc-stagger-item animate-bwc-fade-in group relative flex items-center gap-4 rounded-2xl border border-near-black/8 bg-cream-50 px-5 py-4 transition-all duration-standard ease-standard hover:-translate-y-0.5 hover:border-copper-300 hover:shadow-lg hover:shadow-copper-900/5"
+                className="cavecms-stagger-item animate-cavecms-fade-in group relative flex items-center gap-4 rounded-2xl border border-near-black/8 bg-cream-50 px-5 py-4 transition-all duration-standard ease-standard hover:-translate-y-0.5 hover:border-copper-300 hover:shadow-lg hover:shadow-copper-900/5"
                 style={{ ['--stagger-index' as string]: i }}
               >
                 <span

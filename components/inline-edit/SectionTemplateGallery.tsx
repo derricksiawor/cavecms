@@ -64,7 +64,7 @@ function countTemplateBlocks(template: SectionTemplate): number {
 //     entire instantiated tree (children cascade via the existing
 //     DELETE soft-delete recursive CTE).
 
-const TITLE_ID = 'bwc-section-template-gallery-title'
+const TITLE_ID = 'cavecms-section-template-gallery-title'
 
 interface Props {
   pageId: number

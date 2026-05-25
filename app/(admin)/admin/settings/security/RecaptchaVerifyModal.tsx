@@ -41,7 +41,7 @@ interface GrecaptchaApi {
   reset?: (widgetId?: number) => void
 }
 
-const SCRIPT_ID = 'bwc-recaptcha-verify'
+const SCRIPT_ID = 'cavecms-recaptcha-verify'
 
 // Read window.grecaptcha through `unknown` rather than augmenting the
 // global type. Three separate modules (this one, LoginForm,

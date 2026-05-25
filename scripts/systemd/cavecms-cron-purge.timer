@@ -1,0 +1,15 @@
+[Unit]
+Description=CaveCMS cron purge timer
+
+[Timer]
+# 06:00 UTC — comfortably after both backups (03:00, 04:30) so the
+# retention sweep can never delete a row that hasn't been backed
+# up yet. `Persistent=true` means a box that was down at 06:00
+# catches up the next time it boots.
+OnCalendar=*-*-* 06:00:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=cavecms-cron-purge.service
+
+[Install]
+WantedBy=timers.target

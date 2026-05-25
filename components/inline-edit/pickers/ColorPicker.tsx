@@ -13,7 +13,7 @@ import { safeStorage } from '@/lib/client/safeStorage'
 import { Popover } from './Popover'
 import { GlobeBindButton } from './GlobeBindButton'
 
-// Elementor-anatomy colour picker for the BWC inline editor.
+// Elementor-anatomy colour picker for the CaveCMS inline editor.
 //
 // Trigger row: [ swatch button ][ globe ] LABEL
 // On swatch click → popover opens with:
@@ -29,7 +29,7 @@ import { GlobeBindButton } from './GlobeBindButton'
 // is the canonical resolver — pickers, renderers, and Globe state
 // all agree on what "bound" means.
 
-const SAVED_COLORS_KEY = 'bwc.editor.savedColors'
+const SAVED_COLORS_KEY = 'cavecms.editor.savedColors'
 const SAVED_COLORS_MAX = 8
 
 interface ColorPickerFieldProps {
@@ -179,7 +179,7 @@ export function ColorPickerField({
     // the overlay can reach document.pointerdown and close the popover
     // before we can apply the sampled hex. The Popover reads this
     // body-level data attribute on every pointerdown.
-    document.body.dataset.bwcPopoverSuppressOutside = '1'
+    document.body.dataset.cavecmsPopoverSuppressOutside = '1'
     try {
       const Ctor = (
         window as unknown as {
@@ -195,7 +195,7 @@ export function ColorPickerField({
     } catch {
       /* user cancelled — no-op */
     } finally {
-      delete document.body.dataset.bwcPopoverSuppressOutside
+      delete document.body.dataset.cavecmsPopoverSuppressOutside
     }
   }, [onChange])
 

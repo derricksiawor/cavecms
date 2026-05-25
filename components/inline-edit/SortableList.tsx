@@ -130,7 +130,7 @@ function SortableRow({
         zIndex: isDragging ? 10 : undefined,
         opacity: isDragging ? 0.85 : 1,
       }}
-      className="animate-bwc-fade-in"
+      className="animate-cavecms-fade-in"
     >
       {children({ ...attributes, ...listeners })}
     </li>

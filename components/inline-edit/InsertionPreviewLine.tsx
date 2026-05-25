@@ -19,7 +19,7 @@
 // already rings itself when an active item hovers, so a redundant
 // copper line on the column edge would just be visual noise.
 //
-// Animation: fade-in via the global animate-bwc-fade-in keyframe
+// Animation: fade-in via the global animate-cavecms-fade-in keyframe
 // (100ms ease-standard). motion-reduce:animate-none honours the
 // reduced-motion preference for vestibular sensitivity.
 
@@ -122,7 +122,7 @@ export function InsertionPreviewLine() {
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed z-[60] rounded-full bg-copper-500 shadow-[0_0_12px_-2px_rgba(160,90,40,0.6)] animate-bwc-fade-in motion-reduce:animate-none"
+      className="pointer-events-none fixed z-[60] rounded-full bg-copper-500 shadow-[0_0_12px_-2px_rgba(160,90,40,0.6)] animate-cavecms-fade-in motion-reduce:animate-none"
       style={{
         top: pos.top,
         left: pos.left,

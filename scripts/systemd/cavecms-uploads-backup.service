@@ -1,0 +1,45 @@
+[Unit]
+Description=CaveCMS daily encrypted uploads backup (tar | gzip | age + rclone off-site)
+OnFailure=cavecms-alert@%n.service
+
+[Service]
+Type=oneshot
+User=cavecms
+Group=backup
+# Group=backup drops supplementary groups; add cavecmsstate so the process
+# can write to /var/lib/cavecms (mode 2770 root:cavecmsstate, see setup.sh
+# cavecmsstate-group block). The dedicated cavecmsstate group scopes the grant
+# to cavecms-user services only — NOT www-data which is in group `cavecms`.
+SupplementaryGroups=cavecmsstate
+IOSchedulingClass=idle
+EnvironmentFile=/etc/cavecms/env.production
+# `-` prefix tolerates missing symlink pre-first-deploy (see
+# cavecms-db-backup.service for the rationale).
+WorkingDirectory=-/opt/cavecms/current
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+# Reads /opt/cavecms/uploads, writes /backup/cavecms/uploads, may also write
+# a success-marker to /var/lib/cavecms for cron-purge's gate.
+ReadWritePaths=/backup /var/log/cavecms /var/lib/cavecms
+# tar + gzip + age + rclone are streaming workloads; 256M caps any
+# pathological in-memory state without affecting the PM2 worker.
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=256
+# Cap total runtime. tar over a multi-GB uploads tree on slow disk +
+# slow off-site upload can legitimately take 30-60min. 2h is generous
+# headroom for the worst-case full-archive day.
+TimeoutStartSec=7200s
+ExecCondition=/usr/bin/test -x /opt/cavecms/current/scripts/uploads-backup.sh
+ExecStart=/opt/cavecms/current/scripts/uploads-backup.sh

@@ -8,7 +8,6 @@ import nextDynamic from 'next/dynamic'
 import { cookies } from 'next/headers'
 import { db } from '@/db/client'
 import { sql } from 'drizzle-orm'
-import { env } from '@/lib/env'
 import { hydratePage } from '@/lib/cms/hydrate'
 import { getSession, canEdit, resolveEditableMode } from '@/lib/auth/getSession'
 import { EditModePill } from '@/components/inline-edit/EditModePill'
@@ -204,7 +203,8 @@ async function renderHome(
 
   const { blocks, media, projects } = hydrated
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
-  const ld = jsonLdForPage({ page, baseUrl: env.SITE_ORIGIN })
+  const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
+  const ld = jsonLdForPage({ page, baseUrl: (await getSiteOrigin()) ?? '' })
 
   return (
     <EditableMain
@@ -267,18 +267,18 @@ function SplashFallback({
       />
 
       <section className="relative z-10 mx-auto flex min-h-screen max-w-5xl flex-col items-start justify-center px-8 py-24 sm:px-12">
-        <p className="text-xs font-semibold uppercase tracking-[0.42em] text-copper-600 animate-bwc-rise">
+        <p className="text-xs font-semibold uppercase tracking-[0.42em] text-copper-600 animate-cavecms-rise">
           Best World Properties
         </p>
-        <h1 className="mt-8 font-serif text-5xl font-bold tracking-tight text-near-black sm:text-7xl lg:text-[5.5rem] leading-[1.02] animate-bwc-rise [animation-delay:120ms]">
+        <h1 className="mt-8 font-serif text-5xl font-bold tracking-tight text-near-black sm:text-7xl lg:text-[5.5rem] leading-[1.02] animate-cavecms-rise [animation-delay:120ms]">
           Built for those who notice the details.
         </h1>
-        <p className="mt-10 max-w-2xl text-base font-medium leading-relaxed text-warm-stone sm:text-lg animate-bwc-rise [animation-delay:260ms]">
+        <p className="mt-10 max-w-2xl text-base font-medium leading-relaxed text-warm-stone sm:text-lg animate-cavecms-rise [animation-delay:260ms]">
           Luxury residential developments in Accra. The new bestworldproperties.com is
           under construction — three projects, refined craftsmanship, quiet confidence.
         </p>
 
-        <div className="mt-16 flex items-center gap-6 animate-bwc-rise [animation-delay:380ms]">
+        <div className="mt-16 flex items-center gap-6 animate-cavecms-rise [animation-delay:380ms]">
           <span className="inline-flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.32em] text-near-black/60">
             <span className="block h-px w-12 bg-copper-500" />
             Launching soon

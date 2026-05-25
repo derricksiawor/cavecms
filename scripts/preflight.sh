@@ -2,10 +2,10 @@
 # scripts/preflight.sh — pre-deploy gate, invoked by scripts/deploy.sh.
 #
 # Refuses the deploy when ANY of these hold:
-#   1. /var/lib/bwc/deploy.blocked sentinel exists (disk-check.sh writes
+#   1. /var/lib/cavecms/deploy.blocked sentinel exists (disk-check.sh writes
 #      this at >=90% usage — operator clears manually after pruning).
 #   2. Projected disk footprint exceeds free space on EITHER the
-#      /opt/bwc filesystem (release tree + headroom) or the /backup/bwc
+#      /opt/cavecms filesystem (release tree + headroom) or the /backup/cavecms
 #      filesystem (pre-deploy snapshot landing zone). Many droplet
 #      setups put /backup on a separate attached volume — we must check
 #      both or mysqldump can fail mid-deploy with no rollback artifact.
@@ -19,7 +19,7 @@
 #   4. sharp's native .node binaries link against glibc symbols missing
 #      from the running kernel/libc (Ubuntu LTS upgrade window).
 #   5. The currently-deployed release is unhealthy (skipped on first
-#      deploy when /opt/bwc/current does not yet exist).
+#      deploy when /opt/cavecms/current does not yet exist).
 #
 # Side effects: NONE. preflight is read-only and idempotent.
 # Exit codes:
@@ -81,17 +81,17 @@ if [[ ! "$SHA" =~ ^[0-9a-f]{7,64}$ ]]; then
   echo "[preflight.sh] invalid SHA '$SHA' — must be 7-64 hex chars" >&2
   exit 2
 fi
-RELEASE_DIR="/opt/bwc/releases/$SHA"
+RELEASE_DIR="/opt/cavecms/releases/$SHA"
 if [ ! -d "$RELEASE_DIR" ]; then
   echo "[preflight.sh] release dir missing: $RELEASE_DIR" >&2
   exit 2
 fi
 
-# Cluster-1 invariant: setup.sh creates /opt/bwc. If it's missing the
+# Cluster-1 invariant: setup.sh creates /opt/cavecms. If it's missing the
 # operator never ran setup.sh and the rest of preflight would silently
 # fall back to /opt (or /) — masking a real misconfig. Fail loudly here.
-if [ ! -d /opt/bwc ]; then
-  echo "[preflight.sh] /opt/bwc missing — run scripts/setup.sh first" >&2
+if [ ! -d /opt/cavecms ]; then
+  echo "[preflight.sh] /opt/cavecms missing — run scripts/setup.sh first" >&2
   exit 2
 fi
 
@@ -103,32 +103,32 @@ fi
 # stop. Catching it here gives the operator the missing-dir hint plus
 # the exact setup.sh block to re-run.
 # ---------------------------------------------------------------------------
-UPLOADS_ROOT_DEFAULT=/opt/bwc/uploads
+UPLOADS_ROOT_DEFAULT=/opt/cavecms/uploads
 for sub in originals variants brochures-private .tmp; do
   d="$UPLOADS_ROOT_DEFAULT/$sub"
   if [ ! -d "$d" ]; then
     echo "[preflight.sh] uploads subdir missing: $d" >&2
     echo "[preflight.sh]   fix: re-run setup.sh's uploads dir block, or run as root:" >&2
-    echo "[preflight.sh]     install -d -o bwc -g bwc -m 750 $UPLOADS_ROOT_DEFAULT/{originals,variants,brochures-private,.tmp}" >&2
+    echo "[preflight.sh]     install -d -o cavecms -g cavecms -m 750 $UPLOADS_ROOT_DEFAULT/{originals,variants,brochures-private,.tmp}" >&2
     exit 1
   fi
 done
 
-# /backup/bwc/pre-deploy is the encrypted mysqldump landing zone for
+# /backup/cavecms/pre-deploy is the encrypted mysqldump landing zone for
 # scripts/deploy.sh's pre-symlink-flip snapshot. Missing → mysqldump
 # fails halfway through deploy.sh with a confusing "directory not
 # found" rather than a clean abort here.
-for d in /backup/bwc/db /backup/bwc/uploads /backup/bwc/pre-deploy; do
+for d in /backup/cavecms/db /backup/cavecms/uploads /backup/cavecms/pre-deploy; do
   if [ ! -d "$d" ]; then
     echo "[preflight.sh] backup subdir missing: $d" >&2
-    echo "[preflight.sh]   fix: re-run setup.sh's /backup/bwc block, or:" >&2
-    echo "[preflight.sh]     install -d -o bwc -g backup -m 750 /backup/bwc/{db,uploads,pre-deploy}" >&2
+    echo "[preflight.sh]   fix: re-run setup.sh's /backup/cavecms block, or:" >&2
+    echo "[preflight.sh]     install -d -o cavecms -g backup -m 750 /backup/cavecms/{db,uploads,pre-deploy}" >&2
     exit 1
   fi
 done
 
 # ---------------------------------------------------------------------------
-# Env contract — required secrets must be present in /etc/bwc/env.production
+# Env contract — required secrets must be present in /etc/cavecms/env.production
 # BEFORE we let the deploy proceed. lib/env.ts is the trust boundary and
 # refuses to boot if any required secret is missing; without this gate, a
 # deploy with a stale env file would symlink-flip successfully then crash
@@ -138,7 +138,7 @@ done
 # setup.sh since the project's first deploy — they're either already
 # present or the operator has bigger problems.
 # ---------------------------------------------------------------------------
-ENV_FILE_PROD=/etc/bwc/env.production
+ENV_FILE_PROD=/etc/cavecms/env.production
 if [ -f "$ENV_FILE_PROD" ]; then
   if ! grep -Eq '^SECRETS_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=$' "$ENV_FILE_PROD"; then
     echo "[preflight.sh] $ENV_FILE_PROD missing or malformed SECRETS_ENCRYPTION_KEY" >&2
@@ -163,38 +163,38 @@ sanitize() { tr -cd '\11\12\15\40-\176'; }
 #    this when free space drops below threshold; even if THIS deploy would
 #    fit, the box is unhealthy and the operator's attention is required.
 # ---------------------------------------------------------------------------
-if [ -f /var/lib/bwc/deploy.blocked ]; then
+if [ -f /var/lib/cavecms/deploy.blocked ]; then
   # Sentinel content is operator-readable, control-byte stripped, and
   # trimmed of trailing whitespace. Empty file → explicit "<empty>" so
   # the operator doesn't see "reason: " with nothing after it.
-  reason=$(head -c 512 /var/lib/bwc/deploy.blocked | sanitize | tr '\n' ' ' | awk '{sub(/[[:space:]]+$/, ""); print}')
+  reason=$(head -c 512 /var/lib/cavecms/deploy.blocked | sanitize | tr '\n' ' ' | awk '{sub(/[[:space:]]+$/, ""); print}')
   : "${reason:=<empty>}"
-  echo "[preflight.sh] /var/lib/bwc/deploy.blocked is set — refusing deploy" >&2
+  echo "[preflight.sh] /var/lib/cavecms/deploy.blocked is set — refusing deploy" >&2
   echo "[preflight.sh]   reason: ${reason}" >&2
-  echo "[preflight.sh]   to clear: sudo rm /var/lib/bwc/deploy.blocked  (after pruning to <85%)" >&2
+  echo "[preflight.sh]   to clear: sudo rm /var/lib/cavecms/deploy.blocked  (after pruning to <85%)" >&2
   exit 1
 fi
 
 # ---------------------------------------------------------------------------
 # 2. Disk gates — TWO filesystems matter:
 #
-#    a. /opt/bwc        — holds the unpacked release tree (already on disk
+#    a. /opt/cavecms        — holds the unpacked release tree (already on disk
 #                         when preflight runs — deploy.sh extracted it),
-#                         the .tar.zst still sitting in /opt/bwc/incoming/
+#                         the .tar.zst still sitting in /opt/cavecms/incoming/
 #                         <sha> (deploy.sh keeps it through preflight and
 #                         only cleans on success), the currently-running
 #                         release. Everything already on disk is already
 #                         netted out of df-avail, so the gate reserves
-#                         space for what's about to LAND in /opt/bwc next:
+#                         space for what's about to LAND in /opt/cavecms next:
 #                         that's only BUFFER_KB headroom for log spillover,
 #                         tmp churn, etc. The tarball-already-on-disk size
 #                         is included for diagnostic transparency in the
 #                         failure message, NOT in the required total.
 #                         Required: BUFFER_KB.
-#    b. /backup/bwc     — holds the pre-deploy mysqldump (encrypted age
+#    b. /backup/cavecms     — holds the pre-deploy mysqldump (encrypted age
 #                         output, deploy.sh writes to pre-deploy/<sha>).
 #                         Sized against the LARGEST existing dump across
-#                         both /backup/bwc/db/ and /backup/bwc/pre-deploy/.
+#                         both /backup/cavecms/db/ and /backup/cavecms/pre-deploy/.
 #                         Required: LARGEST_DUMP_KB + BUFFER_KB.
 #
 #    Splitting these is the difference between "we caught it pre-deploy"
@@ -211,7 +211,7 @@ artifact_du=$(du -sk "$RELEASE_DIR")
 ARTIFACT_KB=$(awk '{print $1}' <<<"$artifact_du")
 [[ "$ARTIFACT_KB" =~ ^[0-9]+$ ]] || { echo "[preflight.sh] du returned non-numeric for $RELEASE_DIR" >&2; exit 1; }
 
-TARBALL=/opt/bwc/incoming/$SHA.tar.zst
+TARBALL=/opt/cavecms/incoming/$SHA.tar.zst
 TARBALL_KB=0
 if [ -f "$TARBALL" ]; then
   tarball_du=$(du -sk "$TARBALL")
@@ -233,8 +233,8 @@ fi
 # fresh-box pre-deploy/ dir to mask everything.
 LARGEST_DUMP_BYTES=0
 dump_paths=()
-[ -d /backup/bwc/db ] && dump_paths+=(/backup/bwc/db)
-[ -d /backup/bwc/pre-deploy ] && dump_paths+=(/backup/bwc/pre-deploy)
+[ -d /backup/cavecms/db ] && dump_paths+=(/backup/cavecms/db)
+[ -d /backup/cavecms/pre-deploy ] && dump_paths+=(/backup/cavecms/pre-deploy)
 if [ "${#dump_paths[@]}" -gt 0 ]; then
   dump_sizes=$(find "${dump_paths[@]}" -maxdepth 1 -name '*.sql.age' -type f -printf '%s\n')
   if [ -n "$dump_sizes" ]; then
@@ -244,14 +244,14 @@ if [ "${#dump_paths[@]}" -gt 0 ]; then
 fi
 LARGEST_DUMP_KB=$(( LARGEST_DUMP_BYTES / 1024 ))
 
-# /opt/bwc gate: the new release + tarball are already on disk and
+# /opt/cavecms gate: the new release + tarball are already on disk and
 # already accounted for in df-avail. We only need to ensure the buffer
 # is met — bigger headroom would refuse legitimate deploys.
 OPT_REQ_KB=$BUFFER_KB
-OPT_AVAIL_KB=$(LC_ALL=C df --output=avail /opt/bwc | tail -n 1 | tr -d '[:space:]')
-[[ "$OPT_AVAIL_KB" =~ ^[0-9]+$ ]] || { echo "[preflight.sh] df returned non-numeric for /opt/bwc" >&2; exit 1; }
+OPT_AVAIL_KB=$(LC_ALL=C df --output=avail /opt/cavecms | tail -n 1 | tr -d '[:space:]')
+[[ "$OPT_AVAIL_KB" =~ ^[0-9]+$ ]] || { echo "[preflight.sh] df returned non-numeric for /opt/cavecms" >&2; exit 1; }
 if [ "$OPT_AVAIL_KB" -le "$OPT_REQ_KB" ]; then
-  echo "[preflight.sh] insufficient disk on /opt/bwc: avail=${OPT_AVAIL_KB}KB <= required=${OPT_REQ_KB}KB" >&2
+  echo "[preflight.sh] insufficient disk on /opt/cavecms: avail=${OPT_AVAIL_KB}KB <= required=${OPT_REQ_KB}KB" >&2
   echo "[preflight.sh]   (already on disk: artifact=${ARTIFACT_KB}KB + tarball=${TARBALL_KB}KB; required=${BUFFER_KB}KB headroom)" >&2
   exit 1
 fi
@@ -259,12 +259,12 @@ fi
 # /backup may not exist on a fresh box (first deploy before any snapshot
 # was written). In that case there is no projection to make — db-backup
 # timer will create the tree on first run.
-if [ -d /backup/bwc ]; then
+if [ -d /backup/cavecms ]; then
   BACKUP_REQ_KB=$(( LARGEST_DUMP_KB + BUFFER_KB ))
-  BACKUP_AVAIL_KB=$(LC_ALL=C df --output=avail /backup/bwc | tail -n 1 | tr -d '[:space:]')
-  [[ "$BACKUP_AVAIL_KB" =~ ^[0-9]+$ ]] || { echo "[preflight.sh] df returned non-numeric for /backup/bwc" >&2; exit 1; }
+  BACKUP_AVAIL_KB=$(LC_ALL=C df --output=avail /backup/cavecms | tail -n 1 | tr -d '[:space:]')
+  [[ "$BACKUP_AVAIL_KB" =~ ^[0-9]+$ ]] || { echo "[preflight.sh] df returned non-numeric for /backup/cavecms" >&2; exit 1; }
   if [ "$BACKUP_AVAIL_KB" -le "$BACKUP_REQ_KB" ]; then
-    echo "[preflight.sh] insufficient disk on /backup/bwc: avail=${BACKUP_AVAIL_KB}KB <= required=${BACKUP_REQ_KB}KB" >&2
+    echo "[preflight.sh] insufficient disk on /backup/cavecms: avail=${BACKUP_AVAIL_KB}KB <= required=${BACKUP_REQ_KB}KB" >&2
     echo "[preflight.sh]   (largest_existing_dump=${LARGEST_DUMP_KB}KB + buffer=${BUFFER_KB}KB)" >&2
     exit 1
   fi
@@ -344,7 +344,7 @@ fi
 #     scripts/pre-migrate-asserts.ts re-asserts this from the TS side, but
 #     surfacing the failure here lets the operator catch it before disk
 #     snapshots and migrator side effects start. Read-only SELECT via the
-#     bwc_backup principal — same connect-extra file used for the inline
+#     cavecms_backup principal — same connect-extra file used for the inline
 #     fingerprint check in deploy.sh.
 #
 #     Regex strips the 5.5.5- legacy MySQL client compat prefix that
@@ -353,10 +353,10 @@ fi
 #     servers, which would fail the migrator anyway but with a less
 #     actionable error.
 # ---------------------------------------------------------------------------
-MYSQL_CNF=/etc/bwc/bwc-backup.cnf
+MYSQL_CNF=/etc/cavecms/cavecms-backup.cnf
 if [ ! -r "$MYSQL_CNF" ]; then
   echo "[preflight.sh] $MYSQL_CNF missing or unreadable — required for DB version gate" >&2
-  echo "[preflight.sh]   fix: re-run scripts/setup.sh to provision the bwc_backup principal" >&2
+  echo "[preflight.sh]   fix: re-run scripts/setup.sh to provision the cavecms_backup principal" >&2
   exit 1
 fi
 # Mirror db/min-mariadb-version.ts — keep these literals in sync.
@@ -428,7 +428,7 @@ fi
 #    doesn't silently skip on a sharp upgrade.
 #
 #    ldd executes the program's ELF interpreter, which has historical
-#    CVEs around malicious binaries. The release tree is owned bwc:bwc
+#    CVEs around malicious binaries. The release tree is owned cavecms:cavecms
 #    750 and is only ever written by deploy.sh extracting a CI-trusted
 #    tarball — within that trust model ldd is acceptable. If the
 #    tarball-signing chain ever weakens, swap ldd for a `readelf -d`
@@ -439,7 +439,7 @@ if [ -d "$SHARP_ROOT" ]; then
   # Write find's output to a temp file so a find error (permission, EIO)
   # is surfaced via its exit code instead of being swallowed by the
   # process-substitution that `mapfile < <(...)` would set up. The release
-  # tree is owned bwc:bwc 750 and preflight runs as root via deploy.sh —
+  # tree is owned cavecms:cavecms 750 and preflight runs as root via deploy.sh —
   # any find error here is anomalous and worth failing on.
   SHARP_LIST=$(mktemp)
   # Cleanup on every exit path. The signal traps explicitly re-raise the
@@ -480,14 +480,14 @@ fi
 
 # ---------------------------------------------------------------------------
 # 5. /healthz of currently-deployed release
-#    Skipped on first deploy when /opt/bwc/current isn't a symlink yet.
+#    Skipped on first deploy when /opt/cavecms/current isn't a symlink yet.
 #    --fsS makes curl fail on 4xx/5xx and stay silent on success.
 #    Port 3040 matches ecosystem.config.cjs (cluster 1, single fork).
 #    Body shape is NOT validated here — that's deploy.sh's commit==$SHA
 #    poll on the NEW release. preflight only asks "is current healthy
 #    enough to swap out from under?"
 # ---------------------------------------------------------------------------
-if [ -L /opt/bwc/current ]; then
+if [ -L /opt/cavecms/current ]; then
   # No X-Real-IP header — it's only meaningful when an upstream proxy
   # sets it, and /healthz makes no auth decision off it (verified in
   # app/healthz/route.ts). Sending one from a loopback caller would
@@ -496,7 +496,7 @@ if [ -L /opt/bwc/current ]; then
        -o /dev/null \
        http://127.0.0.1:3040/healthz; then
     echo "[preflight.sh] current release unhealthy — refusing to deploy on top of a broken process" >&2
-    echo "[preflight.sh]   diagnose: curl -i http://127.0.0.1:3040/healthz && pm2 logs bwc --lines 50" >&2
+    echo "[preflight.sh]   diagnose: curl -i http://127.0.0.1:3040/healthz && pm2 logs cavecms --lines 50" >&2
     exit 1
   fi
 fi

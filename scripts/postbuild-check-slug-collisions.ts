@@ -28,7 +28,7 @@
 // DATABASE_URL semantics: when unset, the gate SKIPS with a warning
 // (default-permissive — local prod-build dry-runs without a DB
 // shouldn't fail). To force the gate strict in CI/deploy, set
-// `BWC_POSTBUILD_DB_REQUIRED=1` — `scripts/deploy.sh` does this so
+// `CAVECMS_POSTBUILD_DB_REQUIRED=1` — `scripts/deploy.sh` does this so
 // production deploys can never silently skip the check. Without
 // that env signal, missing DATABASE_URL is treated as a developer
 // signal of "no DB available here," not as a security regression.
@@ -92,11 +92,11 @@ if (process.env['NODE_ENV'] === 'production') {
   }
 
   const url = process.env['DATABASE_URL']
-  const strict = process.env['BWC_POSTBUILD_DB_REQUIRED'] === '1'
+  const strict = process.env['CAVECMS_POSTBUILD_DB_REQUIRED'] === '1'
   if (!url) {
     if (strict) {
       console.error(
-        '[postbuild-check-slug-collisions] DATABASE_URL not set; BWC_POSTBUILD_DB_REQUIRED=1 demands strict mode. Aborting.',
+        '[postbuild-check-slug-collisions] DATABASE_URL not set; CAVECMS_POSTBUILD_DB_REQUIRED=1 demands strict mode. Aborting.',
       )
       process.exit(2)
     }
@@ -105,7 +105,7 @@ if (process.env['NODE_ENV'] === 'production') {
         level: 'warn',
         msg: 'postbuild_check_slug_collisions_skipped',
         reason: 'database_url_missing',
-        note: 'Set BWC_POSTBUILD_DB_REQUIRED=1 in CI/deploy to force this check.',
+        note: 'Set CAVECMS_POSTBUILD_DB_REQUIRED=1 in CI/deploy to force this check.',
       }),
     )
     return

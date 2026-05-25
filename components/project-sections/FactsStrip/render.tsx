@@ -72,7 +72,7 @@ export function FactsStripSection({
   // CSS fade-in instead so it arrives in lockstep with the hero.
   return (
     <section
-      className="animate-bwc-fade-in border-y border-near-black/8 bg-cream/95 backdrop-blur supports-[backdrop-filter]:bg-cream/80"
+      className="animate-cavecms-fade-in border-y border-near-black/8 bg-cream/95 backdrop-blur supports-[backdrop-filter]:bg-cream/80"
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-10">
         <ul

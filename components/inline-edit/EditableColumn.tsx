@@ -821,7 +821,7 @@ function ColumnInlinePicker({
       role="menu"
       aria-label="Pick a widget to add to this column"
       className={clsx(
-        'relative p-3 animate-bwc-fade-in',
+        'relative p-3 animate-cavecms-fade-in',
         dark ? 'text-cream-50' : 'text-near-black',
       )}
     >

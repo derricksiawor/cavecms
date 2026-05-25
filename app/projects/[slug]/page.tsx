@@ -17,6 +17,7 @@ import type {
   PricingData,
 } from '@/components/project-sections/_shared/types'
 import { residenceLd } from '@/lib/seo/jsonLd'
+import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { ensurePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
@@ -176,6 +177,7 @@ export default async function ProjectPage({
       (s) => s.sectionKey === 'pricing',
     )
     const pricingData = pricingSection?.data as PricingData | undefined
+    const siteOrigin = await getSiteOrigin()
     const ld = residenceLd({
       name: hydratedProject.project.name,
       tagline: hydratedProject.project.tagline,
@@ -185,6 +187,7 @@ export default async function ProjectPage({
       priceMin: pricingData?.price_min,
       priceMax: pricingData?.price_max,
       priceCurrency: pricingData?.price_currency,
+      siteOrigin,
     })
 
     return (
@@ -256,6 +259,7 @@ export default async function ProjectPage({
   const heroVariants = hydratedProject.project.hero_image_id
     ? hydratedProject.media.get(hydratedProject.project.hero_image_id)?.variants
     : null
+  const siteOrigin = await getSiteOrigin()
   const ld = residenceLd({
     name: hydratedProject.project.name,
     tagline: hydratedProject.project.tagline,
@@ -265,6 +269,7 @@ export default async function ProjectPage({
     priceMin: pricingData?.price_min,
     priceMax: pricingData?.price_max,
     priceCurrency: pricingData?.price_currency,
+    siteOrigin,
   })
 
   const ctx = {

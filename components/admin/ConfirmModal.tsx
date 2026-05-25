@@ -72,13 +72,13 @@ export function ConfirmModal({
           // (or worse, hides it while the promise still resolves).
           if (!busy) onCancel()
         }}
-        className="fixed inset-0 z-40 cursor-default bg-near-black/45 backdrop-blur-[3px] animate-bwc-fade-in"
+        className="fixed inset-0 z-40 cursor-default bg-near-black/45 backdrop-blur-[3px] animate-cavecms-fade-in"
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
-        className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-warm-stone/20 bg-cream-50 shadow-[0_40px_80px_-30px_rgba(5,5,5,0.55)] animate-bwc-fade-in"
+        className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl border border-warm-stone/20 bg-cream-50 shadow-[0_40px_80px_-30px_rgba(5,5,5,0.55)] animate-cavecms-fade-in"
       >
         <div className="relative px-8 pt-9 pb-7 sm:px-10 sm:pt-10">
           <div

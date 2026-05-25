@@ -116,7 +116,7 @@ export function LeadsTable({
   }, [])
 
   // Drain cursor pagination up to FETCH_TOTAL_CAP. At >1000 leads
-  // we'd switch back to server-side pagination, but BWC at v1 is
+  // we'd switch back to server-side pagination, but CaveCMS at v1 is
   // well under that ceiling.
   const loadAll = useCallback(async () => {
     inFlightRef.current?.abort()

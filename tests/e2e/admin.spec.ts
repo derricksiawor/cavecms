@@ -43,8 +43,8 @@ async function hashPasswordLocal(pw: string): Promise<string> {
 
 const ADMIN_PASSWORD = 'CorrectHorseBattery0!'
 // Distinct test emails so this suite doesn't trip other specs' seeders.
-const ADMIN_EDITOR_EMAIL = 'admin-editor@bwc.test'
-const ADMIN_VIEWER_EMAIL = 'admin-viewer@bwc.test'
+const ADMIN_EDITOR_EMAIL = 'admin-editor@cavecms.test'
+const ADMIN_VIEWER_EMAIL = 'admin-viewer@cavecms.test'
 // Specific test lead body — used by the CSV-injection assertion to
 // confirm the leading `=` is escaped with a single-quote prefix.
 const INJECTION_NAME = '=HYPERLINK("http://evil.test","x")'
@@ -103,7 +103,7 @@ async function purgeTestArtefacts(): Promise<void> {
     // operates against a known row set.
     await conn.execute(
       'DELETE FROM leads WHERE email = ?',
-      ['admin-spec-lead@bwc.test'],
+      ['admin-spec-lead@cavecms.test'],
     )
     await conn.execute(
       'DELETE FROM audit_log WHERE user_id IN (SELECT id FROM users WHERE email IN (?, ?))',
@@ -125,7 +125,7 @@ async function seedInjectionLead(): Promise<void> {
   try {
     await conn.execute(
       'INSERT INTO leads (source, name, email, phone, message, status) VALUES (?, ?, ?, ?, ?, ?)',
-      ['contact', INJECTION_NAME, 'admin-spec-lead@bwc.test', '0240000000', 'csv-injection probe', 'new'],
+      ['contact', INJECTION_NAME, 'admin-spec-lead@cavecms.test', '0240000000', 'csv-injection probe', 'new'],
     )
   } finally {
     await conn.end()
@@ -214,7 +214,7 @@ test.describe.serial('Plan 08 — Admin', () => {
     await ensureUser(ADMIN_VIEWER_EMAIL, 'viewer', ADMIN_PASSWORD)
     await seedInjectionLead()
 
-    const adminId = await getUserId('admin@bwc.test')
+    const adminId = await getUserId('admin@cavecms.test')
     adminPage = await pageForUser(browser, adminId)
 
     const editorId = await getUserId(ADMIN_EDITOR_EMAIL)
@@ -241,13 +241,13 @@ test.describe.serial('Plan 08 — Admin', () => {
       }>
     }
     expect(j.items.length).toBeGreaterThan(0)
-    // The injection probe row has email 'admin-spec-lead@bwc.test'.
+    // The injection probe row has email 'admin-spec-lead@cavecms.test'.
     // For a viewer, the local part must collapse to 'a***'.
     const target = j.items.find((i) =>
-      i.email?.startsWith('a***@bwc.test'),
+      i.email?.startsWith('a***@cavecms.test'),
     )
     expect(target).toBeDefined()
-    expect(target!.email).toBe('a***@bwc.test')
+    expect(target!.email).toBe('a***@cavecms.test')
     expect(target!.phone).toMatch(/^\*\*\*\d{4}$/)
   })
 
@@ -293,7 +293,7 @@ test.describe.serial('Plan 08 — Admin', () => {
         'x-csrf-token': csrf,
       },
       data: {
-        email: 'never-created@bwc.test',
+        email: 'never-created@cavecms.test',
         role: 'editor',
         password: 'NeverCreated__12!',
       },
@@ -342,7 +342,7 @@ test.describe.serial('Plan 08 — Admin', () => {
 
   test('last-admin invariant blocks demoting the only admin', async () => {
     // Sanity-snapshot the admin set, then attempt to demote
-    // admin@bwc.test (the seed admin). The spec runs against a DB
+    // admin@cavecms.test (the seed admin). The spec runs against a DB
     // with at least that one admin row; the demote must 409.
     const csrf = await csrfHeader(adminPage)
     // Fresh reauth (the previous test consumed up to 5 minutes
@@ -360,7 +360,7 @@ test.describe.serial('Plan 08 — Admin', () => {
     // either way — if there's only one admin, the demote of that
     // admin via another admin context would still 409. Here we
     // ALSO check the self-modification guard catches the same intent.
-    const adminUserId = await getUserId('admin@bwc.test')
+    const adminUserId = await getUserId('admin@cavecms.test')
     const r = await adminPage.request.patch(
       `/api/admin/users/${adminUserId}`,
       {

@@ -5,7 +5,7 @@
 // `pnpm db:migrate` runs from two terminals (or a dev + a CI git-hook)
 // can't race on the __drizzle_migrations table mid-flight.
 //
-// Lock name and shape match migrator/run.js (`bwc_migrator_lock_<dbname>`,
+// Lock name and shape match migrator/run.js (`cavecms_migrator_lock_<dbname>`,
 // 60-second wait) so a dev migration and a prod migration cannot run
 // concurrently against the same DB even if someone points dev tooling at
 // prod credentials by accident.
@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process'
 import mysql from 'mysql2/promise'
 
-const ADVISORY_LOCK_PREFIX = 'bwc_migrator_lock'
+const ADVISORY_LOCK_PREFIX = 'cavecms_migrator_lock'
 const ADVISORY_LOCK_WAIT_SECONDS = 60
 
 function lockNameFor(dbName: string | undefined): string {
@@ -39,13 +39,13 @@ async function main(): Promise<number> {
   // advisory lock and apply uncommitted dev migrations to prod.
   if (
     process.env['NODE_ENV'] === 'production' &&
-    process.env['BWC_MIGRATE_OK'] !== '1'
+    process.env['CAVECMS_MIGRATE_OK'] !== '1'
   ) {
     console.error(
       '[db-migrate-with-lock] refusing to run with NODE_ENV=production without explicit opt-in.',
     )
     console.error(
-      '[db-migrate-with-lock]   prod migrations run via scripts/deploy.sh; if you really need to migrate manually: BWC_MIGRATE_OK=1 pnpm db:migrate',
+      '[db-migrate-with-lock]   prod migrations run via scripts/deploy.sh; if you really need to migrate manually: CAVECMS_MIGRATE_OK=1 pnpm db:migrate',
     )
     return 1
   }

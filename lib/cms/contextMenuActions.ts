@@ -61,7 +61,7 @@
 //   Clipboard: dual-write system clipboard (text/plain + text/html
 //   with base64 .fig metadata) — cross-tab + cross-app.
 //
-// Common patterns BWC adopts:
+// Common patterns CaveCMS adopts:
 //   - Edit-first verb (operator's most-common gesture sits at the top)
 //   - Group separators: structural / clipboard / destructive
 //   - Right-aligned dim keyboard hints (⌘D, ⌘C, ⌫)

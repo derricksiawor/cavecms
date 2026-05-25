@@ -15,7 +15,7 @@ const useIsomorphicLayoutEffect =
 // Single client wrapper for scroll-tied entrance animation. Uses
 // IntersectionObserver (no Framer Motion dep) — children render
 // invisible until the wrapper enters the viewport, then add one of
-// the Chunk D motion utility classes (animate-bwc-slide-up by
+// the Chunk D motion utility classes (animate-cavecms-slide-up by
 // default).
 //
 // Section-usage policy (project-detail page):
@@ -23,7 +23,7 @@ const useIsomorphicLayoutEffect =
 //     Inquiry, Location, Timeline, SimilarProjectsRail) WRAP their
 //     outer section in RevealOnView for the scroll-tied entrance.
 //   - Above-the-fold sections (Hero, FactsStrip) animate on first
-//     paint via the static `animate-bwc-rise` / `animate-bwc-fade-in`
+//     paint via the static `animate-cavecms-rise` / `animate-cavecms-fade-in`
 //     classes — wrapping them would delay paint by one IO tick and
 //     leave a blank strip during the hero's settle.
 //   - Client-interactive sections that own their internal motion
@@ -59,10 +59,10 @@ const useIsomorphicLayoutEffect =
 type RevealAnimation = 'slide-up' | 'fade-in' | 'scale-in' | 'rise'
 
 const CLASS_FOR_ANIMATION: Record<RevealAnimation, string> = {
-  'slide-up': 'animate-bwc-slide-up',
-  'fade-in': 'animate-bwc-fade-in',
-  'scale-in': 'animate-bwc-scale-in',
-  rise: 'animate-bwc-rise',
+  'slide-up': 'animate-cavecms-slide-up',
+  'fade-in': 'animate-cavecms-fade-in',
+  'scale-in': 'animate-cavecms-scale-in',
+  rise: 'animate-cavecms-rise',
 }
 
 interface Props {
@@ -150,7 +150,7 @@ export function RevealOnView({
 
   // Pre-reveal: opacity-0 (no transform — the animation utility owns
   // its own transform end-state via 'both' fill-mode).
-  // Post-reveal: animate-bwc-* utility applies; with `both` fill-mode
+  // Post-reveal: animate-cavecms-* utility applies; with `both` fill-mode
   // the end state sticks even after the animation finishes.
   const animClass = revealed && !reducedMotion ? CLASS_FOR_ANIMATION[animation] : ''
   const visibility = revealed || reducedMotion ? '' : 'opacity-0'

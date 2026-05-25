@@ -2,10 +2,10 @@
 # scripts/restore-drill.sh — weekly verification that the latest db-backup
 # can actually be decrypted and restored.
 #
-# Invoked by systemd: bwc-restore-drill.timer → bwc-restore-drill.service.
+# Invoked by systemd: cavecms-restore-drill.timer → cavecms-restore-drill.service.
 # Runs as ROOT (needs CREATE DATABASE / DROP DATABASE privilege that
-# bwc_migrator does not have — bwc_migrator's grants are scoped to
-# bwc.* by setup.sh's bwc_migrator GRANT block). Authenticates to
+# cavecms_migrator does not have — cavecms_migrator's grants are scoped to
+# cavecms.* by setup.sh's cavecms_migrator GRANT block). Authenticates to
 # MariaDB via unix_socket on the root@localhost account (cluster-1
 # invariant — Ubuntu MariaDB default).
 #
@@ -27,41 +27,41 @@
 #     drops the file, db-backup.sh's next run uploads a fresh copy).
 #
 # Flow:
-#   1. Validate /etc/bwc/age-identity exists at mode 600/400 owned by
+#   1. Validate /etc/cavecms/age-identity exists at mode 600/400 owned by
 #      root. If MISSING, exit 0 with a notice — the operator has not
 #      opted in to automated drills. (The identity is the private key;
 #      shipping it on the prod box is a security trade-off the operator
 #      explicitly accepts by installing it.)
-#   2. Find the latest /backup/bwc/db/*.sql.age by mtime.
-#   3. DROP DATABASE IF EXISTS bwc_drill; CREATE DATABASE bwc_drill.
-#   4. age decrypt | gunzip | mysql bwc_drill.
-#   5. Verify: bwc_drill table count matches bwc within a tolerance,
+#   2. Find the latest /backup/cavecms/db/*.sql.age by mtime.
+#   3. DROP DATABASE IF EXISTS cavecms_drill; CREATE DATABASE cavecms_drill.
+#   4. age decrypt | gunzip | mysql cavecms_drill.
+#   5. Verify: cavecms_drill table count matches cavecms within a tolerance,
 #      AND tracked tables (__drizzle_migrations, users) have non-zero
 #      rows. Both gates: each catches a different failure mode (table
 #      count = schema correctness; tracked rows = data presence).
-#   6. DROP DATABASE bwc_drill regardless of verification outcome
+#   6. DROP DATABASE cavecms_drill regardless of verification outcome
 #      (cleanup in finally-like fashion via EXIT trap).
 #
 # Why scratch-DB instead of restore-to-live:
-#   The live bwc database is serving traffic. Restoring on top would
+#   The live cavecms database is serving traffic. Restoring on top would
 #   wipe in-flight data. The drill validates the restore PATH without
 #   touching production data — exactly the property we need for a
 #   confidence check.
 #
 # Why root-auth instead of a dedicated drill user:
-#   Adding a bwc_drill_admin user would require touching setup.sh
+#   Adding a cavecms_drill_admin user would require touching setup.sh
 #   (cluster-1 invariant, already shipped). Root-via-socket auth is the
 #   minimal-blast-radius alternative: the unit's ProtectSystem=strict
 #   sandbox keeps the script from poking at anything besides MariaDB
 #   and a tempdir, and the script never writes plaintext SQL to disk
 #   (everything is piped age→gunzip→mysql, with no intermediate tee).
 #
-# Concurrency: persistent flock at /var/lib/bwc/.bwc-restore-drill.lock.
+# Concurrency: persistent flock at /var/lib/cavecms/.cavecms-restore-drill.lock.
 # Same persistent-lock pattern as cluster-3 siblings.
 #
-# Side effects: creates+drops the bwc_drill DB; touches
-# /var/lib/bwc/last-restore-drill.ok on success. Logs to stdout/stderr
-# (systemd journal). OnFailure=bwc-alert@%n.service alerts on non-zero
+# Side effects: creates+drops the cavecms_drill DB; touches
+# /var/lib/cavecms/last-restore-drill.ok on success. Logs to stdout/stderr
+# (systemd journal). OnFailure=cavecms-alert@%n.service alerts on non-zero
 # exits.
 #
 # Exit codes:
@@ -96,19 +96,19 @@ fi
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
-BACKUP_DIR=/backup/bwc/db
-LIVE_DB=bwc
-DRILL_DB=bwc_drill
-AGE_IDENTITY=/etc/bwc/age-identity
-MARKER=/var/lib/bwc/last-restore-drill.ok
-LOCK_FILE=/var/lib/bwc/.bwc-restore-drill.lock
-# Tolerance in table-count delta between bwc_drill and bwc. The drill
-# restores a backup that may be several days old; live bwc could have
+BACKUP_DIR=/backup/cavecms/db
+LIVE_DB=cavecms
+DRILL_DB=cavecms_drill
+AGE_IDENTITY=/etc/cavecms/age-identity
+MARKER=/var/lib/cavecms/last-restore-drill.ok
+LOCK_FILE=/var/lib/cavecms/.cavecms-restore-drill.lock
+# Tolerance in table-count delta between cavecms_drill and cavecms. The drill
+# restores a backup that may be several days old; live cavecms could have
 # 0 to a handful of new tables from migrations since. ±5 absorbs the
 # realistic migration cadence (≤1 migration/week) plus reserve.
 TABLE_COUNT_TOLERANCE=5
 # Tracked tables — restored data MUST have non-zero rows here. These
-# are the minimum-fanout tables that exist in every BWC install:
+# are the minimum-fanout tables that exist in every CaveCMS install:
 #   __drizzle_migrations — migrations history; never empty after
 #                          first deploy.
 #   users                — admin users; setup.sh seeds at least one.
@@ -119,7 +119,7 @@ TRACKED_TABLES=(__drizzle_migrations users)
 
 # ---------------------------------------------------------------------------
 # Must run as root — CREATE/DROP DATABASE requires the global privilege
-# that bwc_migrator does not have. The systemd unit sets User=root.
+# that cavecms_migrator does not have. The systemd unit sets User=root.
 # ---------------------------------------------------------------------------
 if [ "$(id -u)" -ne 0 ]; then
   echo "[restore-drill.sh] must run as root (need CREATE DATABASE privilege; running as $(id -un))" >&2
@@ -212,7 +212,7 @@ backup_age_seconds=$(( $(date -u +%s) - $(stat -c %Y "$LATEST_BACKUP") ))
 backup_age_days=$(( backup_age_seconds / 86400 ))
 if [ "$backup_age_seconds" -gt $((3 * 86400)) ]; then
   echo "[restore-drill.sh] latest backup is ${backup_age_days}d (${backup_age_seconds}s) old (>3d) — db-backup may have stopped running" >&2
-  echo "[restore-drill.sh]   investigate journalctl -u bwc-db-backup.service" >&2
+  echo "[restore-drill.sh]   investigate journalctl -u cavecms-db-backup.service" >&2
   exit 1
 fi
 
@@ -222,9 +222,9 @@ fi
 for f in "$LOCK_FILE" "$MARKER"; do
   # $LOCK_FILE — `exec 9>` follows symlinks and would O_TRUNC the target.
   # $MARKER — `: > "$MARKER"` (post-success touch) also follows symlinks.
-  # Without this precheck, a bwc-uid attacker could pre-plant $MARKER as
-  # a symlink to /var/lib/bwc/deploy.blocked or any path in this unit's
-  # ReadWritePaths set (/var/log/bwc /var/lib/bwc); the next drill tick
+  # Without this precheck, a cavecms-uid attacker could pre-plant $MARKER as
+  # a symlink to /var/lib/cavecms/deploy.blocked or any path in this unit's
+  # ReadWritePaths set (/var/log/cavecms /var/lib/cavecms); the next drill tick
   # (running as root, mode 0644 truncate via shell `>`) would zero the
   # target. systemd's ProtectSystem=strict bounds the blast radius to
   # the unit's RW paths, but a truncated deploy.blocked sentinel is
@@ -243,7 +243,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Cleanup trap. Always DROP the scratch DB on exit, success or failure,
-# so we never leave a stale bwc_drill lying around to occupy disk or
+# so we never leave a stale cavecms_drill lying around to occupy disk or
 # confuse the next drill run's "DROP IF EXISTS" with old indexes.
 #
 # Why the DROP is idempotent: mysql IF EXISTS variants tolerate the DB
@@ -304,7 +304,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # Verification gate 1: table count.
-# Compare bwc_drill table count vs live bwc. Drift > TABLE_COUNT_TOLERANCE
+# Compare cavecms_drill table count vs live cavecms. Drift > TABLE_COUNT_TOLERANCE
 # indicates either (a) the backup is from far enough back that several
 # migrations have run since, or (b) the dump dropped tables entirely.
 # Either way, alert.
@@ -333,7 +333,7 @@ fi
 # Verification gate 2: tracked tables have rows.
 # Catches the "schema-only dump" failure mode where mysqldump produces
 # CREATE TABLE statements but no INSERT data (e.g., from --no-data).
-# A clean backup of a live BWC install MUST have rows in these tables.
+# A clean backup of a live CaveCMS install MUST have rows in these tables.
 # ---------------------------------------------------------------------------
 for tbl in "${TRACKED_TABLES[@]}"; do
   rows=$(mysql --protocol=socket --connect-timeout=10 -uroot -N -B -e \
