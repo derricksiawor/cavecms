@@ -34,6 +34,12 @@ import {
   useEffectiveVersions,
   useInlineEditDispatch,
 } from './InlineEditContext'
+import { useSparkleSessionFor } from './AiSparkleSessionContext'
+import { AISparkleButton } from './AISparkleButton'
+import {
+  AISparklePreviewOverlay,
+  SPARKLE_ACTIVE_OUTLINE,
+} from './AISparklePreviewOverlay'
 import { useContextMenu } from './ContextMenuProvider'
 import { useRecordCommand, useUndoActions } from './UndoStackProvider'
 import { useSelection } from './SelectionContext'
@@ -818,6 +824,13 @@ export function EditableBlock(p: EditableBlockProps) {
   }, [p.blockId])
 
   const isSelected = selection.isSelected(p.blockId)
+  // Active AI session against THIS block — drives the dashed copper
+  // outline + "AI proposing…" pill via AISparklePreviewOverlay.
+  const sparkleSession = useSparkleSessionFor(p.blockId)
+  const sparkleActive =
+    sparkleSession !== null &&
+    sparkleSession.status !== 'idle' &&
+    sparkleSession.status !== 'applying'
 
   // ── Keyboard shortcuts — only fire when this block is the selected one.
   // Webflow / Notion / Figma convention: ⌘D duplicate, ⌫/Delete remove,
@@ -1024,10 +1037,15 @@ export function EditableBlock(p: EditableBlockProps) {
           // touch operators can hit the toolbar after the first tap.
           isSelected &&
             '!outline-copper-400 shadow-[0_18px_44px_-22px_rgba(160,90,40,0.35)]',
+          // AI sparkle session active — dashed copper outline overrides
+          // selection/hover state so the operator knows the AI is
+          // working on THIS block specifically.
+          sparkleActive && SPARKLE_ACTIVE_OUTLINE,
           'motion-reduce:transition-none',
         )}
       >
         {p.children}
+        {sparkleSession !== null && <AISparklePreviewOverlay blockId={p.blockId} />}
       </div>
 
       {/* Floating action toolbar. Pinned top-right with a copper-pill
@@ -1093,6 +1111,25 @@ export function EditableBlock(p: EditableBlockProps) {
           <GripVertical size={16} strokeWidth={2.2} aria-hidden="true" />
         </button>
         <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-cream-50/15" />
+        {/* AI sparkle — leading position so the most-used affordance
+            is closest to the drag handle. Self-gates via aiSnapshot +
+            INLINE_AI_BLOCK_TYPES; returns null when AI is off or the
+            block isn't eligible, so the layout collapses cleanly.
+            currentData reads from the live InlineEditContext (which
+            includes any inline edits the operator made since page
+            load) so AI fields reflect the freshest content, not the
+            server-render snapshot. */}
+        <AISparkleButton
+          blockId={p.blockId}
+          blockType={p.blockType}
+          blockVersion={versions.blockVersion}
+          pageId={p.pageId}
+          pageVersion={versions.pageVersion}
+          currentData={
+            liveBlocksRef.current.find((b) => b.id === p.blockId)?.data ??
+            p.initialData
+          }
+        />
         <ToolButton
           icon={Pencil}
           label="Edit"

@@ -4,6 +4,8 @@ import { env } from '@/lib/env'
 import { RESERVED } from '@/lib/cms/page-slug'
 import { parseCidr } from '@/lib/security/ipMatch'
 import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
+import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
+import { encryptedSecretSchema } from '@/lib/security/secretCipher'
 
 // One Zod schema per `settings.key`. getSetting() parses every value
 // through this registry on read — so a tampered DB cell or a
@@ -488,6 +490,308 @@ const organizationJsonLd = z.object({
   sameAs: z.array(HttpsUrl).max(20).optional(),
 })
 
+// Site-wide identity — used wherever CaveCMS emits absolute URLs
+// (sitemap.xml, robots.txt, JSON-LD `url` fields, every email link).
+//
+// `siteUrl` is REQUIRED for those surfaces to emit anything; until an
+// operator configures it, sitemap/robots fall back to relative URLs
+// and email-based notifications are skipped. This is intentional — a
+// freshly-installed CaveCMS shouldn't be putting "https://bestworld
+// company.com" links into emails by mistake.
+const siteGeneral = z.object({
+  siteUrl: z
+    .string()
+    .max(500)
+    .url()
+    .refine(
+      (u) => u.startsWith('https://') && !u.endsWith('/'),
+      'must_be_https_no_trailing_slash',
+    )
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
+  siteName: z.string().max(120).optional(),
+})
+
+// Session + CSRF timeout policy. Hard caps enforce the project's
+// security gold-standard: max 8h session, max 24h absolute. An
+// operator who sets a "1 year session" through the dashboard gets
+// Zod-rejected before it ever lands in the DB.
+const sessionConfig = z.object({
+  /** JWT lifetime per token, in seconds. 1h–8h. */
+  jwtTtlSec: z
+    .number()
+    .int()
+    .min(3600, 'min_1h')
+    .max(28800, 'max_8h')
+    .default(28800),
+  /** Soft-renew threshold — middleware re-issues the JWT when this
+   *  many seconds remain on the current one. 5min–1h. */
+  jwtRenewAfterSec: z
+    .number()
+    .int()
+    .min(300, 'min_5m')
+    .max(3600, 'max_1h')
+    .default(1800),
+  /** Absolute max from `oat` (original auth time) — caps how long a
+   *  rolling session can survive past the initial login. Max 24h. */
+  jwtAbsoluteMaxSec: z
+    .number()
+    .int()
+    .min(3600, 'min_1h')
+    .max(86400, 'max_24h')
+    .default(86400),
+  /** CSRF token lifetime, seconds. Max 24h. */
+  csrfTtlSec: z
+    .number()
+    .int()
+    .min(900, 'min_15m')
+    .max(86400, 'max_24h')
+    .default(3600),
+})
+
+// Self-update preferences. Mirrors the Settings → Updates form.
+// `notificationEmail` is optional + nullable so a blank input maps to
+// undefined (no email notification) — distinct from a typo'd value
+// (which gets rejected by the email refinement).
+const updates = z.object({
+  autoApplySecurityPatches: z.boolean().default(true),
+  checkFrequencyHours: z.number().int().min(1).max(168).default(12),
+  notificationEmail: z
+    .string()
+    .max(180)
+    .email('must_be_email')
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
+})
+
+// Internal state for the install wizard. The middleware install-gate
+// reads `completedAt` — null means a fresh deploy, redirect to /install.
+// Once set, /install is permanently locked.
+const installState = z.object({
+  completedAt: z.string().max(40).optional(),
+  /** Site URL the operator entered during install. Stored here as a
+   *  forensic record; the live siteUrl lives at `site_general`. */
+  initialSiteUrl: z.string().max(500).optional(),
+})
+
+// Internal state for the Updates background job. NOT operator-editable
+// — no form shape, no Settings page surface. The instrumentation.ts
+// scheduled job writes `lastNotifiedSha` here so we don't re-email
+// the operator about the same release on every poll.
+const updatesState = z.object({
+  lastNotifiedSha: z.string().max(64).optional(),
+  lastNotifiedAt: z.string().max(40).optional(),
+  lastCheckedAt: z.string().max(40).optional(),
+})
+
+// SMTP configuration. Moved from .env.local so operators can configure
+// outbound email from the dashboard without SSH'ing the server.
+// Mirrors the env-var shape: host/port/secure/user/password/fromAddress/
+// fromName. `password` redacted client-side like the HubSpot/Zoho CRM
+// credential pattern — never sent back to the form, PATCH preserves
+// the stored value when an empty string comes in.
+const smtpConfig = z
+  .object({
+    enabled: z.boolean(),
+    host: z.string().max(200).optional(),
+    port: z.number().int().min(1).max(65535).default(587),
+    // 465 = implicit TLS; 587 = STARTTLS (requireTLS). When `false`
+    // and port !== 465 we let nodemailer auto-detect.
+    secure: z.boolean().default(false),
+    user: z.string().max(180).optional(),
+    password: z.string().max(400).optional(),
+    fromAddress: z
+      .string()
+      .max(180)
+      .email('must_be_email')
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+    fromName: z.string().max(120).optional(),
+    // Lead-notification recipient — replaces the old `SALES_EMAIL`
+    // env var. When a visitor submits a contact / inquiry / brochure
+    // form, the operator gets an email here. Falls back to
+    // fromAddress when unset (single-mailbox deploys).
+    notificationRecipient: z
+      .string()
+      .max(180)
+      .email('must_be_email')
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+  })
+  .refine(
+    (d) => !d.enabled || (!!d.host && !!d.fromAddress),
+    'host_and_from_required_when_enabled',
+  )
+
+// ─── AI Assistant (Gemini) ───
+// Operator-provided Gemini key (BYOK), stored encrypted at rest via
+// lib/security/secretCipher. The settings PATCH route preserves the
+// stored value when an incoming `apiKey` is null/undefined — same
+// redaction pattern as SMTP password / HubSpot token. `apiKeyLast4`
+// is the only operator-visible record of the saved key ("ends in
+// 1234") — derived at write time and stored alongside so the UI
+// never has to round-trip ciphertext through decrypt for display.
+//
+// `voicePreset` feeds into the AI system prompt to keep rewrites in
+// the operator's brand voice. Marketing positions this as "in your
+// voice, with your site's tone." Custom preset unlocks the free-form
+// notes field (capped at 800 chars — long enough for a couple of
+// style examples, short enough to keep the prompt under cost budget).
+//
+// Cross-field refines:
+//   - Enabling AI requires a stored apiKey (UI may show a placeholder
+//     "set" state when the operator already saved a key; the PATCH
+//     route's redaction merge handles this).
+//   - Verifying the connection (verifiedAt set by /api/admin/ai/verify)
+//     is a soft gate — the surface toggles (inlineEnabled / chatEnabled)
+//     can be flipped at any time, but the verify timestamp lets the UI
+//     show "needs reverification after key change."
+// CREATOR-vs-USER AUTHORITY (read this before editing the AI shape).
+//
+// The CaveCMS creator (us, shipping the CMS) controls:
+//   - Which AI provider(s) are wired in (Gemini only for v1)
+//   - The model allowlist below — operators pick from it, never extend
+//   - The Zod shape, the cross-field refines, encryption at rest
+//   - The tool surface exposed to Gemini (lib/ai/tools.ts), the system
+//     prompt scaffolding (lib/ai/prompts/*), the apply pipeline
+//   - Backend behaviour: rate limits, proposal expiry, tool budget,
+//     audit logging, redaction patterns
+//
+// The CaveCMS operator (the person who installs CaveCMS on their box)
+// controls:
+//   - Whether AI is on at all (enabled / inlineEnabled / chatEnabled)
+//   - Their own Gemini API key (BYOK)
+//   - Which model their site uses for each surface (from our allowlist)
+//   - Their brand voice (preset + free-form notes)
+//   - Whether to apply or dismiss each proposed change
+//
+// What the operator does NOT control: anything that affects safety
+// (CSRF, optimistic locks, sanitization), the tool surface (so the AI
+// can never reach beyond CMS blocks), or the apply pipeline (so every
+// AI edit lands through the same audited write path a manual edit
+// uses). When tempted to make something configurable, ask: "does the
+// operator NEED this knob, or is a sensible creator-decision enough?"
+// Configurability is a maintenance + audit + safety surface. Default
+// to creator-locked; expose to the operator only with a reason.
+//
+// Voice presets are deliberately brand-NEUTRAL — CaveCMS is a generic
+// CMS, so the shipped presets must work for a bakery, a law firm, a
+// fan blog, or a luxury brand alike. Vertical-specific tones live in
+// `customVoiceNotes` where the operator writes them in their own words.
+//
+// Gemini API model IDs verified against
+// https://ai.google.dev/gemini-api/docs/models on 2026-05-25. Exact
+// strings matter — these get passed verbatim to the @google/genai SDK,
+// so an unrecognised value would 400 the verify endpoint and silently
+// break inline / chat at runtime. When Google deprecates a preview ID,
+// this list updates and the post-migrate gate fails any DB rows still
+// pointing at the dead ID (the operator re-picks from the dashboard).
+//
+// No default. The operator MUST pick before AI features turn on. The
+// refines below require both surfaces' model fields to be present when
+// the matching surface is enabled — clearer than us silently picking
+// a model the operator never approved.
+//
+// The list itself moved to `lib/cms/aiModelIds.ts` (client-safe) so
+// the admin Settings → AI page can read it without dragging this
+// server-only registry into the client bundle. Re-exported here for
+// any caller still importing from this module.
+export { AI_MODEL_IDS }
+
+const aiModelEnum = z.enum(AI_MODEL_IDS)
+
+const aiConfig = z
+  .object({
+    enabled: z.boolean(),
+    provider: z.literal('gemini'),
+    // Encrypted envelope of the Gemini API key, or null when not yet
+    // configured. The settings PATCH route MUST preserve the stored
+    // value when an empty / undefined apiKey comes in — mirrors the
+    // SMTP password redaction merge.
+    apiKey: encryptedSecretSchema.nullable().optional(),
+    // Last 4 plaintext chars of the saved key, for UI display only
+    // ("Key ending in …1234"). Industry-standard amount to surface
+    // (Stripe / SendGrid pattern). Set at write time alongside apiKey
+    // by the settings PATCH route — clients MUST NOT supply this
+    // directly (PATCH overrides any client-supplied value). Exact
+    // length (4) enforced so a tampered DB cell cannot mislead the
+    // operator with a longer or shorter "ends in" display.
+    apiKeyLast4: z.string().length(4).optional(),
+    // Per-surface model choice. Optional in the schema (the row may
+    // exist before the operator picks), but required-when-enabled via
+    // the refines below. No fallback default — picking is intentional
+    // because models differ in cost, latency, and capability profile.
+    models: z
+      .object({
+        inline: aiModelEnum.optional(),
+        chat: aiModelEnum.optional(),
+      })
+      .optional(),
+    inlineEnabled: z.boolean(),
+    chatEnabled: z.boolean(),
+    // Brand-neutral starting tones. The creator ships the menu; the
+    // operator picks one — or chooses 'custom' to describe their own
+    // voice in `customVoiceNotes`. No vertical-specific values (e.g.
+    // "luxury", "real-estate", "saas") — those are the operator's job
+    // to describe in custom mode.
+    voicePreset: z.enum([
+      'default',
+      'editorial',
+      'friendly',
+      'professional',
+      'playful',
+      'custom',
+    ]),
+    customVoiceNotes: z.string().max(800).optional(),
+    // ISO 8601 string set by /api/admin/ai/verify when a Gemini ping
+    // succeeds with the currently-saved key. Cleared on apiKey change
+    // (the PATCH handler wipes it whenever a new apiKey is supplied).
+    verifiedAt: z.string().max(40).optional(),
+  })
+  .superRefine((d, ctx) => {
+    // Dominating constraint first — if the operator enabled a surface
+    // without enabling the master switch, only THAT error surfaces.
+    // Otherwise a single misclick would generate three error bubbles
+    // and the UI would have to guess which to highlight first.
+    if (!d.enabled && (d.inlineEnabled || d.chatEnabled)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'enable_master_switch_first',
+        path: ['enabled'],
+      })
+      return
+    }
+    // Master switch is on, but the credential row is empty. The
+    // settings PATCH route preserves a previously-stored apiKey when
+    // the form sends an empty field — so this fires only when the
+    // operator truly has no key.
+    if (d.enabled && !d.apiKey) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'api_key_required_when_enabled',
+        path: ['apiKey'],
+      })
+    }
+    // No-fallback model selection. A surface can be enabled only when
+    // its model is picked — we refuse to silently choose for the
+    // operator. Per-field paths so the admin form lights up the right
+    // input.
+    if (d.inlineEnabled && !d.models?.inline) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'inline_model_required_when_inline_enabled',
+        path: ['models', 'inline'],
+      })
+    }
+    if (d.chatEnabled && !d.models?.chat) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'chat_model_required_when_chat_enabled',
+        path: ['models', 'chat'],
+      })
+    }
+  })
+
 export const registry = {
   contact_info: {
     schema: contactInfo,
@@ -650,6 +954,62 @@ export const registry = {
   mobile_cta: {
     schema: mobileCta,
     default: { enabled: false, buttons: [] } satisfies z.infer<typeof mobileCta>,
+  },
+  // ─── Session + CSRF timeouts ───
+  session_config: {
+    schema: sessionConfig,
+    default: {
+      jwtTtlSec: 28800,
+      jwtRenewAfterSec: 1800,
+      jwtAbsoluteMaxSec: 86400,
+      csrfTtlSec: 3600,
+    } satisfies z.infer<typeof sessionConfig>,
+  },
+  // ─── Site identity ───
+  site_general: {
+    schema: siteGeneral,
+    default: {} satisfies z.infer<typeof siteGeneral>,
+  },
+  // ─── Self-update preferences ───
+  updates: {
+    schema: updates,
+    default: {
+      autoApplySecurityPatches: true,
+      checkFrequencyHours: 12,
+    } satisfies z.infer<typeof updates>,
+  },
+  // Internal install-wizard state — not operator-editable, no UI.
+  install_state: {
+    schema: installState,
+    default: {} satisfies z.infer<typeof installState>,
+  },
+  // Internal Updates state — not operator-editable, no Settings page.
+  updates_state: {
+    schema: updatesState,
+    default: {} satisfies z.infer<typeof updatesState>,
+  },
+  // ─── SMTP / outbound email ───
+  smtp_config: {
+    schema: smtpConfig,
+    default: {
+      enabled: false,
+      port: 587,
+      secure: false,
+    } satisfies z.infer<typeof smtpConfig>,
+  },
+  // ─── AI Assistant (Gemini, BYOK) ───
+  // Default row carries no model picks — operator MUST select before
+  // turning AI on. The refines on the schema enforce this at save time;
+  // the row sits with empty `models` until then.
+  ai_config: {
+    schema: aiConfig,
+    default: {
+      enabled: false,
+      provider: 'gemini',
+      inlineEnabled: false,
+      chatEnabled: false,
+      voicePreset: 'default',
+    } satisfies z.infer<typeof aiConfig>,
   },
 } as const
 

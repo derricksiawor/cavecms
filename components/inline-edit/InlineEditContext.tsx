@@ -16,6 +16,7 @@ import { csrfFetch } from '@/lib/client/csrf'
 import { safeStorage } from '@/lib/client/safeStorage'
 import { assertNever } from '@/lib/typeUtils'
 import type { HydratedBlock } from '@/lib/cms/hydrate'
+import type { EditorAiSnapshot } from '@/lib/cms/getEditorAiSnapshot'
 import { CLIPBOARD_SCHEMA_VERSION, type ClipboardSlot } from '@/lib/cms/clipboard'
 import { SEED_DATA, type SeedBlockType } from '@/lib/cms/blockSeeds'
 import {
@@ -557,12 +558,21 @@ function reducer(
 interface ProviderProps {
   initialBlocks: HydratedBlock[]
   initialPageVersion: number
+  /** Editor-safe AI snapshot read once at page render time. Null when
+   *  the editor mounts outside an AI-aware context (e.g., legacy
+   *  callers that haven't been updated). The sparkle button reads
+   *  this via `useAiSnapshot()` and hides itself when `enabled !==
+   *  true || inlineEnabled !== true || keyOnFile !== true`. */
+  aiSnapshot?: EditorAiSnapshot | null
   children: ReactNode
 }
+
+const AiSnapshotContext = createContext<EditorAiSnapshot | null>(null)
 
 export function InlineEditProvider({
   initialBlocks,
   initialPageVersion,
+  aiSnapshot,
   children,
 }: ProviderProps) {
   const [state, dispatch] = useReducer(
@@ -655,10 +665,20 @@ export function InlineEditProvider({
   return (
     <StateContext.Provider value={state}>
       <DispatchContext.Provider value={dispatch}>
-        {children}
+        <AiSnapshotContext.Provider value={aiSnapshot ?? null}>
+          {children}
+        </AiSnapshotContext.Provider>
       </DispatchContext.Provider>
     </StateContext.Provider>
   )
+}
+
+/** Read the editor-safe AI snapshot. Returns null when the provider
+ *  wasn't given one, when the operator hasn't configured AI yet, or
+ *  when AI features are master-disabled. Consumers (AISparkleButton)
+ *  should treat null as "AI surfaces off". */
+export function useAiSnapshot(): EditorAiSnapshot | null {
+  return useContext(AiSnapshotContext)
 }
 
 // In development, throw on use-outside-provider so a misplaced consumer

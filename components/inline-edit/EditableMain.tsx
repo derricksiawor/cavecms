@@ -15,6 +15,7 @@ import type {
   HydratedMedia,
   HydratedProject,
 } from '@/lib/cms/hydrate'
+import { getEditorAiSnapshot } from '@/lib/cms/getEditorAiSnapshot'
 
 // Single edit-mode shell shared by every public-page render path
 // (home `/`, dynamic `/{slug}`, and the legacy `/contact` template
@@ -83,6 +84,14 @@ const UndoRedoController = nextDynamic(() =>
   import('./UndoRedoController').then((m) => m.UndoRedoController),
 )
 
+// AI sparkle session provider — orchestrates the SSE stream + apply/
+// dismiss POSTs for the inline AI sparkle. Dynamic-imported so non-
+// editor mounts (anonymous visitors, admins with edit mode off) don't
+// ship the streaming parser + the AI tab UI in their bundle.
+const AiSparkleSessionProvider = nextDynamic(() =>
+  import('./AiSparkleSessionContext').then((m) => m.AiSparkleSessionProvider),
+)
+
 // Chunk J: section-template gallery. Mounted at editor root so the
 // three entry points (slash palette "Templates" item, OutlinePanel
 // AddBlockMenu button, EditModeEmptyState secondary CTA) open the
@@ -121,9 +130,14 @@ interface Props {
   csrf?: string
 }
 
-export function EditableMain(p: Props) {
+export async function EditableMain(p: Props) {
   const showEmpty = p.showEmptyState ?? true
   const isEditor = canEdit(p.session)
+  // Editor-only: resolve the AI snapshot once at render so the inline
+  // sparkle button can read it from context without a per-block fetch.
+  // Anonymous + admin-without-edit-mode mounts skip the lookup — they
+  // never render the sparkle either way.
+  const aiSnapshot = p.editable ? await getEditorAiSnapshot() : null
 
   // Branch the renderer choice early. The non-editable path stays on
   // the server-only BlockTreeRenderer so anonymous visitors never load
@@ -208,7 +222,9 @@ export function EditableMain(p: Props) {
         <InlineEditProvider
           initialBlocks={p.blocks}
           initialPageVersion={p.pageVersion}
+          aiSnapshot={aiSnapshot}
         >
+          <AiSparkleSessionProvider>
           {/* SelectionProvider — per-page persistent "selected block"
               cursor. Sits INSIDE InlineEditProvider so it survives
               router.refresh() reconciliation and stays scoped per page;
@@ -258,6 +274,7 @@ export function EditableMain(p: Props) {
               </ContextMenuProvider>
             </UndoStackProvider>
           </SelectionProvider>
+          </AiSparkleSessionProvider>
         </InlineEditProvider>
       ) : (
         <>
