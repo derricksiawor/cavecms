@@ -91,9 +91,9 @@ export async function register(): Promise<void> {
   // the imports / fingerprint check / scrypt warm-up below would
   // otherwise route through Node's default uncaught handler with no
   // structured log shape.
-  const g = globalThis as unknown as { __bwcCrashHandlersRegistered?: true }
-  if (!g.__bwcCrashHandlersRegistered) {
-    g.__bwcCrashHandlersRegistered = true
+  const g = globalThis as unknown as { __cavecmsCrashHandlersRegistered?: true }
+  if (!g.__cavecmsCrashHandlersRegistered) {
+    g.__cavecmsCrashHandlersRegistered = true
     process.on('uncaughtException', (e) => crash('uncaughtException', e))
     process.on('unhandledRejection', (e) => crash('unhandledRejection', e))
   }
@@ -116,7 +116,7 @@ export async function register(): Promise<void> {
         msg: 'pm2_cluster_refusal',
         instance: pmInstance,
         reason:
-          'BWC uses in-memory rate-limit and email-queue state; not cluster-safe. Set instances: 1 in ecosystem.config.cjs OR migrate state to Redis.',
+          'CaveCMS uses in-memory rate-limit and email-queue state; not cluster-safe. Set instances: 1 in ecosystem.config.cjs OR migrate state to Redis.',
       }),
     )
     process.exit(1)
@@ -125,7 +125,7 @@ export async function register(): Promise<void> {
   // __Host- cookie prefix assertion. The `__Host-` prefix is the
   // strongest browser-side defence against subdomain / domain-scope
   // cookie shadowing — a misconfigured prod box that drops the prefix
-  // (NODE_ENV ≠ 'production') would mint plain `bwc_session` cookies
+  // (NODE_ENV ≠ 'production') would mint plain `cavecms_session` cookies
   // with no prefix, leaving a Cookie-Tossing attack open. Refuse to
   // boot rather than silently serving in the weaker shape.
   if (env.NODE_ENV === 'production') {
@@ -277,9 +277,9 @@ export async function register(): Promise<void> {
   // delay process exit past PM2's kill_timeout. Production-only so
   // dev hot-reload stays snappy.
   if (env.NODE_ENV === 'production') {
-    const dg = globalThis as unknown as { __bwcShutdownRegistered?: true }
-    if (!dg.__bwcShutdownRegistered) {
-      dg.__bwcShutdownRegistered = true
+    const dg = globalThis as unknown as { __cavecmsShutdownRegistered?: true }
+    if (!dg.__cavecmsShutdownRegistered) {
+      dg.__cavecmsShutdownRegistered = true
       const raceTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | void> =>
         Promise.race([
           p,
@@ -337,9 +337,9 @@ export async function register(): Promise<void> {
   // PM2 cluster-mode is refused at line 112-123, so we don't worry
   // about two workers both firing the check.
   const updateSchedGlobal = globalThis as unknown as {
-    __bwcUpdateChecker?: ReturnType<typeof setInterval>
+    __cavecmsUpdateChecker?: ReturnType<typeof setInterval>
   }
-  if (!updateSchedGlobal.__bwcUpdateChecker) {
+  if (!updateSchedGlobal.__cavecmsUpdateChecker) {
     // First fire: 30s after boot so DB pool / route handlers settle
     // before we make outbound network calls.
     const FIRST_FIRE_MS = 30_000
@@ -373,7 +373,7 @@ export async function register(): Promise<void> {
     // dashboard change takes effect without restart. We tick every
     // hour and bail inside if we're still within the configured
     // window since lastCheckedAt.
-    updateSchedGlobal.__bwcUpdateChecker = setInterval(async () => {
+    updateSchedGlobal.__cavecmsUpdateChecker = setInterval(async () => {
       try {
         const { getSetting } = await import('@/lib/cms/getSettings')
         const updatesCfg = await getSetting('updates')
@@ -387,6 +387,62 @@ export async function register(): Promise<void> {
         /* swallow — next tick retries. */
       }
     }, 60 * 60 * 1000)
-    updateSchedGlobal.__bwcUpdateChecker.unref()
+    updateSchedGlobal.__cavecmsUpdateChecker.unref()
+  }
+
+  // ─── AI proposal expiry sweeper (PR 1 + PR 4) ──────────────────
+  //
+  // Flips ai_proposals rows from `pending` → `expired` once past
+  // their 30-minute window. Without this sweeper the row stays
+  // `pending` in storage until an apply attempt notices the expiry
+  // on-read (which itself flips it). The sweeper makes the state
+  // transition timely so the admin dashboard's pending-list always
+  // reflects truth + so a stale token presented out-of-band fails
+  // closed.
+  //
+  // 5-minute interval. Best-effort — a missed tick (e.g. process
+  // restart) catches up on the next one; an apply against a still-
+  // pending-but-actually-expired row also flips the status inline
+  // (see applyInlineProposalByToken / applyChatProposalByToken).
+  //
+  // PM2 cluster-mode is refused upstream so two workers can't both
+  // sweep concurrently.
+  const proposalSweeperGlobal = globalThis as unknown as {
+    __cavecmsAiProposalSweeper?: ReturnType<typeof setInterval>
+  }
+  if (!proposalSweeperGlobal.__cavecmsAiProposalSweeper) {
+    const SWEEP_INTERVAL_MS = 5 * 60 * 1000
+    const sweepOnce = async (): Promise<void> => {
+      try {
+        const { db } = await import('@/db/client')
+        const { sql } = await import('drizzle-orm')
+        await db.execute(sql`
+          UPDATE ai_proposals
+          SET status = 'expired'
+          WHERE status = 'pending'
+            AND expires_at < NOW(3)
+        `)
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'ai_proposal_sweep_failed',
+            err:
+              err instanceof Error
+                ? err.message.slice(0, 200)
+                : String(err).slice(0, 200),
+          }),
+        )
+      }
+    }
+    // First sweep 60s after boot so DB pool settles. Subsequent
+    // sweeps every 5 min via setInterval.
+    setTimeout(() => {
+      void sweepOnce()
+    }, 60_000)
+    proposalSweeperGlobal.__cavecmsAiProposalSweeper = setInterval(() => {
+      void sweepOnce()
+    }, SWEEP_INTERVAL_MS)
+    proposalSweeperGlobal.__cavecmsAiProposalSweeper.unref()
   }
 }

@@ -36,31 +36,15 @@ export interface SessionPayload extends JWTPayload {
   pwp: boolean
 }
 
-export async function signSessionJwt(
-  sub: string,
-  opts: { pwp: boolean; jti?: string; oat?: number },
-): Promise<{ token: string; jti: string; oat: number; iat: number; exp: number }> {
-  const now = Math.floor(Date.now() / 1000)
-  const jti = opts.jti ?? crypto.randomUUID()
-  const oat = opts.oat ?? now
-  const exp = Math.min(now + env.JWT_TTL_SECONDS, oat + env.JWT_ABSOLUTE_MAX_SECONDS)
-  const token = await new SignJWT({ oat, pwp: opts.pwp })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuer(ISS_SESSION)
-    .setAudience(AUD_SESSION)
-    .setSubject(sub)
-    .setJti(jti)
-    .setIssuedAt(now)
-    .setNotBefore(now)
-    .setExpirationTime(exp)
-    .sign(JWT_KEY)
-  // `exp` is returned so callers can size the companion `__Host-bwc_session_jti`
-  // cookie's Max-Age to the JWT's actual remaining lifetime instead of
-  // bare JWT_TTL_SECONDS — prevents the jti cookie from outliving the
-  // session JWT in the final rotation window before JWT_ABSOLUTE_MAX_SECONDS.
-  // See spec §3.5 cookie-Max-Age-fix.
-  return { token, jti, oat, iat: now, exp }
-}
+// signSessionJwt has moved to `./sign-session-jwt.ts` so the DB-stack
+// transitive imports (`@/lib/cms/getSettings` → mysql2 → node:stream)
+// stay out of the Edge-runtime middleware bundle that consumes
+// `verifySessionJwt` below. Re-exporting here would defeat the split
+// because the re-export turns into a static chain webpack follows. So
+// Node-runtime callers (login route, JWT refresh) must import from
+// `@/lib/auth/sign-session-jwt` directly. The compile-time test that
+// guards against accidental Edge-side imports is the absence of a
+// `signSessionJwt` symbol in this file.
 
 export async function verifySessionJwt(token: string): Promise<SessionPayload> {
   const { payload, protectedHeader } = await jwtVerify(token, JWT_KEY, {
@@ -77,16 +61,18 @@ export async function verifySessionJwt(token: string): Promise<SessionPayload> {
   const p = payload as SessionPayload
   if (typeof p.oat !== 'number') throw new Error('missing oat')
   if (typeof p.pwp !== 'boolean') throw new Error('missing pwp')
-  // Apply the same 5s clock-skew tolerance jose uses for nbf/exp so a
-  // host whose clock runs 1-3s fast doesn't prematurely invalidate a
-  // session that's exactly at the absolute-cap boundary.
-  const CLOCK_SKEW_SEC = 5
-  if (
-    Math.floor(Date.now() / 1000) - CLOCK_SKEW_SEC >
-    p.oat + env.JWT_ABSOLUTE_MAX_SECONDS
-  ) {
-    throw new Error('absolute cap exceeded')
-  }
+  // Absolute-cap defence intentionally not re-checked here.
+  //
+  // At sign time, `exp = min(now + jwtTtlSec, oat + jwtAbsoluteMaxSec)`,
+  // and `jose.jwtVerify()` automatically rejects any token whose
+  // `exp` has passed. Re-deriving the cap from `settings.session_config`
+  // here would force `verifySessionJwt` to import the DB layer, which
+  // breaks Edge-runtime bundling for `middleware.ts`. The signing
+  // gate is the canonical enforcement point; a tampered-stored JWT
+  // can't outlive its `exp`, and an operator who shortens the cap
+  // post-issue can't retroactively shorten already-issued tokens
+  // anyway (only future signs are affected — same as every JWT
+  // policy change in any auth system).
   return p
 }
 

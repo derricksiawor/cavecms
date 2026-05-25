@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { sql } from 'drizzle-orm'
+import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole } from '@/lib/auth/requireRole'
@@ -7,7 +9,10 @@ import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import {
   applyInlineProposalByToken,
+  applyChatProposalByToken,
+  normaliseAcceptIndices,
   type ApplyConflict,
+  type ChatApplyResult,
 } from '@/lib/ai/applyProposal'
 
 // POST /api/ai/proposals/[token]/apply
@@ -116,20 +121,101 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   }
 
   const meta = auditMetaFromRequest(req)
-  const result = await applyInlineProposalByToken({
-    token,
-    userId: ctx.userId,
-    pageVersion: body.pageVersion,
-    ip: meta.ip,
-    userAgent: meta.userAgent,
-    requestId: meta.requestId,
-  })
-  if (result.ok) {
+
+  // Surface dispatch. The token's row carries surface='inline' OR
+  // surface='chat'; the inline applier is single-op + always-all,
+  // the chat applier supports a subset accept via acceptIndices.
+  // We do a lightweight non-locking read to discover the surface
+  // before opening the heavyweight TX inside the matching applier —
+  // a wrong-surface body shape on the chat path would otherwise
+  // confuse error reporting.
+  const [surfaceRows] = (await db.execute(sql`
+    SELECT surface FROM ai_proposals WHERE token = ${token} LIMIT 1
+  `)) as unknown as [Array<{ surface: 'inline' | 'chat' }>]
+  const surface = surfaceRows[0]?.surface
+  if (!surface) {
+    return new Response(JSON.stringify({ error: 'not_found' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    })
+  }
+
+  if (surface === 'inline') {
+    const result = await applyInlineProposalByToken({
+      token,
+      userId: ctx.userId,
+      pageVersion: body.pageVersion,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    })
+    if (result.ok) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          applied: result.applied,
+          pageVersion: result.pageVersion,
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+        },
+      )
+    }
+    const mapping = mapConflict(result)
+    return new Response(
+      JSON.stringify({ error: mapping.code, ...(mapping.extra ?? {}) }),
+      {
+        status: mapping.status,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      },
+    )
+  }
+
+  // Chat surface — body.accept may be 'all' OR an explicit list of
+  // indices into the persisted changeset. We pass the indices into
+  // applyChatProposalByToken; null means "every op".
+  //
+  // The changeset length isn't known at this layer (would require a
+  // pre-fetch). For range-check, applyChatProposalByToken's filter
+  // step rejects out-of-range indices with reason='validation_failed'.
+  let acceptIndices: number[] | null
+  if (body.accept === 'all') {
+    acceptIndices = null
+  } else {
+    try {
+      acceptIndices = normaliseAcceptIndices(
+        body.accept,
+        // Effectively no upper bound here — the applier checks per-op
+        // existence. 32 matches the changeset cap so an overshoot
+        // returns a clean 400 from the helper rather than a confusing
+        // ApplyConflict.
+        32,
+      )
+    } catch {
+      return new Response(JSON.stringify({ error: 'invalid_accept_indices' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      })
+    }
+  }
+
+  const chatResult: ChatApplyResult | ApplyConflict =
+    await applyChatProposalByToken({
+      token,
+      userId: ctx.userId,
+      pageVersion: body.pageVersion,
+      acceptIndices,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    })
+  if (chatResult.ok) {
     return new Response(
       JSON.stringify({
         ok: true,
-        applied: result.applied,
-        pageVersion: result.pageVersion,
+        applied: chatResult.applied,
+        pageVersion: chatResult.pageVersion,
       }),
       {
         status: 200,
@@ -137,7 +223,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
       },
     )
   }
-  const mapping = mapConflict(result)
+  const mapping = mapConflict(chatResult)
   return new Response(
     JSON.stringify({ error: mapping.code, ...(mapping.extra ?? {}) }),
     {

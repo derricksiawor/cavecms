@@ -3,7 +3,7 @@ import { sql, eq, and } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { users, userKnownIps } from '@/db/schema'
 import { verifyPassword, getDummyScryptHash } from '@/lib/auth/scrypt'
-import { signSessionJwt } from '@/lib/auth/jwt'
+import { signSessionJwt } from '@/lib/auth/sign-session-jwt'
 import { issueCsrf } from '@/lib/auth/csrf'
 import { computeLockState, recordFailure, recordSuccess } from '@/lib/auth/lockout'
 import { invalidateUser } from '@/lib/auth/userCache'
@@ -220,8 +220,31 @@ export const POST = withError(async (req: Request) => {
   // `signSessionJwt` for a renewal (none exist today; defence in
   // depth). Spec §3.5 cookie-Max-Age-fix.
   c.set(SESSION_COOKIE, token, cookieFlags(exp - iat))
-  c.set(CSRF_COOKIE, csrfToken, csrfCookieFlags(env.CSRF_TTL_SECONDS))
+  // CSRF cookie Max-Age comes from DB-stored session_config.
+  const { getSetting: getSettingForCookies } = await import('@/lib/cms/getSettings')
+  const csrfCookieTtl = (await getSettingForCookies('session_config')).csrfTtlSec
+  c.set(CSRF_COOKIE, csrfToken, csrfCookieFlags(csrfCookieTtl))
   c.set(JTI_COOKIE, jti, jtiCookieFlags(exp - iat))
+
+  // Fire-and-forget update check for admins. Warms the 5-minute
+  // in-memory release cache so the dashboard's next-page-load is
+  // instantaneous. Skipped on local dev (sha === 'dev') and for
+  // non-admin roles. Wrapped in a catch so a GitHub API hiccup can
+  // NEVER fail the login.
+  if (user.role === 'admin') {
+    void (async () => {
+      try {
+        const { getCurrentVersion } = await import('@/lib/updates/getCurrentVersion')
+        if (getCurrentVersion().sha === 'dev') return
+        const { checkLatestRelease } = await import('@/lib/updates/checkLatestRelease')
+        const owner = process.env.CAVECMS_REPO_OWNER ?? 'derricksiawor'
+        const repo = process.env.CAVECMS_REPO_NAME ?? 'cavecms'
+        await checkLatestRelease({ owner, repo })
+      } catch {
+        /* fail-silent — operator's login succeeded regardless */
+      }
+    })()
+  }
 
   // Use a non-secret stable path for rotation; LOGIN_PATH never appears in
   // any post-auth response body or browser history.

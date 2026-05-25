@@ -367,7 +367,6 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                   className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-sm text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[44px]"
                   value={form.models?.inline ?? ''}
                   onChange={(e) => setModel('inline', e.target.value)}
-                  disabled={!form.inlineEnabled}
                 >
                   <option value="">— pick a model —</option>
                   {AI_MODEL_IDS.map((id) => (
@@ -385,7 +384,6 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                   className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-sm text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[44px]"
                   value={form.models?.chat ?? ''}
                   onChange={(e) => setModel('chat', e.target.value)}
-                  disabled={!form.chatEnabled}
                 >
                   <option value="">— pick a model —</option>
                   {AI_MODEL_IDS.map((id) => (
@@ -483,7 +481,7 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
           )}
           {dirty && (
             <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-copper-700">
-              <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-bwc-pulse-copper" />
+              <span className="inline-flex h-2 w-2 rounded-full bg-copper-500 animate-cavecms-pulse-copper" />
               Unsaved changes
             </span>
           )}

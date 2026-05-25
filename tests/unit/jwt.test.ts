@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { signSessionJwt, verifySessionJwt } from '@/lib/auth/jwt'
+import { verifySessionJwt } from '@/lib/auth/jwt'
+import { signSessionJwt } from '@/lib/auth/sign-session-jwt'
 
 const SUB = '42'
 

@@ -44,6 +44,20 @@ const ALIGN_CONTAINER: Record<BlockData<'lx_action'>['alignment'], string> = {
   right: 'text-right',
 }
 
+// In EDIT mode the renderer wraps label + href editors in a vertical
+// `flex flex-col` — `text-align` cascades to inline children but a
+// `w-fit` button child collapses against the FLEX cross-axis (default
+// `stretch`) and lands at the start. Mirror the configured alignment
+// onto `items-{start|center|end}` so the pill renders where the
+// operator picked it. Bug surfaced: button stayed left in edit mode
+// regardless of alignment; the public render path was fine because it
+// has no flex wrapper.
+const ALIGN_ITEMS: Record<BlockData<'lx_action'>['alignment'], string> = {
+  left: 'items-start',
+  center: 'items-center',
+  right: 'items-end',
+}
+
 // External-href detection. The earlier draft over-tightened to
 // require `://`; we keep that strictness here so `https:foo`
 // (ambiguous) doesn't classify as external.
@@ -103,7 +117,7 @@ export function LxAction({
     )
     if (isLinkArrow) {
       return (
-        <div className={clsx(containerClass, 'flex flex-col gap-1')}>
+        <div className={clsx(containerClass, 'flex flex-col gap-1', ALIGN_ITEMS[data.alignment])}>
           <span className={linkClass}>
             <InlineEditable
               blockId={inlineEdit.blockId}
@@ -125,7 +139,7 @@ export function LxAction({
       )
     }
     return (
-      <div className={clsx(containerClass, 'flex flex-col gap-1')}>
+      <div className={clsx(containerClass, 'flex flex-col gap-1', ALIGN_ITEMS[data.alignment])}>
         <InlineEditable
           blockId={inlineEdit.blockId}
           blockVersion={inlineEdit.blockVersion}

@@ -10,9 +10,11 @@ import { registry } from '@/lib/cms/settings-registry'
 // per-block fetches. The snapshot is intentionally narrow:
 //
 //   - `enabled` (master switch — gates all AI surfaces)
-//   - `inlineEnabled` (gates this specific surface)
+//   - `inlineEnabled` (gates the inline sparkle surface)
+//   - `chatEnabled` (gates the PR 4 Page Assistant chatbot)
 //   - `keyOnFile` (true when an encrypted apiKey is stored)
 //   - `inlineModel` (operator's per-surface choice; null when unpicked)
+//   - `chatModel`  (operator's per-surface choice; null when unpicked)
 //   - `voicePreset` (label only, for the popover footer chip)
 //
 // Explicitly NOT included:
@@ -20,13 +22,14 @@ import { registry } from '@/lib/cms/settings-registry'
 //   - apiKeyLast4 (would leak partial credential into the public-page
 //     edit chrome bundle; not needed for the sparkle UI — the dashboard
 //     is the surface that shows it)
-//   - chatEnabled (the chat surface is PR 4)
 
 export interface EditorAiSnapshot {
   enabled: boolean
   inlineEnabled: boolean
+  chatEnabled: boolean
   keyOnFile: boolean
   inlineModel: string | null
+  chatModel: string | null
   voicePreset:
     | 'default'
     | 'editorial'
@@ -47,8 +50,10 @@ export async function getEditorAiSnapshot(): Promise<EditorAiSnapshot> {
   const empty: EditorAiSnapshot = {
     enabled: false,
     inlineEnabled: false,
+    chatEnabled: false,
     keyOnFile: false,
     inlineModel: null,
+    chatModel: null,
     voicePreset: 'default',
   }
   try {
@@ -74,8 +79,10 @@ export async function getEditorAiSnapshot(): Promise<EditorAiSnapshot> {
     return {
       enabled: cfg.enabled,
       inlineEnabled: cfg.inlineEnabled,
+      chatEnabled: cfg.chatEnabled,
       keyOnFile: !!cfg.apiKey,
       inlineModel: cfg.models?.inline ?? null,
+      chatModel: cfg.models?.chat ?? null,
       voicePreset: cfg.voicePreset,
     }
   } catch {

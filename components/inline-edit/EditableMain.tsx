@@ -92,6 +92,13 @@ const AiSparkleSessionProvider = nextDynamic(() =>
   import('./AiSparkleSessionContext').then((m) => m.AiSparkleSessionProvider),
 )
 
+// PR 4 — Page Assistant chatbot. Same dynamic-import pattern as the
+// sparkle session provider; the floating button + panel only ship to
+// active editors with chatEnabled + key on file + a chat model picked.
+const PageAssistantIfEnabled = nextDynamic(() =>
+  import('./PageAssistant').then((m) => m.PageAssistantIfEnabled),
+)
+
 // Chunk J: section-template gallery. Mounted at editor root so the
 // three entry points (slash palette "Templates" item, OutlinePanel
 // AddBlockMenu button, EditModeEmptyState secondary CTA) open the
@@ -191,6 +198,15 @@ export async function EditableMain(p: Props) {
              admin-bar "Outline" pill (edit-mode-only) brings the
              outline back. */}
           <WidgetPicker pageId={p.pageId} />
+          {/* PR 4 — Page Assistant chatbot. The component reads
+             ai_config from InlineEditContext via useAiSnapshot() and
+             returns null when chat is disabled / key missing / model
+             unpicked, so this mount is safe even on tenants that
+             haven't enabled AI. session?.userId is guaranteed by the
+             `editable` branch — `editable` implies signed in. */}
+          {p.session && (
+            <PageAssistantIfEnabled pageId={p.pageId} />
+          )}
         </>
       )}
     </>

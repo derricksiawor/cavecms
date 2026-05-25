@@ -55,6 +55,16 @@ const limitAiVerify = rateLimit('cms:ai-verify:user', {
   windowSec: 60,
 })
 
+// PR 4 — Page Assistant chat bucket. Chat turns are heavier than
+// inline rewrites (tool-call loops, multi-block context) so the
+// budget is tighter than the inline bucket (30/min). 10/min still
+// supports an editor having a back-and-forth conversation while
+// hard-capping a runaway client.
+const limitAiChat = rateLimit('cms:ai-chat:user', {
+  limit: 10,
+  windowSec: 60,
+})
+
 export function checkMutationRate(userId: number): void {
   if (!limitMutations(String(userId))) {
     throw new HttpError(429, 'rate_limited')
@@ -83,4 +93,11 @@ export function checkAiVerifyRate(userId: number): void {
   if (!limitAiVerify(String(userId))) {
     throw new HttpError(429, 'rate_limited')
   }
+}
+
+/** PR 4 — Page Assistant chat bucket. Routes return 429 + 'rate_limited'
+ *  before opening the SSE stream when the operator overshoots the
+ *  per-minute budget. */
+export function checkAiChatRate(userId: number): boolean {
+  return limitAiChat(String(userId))
 }
