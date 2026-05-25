@@ -180,11 +180,12 @@ export async function register(): Promise<void> {
     env.PREVIEW_SECRET,
     env.BROCHURE_SECRET,
     env.INTERNAL_REVALIDATE_SECRET,
+    env.SECRETS_ENCRYPTION_KEY,
   ]
   const seen = new Set<string>()
   for (const s of secrets) {
     if (seen.has(s)) {
-      console.error('boot: refusing — duplicate secret detected (JWT/CSRF/PREVIEW/BROCHURE/INTERNAL_REVALIDATE must be distinct)')
+      console.error('boot: refusing — duplicate secret detected (JWT/CSRF/PREVIEW/BROCHURE/INTERNAL_REVALIDATE/SECRETS_ENCRYPTION_KEY must be distinct)')
       process.exit(1)
     }
     seen.add(s)
@@ -320,5 +321,72 @@ export async function register(): Promise<void> {
         void drain('SIGINT')
       })
     }
+  }
+
+  // ─── Background update checker (WordPress-style) ───────────────
+  //
+  // Polls upstream every `settings.updates.checkFrequencyHours` (12
+  // by default), updating the cached release info AND emailing the
+  // operator if there's a new version they haven't been notified
+  // about. The whole thing is contained in `backgroundScheduler.ts`
+  // — we import it dynamically here so its transitive dependencies
+  // (nodemailer, drizzle, etc., none of which are edge-safe) never
+  // reach the edge-runtime bundle via instrumentation.ts's static
+  // analysis.
+  //
+  // PM2 cluster-mode is refused at line 112-123, so we don't worry
+  // about two workers both firing the check.
+  const updateSchedGlobal = globalThis as unknown as {
+    __bwcUpdateChecker?: ReturnType<typeof setInterval>
+  }
+  if (!updateSchedGlobal.__bwcUpdateChecker) {
+    // First fire: 30s after boot so DB pool / route handlers settle
+    // before we make outbound network calls.
+    const FIRST_FIRE_MS = 30_000
+    const FALLBACK_HOURS = 12
+    const fire = async (): Promise<void> => {
+      try {
+        // Dynamic import — Next.js can split this off into a
+        // separate chunk that ONLY loads at runtime under Node.
+        // nodemailer (transitive) is declared in
+        // `serverExternalPackages` in next.config.ts so the Edge
+        // bundler doesn't try to follow it.
+        const mod = await import('@/lib/updates/backgroundScheduler')
+        await mod.runUpdateCheck()
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'update_check_loop_failed',
+            err:
+              err instanceof Error
+                ? err.message.slice(0, 200)
+                : String(err).slice(0, 200),
+          }),
+        )
+      }
+    }
+    setTimeout(() => {
+      void fire()
+    }, FIRST_FIRE_MS)
+    // Subsequent fires: read frequency dynamically each tick so a
+    // dashboard change takes effect without restart. We tick every
+    // hour and bail inside if we're still within the configured
+    // window since lastCheckedAt.
+    updateSchedGlobal.__bwcUpdateChecker = setInterval(async () => {
+      try {
+        const { getSetting } = await import('@/lib/cms/getSettings')
+        const updatesCfg = await getSetting('updates')
+        const state = await getSetting('updates_state')
+        const intervalMs =
+          (updatesCfg.checkFrequencyHours || FALLBACK_HOURS) * 60 * 60 * 1000
+        const lastTs = state.lastCheckedAt ? Date.parse(state.lastCheckedAt) : 0
+        if (Number.isFinite(lastTs) && Date.now() - lastTs < intervalMs) return
+        await fire()
+      } catch {
+        /* swallow — next tick retries. */
+      }
+    }, 60 * 60 * 1000)
+    updateSchedGlobal.__bwcUpdateChecker.unref()
   }
 }

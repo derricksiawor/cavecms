@@ -288,6 +288,150 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       help: 'Paste full https links to your own pages on LinkedIn, Wikipedia, Crunchbase, etc. Helps Google trust that all these pages belong to the same brand.',
     },
   ],
+
+  site_general: [
+    {
+      kind: 'string',
+      key: 'siteUrl',
+      label: 'Site URL',
+      maxLength: 500,
+      placeholder: 'https://www.yoursite.com',
+      help: 'Your site’s public web address — used in email links, search-engine sitemaps, and structured data. Must start with https and have no trailing slash.',
+    },
+    {
+      kind: 'string',
+      key: 'siteName',
+      label: 'Site name (optional)',
+      maxLength: 120,
+      placeholder: 'My CaveCMS Site',
+      help: 'Shown in email subject lines and as the display name in update notifications.',
+    },
+  ],
+
+  session_config: [
+    {
+      kind: 'number',
+      key: 'jwtTtlSec',
+      label: 'Session length (seconds)',
+      min: 3600,
+      max: 28800,
+      step: 60,
+      help: 'How long an admin stays logged in before they need to sign in again. Min 1 hour, max 8 hours.',
+    },
+    {
+      kind: 'number',
+      key: 'jwtRenewAfterSec',
+      label: 'Auto-renew sessions older than (seconds)',
+      min: 300,
+      max: 3600,
+      step: 60,
+      help: 'When an admin is active near the end of their session, we silently issue a fresh token. Min 5 minutes, max 1 hour.',
+    },
+    {
+      kind: 'number',
+      key: 'jwtAbsoluteMaxSec',
+      label: 'Absolute max session length (seconds)',
+      min: 3600,
+      max: 86400,
+      step: 60,
+      help: 'Hard cap on how long a single login can keep rolling, regardless of activity. Max 24 hours.',
+    },
+    {
+      kind: 'number',
+      key: 'csrfTtlSec',
+      label: 'CSRF token lifetime (seconds)',
+      min: 900,
+      max: 86400,
+      step: 60,
+      help: 'How long a CSRF token stays valid. Lower = stricter; higher = fewer "refresh" interruptions.',
+    },
+  ],
+
+  smtp_config: [
+    {
+      kind: 'boolean',
+      key: 'enabled',
+      label: 'Send outbound email from this site',
+      help: 'When off, CaveCMS will not send any email (lead notifications, password reset, update notifications). Turn this on after filling in the rest of this form.',
+    },
+    {
+      kind: 'string',
+      key: 'host',
+      label: 'SMTP server',
+      maxLength: 200,
+      placeholder: 'smtp.sendgrid.net',
+      help: 'The hostname your email provider gave you. Common ones: smtp.sendgrid.net, smtp.mailgun.org, smtp-relay.gmail.com.',
+    },
+    {
+      kind: 'number',
+      key: 'port',
+      label: 'Port',
+      min: 1,
+      max: 65535,
+      step: 1,
+      help: 'Use 587 for STARTTLS (recommended), or 465 for implicit TLS.',
+    },
+    {
+      kind: 'boolean',
+      key: 'secure',
+      label: 'Use implicit TLS (only if your server uses port 465)',
+    },
+    {
+      kind: 'string',
+      key: 'user',
+      label: 'Username',
+      maxLength: 180,
+      placeholder: 'apikey  (SendGrid uses literally "apikey")',
+    },
+    {
+      kind: 'string',
+      key: 'password',
+      label: 'Password / API key',
+      maxLength: 400,
+      placeholder: 'Paste your API key or SMTP password',
+      help: 'We store this safely and never show it back to you. Leave blank to keep the saved value.',
+    },
+    {
+      kind: 'string',
+      key: 'fromAddress',
+      label: 'Send emails from',
+      maxLength: 180,
+      placeholder: 'noreply@yoursite.com',
+      help: 'Must be an address your SMTP provider has verified for you.',
+    },
+    {
+      kind: 'string',
+      key: 'fromName',
+      label: 'Display name (optional)',
+      maxLength: 120,
+      placeholder: 'CaveCMS',
+    },
+    {
+      kind: 'string',
+      key: 'notificationRecipient',
+      label: 'Lead notifications go to (optional)',
+      maxLength: 180,
+      placeholder: 'sales@yoursite.com',
+      help: 'Receives an email when a visitor submits the contact, inquiry, or brochure form. Leave blank to use the From address.',
+    },
+  ],
+
+  updates: [
+    {
+      kind: 'boolean',
+      key: 'autoApplySecurityPatches',
+      label: 'Apply security patches automatically',
+      help: 'When a release is flagged as a security fix, install it on the next check without asking. Feature updates always require a click.',
+    },
+    {
+      kind: 'string',
+      key: 'notificationEmail',
+      label: 'Notify this email when an update is available (optional)',
+      maxLength: 180,
+      placeholder: 'ops@example.com',
+      help: 'Leave blank to skip email notifications — the dashboard banner is shown to every admin regardless.',
+    },
+  ],
 }
 
 // Per-key help copy shown above the form. Settings rows are
@@ -307,6 +451,16 @@ export const SETTINGS_HELP: Record<string, string> = {
     'Background info Google reads to understand your brand. Filling this in unlocks richer search result cards.',
   site_header:
     'The top of every public page — your logo, the main navigation links, and any call-to-action buttons.',
+  updates:
+    'CaveCMS checks for new releases automatically. Security patches can install on their own; feature updates always wait for your click.',
+  site_general:
+    'Your site’s public address and display name. CaveCMS uses these to build links in emails, sitemap.xml, and search-engine metadata.',
+  smtp_config:
+    'Outbound email — used for lead notifications, password reset, and update alerts. Most operators paste credentials from a transactional email provider like SendGrid, Mailgun, or AWS SES.',
+  session_config:
+    'How long admin sessions last and when they auto-renew. Defaults follow the security gold-standard (8 h session, 24 h absolute cap).',
+  ai_config:
+    'Bring your own Gemini API key. The AI writing partner appears as a sparkle on every CMS section and as a Page Assistant chat in the bottom-left. AI never touches your settings, users, or files — only the words inside your blocks.',
 }
 
 // Most settings values are objects (shapes apply at the top level).
@@ -321,6 +475,11 @@ export const SETTINGS_ROOT_KIND: Record<string, 'object' | 'array'> = {
   footer: 'object',
   organization_json_ld: 'object',
   site_header: 'object',
+  updates: 'object',
+  smtp_config: 'object',
+  site_general: 'object',
+  session_config: 'object',
+  ai_config: 'object',
 }
 
 export const SETTINGS_LABELS: Record<string, string> = {
@@ -330,4 +489,9 @@ export const SETTINGS_LABELS: Record<string, string> = {
   footer: 'Footer',
   organization_json_ld: 'Brand info for search engines',
   site_header: 'Site header',
+  updates: 'Updates',
+  smtp_config: 'Email',
+  site_general: 'General',
+  session_config: 'Session lifetimes',
+  ai_config: 'AI Assistant',
 }

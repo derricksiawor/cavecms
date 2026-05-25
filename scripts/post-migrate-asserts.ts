@@ -473,7 +473,109 @@ async function main(): Promise<void> {
       )
     }
 
-    console.log('[post-migrate-asserts] passed (16/16)')
+    // -------------------------------------------------------------------
+    // 17. Migration 0022 — `ai_proposals` must exist with the columns +
+    //     FKs + indexes the propose / apply / sweeper paths depend on.
+    //     A partial-shape table (legacy dev run + CREATE TABLE IF NOT
+    //     EXISTS skip, or a manual DROP-INDEX recovery that wasn't
+    //     restored) would let the app boot but break on the first AI
+    //     proposal insert — catch it here.
+    // -------------------------------------------------------------------
+    const [aiColRows] = await conn.execute<mysql.RowDataPacket[]>(`
+      SELECT COLUMN_NAME, IS_NULLABLE, DATA_TYPE
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_proposals'
+    `)
+    const aiCols = new Map(aiColRows.map((r) => [String(r['COLUMN_NAME']), r]))
+    const aiRequired = [
+      'id', 'token', 'user_id', 'page_id', 'surface', 'prompt',
+      'changeset', 'status', 'model', 'tokens_usage', 'created_at',
+      'expires_at', 'applied_at',
+    ]
+    for (const c of aiRequired) {
+      if (!aiCols.has(c)) {
+        throw new Error(
+          `[post-migrate-asserts] #17 ai_proposals missing column '${c}'; recovery: DROP TABLE ai_proposals; then pnpm db:migrate.`,
+        )
+      }
+    }
+    // FK to pages(id) ON DELETE CASCADE — a deleted page must reap
+    // every pending proposal scoped to it (they can never apply).
+    const [aiPageFkRows] = await conn.execute<mysql.RowDataPacket[]>(`
+      SELECT rc.DELETE_RULE
+      FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+      JOIN information_schema.KEY_COLUMN_USAGE k
+        ON k.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+       AND k.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+      WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+        AND rc.TABLE_NAME = 'ai_proposals'
+        AND k.COLUMN_NAME = 'page_id'
+        AND k.REFERENCED_TABLE_NAME = 'pages'
+        AND k.REFERENCED_COLUMN_NAME = 'id'
+    `)
+    if (aiPageFkRows.length === 0) {
+      throw new Error(
+        `[post-migrate-asserts] #17 ai_proposals missing FK page_id→pages(id); recovery: re-run migration 0022.`,
+      )
+    }
+    if (String(aiPageFkRows[0]?.['DELETE_RULE'] ?? '') !== 'CASCADE') {
+      throw new Error(
+        `[post-migrate-asserts] #17 ai_proposals.page_id FK is not ON DELETE CASCADE; recovery: drop and re-add with ON DELETE CASCADE.`,
+      )
+    }
+    // FK to users(id) ON DELETE SET NULL — preserve audit trail when a
+    // user is deactivated; the proposal still records what was asked.
+    const [aiUserFkRows] = await conn.execute<mysql.RowDataPacket[]>(`
+      SELECT rc.DELETE_RULE
+      FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+      JOIN information_schema.KEY_COLUMN_USAGE k
+        ON k.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+       AND k.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+      WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+        AND rc.TABLE_NAME = 'ai_proposals'
+        AND k.COLUMN_NAME = 'user_id'
+        AND k.REFERENCED_TABLE_NAME = 'users'
+        AND k.REFERENCED_COLUMN_NAME = 'id'
+    `)
+    if (aiUserFkRows.length === 0) {
+      throw new Error(
+        `[post-migrate-asserts] #17 ai_proposals missing FK user_id→users(id); recovery: re-run migration 0022.`,
+      )
+    }
+    if (String(aiUserFkRows[0]?.['DELETE_RULE'] ?? '') !== 'SET NULL') {
+      throw new Error(
+        `[post-migrate-asserts] #17 ai_proposals.user_id FK is not ON DELETE SET NULL; recovery: drop and re-add with ON DELETE SET NULL.`,
+      )
+    }
+    // Unique token index (lookups on /apply, /dismiss).
+    const [aiTokenIdxRows] = await conn.execute<mysql.RowDataPacket[]>(`
+      SELECT INDEX_NAME, NON_UNIQUE
+      FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'ai_proposals'
+        AND INDEX_NAME = 'uniq_ai_proposals_token'
+    `)
+    if (aiTokenIdxRows.length === 0 || String(aiTokenIdxRows[0]?.['NON_UNIQUE']) !== '0') {
+      throw new Error(
+        `[post-migrate-asserts] #17 uniq_ai_proposals_token missing or not UNIQUE; recovery: CREATE UNIQUE INDEX uniq_ai_proposals_token ON ai_proposals (token).`,
+      )
+    }
+    // Sweeper index on expires_at — without this, the 5-min sweeper
+    // query becomes a full table scan as proposal rows accumulate.
+    const [aiExpiresIdxRows] = await conn.execute<mysql.RowDataPacket[]>(`
+      SELECT INDEX_NAME
+      FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'ai_proposals'
+        AND INDEX_NAME = 'idx_ai_proposals_expires'
+    `)
+    if (aiExpiresIdxRows.length === 0) {
+      throw new Error(
+        `[post-migrate-asserts] #17 idx_ai_proposals_expires missing; recovery: CREATE INDEX idx_ai_proposals_expires ON ai_proposals (expires_at).`,
+      )
+    }
+
+    console.log('[post-migrate-asserts] passed (17/17)')
   } finally {
     try {
       await conn.end()

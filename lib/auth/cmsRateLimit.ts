@@ -44,6 +44,16 @@ const limitExports = rateLimit('cms:export:user', {
   limit: 5,
   windowSec: 60,
 })
+// AI provider verify bucket — tightest of all. Each call makes an
+// outbound request to the operator's Gemini account, BURNING THEIR
+// QUOTA + revealing key-validity to whoever holds the admin session.
+// Without this, a compromised editor session could probe arbitrary
+// Gemini keys at 300/min through the operator's box (the generic
+// mutation bucket). 5/min keeps the verify-flow human-paced.
+const limitAiVerify = rateLimit('cms:ai-verify:user', {
+  limit: 5,
+  windowSec: 60,
+})
 
 export function checkMutationRate(userId: number): void {
   if (!limitMutations(String(userId))) {
@@ -65,6 +75,12 @@ export function checkReadRate(userId: number): void {
 
 export function checkExportRate(userId: number): void {
   if (!limitExports(String(userId))) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+export function checkAiVerifyRate(userId: number): void {
+  if (!limitAiVerify(String(userId))) {
     throw new HttpError(429, 'rate_limited')
   }
 }

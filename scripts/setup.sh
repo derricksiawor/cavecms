@@ -180,6 +180,14 @@ JWT_SECRET_STAGING="$(openssl rand -hex 48)"
 CSRF_SECRET_STAGING="$(openssl rand -hex 48)"
 PREVIEW_SECRET_STAGING="$(openssl rand -hex 48)"
 BROCHURE_SECRET_STAGING="$(openssl rand -hex 48)"
+# AES-256-GCM master key for lib/security/secretCipher.ts — used to
+# encrypt operator-provided secrets at rest (ai_config.apiKey today;
+# SMTP password on a follow-up migration). Must decode from base64 to
+# EXACTLY 32 bytes. Distinct openssl invocation (base64 not hex)
+# because the cipher decodes via Buffer.from(s, 'base64') and a hex
+# value would decode to a different byte length than required.
+SECRETS_ENCRYPTION_KEY_PROD="$(openssl rand -base64 32)"
+SECRETS_ENCRYPTION_KEY_STAGING="$(openssl rand -base64 32)"
 # Healthz bearer tokens — 32 bytes hex (64 chars). deploy.sh:111
 # refuses to deploy if HEALTHZ_TOKEN is empty or shorter than 32
 # chars, so auto-generating here removes the manual-edit-between-
@@ -200,6 +208,14 @@ for s in "$JWT_SECRET_PROD" "$CSRF_SECRET_PROD" "$PREVIEW_SECRET_PROD" "$BROCHUR
 done
 for s in "$HEALTHZ_TOKEN_PROD" "$HEALTHZ_TOKEN_STAGING"; do
   [[ "$s" =~ ^[0-9a-f]{64}$ ]] || { echo "[setup.sh] FAIL: generated healthz token must be 64 hex chars" >&2; exit 1; }
+done
+# SECRETS_ENCRYPTION_KEY contract: base64 of 32 bytes — that's 44 chars
+# total with a single trailing '=' (openssl rand -base64 32 output).
+# The exact regex `^[A-Za-z0-9+/]{43}=$` matches that shape; the
+# decoded length is also verified by lib/security/secretCipher.ts at
+# first use, but failing here makes for a clearer install-time error.
+for s in "$SECRETS_ENCRYPTION_KEY_PROD" "$SECRETS_ENCRYPTION_KEY_STAGING"; do
+  [[ "$s" =~ ^[A-Za-z0-9+/]{43}=$ ]] || { echo "[setup.sh] FAIL: generated secrets-encryption key must be 44-char base64 (openssl rand -base64 32)" >&2; exit 1; }
 done
 
 # ---------------------------------------------------------------------------
@@ -625,6 +641,7 @@ for env_name in production staging; do
       preview_secret="$PREVIEW_SECRET_PROD"
       brochure_secret="$BROCHURE_SECRET_PROD"
       healthz_token="$HEALTHZ_TOKEN_PROD"
+      secrets_encryption_key="$SECRETS_ENCRYPTION_KEY_PROD"
       ;;
     staging)
       site_origin="https://${STAGING}"
@@ -633,6 +650,7 @@ for env_name in production staging; do
       preview_secret="$PREVIEW_SECRET_STAGING"
       brochure_secret="$BROCHURE_SECRET_STAGING"
       healthz_token="$HEALTHZ_TOKEN_STAGING"
+      secrets_encryption_key="$SECRETS_ENCRYPTION_KEY_STAGING"
       ;;
   esac
   # Atomic write — see .cnf-file rationale above. mktemp in the same
@@ -662,6 +680,13 @@ JWT_SECRET=${jwt_secret}
 CSRF_SECRET=${csrf_secret}
 PREVIEW_SECRET=${preview_secret}
 BROCHURE_SECRET=${brochure_secret}
+# AES-256-GCM master key for at-rest encryption of operator secrets
+# (ai_config.apiKey today, SMTP password on follow-up migration).
+# Must decode from base64 to exactly 32 bytes — distinct from the
+# 96-char hex secrets above. Rotation requires every operator to
+# re-enter their stored secrets through the dashboard; do not
+# rotate casually.
+SECRETS_ENCRYPTION_KEY=${secrets_encryption_key}
 
 # Hidden login
 LOGIN_PATH=${LOGIN_PATH}

@@ -22,6 +22,12 @@ import {
   SecurityGuardFailure,
 } from '@/lib/security/patchGuards'
 import { clearZohoAccessTokenCache } from '@/lib/crm/zoho'
+import {
+  AAD_AI_CONFIG_API_KEY,
+  encryptSecret,
+  last4 as last4Of,
+} from '@/lib/security/secretCipher'
+import { resetActiveAiClientCache } from '@/lib/ai/client'
 
 interface SettingRow {
   key: string
@@ -37,6 +43,64 @@ function jsonGuardFail(err: SecurityGuardFailure): Response {
   })
 }
 
+// Credential fields per key — stripped server-side before serialization.
+// Mirrors the per-page redaction at:
+//   - app/(admin)/admin/settings/integrations/page.tsx (HubSpot,
+//     Zoho CRM)
+//   - app/(admin)/admin/settings/email/page.tsx (SMTP password)
+// The /api/admin/settings GET serves the SAME admin who can read
+// those pages, but a stolen-session attacker or a browser XSS pulls
+// the unredacted JSON in one curl. Same redaction discipline as the
+// individual pages.
+const CREDENTIAL_FIELDS_BY_KEY: Record<string, string[]> = {
+  smtp_config: ['password'],
+  integrations_hubspot: ['privateAppAccessToken'],
+  integrations_zoho_crm: [
+    'oauthClientId',
+    'oauthClientSecret',
+    'oauthRefreshToken',
+  ],
+  // Google reCAPTCHA server secret — used by siteverify on the auth
+  // login route + every public lead form. Leaking it lets an attacker
+  // mint valid g-recaptcha-response tokens against the operator's
+  // site, bypassing bot protection on every form.
+  security_recaptcha: ['secretKey'],
+  // Encrypted Gemini API key envelope. We redact even the CIPHERTEXT
+  // before serving GETs — defence-in-depth: a stolen admin session
+  // shouldn't get the envelope to take offline. The UI shows
+  // `apiKeyLast4` ("ends in 1234") to confirm a key is on file.
+  ai_config: ['apiKey'],
+}
+
+function redactSettingsRow(row: SettingRow): SettingRow {
+  const fields = CREDENTIAL_FIELDS_BY_KEY[row.key]
+  if (!fields) return row
+  // Value may arrive as a JSON string (MariaDB LONGTEXT-aliased JSON
+  // column) or a parsed object (some drivers). Handle both.
+  let parsed: Record<string, unknown>
+  if (typeof row.value === 'string') {
+    try {
+      parsed = JSON.parse(row.value) as Record<string, unknown>
+    } catch {
+      return row
+    }
+  } else if (row.value && typeof row.value === 'object' && !Array.isArray(row.value)) {
+    parsed = { ...(row.value as Record<string, unknown>) }
+  } else {
+    return row
+  }
+  for (const f of fields) {
+    if (typeof parsed[f] === 'string' && (parsed[f] as string).length > 0) {
+      parsed[f] = ''
+    }
+  }
+  // Return same wire-shape as the original (string vs object).
+  return {
+    ...row,
+    value: typeof row.value === 'string' ? JSON.stringify(parsed) : parsed,
+  }
+}
+
 export const GET = withError(async () => {
   const ctx = await requireRole(['admin'])
   checkReadRate(ctx.userId)
@@ -45,7 +109,8 @@ export const GET = withError(async () => {
     FROM settings
     ORDER BY \`key\`
   `)) as unknown as [SettingRow[]]
-  return new Response(JSON.stringify({ items: rows }), {
+  const redacted = rows.map(redactSettingsRow)
+  return new Response(JSON.stringify({ items: redacted }), {
     status: 200,
     headers: {
       'content-type': 'application/json',
@@ -91,7 +156,18 @@ export const PATCH = withError(async (req: Request) => {
   // two CRM keys aren't gated by name-only convention. Routine
   // analytics/tracking/widget integrations + mobile_cta + footer +
   // SEO + contact don't re-prompt.
-  const REAUTH_KEYS = new Set<string>(['integrations_hubspot', 'integrations_zoho_crm'])
+  const REAUTH_KEYS = new Set<string>([
+    'integrations_hubspot',
+    'integrations_zoho_crm',
+    // SMTP password is credential-class — gate behind step-up reauth
+    // for the same reason CRM tokens are.
+    'smtp_config',
+    // Gemini API key is credential-class — gate behind step-up reauth.
+    // A stolen short-lived admin session must NOT be able to rotate
+    // the AI key (would let an attacker proxy all AI traffic through
+    // their own key + harvest block content + prompts).
+    'ai_config',
+  ])
   if (body.key.startsWith('security_') || REAUTH_KEYS.has(body.key)) {
     await requireFreshReauth(ctx.jti)
   }
@@ -114,7 +190,12 @@ export const PATCH = withError(async (req: Request) => {
   // cache — flushing on every settings save would force an
   // unnecessary refresh-token round-trip after benign edits.
   let zohoCredsChanged = false
-  if (body.key === 'integrations_hubspot' || body.key === 'integrations_zoho_crm') {
+  if (
+    body.key === 'integrations_hubspot' ||
+    body.key === 'integrations_zoho_crm' ||
+    body.key === 'smtp_config' ||
+    body.key === 'security_recaptcha'
+  ) {
     const [existingRows] = (await db.execute(sql`
       SELECT value FROM settings WHERE \`key\` = ${body.key}
     `)) as unknown as [Array<{ value: unknown }>]
@@ -136,7 +217,11 @@ export const PATCH = withError(async (req: Request) => {
     const credentialFields =
       body.key === 'integrations_hubspot'
         ? ['privateAppAccessToken']
-        : ['oauthClientId', 'oauthClientSecret', 'oauthRefreshToken']
+        : body.key === 'integrations_zoho_crm'
+          ? ['oauthClientId', 'oauthClientSecret', 'oauthRefreshToken']
+          : body.key === 'smtp_config'
+            ? ['password']
+            : ['secretKey']
     const merged: Record<string, unknown> = { ...incoming }
     for (const field of credentialFields) {
       const incomingVal = merged[field]
@@ -161,8 +246,146 @@ export const PATCH = withError(async (req: Request) => {
     }
   }
 
+  // ─── ai_config: encrypt-on-write credential merge ───
+  // Same redaction discipline as the integrations branch, but the form
+  // sends apiKey as a PLAINTEXT string (the operator just pasted the
+  // key) while the registry schema expects an EncryptedSecret envelope.
+  // We transform here: encrypt plaintext → envelope BEFORE Zod parse.
+  //
+  // Field rules:
+  //   apiKey == '' or undefined → preserve stored envelope + last4
+  //                              + verifiedAt (operator didn't touch
+  //                              the redacted field).
+  //   apiKey == null            → clear stored (operator explicit
+  //                              "Remove key" button).
+  //   apiKey == "<plaintext>"   → encrypt with AAD, derive last4
+  //                              server-side, CLEAR verifiedAt
+  //                              (re-verification required after
+  //                              rotation).
+  //
+  // apiKeyLast4 from the client is IGNORED — derived server-side from
+  // plaintext only. Mitigates the "tampered last4 misleads operator
+  // about which key is on file" desync attack.
+  let aiKeyChanged = false
+  if (body.key === 'ai_config') {
+    const [existingRows] = (await db.execute(sql`
+      SELECT value FROM settings WHERE \`key\` = 'ai_config'
+    `)) as unknown as [Array<{ value: unknown }>]
+    const existing: Record<string, unknown> =
+      existingRows[0]
+        ? typeof existingRows[0].value === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(existingRows[0].value as string) as Record<string, unknown>
+              } catch {
+                return {}
+              }
+            })()
+          : ((existingRows[0].value as Record<string, unknown>) ?? {})
+        : {}
+    const incoming = (body.value && typeof body.value === 'object' && !Array.isArray(body.value)
+      ? (body.value as Record<string, unknown>)
+      : {})
+    const merged: Record<string, unknown> = { ...incoming }
+    // ALWAYS strip client-supplied apiKeyLast4 — server-derived only.
+    delete merged.apiKeyLast4
+    const incomingKey = merged.apiKey
+    if (incomingKey === undefined || incomingKey === '') {
+      // Preserve everything: envelope, last4, verifiedAt.
+      if (existing.apiKey !== undefined) merged.apiKey = existing.apiKey
+      else delete merged.apiKey
+      if (typeof existing.apiKeyLast4 === 'string') {
+        merged.apiKeyLast4 = existing.apiKeyLast4
+      }
+      if (typeof existing.verifiedAt === 'string' && merged.verifiedAt === undefined) {
+        merged.verifiedAt = existing.verifiedAt
+      }
+    } else if (incomingKey === null) {
+      // Explicit clear.
+      delete merged.apiKey
+      delete merged.apiKeyLast4
+      delete merged.verifiedAt
+      aiKeyChanged = true
+    } else if (typeof incomingKey === 'string') {
+      const plaintext = incomingKey.trim()
+      if (plaintext.length === 0) {
+        // Treat whitespace-only as "no change" — same as empty.
+        if (existing.apiKey !== undefined) merged.apiKey = existing.apiKey
+        else delete merged.apiKey
+        if (typeof existing.apiKeyLast4 === 'string') {
+          merged.apiKeyLast4 = existing.apiKeyLast4
+        }
+        if (typeof existing.verifiedAt === 'string' && merged.verifiedAt === undefined) {
+          merged.verifiedAt = existing.verifiedAt
+        }
+      } else {
+        // Fresh plaintext → encrypt with AAD, derive last4, clear verifiedAt.
+        merged.apiKey = encryptSecret(plaintext, AAD_AI_CONFIG_API_KEY)
+        const tail = last4Of(plaintext)
+        if (tail) merged.apiKeyLast4 = tail
+        else delete merged.apiKeyLast4
+        // Force re-verification on rotation. The verify route only
+        // sets verifiedAt — this PATCH route never sets it for a fresh
+        // key, by design.
+        delete merged.verifiedAt
+        aiKeyChanged = true
+      }
+    } else {
+      // Anything else (object, number, boolean) is operator error
+      // or a malformed client. Fail closed.
+      throw new HttpError(400, 'invalid_api_key_value')
+    }
+    valueForValidation = merged
+  }
+
   const parsed = entry.schema.parse(valueForValidation)
   const meta = auditMetaFromRequest(req)
+
+  // SMTP enable-gate. Operators can save the form with `enabled: false`
+  // freely while iterating on credentials. Flipping `enabled: true`
+  // REQUIRES a successful SMTP handshake against the candidate config
+  // — otherwise the operator could persist broken credentials in the
+  // "on" state, which would then silently drop every lead notification
+  // / password reset / update alert.
+  if (body.key === 'smtp_config') {
+    const candidate = parsed as {
+      enabled?: boolean
+      host?: string
+      port?: number
+      secure?: boolean
+      user?: string
+      password?: string
+      fromAddress?: string
+      fromName?: string
+    }
+    if (candidate.enabled) {
+      const { verifyTransport } = await import('@/lib/email/transport')
+      const result = await verifyTransport({
+        host: candidate.host,
+        port: candidate.port ?? 587,
+        secure: candidate.secure ?? false,
+        user: candidate.user,
+        password: candidate.password,
+        fromAddress: candidate.fromAddress ?? '',
+        fromName: candidate.fromName,
+      })
+      if (!result.ok) {
+        return new Response(
+          JSON.stringify({
+            error: 'smtp_verify_failed',
+            detail: result.error,
+          }),
+          {
+            status: 422,
+            headers: {
+              'content-type': 'application/json',
+              'cache-control': 'no-store',
+            },
+          },
+        )
+      }
+    }
+  }
 
   // Resolve saver IP for the lockout guards. nginx prod sets x-real-ip;
   // clientIpFromHeaders falls back to 0.0.0.0 when no trusted source
@@ -347,6 +570,17 @@ export const PATCH = withError(async (req: Request) => {
     // the (region, clientId) pair the operator has unchanged.
     if (zohoCredsChanged) {
       clearZohoAccessTokenCache()
+    }
+    // Invalidate the in-process Gemini client cache when the
+    // operator rotated / cleared the AI API key. Other ai_config
+    // edits (toggling enabled, switching models, changing voice
+    // preset) don't need a flush — the cache is keyed on the
+    // ciphertext's iv+tag which only changes when the key itself
+    // is re-encrypted, but we belt-and-braces flush here too so a
+    // future cache-key change in lib/ai/client.ts can never miss
+    // a rotation event.
+    if (aiKeyChanged) {
+      resetActiveAiClientCache()
     }
   }
 

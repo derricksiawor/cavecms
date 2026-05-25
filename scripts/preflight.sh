@@ -128,6 +128,29 @@ for d in /backup/bwc/db /backup/bwc/uploads /backup/bwc/pre-deploy; do
 done
 
 # ---------------------------------------------------------------------------
+# Env contract — required secrets must be present in /etc/bwc/env.production
+# BEFORE we let the deploy proceed. lib/env.ts is the trust boundary and
+# refuses to boot if any required secret is missing; without this gate, a
+# deploy with a stale env file would symlink-flip successfully then crash
+# PM2 indefinitely. The only secret we check by name here is the one this
+# preflight is responsible for: SECRETS_ENCRYPTION_KEY (added in the AI
+# integration). Other secrets (JWT, CSRF, PREVIEW, BROCHURE) have been in
+# setup.sh since the project's first deploy — they're either already
+# present or the operator has bigger problems.
+# ---------------------------------------------------------------------------
+ENV_FILE_PROD=/etc/bwc/env.production
+if [ -f "$ENV_FILE_PROD" ]; then
+  if ! grep -Eq '^SECRETS_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=$' "$ENV_FILE_PROD"; then
+    echo "[preflight.sh] $ENV_FILE_PROD missing or malformed SECRETS_ENCRYPTION_KEY" >&2
+    echo "[preflight.sh]   fix (one-time): add a 44-char base64 line:" >&2
+    echo "[preflight.sh]     echo \"SECRETS_ENCRYPTION_KEY=\$(openssl rand -base64 32)\" | sudo tee -a $ENV_FILE_PROD" >&2
+    echo "[preflight.sh]   NOTE: rotating this invalidates ALL stored encrypted secrets (currently: ai_config.apiKey)." >&2
+    echo "[preflight.sh]   Operators must re-enter their stored secrets via the dashboard after rotation." >&2
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Helper: sanitize untrusted file contents before echoing to an operator
 # terminal. Strips control bytes and ANSI escapes so a tampered sentinel
 # or migration file can't hijack the terminal or smuggle CSI codes into

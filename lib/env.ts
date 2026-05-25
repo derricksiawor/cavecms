@@ -29,6 +29,31 @@ const Env = z.object({
       /^[\x20-\x7e]+$/,
       'INTERNAL_REVALIDATE_SECRET must be printable ASCII (matches openssl rand -base64 64 output)',
     ),
+  // AES-256-GCM master key for `lib/security/secretCipher.ts` — used to
+  // encrypt operator-provided secrets stored in the settings table
+  // (ai_config.apiKey today; SMTP password on follow-up). Must decode
+  // from base64 to exactly 32 bytes. Generate with:
+  //   openssl rand -base64 32
+  // Distinct from JWT/CSRF/PREVIEW/BROCHURE/INTERNAL_REVALIDATE per the
+  // "separate secrets per concern" rule — if this leaks, only stored
+  // settings ciphertext is exposed (and only for keys whose plaintext
+  // an attacker hasn't already exfiltrated some other way). Rotating
+  // requires re-entering every encrypted secret in the dashboard; the
+  // helper crashes loudly on a mismatched envelope so silent corruption
+  // is impossible.
+  SECRETS_ENCRYPTION_KEY: z
+    .string()
+    // Strict base64 alphabet check first — Node's Buffer.from(...,
+    // 'base64') silently strips non-base64 chars, so a copy-paste with
+    // embedded whitespace would decode to a DIFFERENT 32-byte key than
+    // intended. Reject any non-base64 input upfront.
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'SECRETS_ENCRYPTION_KEY must be plain base64 (no whitespace, no newlines)')
+    // Then enforce exact decoded length. Buffer.from() never throws —
+    // it returns whatever it could decode — so we don't wrap in try/catch.
+    .refine(
+      (s) => Buffer.from(s, 'base64').length === 32,
+      'SECRETS_ENCRYPTION_KEY must decode to exactly 32 bytes (openssl rand -base64 32)',
+    ),
   // LOGIN_PATH is the obscured admin login URL segment (e.g. `/laccess`).
   // The refinement below rejects any value that collides with the
   // page-slug RESERVED set so an admin can't accidentally configure a
@@ -72,10 +97,10 @@ const Env = z.object({
     .optional()
     .transform((v) => v === '1' || v?.toLowerCase() === 'true'),
   PORT: z.coerce.number().int().default(3040),
-  JWT_TTL_SECONDS: z.coerce.number().int().default(28800),
-  JWT_RENEW_AFTER_SECONDS: z.coerce.number().int().default(1800),
-  JWT_ABSOLUTE_MAX_SECONDS: z.coerce.number().int().default(86400),
-  CSRF_TTL_SECONDS: z.coerce.number().int().default(3600),
+  // JWT + CSRF lifetimes moved to `settings.session_config` (DB-
+  // driven, configured via Settings → Security in the dashboard).
+  // Zod-capped at 8h session / 24h absolute per the security
+  // gold-standard, so an operator can't push past policy.
   DB_POOL_LIMIT: z.coerce.number().int().default(15),
   DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().default(10000),
   HANDLER_TIMEOUT_MS: z.coerce.number().int().default(15000),
@@ -100,16 +125,10 @@ const Env = z.object({
   // In production, must be absolute (refused at boot otherwise — see
   // superRefine below). Dev may point at a local writable path.
   UPLOADS_ROOT: z.string().min(1).default('/opt/bwc/uploads'),
-  // Canonical public origin — used by JSON-LD `url` fields, sitemap.xml,
-  // robots.txt's Host directive, and any absolute-URL emission. Staging
-  // deploys override this to https://staging.bestworldcompany.com so
-  // sitemap entries don't leak production URLs from a staging host.
-  // Must be an absolute https:// URL; no trailing slash.
-  SITE_ORIGIN: z
-    .string()
-    .url()
-    .refine((u) => u.startsWith('https://') && !u.endsWith('/'), 'must_be_https_no_trailing_slash')
-    .default('https://bestworldcompany.com'),
+  // Site URL moved to `settings.site_general.siteUrl` — configured
+  // via Settings → General in the dashboard, set during the install
+  // wizard's "Site" step. No env fallback (rule: operators don't
+  // edit .env on a public CMS).
   // Release timestamp used as sitemap.xml lastModified for static
   // paths. Pinning to a deploy-time constant (vs `new Date()` per
   // request) prevents crawlers from seeing every URL as "changed
@@ -123,22 +142,10 @@ const Env = z.object({
       'must_be_ISO_8601_datetime',
     )
     .default('2026-05-12T00:00:00Z'),
-  // SMTP for outbound email (lead notifications, brochure delivery,
-  // newsletter confirmation). All optional in dev so the stack runs
-  // without SMTP keys; the email queue runner short-circuits when
-  // SMTP_HOST is unset, leaving pending_emails rows for replay once
-  // credentials land. Production validation lives in superRefine.
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  // The envelope sender. Must be a complete address, not just a
-  // domain. Required when SMTP_HOST is set.
-  SMTP_FROM: z.string().optional(),
-  // Internal recipient for new-lead notifications. Falls back to
-  // SMTP_FROM when unset so a single-mailbox deploy still works
-  // (the sales team reads their own outbox).
-  SALES_EMAIL: z.string().optional(),
+  // SMTP + lead-notification routing moved to `settings.smtp_config`
+  // (DB-driven, configured via the Settings → Email dashboard page).
+  // No env fallback — CaveCMS is a public CMS; operators don't edit
+  // .env. See lib/email/transport.ts.
   // Hard cap on rows returned by /api/admin/leads/export. Each row
   // costs DB read time + ~500 bytes of stream output; 100k is the
   // safe default for a single-fork PM2 box with default heap. Ops
@@ -183,64 +190,10 @@ const Env = z.object({
       message: 'UPLOADS_ROOT must be an absolute path in production',
     })
   }
-  // SMTP_HOST set implies SMTP_FROM set: nodemailer requires an
-  // envelope sender and a queue with no `from` would 5xx every
-  // attempt. Validating here so a half-configured deploy fails
-  // boot instead of silently breaking lead delivery.
-  if (e.SMTP_HOST && !e.SMTP_FROM) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['SMTP_FROM'],
-      message: 'SMTP_FROM must be set when SMTP_HOST is set',
-    })
-  }
-  // SMTP_USER without SMTP_PASS = AUTH PLAIN attempt with empty
-  // password against the relay. Either a relay quirk lets it
-  // through (unexpected security relaxation) or it fails noisily
-  // (5 failures trip the breaker). Refuse at boot.
-  if (e.SMTP_USER && !e.SMTP_PASS) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['SMTP_PASS'],
-      message: 'SMTP_PASS must be set when SMTP_USER is set',
-    })
-  }
-  // SMTP_FROM format: either bare address `local@domain` or
-  // RFC 5322 display form `Name <local@domain>`. nodemailer would
-  // surface a typo only at first send (after lead capture), so
-  // validate at boot.
-  if (e.SMTP_FROM) {
-    const bare = /^[^<>\s]+@[^<>\s.]+\.[^<>\s]+$/
-    const display = /^.+<[^<>\s]+@[^<>\s.]+\.[^<>\s]+>$/
-    if (!bare.test(e.SMTP_FROM) && !display.test(e.SMTP_FROM)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['SMTP_FROM'],
-        message: 'SMTP_FROM must be a valid email or "Name <email>" form',
-      })
-    }
-  }
-  // Same check for SALES_EMAIL when set — a typo here misroutes
-  // every lead notification with no visible error path.
-  if (e.SALES_EMAIL) {
-    const bare = /^[^<>\s]+@[^<>\s.]+\.[^<>\s]+$/
-    if (!bare.test(e.SALES_EMAIL)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['SALES_EMAIL'],
-        message: 'SALES_EMAIL must be a bare email address',
-      })
-    }
-  }
-  // In production, SMTP_HOST + SMTP_FROM are required. Skip during
-  // build phase same as the reCAPTCHA check above.
-  if (e.NODE_ENV === 'production' && !isBuildPhase && !e.SMTP_HOST) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['SMTP_HOST'],
-      message: 'SMTP_HOST is required in production',
-    })
-  }
+  // SMTP validation now lives at the Settings → Email save path
+  // (lib/cms/settings-registry.ts smtpConfig schema + the
+  // verify-before-enable gate in app/api/admin/settings/route.ts).
+  // No env-time validation because there are no env-time SMTP knobs.
 })
 
 export const env = Env.parse(process.env)

@@ -20,6 +20,7 @@ import { sql } from 'drizzle-orm'
 // information_schema) so a stray test table or an unrelated schema in the
 // same database cannot tilt the fingerprint.
 const TRACKED_TABLES = [
+  'ai_proposals',
   'audit_log',
   'content_blocks',
   'failed_logins_by_email',

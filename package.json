@@ -2,6 +2,10 @@
   "name": "bwc",
   "version": "0.1.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "author": "Derrick S. K. Siawor",
+  "description": "CaveCMS — AI-native CMS on Next.js. Prosperity Public License 3.0.0 (free for noncommercial; 30-day commercial trial).",
+  "homepage": "https://cavecms.derricksiawor.com",
   "type": "module",
   "engines": {
     "node": ">=20.10.0",
@@ -34,6 +38,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^8.0.0",
     "@dnd-kit/utilities": "3.2.2",
+    "@google/genai": "2.6.0",
     "clsx": "^2.1.1",
     "cmdk": "1.1.1",
     "drizzle-orm": "0.45.2",

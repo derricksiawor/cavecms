@@ -14,6 +14,9 @@ import {
   Plug,
   HelpCircle,
   AtSign,
+  Download,
+  Mail,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -57,6 +60,9 @@ export const NAV: readonly NavItem[] = [
   { label: 'Settings', href: '/admin/settings', roles: ['admin'], icon: SettingsIcon },
   { label: 'Security', href: '/admin/settings/security', roles: ['admin'], icon: Lock, parent: '/admin/settings' },
   { label: 'Integrations', href: '/admin/settings/integrations', roles: ['admin'], icon: Plug, parent: '/admin/settings' },
+  { label: 'Email', href: '/admin/settings/email', roles: ['admin'], icon: Mail, parent: '/admin/settings' },
+  { label: 'AI Assistant', href: '/admin/settings/ai', roles: ['admin'], icon: Sparkles, parent: '/admin/settings' },
+  { label: 'Updates', href: '/admin/settings/updates', roles: ['admin'], icon: Download, parent: '/admin/settings' },
   { label: 'Activity', href: '/admin/activity', roles: ['admin'], icon: ShieldCheck },
   { label: 'Help', href: '/admin/help', roles: ['admin', 'editor', 'viewer'], icon: HelpCircle },
 ]
