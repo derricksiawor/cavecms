@@ -125,6 +125,15 @@ function renderActionLabel(action: string, reason: string | undefined): string {
   return humaniseAuditAction(action)
 }
 
+// The detach mechanism is only meaningful on the kick-off row (apply
+// or force_apply). Terminal rows (completed / failed / rolled_back)
+// carry their own diff payload (durationMs, error, reason) and never
+// re-emit detachMechanism, so this guard skips them rather than
+// rendering an empty slot.
+function shouldShowDetach(action: string): boolean {
+  return action === 'apply' || action === 'force_apply'
+}
+
 export function UpdateHistoryTable() {
   const [rows, setRows] = useState<AuditRow[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -239,11 +248,23 @@ export function UpdateHistoryTable() {
                       {r.user_email ?? '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-medium ${tone}`}
-                      >
-                        {renderActionLabel(r.action, d.reason)}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-medium ${tone}`}
+                        >
+                          {renderActionLabel(r.action, d.reason)}
+                        </span>
+                        {shouldShowDetach(r.action) &&
+                        typeof d.detachMechanism === 'string' &&
+                        d.detachMechanism ? (
+                          <span
+                            title={`Detach mechanism: ${d.detachMechanism}. Indicates the isolation strength the orchestrator used to survive the apply route's response — systemd-run-user is strongest, nohup-only is weakest.`}
+                            className="inline-flex items-center rounded bg-warm-stone/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.04em] text-warm-stone/80"
+                          >
+                            {d.detachMechanism}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-[11px] text-warm-stone">
                       {shortSha(d.fromSha)} → {shortSha(d.toSha)}

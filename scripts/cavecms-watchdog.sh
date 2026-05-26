@@ -248,7 +248,12 @@ do_rollback() {
     return 1
   fi
 
-  (cd "$REPO_DIR" && pm2 reload ecosystem.config.cjs --update-env >/dev/null 2>&1 || true)
+  # Reload by name when CAVECMS_PM2_APP_NAME is set (CLI-install
+  # shared-host layout where the in-tree ecosystem.config.cjs is the
+  # bundled legacy version that doesn't match the live app); else
+  # fall back to the historical config-file form for bare-metal
+  # deploy.sh installs.
+  (cd "$REPO_DIR" && pm2 reload "${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}" --update-env >/dev/null 2>&1 || true)
 
   # Verify rollback health (15 × 2s = 30s budget).
   local success=0 i

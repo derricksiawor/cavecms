@@ -41,9 +41,11 @@ install.**
 > **TL;DR**: `npx create-cavecms my-site` on your server, open the URL it
 > prints, finish the browser wizard.
 
-CaveCMS installs on three surfaces with the same one command:
+CaveCMS installs on four surfaces with the same one command:
 
-- **VPS** (Ubuntu/Debian 22.04 LTS+ with systemd + nginx)
+- **VPS** (Ubuntu/Debian 22.04 LTS+ with systemd + nginx, own the whole box)
+- **PM2** (shared Linux host already running other Next.js apps via PM2,
+  e.g. a portfolio box serving multiple domains)
 - **Laptop** (macOS / Linux dev box, for local evaluation)
 - **cPanel** (shared host with Node.js Selector + Passenger)
 
@@ -51,10 +53,15 @@ CaveCMS installs on three surfaces with the same one command:
 
 - **Node 20+** on the target machine (via [nvm](https://github.com/nvm-sh/nvm)
   on Linux, the installer on macOS, or Node.js Selector on cPanel)
-- **MariaDB 10.11+** reachable from the install target (local socket on VPS;
-  local install on a laptop; provider-managed on cPanel)
+- **MariaDB 10.11+** reachable from the install target (local socket on VPS /
+  PM2; local install on a laptop; provider-managed on cPanel)
 - On VPS only: a domain pointed at the box (for HTTPS via Let's Encrypt) and
   sudo access during the CLI run
+- On PM2 only: `pm2` installed, `www-data` user present, `/var/www/.pm2`
+  initialised, and root/passwordless-sudo. The CLI registers a per-install
+  PM2 app named `cavecms-<site>` under the existing `www-data` daemon and
+  prints an nginx vhost block for the operator to paste into their existing
+  vhost file
 
 ### One command
 
@@ -64,7 +71,7 @@ npx create-cavecms my-site
 
 The CLI:
 
-1. Detects whether you're on **VPS / laptop / cPanel** and picks the right adapter
+1. Detects whether you're on **VPS / PM2 / laptop / cPanel** and picks the right adapter
 2. Downloads and signature-verifies the latest release from `cavecms.derricksiawor.com`
 3. Unpacks the runtime to the canonical location for the surface
 4. Prompts for the minimum it cannot auto-supply: database connection, public
@@ -74,7 +81,8 @@ The CLI:
 6. Writes **one** sealed `env.production` file (mode `600`, owned by the
    service user) that you **never open or edit**
 7. Runs database migrations
-8. Starts the service (systemd on VPS, foreground on laptop, Passenger on cPanel)
+8. Starts the service (systemd on VPS, PM2 daemon on PM2, foreground on laptop,
+   Passenger on cPanel)
 
 On VPS installs the CLI also writes a ready-to-use nginx vhost. Total time:
 about 2 minutes. Output:

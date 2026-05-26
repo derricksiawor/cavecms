@@ -147,6 +147,13 @@ except Exception:
 # (kept in place by the destructive ops), .next/cache (rebuilt by
 # next), snapshots/ itself (would recurse infinitely), in-flight tmp
 # directories.
+#
+# CALLER-UID ASSUMPTION: snapshot_current_tree below probes writability
+# of SNAPSHOT_ROOT via `[ -w "$SNAPSHOT_ROOT" ]`, which reflects the
+# UID currently executing the script. This is correct for the
+# orchestrator (always runs as the app's runUser — cavecms on the VPS
+# surface, www-data on the PM2 surface) but a future caller invoking
+# this helper from a different UID would see a misleading result.
 # ---------------------------------------------------------------------------
 SNAPSHOT_ROOT="${CAVECMS_SNAPSHOT_ROOT:-/var/lib/cavecms/snapshots}"
 
@@ -163,6 +170,23 @@ snapshot_current_tree() {
   # supported host (`apt install rsync` / `dnf install rsync` / etc).
   if ! command -v rsync >/dev/null 2>&1; then
     echo "[snapshot] rsync required but not installed" >&2
+    return 1
+  fi
+  # Pre-flight: confirm we can WRITE to SNAPSHOT_ROOT. On the PM2-
+  # surface CLI install, the runtime user (www-data) needs to be a
+  # member of the cavecmsstate group to write into /var/lib/cavecms
+  # (mode 2770 root:cavecmsstate). `usermod -aG cavecmsstate www-data`
+  # only takes effect for processes started AFTER the group change —
+  # an existing pm2 daemon (which spawned the app process) keeps its
+  # old supplementary groups until the operator restarts the daemon
+  # via `pm2 update`. If the operator skipped that restart, the
+  # snapshot would silently fail mid-rsync with EACCES. Surface the
+  # actionable diagnosis up-front instead.
+  if ! mkdir -p "$SNAPSHOT_ROOT" 2>/dev/null || ! [ -w "$SNAPSHOT_ROOT" ]; then
+    echo "[snapshot] cannot write to ${SNAPSHOT_ROOT} — the runtime user is not a member of the cavecmsstate group (or the dir doesn't exist)." >&2
+    echo "[snapshot]   If you just installed CaveCMS via the PM2 surface, your pm2 daemon needs a restart to pick up the new group membership:" >&2
+    echo "[snapshot]     sudo -u <runtime-user> PM2_HOME=<your PM2_HOME> pm2 update" >&2
+    echo "[snapshot]   (Briefly restarts every pm2 app the runtime user manages.)" >&2
     return 1
   fi
   local snap_dir="${SNAPSHOT_ROOT}/${sha}"
@@ -779,7 +803,8 @@ spawn_detached() {
       CAVECMS_WATCHDOG_PREVIOUS_SHA CAVECMS_WATCHDOG_DURATION_S \
       CAVECMS_WATCHDOG_INTERVAL_S CAVECMS_WATCHDOG_FAIL_THRESHOLD \
       CAVECMS_WATCHDOG_HAD_MIGRATION CAVECMS_WATCHDOG_BACKUP_DUMP \
-      CAVECMS_KICKOFF_TOKEN CAVECMS_KICKOFF_TOKEN_FILE; do
+      CAVECMS_KICKOFF_TOKEN CAVECMS_KICKOFF_TOKEN_FILE \
+      CAVECMS_PM2_APP_NAME CAVECMS_ENV_FILE; do
       val="${!v:-}"
       if [ -n "$val" ]; then
         setenv_args+=("--setenv=${v}=${val}")

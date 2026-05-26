@@ -148,6 +148,24 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   // ok because the old process is still up, and the apply path
   // appears to succeed while the actual reload did nothing.
   'PM2_HOME',
+  // CAVECMS_PM2_APP_NAME: tells the orchestrator + watchdog which pm2
+  // app to reload by NAME, instead of relying on an in-tree
+  // `ecosystem.config.cjs`. Required on the shared-host PM2 surface
+  // where the in-tree config gets overwritten by the new release's
+  // bundled (legacy /opt/cavecms-shaped) ecosystem.config.cjs during
+  // the atomic swap — without this, `pm2 reload ecosystem.config.cjs`
+  // would target a non-existent app and silently no-op, healthz keeps
+  // returning the OLD commit, and the apply fails at the verify step.
+  'CAVECMS_PM2_APP_NAME',
+  // CAVECMS_ENV_FILE: location of the install's sealed env.production.
+  // The orchestrator stamps CAVECMS_COMMIT + CAVECMS_RELEASE_TS into
+  // this file on successful update so the next pm2 reload picks up
+  // the new commit via Node's --env-file flag. Default in the
+  // orchestrator is /etc/cavecms/env.production (the bare-metal
+  // deploy.sh layout). CLI installs (vps + pm2 surfaces) put env at
+  // $targetDir/env.production — without overriding this, the stamping
+  // silently skips and the new commit never lands in env.production.
+  'CAVECMS_ENV_FILE',
   // DB connectivity for db:migrate inside step 3.
   'DATABASE_URL',
   'DATABASE_MIGRATOR_URL',

@@ -157,9 +157,65 @@ function die(msg) {
   process.exit(1)
 }
 
+// Tiny helpers wrapping spawnSync('sudo', ...) so every call has a
+// timeout AND we can centralise exit-code policy. Per the audit pass,
+// silently-ignored chown / install failures are how PM2-surface installs
+// end up with an app that boots fine but whose first in-app update
+// silently fails to snapshot (because /var/lib/cavecms wasn't actually
+// created). Two flavours: `runSudo` returns the spawnSync result so the
+// caller can decide; `runSudoOrDie` dies on non-zero with a clear msg.
+//
+// Timeout default 30s — well above any expected sudo call duration but
+// short enough that a wedged interaction (locked /etc/group during
+// usermod, hung pm2 daemon during ping) surfaces in seconds, not the
+// 2-minute default that node's spawnSync inherits from no explicit
+// timeout (which is "forever").
+const DEFAULT_SUDO_TIMEOUT_MS = 30000
+
+function runSudo(args, opts = {}) {
+  return spawnSync('sudo', args, {
+    stdio: 'inherit',
+    timeout: DEFAULT_SUDO_TIMEOUT_MS,
+    ...opts,
+  })
+}
+
+// Throws (not die()s) so failures during post-unpack work bubble up
+// into main()'s catch handler, which prints the retry hint
+// ("rm -rf $targetDir && npx create-cavecms <name>") BEFORE the
+// top-level main().catch prints the error message + exits 1. Earlier
+// versions called die() directly, which short-circuited that hint and
+// left the operator without recovery guidance.
+//
+// Three failure modes worth differentiating:
+//   1. r.error  → spawn itself failed (ENOENT: sudo not installed,
+//      EACCES: not executable). Operator sees a useful "sudo not
+//      found" instead of the misleading "exit unknown".
+//   2. r.signal → killed by signal — most commonly our own timeout
+//      via the DEFAULT_SUDO_TIMEOUT_MS option.
+//   3. r.status !== 0 → sudo / inner command exited non-zero.
+function runSudoOrDie(args, label) {
+  const r = runSudo(args)
+  if (r.status === 0) return r
+  if (r.error) {
+    throw new Error(`${label} failed to spawn sudo: ${r.error.message}`)
+  }
+  if (r.signal) {
+    throw new Error(`${label} timed out (signal ${r.signal}) after ${DEFAULT_SUDO_TIMEOUT_MS / 1000}s: sudo ${args.join(' ')}`)
+  }
+  throw new Error(`${label} failed (exit ${r.status ?? 'unknown'}): sudo ${args.join(' ')}`)
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Argv parsing
 // ════════════════════════════════════════════════════════════════════
+
+// Site name shape — shared by the interactive prompt + the positional /
+// env-var / --dir paths so an attacker-friendly value like
+// `../../etc/foo` can't slip through the CLI's positional argument and
+// reach the targetDir interpolation in defaultInstallDir(). Same regex
+// the interactive prompt at line ~1690 uses.
+const SITE_NAME_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
 
 function parseArgv(argv) {
   const out = {
@@ -214,7 +270,7 @@ function showHelp() {
     c('bold', 'Usage:') + ' npx create-cavecms <site-name> [options]',
     '',
     c('bold', 'Options:'),
-    '  --surface=auto|vps|laptop|cpanel   Force a deployment surface (default: auto)',
+    '  --surface=auto|vps|pm2|cpanel|laptop  Force a deployment surface (default: auto)',
     '  --port=NUMBER                      Port the app listens on (default: 3040)',
     '  --version=X.Y.Z|latest             Release to install (default: latest)',
     '  --dir=PATH                         Override the install directory',
@@ -343,6 +399,24 @@ function detectSurface() {
   // "cpanel" / "host" / "shared".
   // (Skipping — too fuzzy. cPanel detection should be deterministic.)
 
+  // pm2 signal — shared Linux host that already runs other Next.js
+  // apps under PM2 (e.g., a portfolio host serving N domains).
+  // Detected BEFORE vps because such a host typically has systemd
+  // too — the vps surface would otherwise win and overwrite the
+  // host's nginx + systemd convention. Signals (ALL must match):
+  //
+  //   - pm2 binary is on PATH
+  //   - the canonical web user `www-data` exists
+  //   - the canonical PM2_HOME for the www-data daemon exists
+  //   - we are root OR have passwordless sudo (needed to chown into
+  //     /var/www/.. and write nginx state)
+  //
+  // The check happens before the vps check below so a host that
+  // qualifies for BOTH (Ubuntu + nginx + PM2 + systemd, which is the
+  // common shared-host shape) lands on pm2 — the surface that
+  // coexists with whatever else is already on the box.
+  if (detectPm2Surface()) return 'pm2'
+
   // VPS signal — has systemd as PID 1 AND we're root-or-sudo-able.
   // /run/systemd/system is the canonical "systemd is in charge" marker.
   if (existsSync('/run/systemd/system')) {
@@ -359,6 +433,22 @@ function detectSurface() {
 
   // Default to laptop.
   return 'laptop'
+}
+
+/**
+ * Reusable PM2-surface signal probe. Lifted out of detectSurface
+ * so the help text + the post-detect logging can quote the exact
+ * reasons we did/didn't pick pm2 without duplicating the conditions.
+ */
+function detectPm2Surface() {
+  const hasPm2 = spawnSync('command', ['-v', 'pm2'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
+  if (!hasPm2) return false
+  const hasWwwData = spawnSync('id', ['www-data'], { stdio: 'ignore' }).status === 0
+  if (!hasWwwData) return false
+  const pm2Home = process.env.CAVECMS_PM2_HOME ?? '/var/www/.pm2'
+  if (!existsSync(pm2Home)) return false
+  if (process.geteuid && process.geteuid() === 0) return true
+  return spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -456,25 +546,52 @@ function preflightPort(port) {
  */
 function preflightVpsCollisions({ targetDir, siteUrl }) {
   if (existsSync('/etc/systemd/system/cavecms.service')) {
+    // We refuse rather than overwrite so a running CaveCMS install
+    // (with a sealed env.production + an active service + uploads in
+    // /opt/cavecms/uploads) is never silently replaced by this run.
+    // The operator removes the unit themselves so the act of replacing
+    // an install is deliberate, audit-able, and impossible to confuse
+    // with "the installer hiccupped." Same posture as overwriting any
+    // other production-shaped state — see #0.5 (never fix prod state
+    // implicitly; require explicit operator action).
     die(
       'A cavecms.service systemd unit already exists at /etc/systemd/system/cavecms.service.\n' +
-        '  This installer refuses to overwrite it. If you want to replace it:\n' +
+        '  Refusing to overwrite — a CaveCMS install may already be running here.\n' +
+        '\n' +
+        '  If you intend to replace it (e.g. re-installing on a host where a prior\n' +
+        '  install failed or you want a clean slate), remove the existing unit first:\n' +
+        '\n' +
         '    sudo systemctl disable --now cavecms.service\n' +
         '    sudo rm /etc/systemd/system/cavecms.service\n' +
-        '  Then re-run the installer.',
+        '    sudo systemctl daemon-reload\n' +
+        '\n' +
+        '  Then re-run this installer. If the old install also wrote to /opt/cavecms,\n' +
+        '  inspect that directory before re-using the path — it contains the previous\n' +
+        '  env.production (with the prior LOGIN_PATH + secrets) and any uploads.',
     )
   }
+  scanWebserverForHostCollision(siteUrl)
+}
+
+/**
+ * Scan nginx + Apache config trees for a vhost claiming `host` (the
+ * hostname of `siteUrl`). die()s with a clear list of matching files
+ * if one is found; returns silently when no collision detected, or
+ * when siteUrl is empty / unparseable / there are no web-server
+ * config dirs to scan.
+ *
+ * Extracted from preflightVpsCollisions + preflightPm2Collisions which
+ * previously inlined the same regex+grep loop verbatim.
+ */
+function scanWebserverForHostCollision(siteUrl) {
   if (!siteUrl) return
   let host = ''
   try {
-    host = new URL(siteUrl).host.toLowerCase()
+    host = new URL(siteUrl).hostname.toLowerCase()
   } catch {
-    return // siteUrl will be re-validated later
+    return
   }
   if (!host) return
-  // grep -rIl ServerName/server_name across the standard config trees.
-  // -I skips binary; -l prints filenames only. Quiet failure if grep
-  // isn't installed.
   const places = [
     '/etc/nginx',
     '/etc/apache2/sites-available',
@@ -482,19 +599,18 @@ function preflightVpsCollisions({ targetDir, siteUrl }) {
     '/etc/httpd/conf.d',
   ].filter((p) => existsSync(p))
   if (places.length === 0) return
-  // Patterns we'd see in either nginx or Apache config.
+  const escapedHost = host.replace(/\./g, '\\.')
   const patterns = [
-    `\\bserver_name[ \\t][^;]*\\b${host.replace(/\./g, '\\.')}\\b`,
-    `\\bServerName[ \\t]+${host.replace(/\./g, '\\.')}\\b`,
-    `\\bServerAlias[ \\t][^\\n]*\\b${host.replace(/\./g, '\\.')}\\b`,
+    `\\bserver_name[ \\t][^;]*\\b${escapedHost}\\b`,
+    `\\bServerName[ \\t]+${escapedHost}\\b`,
+    `\\bServerAlias[ \\t][^\\n]*\\b${escapedHost}\\b`,
   ]
   for (const dir of places) {
     for (const pattern of patterns) {
-      const r = spawnSync(
-        'grep',
-        ['-rIlE', pattern, dir],
-        { encoding: 'utf8' },
-      )
+      const r = spawnSync('grep', ['-rIlE', pattern, dir], {
+        encoding: 'utf8',
+        timeout: 10000,
+      })
       if (r.status === 0 && typeof r.stdout === 'string' && r.stdout.trim().length > 0) {
         const files = r.stdout.trim().split('\n').slice(0, 3)
         die(
@@ -507,8 +623,88 @@ function preflightVpsCollisions({ targetDir, siteUrl }) {
   }
 }
 
+/**
+ * PM2-only collision guards. Same shape as preflightVpsCollisions but
+ * tuned for the shared-host model:
+ *
+ * 1. A PM2 app with this install's name must NOT already be running
+ *    under the www-data daemon. Without this, `pm2 start` happily
+ *    starts a SECOND instance with the same name (PM2 allows
+ *    name dupes by design) — port conflict + log scribbling ensue.
+ * 2. The operator's siteUrl host must NOT already appear in an
+ *    existing nginx vhost (reuses the same scan as the VPS guard).
+ */
+function preflightPm2Collisions({ pm2AppName, siteUrl, pm2User, pm2Home }) {
+  // Probe pm2 jlist as the runUser daemon. If the call fails for any
+  // reason (sudo prompt, pm2 daemon not yet started for this user),
+  // we pass through silently — the actual `pm2 start` later in the
+  // flow will surface a clearer error than we could synthesise here.
+  // Timeout: 10s — a wedged daemon (orphaned IPC socket at
+  // $PM2_HOME/rpc.sock after a kernel OOM-kill) would otherwise hang
+  // the install indefinitely.
+  const probe = spawnSync(
+    'sudo',
+    ['-n', '-u', pm2User, 'env', `PM2_HOME=${pm2Home}`, 'pm2', 'jlist'],
+    { encoding: 'utf8', timeout: 10000 },
+  )
+  if (probe.status === 0 && typeof probe.stdout === 'string' && probe.stdout.trim().length > 0) {
+    let parsed
+    let parseErr = null
+    try {
+      parsed = JSON.parse(probe.stdout)
+    } catch (err) {
+      parsed = null
+      parseErr = err
+    }
+    // Parse failure on non-empty stdout means jlist returned junk
+    // (truncated by a daemon mid-restart, OR pm2 binary outputting a
+    // warning before the JSON). Don't silently pass — a real
+    // collision could be hiding here. Fail loud + show the diagnosis.
+    if (parsed === null && parseErr) {
+      die(
+        `pm2 jlist returned unparseable output — refusing to start an app whose name might already collide with a registered app.\n` +
+          `  Parse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}\n` +
+          `  First 200 chars of stdout: ${probe.stdout.slice(0, 200)}\n` +
+          `  Investigate: sudo -u ${pm2User} PM2_HOME=${pm2Home} pm2 jlist`,
+      )
+    }
+    if (Array.isArray(parsed)) {
+      const collision = parsed.find((p) => p && p.name === pm2AppName)
+      if (collision) {
+        die(
+          `A PM2 app named "${pm2AppName}" is already registered under ${pm2User}'s PM2 daemon.\n` +
+            `  pid=${collision.pid ?? '?'} status=${collision.pm2_env?.status ?? '?'}\n` +
+            `\n` +
+            `  Refusing to start a second instance. If this is an old install you want to\n` +
+            `  replace, stop and delete it first:\n` +
+            `\n` +
+            `    sudo -u ${pm2User} PM2_HOME=${pm2Home} pm2 delete ${pm2AppName}\n` +
+            `    sudo -u ${pm2User} PM2_HOME=${pm2Home} pm2 save\n` +
+            `\n` +
+            `  Then re-run this installer. If the prior install also wrote to\n` +
+            `  /var/www/html/<site>/public_html, inspect that path before re-using it.`,
+        )
+      }
+    }
+  }
+  // Same nginx + Apache server_name collision scan that VPS surface
+  // uses — extracted to a shared helper.
+  scanWebserverForHostCollision(siteUrl)
+}
+
 function defaultInstallDir(surface, siteName) {
   if (surface === 'vps') return `/opt/cavecms`
+  if (surface === 'pm2') {
+    // Mirror the convention every other Next.js site on a shared
+    // Debian/Ubuntu nginx box uses: /var/www/html/<host>/public_html.
+    // The siteName is expected to be the public hostname (operator
+    // usually passes the apex/sub the install will serve) so the
+    // install dir naturally aligns with the nginx vhost's document
+    // root. When the operator picks a non-domain site name (e.g.
+    // 'my-test'), the path still works — they just won't see the
+    // 1:1 alignment in `ls /var/www/html`.
+    return `/var/www/html/${siteName || 'cavecms'}/public_html`
+  }
   if (surface === 'cpanel') return join(homedir(), siteName || 'cavecms')
   return resolve(process.cwd(), siteName || 'cavecms')
 }
@@ -1022,6 +1218,14 @@ function writeSystemdUnit({ targetDir, envPath, runUser }) {
   // Cavecms-app systemd unit. Written to /etc/systemd/system/ when
   // we have root, or printed to stdout for the operator to install
   // when we don't.
+  //
+  // The `Environment=` lines for CAVECMS_ENV_FILE + CAVECMS_REPO_DIR
+  // are installer-pinned and override any matching key in env.production
+  // (per systemd ordering: Environment= AFTER EnvironmentFile= wins).
+  // The orchestrator defaults these to bare-metal deploy.sh paths
+  // (/etc/cavecms/env.production, $(pwd)) which don't match CLI-install
+  // layout; without the overrides the orchestrator's COMMIT-stamping
+  // step silently skips and the new commit never reaches env.production.
   const unit = `[Unit]
 Description=CaveCMS — self-hosted CMS
 After=network.target mariadb.service mysql.service
@@ -1032,6 +1236,10 @@ Type=simple
 User=${runUser}
 WorkingDirectory=${targetDir}
 EnvironmentFile=${envPath}
+# CAVECMS_ENV_FILE + CAVECMS_REPO_DIR: installer-pinned. Do not
+# override via env.production — the unit-file value wins.
+Environment=CAVECMS_ENV_FILE=${envPath}
+Environment=CAVECMS_REPO_DIR=${targetDir}
 ExecStart=/usr/bin/env node ${join(targetDir, 'scripts', 'start-standalone.mjs')}
 Restart=on-failure
 RestartSec=5
@@ -1069,6 +1277,141 @@ function startForeground({ targetDir, envPath }) {
   })
 }
 
+/**
+ * Slug a free-form site name into a PM2-app-name-safe token.
+ * PM2 accepts a generous character set in app names but anything with
+ * shell-meta or whitespace is a footgun (the operator will eventually
+ * type the name into a pm2 CLI command), so we narrow to
+ * [a-z0-9-]+ — same shape as nginx server_name parts.
+ */
+function pm2AppNameFor(siteName) {
+  // Treat null / undefined / empty-string / whitespace-only siteName
+  // the same way — without this, `pm2AppNameFor('')` yielded
+  // 'cavecms-site' while `pm2AppNameFor(undefined)` yielded
+  // 'cavecms-cavecms' (the ?? branch fell to a different default).
+  const trimmed = (siteName ?? '').toString().trim()
+  const raw = (trimmed || 'cavecms').toLowerCase()
+  // Truncate FIRST then trim the dashes — otherwise a name ending in
+  // a dash run that straddles char 40 leaves a trailing dash on the
+  // final slug ('aaa-bbb-...-' instead of 'aaa-bbb-...').
+  const slug = raw.replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '')
+  return `cavecms-${slug || 'site'}`
+}
+
+/**
+ * Provision the host-shared state every CaveCMS install needs:
+ *
+ *   - cavecmsstate system group (owns lock + marker files in
+ *     /var/lib/cavecms, READ access for state-aware services)
+ *   - /var/log/cavecms — log dir, owned by runUser:runUser 750
+ *   - /var/lib/cavecms — root:cavecmsstate 2770 (setgid so inherited
+ *     state files belong to cavecmsstate, not the writer's primary
+ *     group)
+ *   - /var/lib/cavecms/snapshots — same posture, used by the in-app
+ *     updater's snapshot/rollback path (lib/cms/updateOrchestrator)
+ *   - /etc/logrotate.d/cavecms — pulled from the release's
+ *     deploy/logrotate.d/cavecms; rotates the update + watchdog logs
+ *     so a weekly-updating install doesn't grow /var/log by ~50MB/yr
+ *
+ * The runtime user is added to cavecmsstate so the orchestrator can
+ * write the lock/marker files under /var/lib/cavecms. The group
+ * membership takes effect on the NEXT spawn (PM2 / systemd start);
+ * an already-running pm2 daemon would need a fresh start to pick up
+ * the supplementary group — that's fine here because we only call
+ * this BEFORE first start.
+ *
+ * Idempotent — safe to re-run on an already-provisioned host. Used
+ * by both startVps (cavecms user) and startPm2 (www-data user) so
+ * the snapshot/rollback machinery from cycle-3 lands on every
+ * surface that has systemd-backed durable storage.
+ */
+function provisionSystemDirs({ runUser, targetDir }) {
+  // Group: create if missing. `getent` exits 0 iff the group exists.
+  const groupExists = spawnSync('getent', ['group', 'cavecmsstate'], { stdio: 'ignore' }).status === 0
+  if (!groupExists) {
+    runSudoOrDie(['groupadd', '--system', 'cavecmsstate'], 'Create cavecmsstate group')
+  }
+  // Add the runtime user to cavecmsstate. `usermod -aG` is idempotent
+  // (a no-op when the user is already a member), so re-running this
+  // on an already-provisioned host is cheap.
+  //
+  // Shared-host trade-off: on a multi-tenant box where runUser is
+  // www-data (the PM2 surface's canonical user), adding www-data to
+  // cavecmsstate widens its group set across EVERY www-data process
+  // on the host — sibling apps now have group r/w/x on
+  // /var/lib/cavecms (mode 2770). We accept this because the
+  // alternative (a dedicated per-install runtime user) breaks the
+  // shared-PM2-daemon model the surface is built around. Operators
+  // on hosts that mix CaveCMS with untrusted www-data tenants should
+  // use the VPS surface (dedicated cavecms user) instead.
+  if (runUser) {
+    runSudoOrDie(['usermod', '-aG', 'cavecmsstate', runUser], `Add ${runUser} to cavecmsstate group`)
+  }
+
+  // /var/log/cavecms — log dir. 750 with owner=runUser so the orchestrator,
+  // watchdog, and snapshot scripts (which run as the same user) can
+  // append. Logrotate's `create 0640 root root` runs as root so it
+  // can always create rotated successors.
+  //
+  // RE-CHOWN on every call (not just on first creation) — `install -d`
+  // is a no-op for an existing dir's ownership, so a failed-then-retried
+  // install with a CHANGED runUser would leave the log dir owned by
+  // the FIRST attempt's runUser. The orchestrator + watchdog running as
+  // the second runUser would then 403 on log writes. Explicit chown
+  // makes failed-retry truly idempotent.
+  //
+  // KNOWN LIMITATION: multi-install-per-host with DIFFERENT runUsers
+  // (e.g. one VPS surface install as `cavecms`, plus a PM2 surface
+  // install as `www-data` on the same box) is NOT supported — the
+  // second install's chown breaks the first install's log writes.
+  // Operators on such a host should pick a single surface OR manually
+  // re-shape /var/log/cavecms to root:cavecmsstate 2770 (matches the
+  // /var/lib/cavecms model so any cavecmsstate member can write).
+  const logOwner = runUser || 'root'
+  runSudoOrDie(
+    ['install', '-d', '-o', logOwner, '-g', logOwner, '-m', '750', '/var/log/cavecms'],
+    'Provision /var/log/cavecms',
+  )
+  if (runUser) {
+    runSudoOrDie(['chown', `${logOwner}:${logOwner}`, '/var/log/cavecms'], 'Re-chown /var/log/cavecms')
+  }
+
+  // /var/lib/cavecms + snapshots — root:cavecmsstate 2770. The setgid
+  // bit makes every child file inherit group=cavecmsstate, regardless
+  // of which user's umask wrote it. Without setgid, db-backup writes
+  // as runUser:runUser (its primary), restore-drill as root:root, and
+  // cross-process reads break. See setup.sh §2 for the full
+  // rationale.
+  //
+  // CRITICAL: these dirs are the snapshot/rollback substrate. If
+  // `install -d` silently no-op-fails (read-only mount, AppArmor
+  // deny, parent dir missing) the install proceeds with a working
+  // app whose FIRST in-app update silently fails to snapshot —
+  // operator only finds out when they need rollback. Fail loud.
+  runSudoOrDie(
+    ['install', '-d', '-o', 'root', '-g', 'cavecmsstate', '-m', '2770', '/var/lib/cavecms'],
+    'Provision /var/lib/cavecms',
+  )
+  runSudoOrDie(
+    ['install', '-d', '-o', 'root', '-g', 'cavecmsstate', '-m', '2770', '/var/lib/cavecms/snapshots'],
+    'Provision /var/lib/cavecms/snapshots',
+  )
+
+  // /etc/logrotate.d/cavecms — install only if the release shipped
+  // the config AND we haven't already installed it. We don't
+  // overwrite a pre-existing file at /etc/logrotate.d/cavecms because
+  // the operator may have hand-tuned it (different rotate count,
+  // additional log paths from a fork, etc.).
+  const logrotateSrc = join(targetDir, 'deploy', 'logrotate.d', 'cavecms')
+  const logrotateDest = '/etc/logrotate.d/cavecms'
+  if (existsSync(logrotateSrc) && !existsSync(logrotateDest)) {
+    runSudoOrDie(
+      ['install', '-m', '0644', '-o', 'root', '-g', 'root', logrotateSrc, logrotateDest],
+      'Install /etc/logrotate.d/cavecms',
+    )
+  }
+}
+
 function startVps({ targetDir, envPath, config }) {
   log.info('VPS surface: writing systemd unit to /etc/systemd/system/cavecms.service')
   const runUser = process.env.SUDO_USER || 'cavecms'
@@ -1091,21 +1434,65 @@ function startVps({ targetDir, envPath, config }) {
       const userCheck = spawnSync('id', ['cavecms'], { stdio: 'ignore' })
       if (userCheck.status !== 0) {
         log.info('Creating cavecms system user…')
-        spawnSync('sudo', ['useradd', '--system', '--no-create-home', '--shell', '/usr/sbin/nologin', 'cavecms'], { stdio: 'inherit' })
+        runSudoOrDie(
+          ['useradd', '--system', '--no-create-home', '--shell', '/usr/sbin/nologin', 'cavecms'],
+          'Create cavecms system user',
+        )
       }
     }
     // env.production is mode 600 — chown to the runtime user so the
     // unit can actually read it. Without this the service crashes at
     // boot with EACCES env.production.
-    spawnSync('sudo', ['chown', `${runUser}:${runUser}`, envPath], { stdio: 'inherit' })
+    runSudoOrDie(['chown', `${runUser}:${runUser}`, envPath], `chown env.production → ${runUser}`)
     // Same for the install dir + uploads — the runtime user must
-    // own everything it reads/writes at runtime.
-    spawnSync('sudo', ['chown', '-R', `${runUser}:${runUser}`, targetDir], { stdio: 'inherit' })
-    spawnSync('sudo', ['mv', tmpUnit, '/etc/systemd/system/cavecms.service'], { stdio: 'inherit' })
-    spawnSync('sudo', ['mkdir', '-p', '/var/log/cavecms'], { stdio: 'inherit' })
-    spawnSync('sudo', ['chown', `${runUser}:${runUser}`, '/var/log/cavecms'], { stdio: 'inherit' })
-    spawnSync('sudo', ['systemctl', 'daemon-reload'], { stdio: 'inherit' })
-    spawnSync('sudo', ['systemctl', 'enable', '--now', 'cavecms.service'], { stdio: 'inherit' })
+    // own everything it reads/writes at runtime. The recursive chown
+    // can take >30s on a slow disk / NFS-backed /var/www / first-boot
+    // IOPS-throttled droplet with a large node_modules tree; use a
+    // higher bound + explicit status check (same shape as the
+    // systemctl enable call below).
+    const chownRes = runSudo(
+      ['chown', '-R', `${runUser}:${runUser}`, targetDir],
+      { timeout: 120000 },
+    )
+    if (chownRes.status !== 0) {
+      // Mirror runSudoOrDie's error-branch ordering.
+      if (chownRes.error) {
+        throw new Error(`chown -R install dir → ${runUser} failed to spawn sudo: ${chownRes.error.message}`)
+      }
+      if (chownRes.signal) {
+        throw new Error(`chown -R install dir → ${runUser} timed out (signal ${chownRes.signal}) after 120s. Slow disk?`)
+      }
+      throw new Error(`chown -R install dir → ${runUser} failed (exit ${chownRes.status ?? 'unknown'}).`)
+    }
+    runSudoOrDie(['mv', tmpUnit, '/etc/systemd/system/cavecms.service'], 'Install cavecms.service')
+    // Provision the shared host state (cavecmsstate group, /var/log/cavecms,
+    // /var/lib/cavecms[/snapshots], /etc/logrotate.d/cavecms). Idempotent.
+    // Used to be inline-chown of /var/log/cavecms only; the helper now
+    // also lays down the snapshot root + logrotate config so the
+    // in-app updater's snapshot/rollback path lands on VPS too.
+    provisionSystemDirs({ runUser, targetDir })
+    runSudoOrDie(['systemctl', 'daemon-reload'], 'systemctl daemon-reload')
+    // systemctl enable --now can take longer than the default 30s on
+    // hosts where mariadb.service starts slowly (it's an After= dep);
+    // bump the bound for this one call.
+    const enableRes = runSudo(
+      ['systemctl', 'enable', '--now', 'cavecms.service'],
+      { timeout: 90000 },
+    )
+    if (enableRes.status !== 0) {
+      // Mirror runSudoOrDie's three-branch ordering so error messages
+      // stay consistent across the codebase (spawn-failed vs timeout
+      // vs non-zero exit). In practice unreachable here because the
+      // preceding daemon-reload would have hit the same ENOENT first;
+      // kept for grep-symmetry with runSudoOrDie.
+      if (enableRes.error) {
+        throw new Error(`systemctl enable --now failed to spawn sudo: ${enableRes.error.message}`)
+      }
+      if (enableRes.signal) {
+        throw new Error(`systemctl enable --now cavecms.service timed out (signal ${enableRes.signal}). The unit may have a slow dependency; check 'systemctl status cavecms.service'.`)
+      }
+      throw new Error(`systemctl enable --now cavecms.service failed (exit ${enableRes.status ?? 'unknown'}).`)
+    }
     log.ok('cavecms.service installed + started.')
   } else {
     log.warn('Sudo unavailable non-interactively. Manual step required:')
@@ -1158,6 +1545,360 @@ function startVps({ targetDir, envPath, config }) {
     log.gray(`  nginx:  apt install nginx  → then run scripts/install-nginx.sh`)
     log.gray(`  Apache: apt install apache2 → then run scripts/install-apache.sh`)
   }
+}
+
+/**
+ * Build the per-install PM2 ecosystem config (CommonJS — PM2 reads
+ * it via require()). One app entry, named cavecms-<slug>, started
+ * via `node --env-file=env.production scripts/start-standalone.mjs`
+ * so it inherits the same env shape as the laptop + VPS flows.
+ *
+ * Log files land in /var/log/cavecms (provisioned by
+ * provisionSystemDirs) with the slug prefixing the filename — so a
+ * single shared host running multiple CaveCMS installs keeps its
+ * logs cleanly separated.
+ *
+ * max_memory_restart and the V8 heap cap mirror ecosystem.config.cjs
+ * at the repo root (which is the production-droplet config). They're
+ * conservative for a 1 GB box; an operator on a beefier host can
+ * `pm2 restart <name> --update-env --max-memory 2048M` post-install.
+ */
+function buildPm2EcosystemConfig({ pm2AppName, slug, targetDir, envPath, pm2Home }) {
+  // CAVECMS_ENV_FILE: the orchestrator reads this to know which env
+  // file to stamp the post-update CAVECMS_COMMIT / CAVECMS_RELEASE_TS
+  // into. Without it, the default is /etc/cavecms/env.production which
+  // doesn't exist on a CLI install — the new commit would never land.
+  //
+  // CAVECMS_PM2_APP_NAME: the orchestrator + watchdog both reload pm2
+  // by NAME instead of by `ecosystem.config.cjs` because the atomic
+  // swap of an in-app update overwrites whatever in-tree config we
+  // ship here with the new release's bundled legacy ecosystem.config.cjs
+  // (which still points at /opt/cavecms paths and doesn't know about
+  // this install). Reloading by name sidesteps that whole class of
+  // bug. Same reason for PM2_HOME — non-default daemon needs an
+  // explicit handle so the reload talks to the right daemon.
+  //
+  // CAVECMS_REPO_DIR: redundant with cwd above but the orchestrator
+  // reads this env var directly (its $(pwd) default is the
+  // Next.js standalone's cwd, not the install root), so pinning it
+  // here saves a path-confusion bug if the standalone server.js
+  // ever changes its working directory.
+  return `// Generated by create-cavecms on ${new Date().toISOString()}.
+// Per-install PM2 config — DO NOT edit by hand; re-run the installer
+// to regenerate. Operator changes (memory cap, args, env additions)
+// should go through 'pm2 restart <name> --update-env' so they don't
+// vanish on the next reinstall.
+module.exports = {
+  apps: [{
+    name: ${JSON.stringify(pm2AppName)},
+    script: 'scripts/start-standalone.mjs',
+    cwd: ${JSON.stringify(targetDir)},
+    // Absolute --env-file path. Earlier this was relative
+    // ('env.production') which relied on PM2 honouring 'cwd' — true
+    // today but Next.js standalone has shipped two breaking changes
+    // to cwd resolution in 14.x→15.x. An absolute path is one less
+    // foot-gun to track across upstream churn.
+    node_args: ${JSON.stringify(`--env-file=${envPath} --max-old-space-size=768`)},
+    instances: 1,
+    exec_mode: 'fork',
+    env: {
+      NODE_ENV: 'production',
+      CAVECMS_ENV_FILE: ${JSON.stringify(envPath)},
+      CAVECMS_PM2_APP_NAME: ${JSON.stringify(pm2AppName)},
+      CAVECMS_REPO_DIR: ${JSON.stringify(targetDir)},
+      PM2_HOME: ${JSON.stringify(pm2Home)},
+    },
+    max_memory_restart: '1280M',
+    kill_timeout: 8000,
+    listen_timeout: 8000,
+    wait_ready: false,
+    max_restarts: 10,
+    min_uptime: 60000,
+    out_file: ${JSON.stringify(`/var/log/cavecms/${slug}-out.log`)},
+    error_file: ${JSON.stringify(`/var/log/cavecms/${slug}-err.log`)},
+    merge_logs: true,
+    time: true,
+  }],
+}
+`
+}
+
+function startPm2({ targetDir, envPath, config, siteName }) {
+  // Resolve the canonical PM2 runtime user + PM2_HOME. Env-var overrides
+  // exist for non-Debian shared hosts where the web user is e.g.
+  // `nginx` and PM2_HOME has been parked under /var/lib/pm2 by the
+  // operator's own convention.
+  const runUser = process.env.CAVECMS_PM2_USER ?? 'www-data'
+  const pm2Home = process.env.CAVECMS_PM2_HOME ?? '/var/www/.pm2'
+  const pm2AppName = pm2AppNameFor(siteName)
+  // The slug for log filenames mirrors the pm2 app name with the
+  // 'cavecms-' prefix stripped so /var/log/cavecms doesn't have every
+  // file double-prefixed.
+  const slug = pm2AppName.replace(/^cavecms-/, '')
+
+  log.info(`PM2 surface: app="${pm2AppName}" user=${runUser} PM2_HOME=${pm2Home}`)
+
+  const sudoOk = spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0
+  if (!sudoOk) {
+    die(
+      'Sudo is required (and was unavailable non-interactively) to:\n' +
+        `  - chown the install dir to ${runUser}\n` +
+        `  - register the PM2 app with the ${runUser} daemon\n` +
+        `  - provision /var/log/cavecms + /var/lib/cavecms\n` +
+        '  Re-run as root or with passwordless sudo.',
+    )
+  }
+
+  // Detect whether the runtime user's PM2 daemon is ALREADY running
+  // before this install. Matters because `usermod -aG cavecmsstate
+  // www-data` (done in provisionSystemDirs below) only takes effect
+  // for processes started AFTER the group change. An existing daemon
+  // — which `pm2 start` will send an RPC to instead of spawning — was
+  // launched long before cavecmsstate existed, so the new
+  // CaveCMS app it spawns inherits the daemon's OLD supplementary
+  // groups (no cavecmsstate). The orchestrator running inside that
+  // app then can't write to /var/lib/cavecms/snapshots (mode 2770
+  // root:cavecmsstate) → snapshot fails → in-app updates can't
+  // roll back.
+  //
+  // We can't auto-restart the daemon because that would briefly
+  // restart EVERY pm2 app the runtime user manages — a shared
+  // portfolio host may have 15+ unrelated apps. The operator decides
+  // when. We just surface a clear, prominent warning + exact command.
+  //
+  // Probe MUST be side-effect-free: `pm2 ping` starts the daemon if
+  // it's not running (so it'd always succeed). Instead, read the
+  // daemon's PID file directly via sudo (needed because PM2_HOME is
+  // owned by runUser and may not be world-readable). The .pid file
+  // exists iff a daemon was started + holds the PID of the current
+  // daemon process. If the file exists AND that PID is alive, we
+  // have a preexisting daemon.
+  const pidProbe = spawnSync(
+    'sudo',
+    ['-n', 'cat', join(pm2Home, 'pm2.pid')],
+    { encoding: 'utf8', timeout: 5000 },
+  )
+  let pm2DaemonPreexisted = false
+  if (pidProbe.status === 0 && typeof pidProbe.stdout === 'string') {
+    const pid = pidProbe.stdout.trim()
+    if (/^\d+$/.test(pid)) {
+      // ps -p <pid> exits 0 if the PID exists. -o user= so we can
+      // also confirm it's running as runUser (defensive against a
+      // PID-recycle race where pm2.pid points to a now-different
+      // process).
+      const psProbe = spawnSync('ps', ['-p', pid, '-o', 'user='], { encoding: 'utf8' })
+      if (psProbe.status === 0 && (psProbe.stdout ?? '').trim() === runUser) {
+        pm2DaemonPreexisted = true
+      }
+    }
+  }
+
+  // Verify the PM2 binary path before we shell out to sudo. `command
+  // -v pm2` runs as the current user; we resolve to its absolute path
+  // because `sudo -u www-data pm2 …` won't necessarily inherit the
+  // invoker's PATH (sudo's secure_path can strip /usr/local/bin where
+  // pm2 typically lives on Debian).
+  const pm2Bin = (() => {
+    const r = spawnSync('command', ['-v', 'pm2'], { shell: '/bin/bash', encoding: 'utf8' })
+    return r.status === 0 ? r.stdout.trim() : 'pm2'
+  })()
+
+  // Provision system dirs FIRST — we need /var/log/cavecms to exist
+  // (and to be writable by runUser) before pm2 start tries to open
+  // out_file / error_file. Order matters: log dir before chown +
+  // app start. provisionSystemDirs is idempotent.
+  provisionSystemDirs({ runUser, targetDir })
+
+  // chown the install tree to the runtime user. env.production was
+  // written mode 600 by the install pipeline; flipping owner is what
+  // gets www-data permission to read it. Same posture as startVps.
+  // Both calls MUST succeed — if env.production isn't readable by
+  // runUser, pm2 start crashes seconds later with a confusing
+  // EACCES traceback inside the standalone server; the real reason
+  // was here, masked by spawnSync's silent error semantics.
+  runSudoOrDie(['chown', `${runUser}:${runUser}`, envPath], `chown env.production → ${runUser}`)
+  runSudoOrDie(['chown', '-R', `${runUser}:${runUser}`, targetDir], `chown -R install dir → ${runUser}`)
+
+  // Write the per-install PM2 config alongside the env-file. Stays
+  // in-tree so a subsequent `pm2 start ./pm2.config.cjs` is the same
+  // file PM2 originally registered with — no drift between the
+  // config-as-installed and the config-as-running.
+  const pm2ConfigPath = join(targetDir, 'pm2.config.cjs')
+  const pm2ConfigText = buildPm2EcosystemConfig({ pm2AppName, slug, targetDir, envPath, pm2Home })
+  writeFileSync(pm2ConfigPath, pm2ConfigText, { mode: 0o644 })
+  // chown to runUser so a subsequent `pm2 restart` invoked as
+  // sudo -u runUser can re-read it.
+  runSudoOrDie(['chown', `${runUser}:${runUser}`, pm2ConfigPath], `chown pm2.config.cjs → ${runUser}`)
+
+  // pm2 start under the runtime user's daemon. --env=production
+  // wires the apps[0].env onto the started process (PM2 honours
+  // this flag for the env-block selection). Timeout 60s — pm2's
+  // app spawn includes a first-listen probe; Next.js standalone
+  // boot is ~5-15s, so 60s is comfortable headroom over a wedged
+  // daemon.
+  const startRes = spawnSync(
+    'sudo',
+    [
+      '-n', '-u', runUser,
+      'env', `PM2_HOME=${pm2Home}`,
+      pm2Bin, 'start', pm2ConfigPath, '--env', 'production',
+    ],
+    { stdio: 'inherit', timeout: 60000 },
+  )
+  if (startRes.status !== 0) {
+    if (startRes.signal) {
+      die(`pm2 start timed out (signal ${startRes.signal}). The ${runUser} PM2 daemon may be wedged — check: sudo -u ${runUser} PM2_HOME=${pm2Home} pm2 status`)
+    }
+    die(`pm2 start failed (exit ${startRes.status}). See output above.`)
+  }
+
+  // pm2 save — flushes the resurrect file. Without this, the app
+  // starts cleanly now but disappears on the next reboot. We rely
+  // on the host's existing pm2 startup unit (typically pm2-www-data
+  // or pm2-cavecms) being installed already, which the shared-host
+  // convention guarantees.
+  const saveRes = spawnSync(
+    'sudo',
+    ['-n', '-u', runUser, 'env', `PM2_HOME=${pm2Home}`, pm2Bin, 'save'],
+    { stdio: 'inherit', timeout: 10000 },
+  )
+  if (saveRes.status !== 0) {
+    log.warn(`pm2 save returned ${saveRes.status ?? `signal ${saveRes.signal}`}. The app is running now, but won't auto-resurrect on reboot until you run: sudo -u ${runUser} PM2_HOME=${pm2Home} pm2 save`)
+  }
+
+  log.ok(`PM2 app "${pm2AppName}" started + saved.`)
+
+  // Surface the daemon-group-lag warning if applicable. Phrased
+  // around what the operator should DO (one-line command) rather
+  // than what's technically wrong (kernel supplementary-groups
+  // inheritance) — see #0.036 (in-app messages must be user-friendly).
+  if (pm2DaemonPreexisted) {
+    console.log('')
+    log.warn(`Your ${runUser} PM2 daemon was already running before this install.`)
+    log.gray(`  In-app updates depend on a group membership change that only takes effect`)
+    log.gray(`  when the daemon next restarts. Until you restart it, in-app updates can`)
+    log.gray(`  still apply releases but can't take or restore snapshots.`)
+    log.gray(`  Restart at a maintenance window (briefly restarts all ${runUser} PM2 apps):`)
+    log.gray(`    sudo -u ${runUser} PM2_HOME=${pm2Home} pm2 update`)
+    console.log('')
+  }
+
+  // Print the nginx vhost block for the operator to drop into the
+  // host's existing vhost file. We deliberately do NOT auto-write
+  // the vhost — shared hosts park their vhosts in different shapes
+  // (one file per site under /etc/nginx/sites-available, OR a single
+  // big custom-sites.conf in /etc/nginx/conf.d/, OR Apache's
+  // sites-available) and the operator already has a working
+  // convention we shouldn't second-guess.
+  printPm2NginxGuidance({ siteUrl: config.siteUrl, port: config.port, slug, runUser, pm2Home })
+}
+
+/**
+ * Emit a fully-rendered nginx server-block the operator can paste
+ * verbatim into their vhost file. Mirrors the CaveCMS reference
+ * vhost (security + nextjs-security snippets + an upstream proxy
+ * to 127.0.0.1:PORT) but doesn't depend on snippets the shared host
+ * may not have — falls back to inline headers when those snippets
+ * are absent.
+ */
+function printPm2NginxGuidance({ siteUrl, port, slug, runUser, pm2Home }) {
+  // Refuse to emit nginx guidance when siteUrl is missing or
+  // unparseable. Otherwise we'd print `server_name ;` (empty token),
+  // which `nginx -t` rejects — operator pastes, gets a confusing
+  // nginx-level error, doesn't know the CLI generated it. Surface
+  // here, in the operator's terminal, where the diagnosis is local.
+  if (!siteUrl) {
+    log.warn('No siteUrl in this install — nginx vhost block was NOT emitted.')
+    log.gray('  Set CAVECMS_SITE_URL (env var) or re-run interactively and re-render later.')
+    return
+  }
+  let parsed
+  try {
+    parsed = new URL(siteUrl)
+  } catch {
+    log.warn(`siteUrl "${siteUrl}" is not a parseable URL — nginx vhost block was NOT emitted.`)
+    log.gray('  Re-run with a valid https://… URL and capture the printed block then.')
+    return
+  }
+  // .hostname (not .host) — strips any :port suffix. nginx
+  // server_name doesn't allow port suffixes; pasting host:port would
+  // produce `server_name example.com:8080;` which nginx rejects.
+  const host = parsed.hostname
+  if (!host) {
+    log.warn(`Couldn't extract a hostname from "${siteUrl}" — nginx vhost block was NOT emitted.`)
+    return
+  }
+  const hasSecuritySnippet = existsSync('/etc/nginx/snippets/security.conf')
+  const hasNextjsSnippet = existsSync('/etc/nginx/snippets/nextjs-security.conf')
+  // Derive the apex domain for the wildcard cert lookup. Strategy
+  // (in priority order):
+  //   1. If a cert exists at the exact host (e.g. operator placed a
+  //      single-domain cert at <host>.pem), use that.
+  //   2. Otherwise, strip the leftmost label and check there
+  //      (test.derricksiawor.com → derricksiawor.com).
+  //   3. Fall through to the placeholder (existsSync below).
+  //
+  // This handles BOTH the apex case (example.com → example.com.pem
+  // when it's the apex) AND the common subdomain case. It also
+  // shrugs off the 2-label ccTLD case (example.co.uk → strip to
+  // co.uk which won't have a cert, falls to placeholder — operator
+  // edits the path). Earlier 'strip first label always' broke the
+  // apex (example.com → com).
+  const hostCertPath = `/etc/ssl/cloudflare/${host}.pem`
+  const strippedHost = host.replace(/^[^.]+\./, '')
+  const apexCertPath = `/etc/ssl/cloudflare/${strippedHost}.pem`
+  let certPath
+  let keyPath
+  if (existsSync(hostCertPath)) {
+    certPath = hostCertPath
+    keyPath = `/etc/ssl/cloudflare/${host}.key`
+  } else if (strippedHost !== host && existsSync(apexCertPath)) {
+    certPath = apexCertPath
+    keyPath = `/etc/ssl/cloudflare/${strippedHost}.key`
+  } else {
+    certPath = '/path/to/fullchain.pem'
+    keyPath = '/path/to/privkey.key'
+  }
+  const certHint = `  ssl_certificate ${certPath};\n  ssl_certificate_key ${keyPath};`
+
+  console.log('')
+  log.info('Add an nginx server block for the new install:')
+  console.log('')
+  console.log(c('gray', `  # /etc/nginx/conf.d/custom-sites.conf  (append at end)`))
+  console.log('')
+  console.log(`server {`)
+  console.log(`  listen 80;`)
+  console.log(`  server_name ${host};`)
+  console.log(`  return 301 https://$host$request_uri;`)
+  console.log(`}`)
+  console.log('')
+  console.log(`server {`)
+  console.log(`  listen 443 ssl http2;`)
+  console.log(`  server_name ${host};`)
+  console.log('')
+  console.log(certHint)
+  console.log('')
+  if (hasSecuritySnippet) console.log(`  include /etc/nginx/snippets/security.conf;`)
+  if (hasNextjsSnippet) console.log(`  include /etc/nginx/snippets/nextjs-security.conf;`)
+  console.log('')
+  console.log(`  client_max_body_size 25M;  # uploads`)
+  console.log('')
+  console.log(`  location / {`)
+  console.log(`    proxy_pass http://127.0.0.1:${port};`)
+  console.log(`    proxy_http_version 1.1;`)
+  console.log(`    proxy_set_header Upgrade $http_upgrade;`)
+  console.log(`    proxy_set_header Connection 'upgrade';`)
+  console.log(`    proxy_set_header Host $host;`)
+  console.log(`    proxy_set_header X-Real-IP $remote_addr;`)
+  console.log(`    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`)
+  console.log(`    proxy_set_header X-Forwarded-Proto $scheme;`)
+  console.log(`    proxy_cache_bypass $http_upgrade;`)
+  console.log(`  }`)
+  console.log(`}`)
+  console.log('')
+  log.gray(`Then:  sudo nginx -t && sudo systemctl reload nginx`)
+  log.gray(`Logs:  sudo tail -f /var/log/cavecms/${slug}-out.log`)
+  log.gray(`PM2:   sudo -u ${runUser} PM2_HOME=${pm2Home} pm2 status`)
 }
 
 function startCpanel({ targetDir, envPath }) {
@@ -1213,13 +1954,14 @@ function startLaptop({ targetDir, envPath, config }) {
   startForeground({ targetDir, envPath })
 }
 
-function startService({ surface, targetDir, envPath, config, skipStart }) {
+function startService({ surface, targetDir, envPath, config, skipStart, siteName }) {
   if (skipStart) {
     log.warn('Skipping service start (--skip-start). Start manually:')
     log.gray(`  node --env-file=env.production scripts/start-standalone.mjs`)
     return
   }
   if (surface === 'vps') return startVps({ targetDir, envPath, config })
+  if (surface === 'pm2') return startPm2({ targetDir, envPath, config, siteName })
   if (surface === 'cpanel') return startCpanel({ targetDir, envPath })
   return startLaptop({ targetDir, envPath, config })
 }
@@ -1243,7 +1985,7 @@ async function main(argv) {
 
   // 1. Surface detect.
   const surface = args.surface === 'auto' ? detectSurface() : args.surface
-  if (!['vps', 'laptop', 'cpanel'].includes(surface)) {
+  if (!['vps', 'pm2', 'laptop', 'cpanel'].includes(surface)) {
     die(`Unknown surface: ${args.surface}`)
   }
   log.info(`Surface: ${c('bold', surface)}`)
@@ -1255,10 +1997,22 @@ async function main(argv) {
       ask(rl, 'Site name', {
         defaultValue: 'my-site',
         validate: (v) =>
-          /^[a-z0-9][a-z0-9-]{1,40}$/.test(v)
+          SITE_NAME_RE.test(v)
             ? null
             : 'Lowercase letters, digits, dashes. 2-41 chars. Must start with a letter or digit.',
       }),
+    )
+  }
+  // Validate positional siteName (which skipped the interactive prompt's
+  // validator). Without this, `npx create-cavecms ../../etc/foo` resolves
+  // a traversed targetDir + the subsequent `sudo chown -R runUser` flips
+  // ownership of a path the operator didn't intend. The interactive
+  // prompt already enforced this regex; we apply it uniformly now.
+  if (args.siteName && !SITE_NAME_RE.test(args.siteName)) {
+    die(
+      `Invalid site name "${args.siteName}". ` +
+        `Must match ${SITE_NAME_RE.source} — lowercase letters, digits, and dashes ` +
+        `only; 2-41 chars; first char a letter or digit.`,
     )
   }
   const targetDir = args.targetDir
@@ -1282,6 +2036,17 @@ async function main(argv) {
   // an nginx / Apache vhost on this box.
   if (surface === 'vps') {
     preflightVpsCollisions({ targetDir, siteUrl: envOr('CAVECMS_SITE_URL', '') })
+  }
+  // PM2-only safety: refuse to re-register a pm2 app name that's
+  // already running under the daemon, and refuse the nginx-vhost
+  // collision (same scan as VPS, narrower set of dirs).
+  if (surface === 'pm2') {
+    preflightPm2Collisions({
+      pm2AppName: pm2AppNameFor(args.siteName),
+      siteUrl: envOr('CAVECMS_SITE_URL', ''),
+      pm2User: process.env.CAVECMS_PM2_USER ?? 'www-data',
+      pm2Home: process.env.CAVECMS_PM2_HOME ?? '/var/www/.pm2',
+    })
   }
   log.ok('Pre-flight OK.')
 
@@ -1351,7 +2116,7 @@ async function main(argv) {
     console.log(c('gray', '  Lost the URL? Run:  ') + c('bold', `grep INSTALL_BOOTSTRAP_TOKEN ${envPath}`))
     console.log('')
 
-    startService({ surface, targetDir, envPath, config, skipStart: args.skipStart })
+    startService({ surface, targetDir, envPath, config, skipStart: args.skipStart, siteName: args.siteName })
   } catch (err) {
     if (createdTargetDir && installPhase === 'pre-extract') {
       try {
@@ -1361,7 +2126,28 @@ async function main(argv) {
         /* best-effort cleanup */
       }
     } else if (installPhase === 'post-unpack' || installPhase === 'env-written') {
-      log.warn(`Install failed mid-flight. To retry: rm -rf ${targetDir} && npx create-cavecms ${args.siteName ?? ''}`)
+      log.warn('Install failed mid-flight. Recovery commands:')
+      log.gray(`  rm -rf ${targetDir}`)
+      // VPS surface may have placed a stale cavecms.service unit OR
+      // started provisioning system dirs before the failure. The
+      // catch can't reliably detect HOW FAR startVps got, so we
+      // surface the unit-cleanup commands unconditionally — they're
+      // safe no-ops on a host that doesn't have the file.
+      if (surface === 'vps') {
+        log.gray(`  sudo systemctl disable --now cavecms.service 2>/dev/null || true`)
+        log.gray(`  sudo rm -f /etc/systemd/system/cavecms.service && sudo systemctl daemon-reload`)
+      }
+      // PM2 surface may have registered the pm2 app before the
+      // failure (e.g. pm2 save failed). Same posture: emit the
+      // delete command unconditionally; it's safe if no such app.
+      if (surface === 'pm2') {
+        const pm2User = process.env.CAVECMS_PM2_USER ?? 'www-data'
+        const pm2Home = process.env.CAVECMS_PM2_HOME ?? '/var/www/.pm2'
+        const pm2AppName = pm2AppNameFor(args.siteName)
+        log.gray(`  sudo -u ${pm2User} PM2_HOME=${pm2Home} pm2 delete ${pm2AppName} 2>/dev/null || true`)
+        log.gray(`  sudo -u ${pm2User} PM2_HOME=${pm2Home} pm2 save`)
+      }
+      log.gray(`  npx create-cavecms ${args.siteName ?? '<site-name>'}`)
     }
     throw err
   }

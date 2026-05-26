@@ -303,8 +303,9 @@ rollback_to_previous() {
   # Reload pm2. Exit code intentionally suppressed — same reasoning as
   # the forward path (pm2 CLI can SIGINT mid-reload and exit non-zero
   # while the daemon completes successfully). Healthz below is the
-  # canonical signal.
-  (cd "$REPO_DIR" && pm2 reload ecosystem.config.cjs --update-env >/dev/null 2>&1 || true)
+  # canonical signal. Target by name when CAVECMS_PM2_APP_NAME is set
+  # (CLI-install layout); else fall back to the bundled config file.
+  (cd "$REPO_DIR" && pm2 reload "${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}" --update-env >/dev/null 2>&1 || true)
 
   # Verify rollback health before claiming success.
   local healthz_args=()
@@ -927,7 +928,33 @@ fi
 # healthz poll is the canonical "did the reload work" signal — if the
 # new process is healthy, the reload worked regardless of what pm2 CLI
 # reported. If healthz fails step 6 will trigger rollback.
-pm2 reload ecosystem.config.cjs --update-env 2>&1 | tail -n 16 > "${LOG_DIR}/pm2-reload.log" || \
+# Reload target: an app NAME when CAVECMS_PM2_APP_NAME is set
+# (shared-host PM2 surface — the in-tree ecosystem.config.cjs gets
+# clobbered by the new release's bundled legacy version on the atomic
+# swap, so we can't rely on the file path here), else the historical
+# `ecosystem.config.cjs` path (bare-metal deploy.sh layout).
+PM2_RELOAD_TARGET="${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}"
+# Pre-reload sanity: confirm pm2 knows the target (only meaningful in
+# the by-name branch — `pm2 describe <config.cjs>` would also fail
+# trivially). The forward path's healthz verify catches misses too,
+# but this surfaces "wrong CAVECMS_PM2_APP_NAME plumbed" with the
+# actual app-name typo instead of waiting for the verify timeout.
+# Truncate the log file ONCE here so we start each apply run with a
+# clean log, AND so the pre-check diagnostic below (if it fires) is
+# preserved through the subsequent pm2 reload output (which uses
+# append, not truncate, to avoid clobbering the warning).
+: > "${LOG_DIR}/pm2-reload.log"
+if [ -n "${CAVECMS_PM2_APP_NAME:-}" ]; then
+  # Wrap in `timeout 10s` defensively — a wedged pm2 daemon would
+  # otherwise hang the orchestrator here without a wall-clock cap.
+  # The diagnostic log is best-effort regardless; exit code is
+  # ignored so a timeout doesn't fail the orchestrator.
+  if ! timeout 10s pm2 describe "$PM2_RELOAD_TARGET" >/dev/null 2>&1; then
+    echo "[cavecms-update] pm2 reload pre-check: app \"$PM2_RELOAD_TARGET\" not registered (or pm2 daemon wedged) under PM2_HOME=\"${PM2_HOME:-<unset>}\"." >> "${LOG_DIR}/pm2-reload.log"
+    echo "[cavecms-update]   The reload will likely no-op. Check the install's pm2.config.cjs vs the actual registered app." >> "${LOG_DIR}/pm2-reload.log"
+  fi
+fi
+pm2 reload "$PM2_RELOAD_TARGET" --update-env 2>&1 | tail -n 16 >> "${LOG_DIR}/pm2-reload.log" || \
   echo "[cavecms-update] pm2 reload CLI exit non-zero (likely SIGINT'd by reload signal — verifying via healthz)" >> "${LOG_DIR}/pm2-reload.log"
 
 # ---------------------------------------------------------------------------
