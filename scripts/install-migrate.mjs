@@ -255,10 +255,18 @@ async function main() {
 
   const conn = await mysql.createConnection({
     uri: url,
-    // multipleStatements: false — we split on `--> statement-breakpoint`
-    // ourselves and dispatch one statement per query. Letting the driver
-    // multi-execute would conceal which statement failed.
-    multipleStatements: false,
+    // multipleStatements: true — required for migrations that ship
+    // WITHOUT `--> statement-breakpoint` markers (hand-written .sql
+    // files added to db/migrations/ without going through
+    // `drizzle-kit generate`). For drizzle-generated migrations
+    // (with breakpoints), splitStatements still cuts them up and we
+    // dispatch one statement per query for diagnostic precision —
+    // the multipleStatements flag is just a permissive ceiling that
+    // accepts the raw multi-statement chunk for migrations that
+    // lack markers. Diagnostic cost: a failed statement in a
+    // marker-less migration shows MariaDB's error pointing at the
+    // line within the file, not at a particular split-index.
+    multipleStatements: true,
     // Reasonable connect timeout for a fresh-install flow where the DB
     // is on the same box and should respond instantly.
     connectTimeout: 10_000,
