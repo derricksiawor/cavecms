@@ -334,10 +334,30 @@ print((u.path or "/").lstrip("/").split("?")[0])
   db_name=$(echo "$parsed" | awk 'NR==5')
   if [ -z "$db_name" ]; then echo ""; return 1; fi
 
-  if mysqldump --single-transaction --skip-lock-tables --column-statistics=0 \
-       --defaults-extra-file=<(printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
-         "$db_host" "$db_port" "$db_user" "$db_pass") \
-       "$db_name" 2>"${LOG_DIR}/db-backup.log" | gzip > "$out"; then
+  # Write credentials to a real temp file rather than a process-
+  # substitution `<(...)` — MariaDB's mysqldump rejects /dev/fd/* paths
+  # via `--defaults-extra-file=` ("unknown variable
+  # 'defaults-extra-file=/dev/fd/63'"). Real file, mode 0600, cleaned
+  # up after dump regardless of outcome.
+  #
+  # `--column-statistics=0` is a MySQL 8 flag MariaDB doesn't know
+  # about — dropped. The flag was a no-op for MariaDB targets and a
+  # hard error: "unknown variable 'column-statistics=0'".
+  local cred_file
+  cred_file=$(mktemp "${TMPDIR:-/tmp}/cavecms-mysqldump-cred.XXXXXX")
+  chmod 0600 "$cred_file"
+  printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
+    "$db_host" "$db_port" "$db_user" "$db_pass" > "$cred_file"
+
+  local dump_rc=0
+  mysqldump --defaults-extra-file="$cred_file" \
+    --single-transaction --skip-lock-tables \
+    "$db_name" 2>"${LOG_DIR}/db-backup.log" | gzip > "$out" \
+    || dump_rc=$?
+
+  rm -f "$cred_file"
+
+  if [ $dump_rc -eq 0 ] && [ -s "$out" ]; then
     echo "$out"
   else
     rm -f "$out"
@@ -373,10 +393,21 @@ print((u.path or "/").lstrip("/").split("?")[0])
   db_name=$(echo "$parsed" | awk 'NR==5')
   if [ -z "$db_name" ]; then return 1; fi
 
-  gunzip -c "$dump" | mysql \
-    --defaults-extra-file=<(printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
-       "$db_host" "$db_port" "$db_user" "$db_pass") \
-    "$db_name" 2>>"${LOG_DIR}/db-restore.log"
+  # Same MariaDB / process-substitution constraint as db_backup —
+  # real temp file with creds, mode 0600, cleaned up regardless.
+  local cred_file
+  cred_file=$(mktemp "${TMPDIR:-/tmp}/cavecms-mysql-cred.XXXXXX")
+  chmod 0600 "$cred_file"
+  printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
+    "$db_host" "$db_port" "$db_user" "$db_pass" > "$cred_file"
+
+  local restore_rc=0
+  gunzip -c "$dump" | mysql --defaults-extra-file="$cred_file" \
+    "$db_name" 2>>"${LOG_DIR}/db-restore.log" \
+    || restore_rc=$?
+
+  rm -f "$cred_file"
+  return $restore_rc
 }
 
 # ---------------------------------------------------------------------------
