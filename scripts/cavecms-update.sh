@@ -821,7 +821,14 @@ if [ -z "$BACKUP_DUMP" ]; then
   exit 1
 fi
 
-if ! pnpm db:migrate 2>&1 | tail -n 16 > "${LOG_DIR}/db-migrate.log"; then
+# db-migrate-with-lock refuses NODE_ENV=production without an explicit
+# opt-in — the gate exists to stop someone running `pnpm db:migrate`
+# by hand on the prod box. The in-app update flow IS a legitimate
+# operator-initiated prod migration: an admin clicked Update Now,
+# the apply route audit-logged it, the orchestrator took a fresh
+# mysqldump in the step above. Pass CAVECMS_MIGRATE_OK=1 to clear
+# the gate.
+if ! CAVECMS_MIGRATE_OK=1 pnpm db:migrate 2>&1 | tail -n 16 > "${LOG_DIR}/db-migrate.log"; then
   write_status "failed" 3 "Couldn't update your data" "Your previous version is being restored. No data was lost." ""
   rollback_to_previous "$PREVIOUS_SHA" 0 "$BACKUP_DUMP"
   post_audit_terminal rolled_back "db_migrate_failed"
