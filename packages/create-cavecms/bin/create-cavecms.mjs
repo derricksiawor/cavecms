@@ -951,14 +951,20 @@ function unpackZip({ zipPath, targetDir, release, stagingDir }) {
   if (!existsSync(innerDir)) {
     die(`Expected ${innerDir} inside the zip, not found. Bad zip structure.`)
   }
-  // Move (rename) the inner dir's contents into targetDir. cpSync with
-  // recursive preserves dereferenced files — the zip itself contains no
-  // symlinks (build-zip.mjs dereferences them at zip time) so we don't
-  // need to worry about absolute-path symlinks here.
-  for (const name of readdirSync(innerDir)) {
-    const src = join(innerDir, name)
-    const dst = join(targetDir, name)
-    cpSync(src, dst, { recursive: true, force: true })
+  // Move the inner dir's contents into targetDir using `cp -a` (BSD +
+  // GNU). NOT `fs.cpSync` — that ABSOLUTIFIES relative symlinks on
+  // copy (turning `node_modules/mysql2 → .pnpm/...` into
+  // `node_modules/mysql2 → /tmp/user/0/create-cavecms-PID/extract/...`)
+  // which then dangles once the staging dir is cleaned up. pnpm-shaped
+  // standalones ship many relative symlinks (one per direct dep of
+  // every package, plus the .pnpm content store) and breaking any of
+  // them takes the customer's runtime down. `cp -a` preserves symlink
+  // targets verbatim. Same fix as scripts/release/build-zip.mjs.
+  const cpRes = spawnSync('cp', ['-a', innerDir + '/.', targetDir], {
+    stdio: ['ignore', 'inherit', 'inherit'],
+  })
+  if (cpRes.status !== 0) {
+    die(`cp -a failed (exit ${cpRes.status}) moving the extracted zip into ${targetDir}.`)
   }
   // Clean up staging.
   try {
