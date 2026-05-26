@@ -8,7 +8,7 @@ import Link from 'next/link'
 // new URL.
 
 export const metadata = {
-  title: 'Page not found — Best World Properties',
+  title: 'Page not found',
   robots: { index: false, follow: false },
 }
 
@@ -25,9 +25,6 @@ export default function NotFound() {
       />
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl flex-col items-start justify-center px-8 py-24 sm:px-12">
-        <p className="text-xs font-semibold uppercase tracking-[0.42em] text-copper-600">
-          Best World Properties
-        </p>
         <p className="mt-8 font-serif text-9xl font-bold tracking-tight text-near-black/15">
           404
         </p>
@@ -35,8 +32,8 @@ export default function NotFound() {
           We couldn&apos;t find that page.
         </h1>
         <p className="mt-8 max-w-2xl text-base font-medium leading-relaxed text-warm-stone sm:text-lg">
-          The link may be outdated, or the page may have moved. Use the
-          links below to find your way back.
+          The link may be outdated, or the page may have moved. Head back
+          to the home page to find your way around.
         </p>
         <div className="mt-16 flex flex-wrap gap-8 text-[11px] font-semibold uppercase tracking-[0.32em] text-near-black/80">
           <Link
@@ -45,20 +42,6 @@ export default function NotFound() {
           >
             <span className="block h-px w-12 bg-copper-500" />
             Home
-          </Link>
-          <Link
-            href="/projects"
-            className="inline-flex items-center gap-3 hover:text-near-black"
-          >
-            <span className="block h-px w-12 bg-copper-500" />
-            Projects
-          </Link>
-          <Link
-            href="/contact"
-            className="inline-flex items-center gap-3 hover:text-near-black"
-          >
-            <span className="block h-px w-12 bg-copper-500" />
-            Contact
           </Link>
         </div>
       </div>
