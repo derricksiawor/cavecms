@@ -53,8 +53,7 @@ export default async function Unsubscribe({
         Confirm unsubscribe
       </h1>
       <p className="mb-6 text-warm-stone">
-        Click the button below to stop receiving updates from Best World
-        Properties.
+        Click the button below to stop receiving updates from this site.
       </p>
       <form method="post" action="/api/newsletter/unsubscribe">
         <input type="hidden" name="token" value={token} />

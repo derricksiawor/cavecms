@@ -274,8 +274,7 @@ function SplashFallback({
           Built for those who notice the details.
         </h1>
         <p className="mt-10 max-w-2xl text-base font-medium leading-relaxed text-warm-stone sm:text-lg animate-cavecms-rise [animation-delay:260ms]">
-          Luxury residential developments in Accra. The new bestworldproperties.com is
-          under construction — three projects, refined craftsmanship, quiet confidence.
+          Your CaveCMS site. Sign in to the admin to start building.
         </p>
 
         <div className="mt-16 flex items-center gap-6 animate-cavecms-rise [animation-delay:380ms]">

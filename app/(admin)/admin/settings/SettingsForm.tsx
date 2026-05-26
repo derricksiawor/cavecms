@@ -252,7 +252,7 @@ function MobileCtaCard({
               </label>
               <label className="block">
                 <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-warm-stone">Goes to</span>
-                <Input className="mt-1.5" value={b.href} maxLength={500} placeholder="tel:+233…, https://wa.me/…, mailto:…, or /contact"
+                <Input className="mt-1.5" value={b.href} maxLength={500} placeholder="tel:+1…, https://wa.me/…, mailto:…, or /contact"
                   onChange={(e) => updateButton(i, { ...b, href: e.target.value })}
                 />
                 <span className="mt-1 block text-[11px] text-warm-stone/80">

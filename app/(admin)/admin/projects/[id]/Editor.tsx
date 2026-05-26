@@ -402,7 +402,7 @@ export function ProjectEditor({
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               maxLength={180}
-              placeholder="e.g. East Legon, Accra"
+              placeholder="e.g. neighbourhood, city"
             />
           </label>
         </div>

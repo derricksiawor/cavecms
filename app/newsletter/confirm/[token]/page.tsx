@@ -55,8 +55,7 @@ export default async function ConfirmSubscription({
         Confirm your subscription
       </h1>
       <p className="mb-6 text-warm-stone">
-        Click the button below to finish subscribing to Best World
-        Properties updates.
+        Click the button below to finish subscribing to updates from this site.
       </p>
       <form method="post" action="/api/newsletter/confirm">
         <input type="hidden" name="token" value={token} />
