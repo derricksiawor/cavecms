@@ -49,11 +49,26 @@ export const POST = withError(async (req: Request) => {
   let latest: Awaited<ReturnType<typeof checkLatestRelease>>
   try {
     latest = await checkLatestRelease({ owner: REPO_OWNER, repo: REPO_NAME })
-  } catch {
-    // Bubble the structured error through withError. We DON'T echo
-    // the GitHub-side error body verbatim — it may carry rate-limit
-    // context tied to our IP that doesn't belong in operator-visible
-    // copy.
+  } catch (err) {
+    // Distinguish the three real failure classes so the UI can render
+    // operator-friendly copy:
+    //   - rate-limited (GitHub 403/429 with x-ratelimit-remaining: 0)
+    //     → "GitHub is rate-limiting your IP, try again in ~X min"
+    //   - repo not found (404)
+    //     → "Couldn't find the release repository — check your
+    //        update channel configuration"
+    //   - generic upstream (anything else)
+    //     → "Couldn't reach the release server, try again later"
+    //
+    // We DON'T echo the GitHub body verbatim — it may carry IP-tied
+    // rate-limit context that doesn't belong in operator UI.
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.startsWith('github_rate_limited_')) {
+      throw new HttpError(429, 'check_rate_limited')
+    }
+    if (msg === 'github_repo_not_found') {
+      throw new HttpError(502, 'check_repo_not_found')
+    }
     throw new HttpError(502, 'check_failed')
   }
 

@@ -94,11 +94,23 @@ export async function checkLatestRelease({
   })
 
   if (!res.ok) {
-    // 403 with rate-limit body, 404 for typo'd repo, 5xx for GitHub
-    // outage — all surface to the operator as the same "couldn't check
-    // for updates" toast. We do NOT include the raw body in the
-    // thrown message because it may contain rate-limit reset info
-    // tied to our IP that doesn't belong in audit_log.
+    // Distinguish rate-limit (403/429 with x-ratelimit-remaining: 0)
+    // from generic upstream failures so the check route can emit
+    // operator-friendly copy ("GitHub is rate-limiting your IP —
+    // try again in ~X minutes") instead of a flat "couldn't check
+    // for updates". 404 for typo'd repo / private repo without PAT
+    // gets its own class so configuration mistakes don't masquerade
+    // as transient failures.
+    if (res.status === 403 || res.status === 429) {
+      const remaining = res.headers.get('x-ratelimit-remaining')
+      if (remaining === '0' || res.status === 429) {
+        const reset = res.headers.get('x-ratelimit-reset') ?? ''
+        throw new Error(`github_rate_limited_${reset}`)
+      }
+    }
+    if (res.status === 404) {
+      throw new Error('github_repo_not_found')
+    }
     throw new Error(`github_api_failed_${res.status}`)
   }
 

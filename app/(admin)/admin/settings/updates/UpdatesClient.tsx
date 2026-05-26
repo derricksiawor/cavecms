@@ -101,8 +101,31 @@ export function UpdatesClient({
     setChecking(true)
     try {
       const r = await csrfFetch('/api/admin/updates/check', { method: 'POST' })
+      // Distinguish the three real failure classes the check route now
+      // emits (per lib/updates/checkLatestRelease error classification):
+      //   - 429 check_rate_limited: GitHub throttled this IP
+      //   - 502 check_repo_not_found: misconfigured update channel
+      //   - 502 check_failed: generic upstream / network problem
+      if (r.status === 429) {
+        toast.error(
+          "GitHub is rate-limiting update checks from this server. Try again in about 30 minutes.",
+        )
+        return
+      }
       if (r.status === 502) {
-        toast.error("Couldn't reach the CaveCMS release server.")
+        let body: { error?: string } | null = null
+        try {
+          body = (await r.json()) as { error?: string }
+        } catch {
+          /* body may not be JSON */
+        }
+        if (body?.error === 'check_repo_not_found') {
+          toast.error(
+            "Couldn't find the CaveCMS release repository. Your update channel may be misconfigured — contact support.",
+          )
+        } else {
+          toast.error("Couldn't reach the CaveCMS release server.")
+        }
         return
       }
       if (!r.ok) return

@@ -192,6 +192,37 @@ export function UpdatesProgressModal({
     status !== null &&
     Date.now() - Date.parse(status.updatedAt) < 60_000
 
+  // Hang-detection thresholds, per Agent B's UX audit. Each step has
+  // an expected duration; if we sit beyond the threshold without
+  // transitioning, surface a "this is taking longer than usual" note
+  // so the operator doesn't read the spinner as "frozen". We never
+  // auto-fail — the server-side stale-detection (15 min) is the
+  // canonical timeout; this is purely cosmetic reassurance.
+  const stepEnteredAt = useRef<number>(Date.now())
+  const lastStepRef = useRef<number>(-1)
+  if (lastStepRef.current !== step) {
+    lastStepRef.current = step
+    stepEnteredAt.current = Date.now()
+  }
+  const stepDurationMs = Date.now() - stepEnteredAt.current
+  // Thresholds in seconds (soft, hard). Soft → mild amber sub-text;
+  // hard → bolder amber row with "you can safely close this window".
+  const STEP_THRESHOLDS: Record<number, [number, number]> = {
+    1: [15, 45],
+    2: [30, 90],
+    3: [30, 90],
+    4: [60, 150],
+    5: [15, 30],
+    6: [30, 90],
+  }
+  const [softMs, hardMs] = (
+    STEP_THRESHOLDS[step] ?? [30, 90]
+  ).map((s) => s * 1000) as [number, number]
+  const isSoftSlow =
+    !isCompleted && !isFailed && !isOrphaned && stepDurationMs > softMs
+  const isHardSlow =
+    !isCompleted && !isFailed && !isOrphaned && stepDurationMs > hardMs
+
   return (
     <AnimatePresence>
       {open && (
@@ -336,6 +367,17 @@ export function UpdatesProgressModal({
                   {isCurrent && status?.stepLabel && (
                     <p className="mt-0.5 text-xs text-warm-stone">{status.stepLabel}</p>
                   )}
+                  {/* Soft-slow indicator: the current step has been
+                      running longer than its expected duration but not
+                      yet long enough to warrant a recovery panel.
+                      Subtle amber to flag "longer than usual" without
+                      alarming the operator. */}
+                  {isCurrent && isSoftSlow && !isHardSlow && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      This is taking longer than usual — that&apos;s
+                      normal for larger updates.
+                    </p>
+                  )}
                   {isStepFailed && status?.error && (
                     <p className="mt-1 text-xs text-red-700">{status.error}</p>
                   )}
@@ -352,6 +394,29 @@ export function UpdatesProgressModal({
             worker was still serving requests fine. Now it only shows
             when status polling itself is failing, and the counter
             telegraphs the retry budget. */}
+        {/* Hard-slow indicator — the current step has exceeded 2-3×
+            its expected duration. Surface a heavier amber row that
+            tells the operator they can safely close the window without
+            affecting the update. The orchestrator runs detached; status
+            persists; the modal re-opens with live state next visit. */}
+        {isHardSlow && !isReconnecting && (
+          <div className="relative mx-8 mt-2 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-xs text-near-black">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+            <div>
+              <p className="font-medium">
+                Still working &mdash; this is unusual, but we&apos;re
+                still waiting.
+              </p>
+              <p className="mt-0.5 text-warm-stone">
+                Your site is still live on the previous version. You can
+                safely close this window; the update keeps running in
+                the background and we&apos;ll record the outcome in the
+                audit log.
+              </p>
+            </div>
+          </div>
+        )}
+
         {isReconnecting && !isFailed && !isCompleted && !isOrphaned && (
           <div className="relative mx-8 mt-2 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-xs text-near-black">
             <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-700" />

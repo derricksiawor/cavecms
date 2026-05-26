@@ -432,19 +432,45 @@ export const POST = withError(async (req: Request) => {
     handedOff = true
 
     const meta = auditMetaFromRequest(req)
-    await db.insert(auditLog).values({
-      userId: ctx.userId,
-      // Distinguish forced rebuilds in the audit thread so the history
-      // table can surface them differently ("Re-ran install" vs.
-      // "Updated to X").
-      action: force ? 'force_apply' : 'apply',
-      resourceType: 'updates',
-      resourceId: target.slice(0, 12),
-      diff: { fromSha: current.sha, toSha: target, ...(force ? { force: true } : {}) },
-      ip: meta.ip,
-      userAgent: meta.userAgent,
-      requestId: meta.requestId,
-    })
+    // Audit insert is intentionally wrapped in its own try/catch and
+    // executed AFTER the spawn handoff: the update IS running at
+    // this point — letting a DB hiccup (deadlock, connection drop,
+    // FK violation) throw here would surface as a 500 to the
+    // operator while the orchestrator continues in the background.
+    // The terminal-state audit row written by the script via
+    // /api/internal/updates/audit-terminal still anchors the audit
+    // thread; a missing apply row is recoverable, a phantom 500 to
+    // the operator is not. Log the error so post-mortem can spot
+    // the gap.
+    try {
+      await db.insert(auditLog).values({
+        userId: ctx.userId,
+        // Distinguish forced rebuilds in the audit thread so the
+        // history table can surface them differently ("Re-ran
+        // install" vs. "Updated to X").
+        action: force ? 'force_apply' : 'apply',
+        resourceType: 'updates',
+        resourceId: target.slice(0, 12),
+        diff: {
+          fromSha: current.sha,
+          toSha: target,
+          ...(force ? { force: true } : {}),
+        },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+        requestId: meta.requestId,
+      })
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          msg: 'audit_log_insert_failed_after_handoff',
+          err: err instanceof Error ? err.message : String(err),
+          fromSha: current.sha,
+          toSha: target,
+        }),
+      )
+    }
 
     return new Response(
       JSON.stringify({

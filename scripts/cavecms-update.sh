@@ -254,6 +254,17 @@ on_signal() {
 CURRENT_STEP=0
 trap on_exit EXIT
 trap 'on_signal SIGTERM' TERM
+
+# Stamp our PID into the lock file the apply route opened. The apply
+# route's child.pid is the outer bash that exec'd the double-fork
+# nohup — it exits within milliseconds. The actual orchestrator
+# (this process) is the orphan grandchild, and lockIsStale() needs
+# OUR pid to do the kill(pid, 0) liveness check. Best-effort: if
+# the write fails (read-only filesystem, etc.) the stale check
+# falls back to the status-mtime heuristic.
+if [ -f "$LOCK_PATH" ]; then
+  echo "$$" > "$LOCK_PATH" 2>/dev/null || true
+fi
 # Ignore SIGINT and SIGHUP. Step 5 (pm2 reload) sends SIGINT to the
 # managed Node process; on some platforms (macOS especially) the
 # signal leaks to the orchestrator via the shared controlling
@@ -705,6 +716,60 @@ if [ -z "$healthz_response" ] || ! echo "$healthz_response" | grep -q '"status":
   exit 1
 fi
 
+# MariaDB version gate. The drizzle migrations + JSON column-defaults
+# the CMS relies on require MariaDB >= 10.6. On an older server, the
+# migration would fail partway with a confusing syntax error, leaving
+# the schema in an inconsistent state (we already snapshotted, but
+# the operator's experience is "the update broke my database").
+# Refuse here instead, BEFORE we touch anything. Mirrors the same
+# gate in scripts/preflight.sh (line 355-421) for the deploy.sh path.
+#
+# Optional: skip the check when DATABASE_URL isn't parseable (dev
+# without a real DB connection) or mysql client isn't installed.
+# In production both are present per #0.045's bootstrap rules.
+if command -v mysql >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && [ -n "${DATABASE_URL:-}" ]; then
+  db_creds=$(DATABASE_URL="$DATABASE_URL" python3 -c '
+import os
+from urllib.parse import urlparse, unquote
+u = urlparse(os.environ["DATABASE_URL"])
+print(u.hostname or "127.0.0.1")
+print(u.port or 3306)
+print(unquote(u.username or ""))
+print(unquote(u.password or ""))
+print((u.path or "/").lstrip("/").split("?")[0])
+' 2>/dev/null || true)
+  if [ -n "$db_creds" ]; then
+    db_host=$(echo "$db_creds" | awk 'NR==1')
+    db_port=$(echo "$db_creds" | awk 'NR==2')
+    db_user=$(echo "$db_creds" | awk 'NR==3')
+    db_pass=$(echo "$db_creds" | awk 'NR==4')
+    cred_file=$(mktemp "${TMPDIR:-/tmp}/cavecms-mysqlver-cred.XXXXXX")
+    chmod 0600 "$cred_file"
+    printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
+      "$db_host" "$db_port" "$db_user" "$db_pass" > "$cred_file"
+    version_line=$(mysql --defaults-extra-file="$cred_file" -BNe "SELECT VERSION();" 2>/dev/null || true)
+    is_mariadb=$(mysql --defaults-extra-file="$cred_file" -BNe "SELECT @@version_comment;" 2>/dev/null || true)
+    rm -f "$cred_file"
+    # MariaDB version strings look like "10.6.16-MariaDB-..." or
+    # "11.4.2-MariaDB". Extract major.minor.
+    db_major=$(echo "$version_line" | awk -F. '{print $1}')
+    db_minor=$(echo "$version_line" | awk -F. '{print $2}')
+    case "$is_mariadb" in
+      *MariaDB*|*mariadb*) ;;  # OK — proceed to version check
+      *)
+        write_status "failed" 1 "Database isn't MariaDB" "CaveCMS requires MariaDB. Pure MySQL isn't supported. Ask your hosting provider to switch the database to MariaDB 10.6 or newer." ""
+        exit 1
+        ;;
+    esac
+    if [ -n "$db_major" ] && [ -n "$db_minor" ]; then
+      if [ "$db_major" -lt 10 ] || { [ "$db_major" -eq 10 ] && [ "$db_minor" -lt 6 ]; }; then
+        write_status "failed" 1 "Your database needs to be upgraded" "CaveCMS needs MariaDB 10.6 or newer. Yours is $version_line. Ask your hosting provider to upgrade before installing this update." ""
+        exit 1
+      fi
+    fi
+  fi
+fi
+
 # Git working-tree cleanliness: refuse to clobber operator-edited files.
 cd "$REPO_DIR"
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -875,6 +940,32 @@ if [ -z "$BACKUP_DUMP" ]; then
   exit 1
 fi
 
+# Expand/contract migration guard — mirrors scripts/preflight.sh's
+# destructive-migration check. If any NEW migration file (added
+# between PREVIOUS_SHA and TARGET_FULL) contains DROP / RENAME COLUMN /
+# TRUNCATE / MODIFY VARCHAR / ALTER COLUMN DROP patterns, refuse
+# unless CAVECMS_ALLOW_CONTRACT=1 is explicitly set. The default
+# expand-only deployment model can't safely auto-rollback a
+# destructive migration (the post-rollback code would 500 on the
+# narrowed/dropped column with no restorable state).
+if [ "$PREVIOUS_SHA" != "$TARGET_FULL" ] && [ -d "$REPO_DIR/db/migrations" ]; then
+  destructive_patterns='DROP COLUMN|DROP TABLE|DROP DATABASE|DROP TRIGGER|DROP PROCEDURE|DROP FUNCTION|DROP VIEW|DROP EVENT|DROP USER|DROP PARTITION|DROP FOREIGN KEY|DROP PRIMARY KEY|DROP CONSTRAINT|TRUNCATE TABLE|RENAME COLUMN|CHANGE COLUMN|ALTER COLUMN DROP|MODIFY[[:space:]]+[a-zA-Z_]+[[:space:]]+VARCHAR'
+  # Files added in TARGET_FULL that weren't in PREVIOUS_SHA. `--diff-filter=A`
+  # selects added files only. Quietly skip if the diff fails (shallow
+  # clone, etc.) — guard is best-effort.
+  new_migrations=$(git -C "$REPO_DIR" diff --name-only --diff-filter=A "$PREVIOUS_SHA" "$TARGET_FULL" -- 'db/migrations/*.sql' 2>/dev/null || true)
+  if [ -n "$new_migrations" ]; then
+    destructive_hits=$(echo "$new_migrations" | while read -r m; do
+      [ -f "$REPO_DIR/$m" ] && grep -EHl "$destructive_patterns" "$REPO_DIR/$m" 2>/dev/null
+    done | head -3)
+    if [ -n "$destructive_hits" ] && [ "${CAVECMS_ALLOW_CONTRACT:-0}" != "1" ]; then
+      write_status "failed" 3 "This update changes your database in ways that can't be undone" "One or more migrations would drop, rename, or narrow columns. Auto-rollback can't reverse this safely. Set CAVECMS_ALLOW_CONTRACT=1 in your install's environment to acknowledge the data-loss risk and try again." ""
+      post_audit_terminal failed "destructive_migration_refused"
+      exit 1
+    fi
+  fi
+fi
+
 # db-migrate-with-lock refuses NODE_ENV=production without an explicit
 # opt-in — the gate exists to stop someone running `pnpm db:migrate`
 # by hand on the prod box. The in-app update flow IS a legitimate
@@ -1024,6 +1115,31 @@ for i in $(seq 1 60); do
   response=$(curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>>"$healthz_log")
   rc=$?
   if [ $rc -eq 0 ] && echo "$response" | grep -q '"status":"ok"'; then
+    # Commit-verification guard: when HEALTHZ_TOKEN is set the verbose
+    # healthz response includes the running process's CAVECMS_COMMIT.
+    # Confirm the new process is actually serving the target SHA — if
+    # pm2 reload silently no-op'd (manifest unchanged) or the new env
+    # didn't propagate, healthz still returns 200 from the OLD process
+    # and step 6 would otherwise falsely declare success. Skip the
+    # check when HEALTHZ_TOKEN is empty (the basic /healthz response
+    # doesn't include `commit`, and we can't refuse on unauth data).
+    if [ -n "$HEALTHZ_TOKEN" ]; then
+      verbose_response=$(curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "${HEALTHZ_URL}?verbose=1" 2>>"$healthz_log" || true)
+      running_commit=$(echo "$verbose_response" | python3 -c '
+import json,sys
+try:
+  d=json.loads(sys.stdin.read())
+  print(d.get("commit","") if isinstance(d, dict) else "")
+except Exception:
+  print("")
+' 2>/dev/null || true)
+      if [ -n "$running_commit" ] && [ "$running_commit" != "${TARGET_FULL:0:12}" ]; then
+        echo "[verify] iter=$i healthz=ok but commit=$running_commit != target=${TARGET_FULL:0:12} — refusing" >> "$healthz_log"
+        success=0
+        write_status "restarting" 6 "Verifying the new version (attempt ${i}/60 — running commit doesn't match yet)" "" ""
+        continue
+      fi
+    fi
     success=$((success + 1))
     echo "[verify] iter=$i rc=0 ok success=$success" >> "$healthz_log"
     write_status "restarting" 6 "Verifying the new version — ${success}/3 healthy checks (attempt ${i}/60)" "" ""

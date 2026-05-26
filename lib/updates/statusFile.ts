@@ -248,6 +248,26 @@ export function releaseUpdateLock(fd: number | null): void {
 }
 
 /**
+ * Read the PID stamped into the lock file by the orchestrator
+ * script at startup (`echo $$ > $LOCK_PATH`). Returns null if the
+ * lock is unstamped (older orchestrator predating this protocol),
+ * the file doesn't exist, or the contents aren't a valid integer.
+ *
+ * Used by `lockIsStale()` to do a process-liveness check that beats
+ * the status-mtime heuristic: SIGKILL'd orchestrators look "fresh"
+ * by status-mtime for 15 minutes but their PID is provably dead.
+ */
+export function readLockPid(): number | null {
+  try {
+    const raw = readFileSync(getLockPath(), 'utf8').trim()
+    const n = Number.parseInt(raw, 10)
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Health check on the lock file — used by the apply route to detect
  * an orphaned lock (process crashed/SIGKILL'd before unlinking) so
  * the next apply can clean up automatically.
@@ -267,6 +287,38 @@ export function lockIsStale(): boolean {
     // No lock file → not stale (and nothing to clean up).
     return false
   }
+  // Primary check: PID liveness. If the orchestrator stamped its PID
+  // into the lock (newer apply route) we can probe the process
+  // directly with kill(0). If the process is gone (ESRCH) the lock
+  // is stale regardless of how recently the status file was written.
+  // This closes the SIGKILL-orphans-15min-wedge gap where the
+  // orchestrator dies untrappably but its status file's `updatedAt`
+  // looks fresh — apply route would otherwise refuse new updates
+  // for the full UPDATE_STALE_AFTER_MS window.
+  const pid = readLockPid()
+  if (pid !== null) {
+    try {
+      // POSIX kill(pid, 0) sends no signal but returns success only
+      // if the caller has permission to signal the process — i.e.,
+      // if the process exists. ESRCH means "no such process".
+      process.kill(pid, 0)
+      // Process is alive → lock NOT stale (regardless of status mtime).
+      return false
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ESRCH') {
+        // Definitively dead.
+        return true
+      }
+      // EPERM means it exists but we can't signal it (different
+      // user). Treat as alive — better to refuse a duplicate apply
+      // than race a real running orchestrator.
+      if (code === 'EPERM') return false
+      // Anything else, fall through to the status-mtime heuristic.
+    }
+  }
+  // Fallback (unstamped lock from an older apply route, or readLockPid
+  // failure): use the status file's `updatedAt`.
   const status = readStatus()
   if (!status) {
     // Lock exists but status file is gone → the orchestrator

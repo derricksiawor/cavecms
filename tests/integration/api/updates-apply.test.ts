@@ -143,7 +143,11 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     expect(status?.state).toBe('preflight')
     expect(status?.toSha).toBe('9999999999999999')
 
-    // Spawn called with the orchestrator script + target SHA.
+    // Spawn called with the orchestrator script + target SHA. The
+    // double-fork orphan pattern routes through `/bin/bash -c '...'`
+    // with the script path + target embedded in the command string,
+    // so assertions match the shell-quoted command rather than
+    // positional argv slots.
     expect(spawnMock).toHaveBeenCalledOnce()
     const firstCall = spawnMock.mock.calls[0] as unknown as [
       string,
@@ -151,8 +155,11 @@ describe('POST /api/admin/updates/apply (integration)', () => {
       Record<string, unknown>,
     ]
     expect(firstCall[0]).toBe('/bin/bash')
-    expect(firstCall[1][0]).toMatch(/scripts\/cavecms-update\.sh$/)
-    expect(firstCall[1][1]).toBe('9999999999999999')
+    expect(firstCall[1][0]).toBe('-c')
+    expect(firstCall[1][1]).toMatch(/scripts\/cavecms-update\.sh/)
+    expect(firstCall[1][1]).toContain('9999999999999999')
+    expect(firstCall[1][1]).toContain('nohup')
+    expect(firstCall[1][1]).toContain('disown')
 
     // Audit row landed with action=apply + diff.fromSha/toSha.
     const audit = await latestUpdateAuditRow()
@@ -190,7 +197,9 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     expect(res.status).toBe(202)
     expect(spawnMock).toHaveBeenCalledOnce()
 
-    // Spawn env got CAVECMS_UPDATE_FORCE=1.
+    // Spawn env got CAVECMS_UPDATE_FORCE=1. The orchestrator picks it
+    // up via `if [ "${CAVECMS_UPDATE_FORCE:-0}" = "1" ]` at startup
+    // (env propagates through the nohup grandchild).
     const forceCall = spawnMock.mock.calls[0] as unknown as [
       string,
       string[],
