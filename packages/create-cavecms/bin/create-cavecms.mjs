@@ -908,9 +908,50 @@ function startVps({ targetDir, envPath, config }) {
     log.gray(`  sudo systemctl daemon-reload`)
     log.gray(`  sudo systemctl enable --now cavecms.service`)
   }
-  log.info('nginx + Let\'s Encrypt:')
-  log.gray(`  An nginx vhost template is at ${join(targetDir, 'scripts', 'nginx', 'cavecms.conf.template')}`)
-  log.gray(`  Run scripts/install-nginx.sh for an automated setup.`)
+  // Web-server detection: Apache or nginx?
+  // Apache signals (any one match):
+  //   /etc/apache2/sites-available/  (Debian / Ubuntu)
+  //   /etc/httpd/conf.d/             (RHEL / Fedora / CentOS / Amazon Linux)
+  //   `command -v httpd` or `command -v apache2`
+  // nginx signals:
+  //   /etc/nginx/  + `command -v nginx`
+  //
+  // Prefer Apache when BOTH are present and Apache is actively running
+  // (some cPanel installs have nginx for static behind Apache).
+  function detectWebServer() {
+    const apacheActive =
+      existsSync('/etc/apache2/sites-available') ||
+      existsSync('/etc/httpd/conf.d') ||
+      spawnSync('command', ['-v', 'apache2'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0 ||
+      spawnSync('command', ['-v', 'httpd'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
+    const nginxActive =
+      existsSync('/etc/nginx') &&
+      spawnSync('command', ['-v', 'nginx'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
+    if (apacheActive && !nginxActive) return 'apache'
+    if (nginxActive && !apacheActive) return 'nginx'
+    if (apacheActive && nginxActive) {
+      // Both present — pick whichever is actively running.
+      const apacheRunning =
+        spawnSync('systemctl', ['is-active', '--quiet', 'apache2'], { stdio: 'ignore' }).status === 0 ||
+        spawnSync('systemctl', ['is-active', '--quiet', 'httpd'], { stdio: 'ignore' }).status === 0
+      return apacheRunning ? 'apache' : 'nginx'
+    }
+    return null
+  }
+  const webServer = detectWebServer()
+  if (webServer === 'apache') {
+    log.info('Apache + Let\'s Encrypt:')
+    log.gray(`  An Apache vhost template is at ${join(targetDir, 'scripts', 'apache', 'cavecms.conf.template')}`)
+    log.gray(`  Run: sudo bash ${join(targetDir, 'scripts', 'install-apache.sh')} <APEX> <LOGIN_PATH>`)
+  } else if (webServer === 'nginx') {
+    log.info('nginx + Let\'s Encrypt:')
+    log.gray(`  An nginx vhost template is at ${join(targetDir, 'scripts', 'nginx', 'cavecms.conf.template')}`)
+    log.gray(`  Run scripts/install-nginx.sh for an automated setup.`)
+  } else {
+    log.warn('Neither Apache nor nginx detected. CaveCMS needs a reverse proxy in front of port 3040.')
+    log.gray(`  nginx:  apt install nginx  → then run scripts/install-nginx.sh`)
+    log.gray(`  Apache: apt install apache2 → then run scripts/install-apache.sh`)
+  }
 }
 
 function startCpanel({ targetDir, envPath }) {

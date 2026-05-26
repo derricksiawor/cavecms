@@ -115,6 +115,9 @@ next-env.d.ts
 !/scripts/disk-check.sh
 !/scripts/prune-static-pool.sh
 !/scripts/install-nginx.sh
+!/scripts/install-apache.sh
+!/scripts/apache/
+!/scripts/apache/**
 !/scripts/install-systemd.sh
 !/scripts/dev-bootstrap.mjs
 !/scripts/setup-shared.sh

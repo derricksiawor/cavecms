@@ -347,7 +347,13 @@ rollback_to_previous() {
     fi
     pnpm install --frozen-lockfile >/dev/null 2>&1 || return 1
     pnpm build >/dev/null 2>&1 || return 1
-    pm2 reload ecosystem.config.cjs --update-env >/dev/null 2>&1 || return 1
+    # Do NOT trust pm2's CLI exit code here — same lesson as the
+    # forward path (commit b1129f8 / e31652e): pm2 reload can SIGINT
+    # mid-operation and exit non-zero while the worker successfully
+    # restarted. The authoritative gate is the healthz poll below.
+    # Suppress the exit code so a SIGINT doesn't spuriously fail an
+    # otherwise-successful rollback.
+    pm2 reload ecosystem.config.cjs --update-env >/dev/null 2>&1 || true
   )
   local rc=$?
   if [ $rc -ne 0 ]; then

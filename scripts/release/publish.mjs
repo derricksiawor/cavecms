@@ -192,49 +192,72 @@ function sshInstallScript(version, fileNames) {
   // Ordering invariant (to close the publish-time race a poller hits):
   //
   // FIRST land the per-version zip + sha256 (+ sig if signed) into
-  // releases/, where they're addressable by exact version. Pollers
-  // hitting /releases/cavecms-X.Y.Z.zip during this phase get the
-  // brand-new bytes; nobody reads "what's latest" yet.
+  // releases/, where they're addressable by exact version. We use
+  // cp + atomic-rename WITHIN the destination tree (NOT mv from
+  // /home/time/) so that:
+  //   - same-filesystem rename is guaranteed (no cross-mount fallback
+  //     to copy-then-unlink, which would expose partial bytes mid-write)
+  //   - the rename only flips the destination once the bytes are fully
+  //     copied — pollers either see the complete new file or don't see
+  //     it at all
   //
-  // THEN flip BOTH manifests (manifest.json + updates/latest.json)
-  // to advertise the new version. Use .new -> rename so the flip
-  // is atomic per-file. Both pollers (npx create-cavecms reading
-  // manifest.json; in-app updater reading updates/latest.json) only
-  // ever see the OLD version OR the NEW version, never a mix.
+  // THEN flip BOTH manifests (manifest.json + updates/latest.json) to
+  // advertise the new version. Use .new -> rename so the flip is atomic
+  // per-file. Both pollers (npx create-cavecms reading manifest.json;
+  // in-app updater reading updates/latest.json) only ever see the OLD
+  // version OR the NEW version.
   //
-  // FINALLY flip the latest.zip + latest.zip.sha256 symlinks.
-  // The invariant: when latest.zip points at vN, both manifests
-  // already advertise vN. If we flipped the symlink first, an in-app
-  // updater that polled the OLD manifest (still advertising vN-1)
-  // would attempt a sha256 mismatch against the NEW zip and fail.
+  // FINALLY flip the latest.zip + latest.zip.sha256 symlinks via a
+  // sub-shell so they're as tight as possible. Note: real consumers
+  // (CLI + in-app updater) use the per-version downloadUrl from
+  // manifest.json — they never read latest.zip directly. The symlink
+  // is a convenience for humans. A poller that DOES fetch latest.zip
+  // followed by latest.zip.sha256 across these two flips would see a
+  // mismatch — but no shipped CaveCMS code uses that pattern.
   const RELEASES_DIR = '/var/www/cavecms-releases'
   const lines = [
     'set -euo pipefail',
     `mkdir -p ${RELEASES_DIR}/releases ${RELEASES_DIR}/updates`,
-    `mv /home/time/cavecms-${version}.zip ${RELEASES_DIR}/releases/cavecms-${version}.zip`,
-    `mv /home/time/cavecms-${version}.zip.sha256 ${RELEASES_DIR}/releases/cavecms-${version}.zip.sha256`,
+    // Copy into the releases tree under a .partial name, then
+    // atomic-rename. Same-fs guaranteed: both paths are under
+    // /var/www/cavecms-releases/releases/, so rename(2) succeeds
+    // atomically regardless of how /home/time is mounted.
+    `cp /home/time/cavecms-${version}.zip ${RELEASES_DIR}/releases/.cavecms-${version}.zip.partial`,
+    `mv ${RELEASES_DIR}/releases/.cavecms-${version}.zip.partial ${RELEASES_DIR}/releases/cavecms-${version}.zip`,
+    `cp /home/time/cavecms-${version}.zip.sha256 ${RELEASES_DIR}/releases/.cavecms-${version}.zip.sha256.partial`,
+    `mv ${RELEASES_DIR}/releases/.cavecms-${version}.zip.sha256.partial ${RELEASES_DIR}/releases/cavecms-${version}.zip.sha256`,
+    // Source files in /home/time are no longer needed — best-effort rm.
+    `rm -f /home/time/cavecms-${version}.zip /home/time/cavecms-${version}.zip.sha256`,
   ]
   if (fileNames.includes(`cavecms-${version}.zip.sig`)) {
-    lines.push(`mv /home/time/cavecms-${version}.zip.sig ${RELEASES_DIR}/releases/cavecms-${version}.zip.sig`)
+    lines.push(
+      `cp /home/time/cavecms-${version}.zip.sig ${RELEASES_DIR}/releases/.cavecms-${version}.zip.sig.partial`,
+      `mv ${RELEASES_DIR}/releases/.cavecms-${version}.zip.sig.partial ${RELEASES_DIR}/releases/cavecms-${version}.zip.sig`,
+      `rm -f /home/time/cavecms-${version}.zip.sig`,
+    )
   }
-  // Manifests flip atomically before any "latest"-pointer advances.
+  // Manifests: cp into dest dir + atomic-rename. Same atomicity story.
   lines.push(
-    `mv /home/time/manifest.json ${RELEASES_DIR}/manifest.json.new`,
+    `cp /home/time/manifest.json ${RELEASES_DIR}/manifest.json.new`,
     `mv ${RELEASES_DIR}/manifest.json.new ${RELEASES_DIR}/manifest.json`,
+    `rm -f /home/time/manifest.json`,
   )
   if (fileNames.includes('manifest.json.sig')) {
-    lines.push(`mv /home/time/manifest.json.sig ${RELEASES_DIR}/manifest.json.sig`)
+    lines.push(
+      `cp /home/time/manifest.json.sig ${RELEASES_DIR}/manifest.json.sig.new`,
+      `mv ${RELEASES_DIR}/manifest.json.sig.new ${RELEASES_DIR}/manifest.json.sig`,
+      `rm -f /home/time/manifest.json.sig`,
+    )
   }
   lines.push(
-    `mv /home/time/updates-latest.json ${RELEASES_DIR}/updates/latest.json.new`,
+    `cp /home/time/updates-latest.json ${RELEASES_DIR}/updates/latest.json.new`,
     `mv ${RELEASES_DIR}/updates/latest.json.new ${RELEASES_DIR}/updates/latest.json`,
+    `rm -f /home/time/updates-latest.json`,
   )
-  // Latest-pointer symlinks LAST — at this point the manifests already
-  // declare the new version, so a poller that flips between manifest
-  // and latest.zip sees a consistent (version, zip-bytes) pair.
+  // Latest-pointer symlinks LAST + grouped in a sub-shell. At this
+  // point the manifests already declare the new version.
   lines.push(
-    `ln -snf releases/cavecms-${version}.zip ${RELEASES_DIR}/latest.zip`,
-    `ln -snf releases/cavecms-${version}.zip.sha256 ${RELEASES_DIR}/latest.zip.sha256`,
+    `( ln -snf releases/cavecms-${version}.zip ${RELEASES_DIR}/latest.zip && ln -snf releases/cavecms-${version}.zip.sha256 ${RELEASES_DIR}/latest.zip.sha256 )`,
     `echo "publish-complete version=${version}"`,
   )
   return lines.join('\n')

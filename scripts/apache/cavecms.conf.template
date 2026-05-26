@@ -1,0 +1,145 @@
+# scripts/apache/cavecms.conf.template
+#
+# Apache vhost template for CaveCMS — mirrors the nginx template's
+# behaviour for operators on Apache-based hosts (cPanel, Plesk, RHEL
+# default stacks, shared hosting that doesn't ship nginx).
+#
+# Placeholders (substituted by install-apache.sh):
+#   __APEX__        apex domain (e.g. your-domain.com)
+#   __STAGING__     staging host (e.g. staging.your-domain.com)
+#   __LOGIN_PATH__  hidden login path (e.g. baccess)
+#   __DOC_ROOT__    install root (e.g. /opt/cavecms — same as APP_ROOT)
+#   __PORT__        Node app port (default 3040)
+#
+# Architecture: Apache terminates TLS, serves /_next/static and
+# /uploads/{originals,variants} from disk via Alias, and reverse-proxies
+# everything else to 127.0.0.1:__PORT__. ErrorDocument 502 swaps in the
+# maintenance HTML during the PM2/systemd reload window.
+#
+# Required modules (enabled by install-apache.sh):
+#   proxy, proxy_http, headers, rewrite, ssl, expires, deflate, http2
+#
+# Inspired by Ceymail Mission Control's `mc-core::config::apache`
+# (AllowOverride None + per-vhost security headers + modern TLS).
+
+# ---------------------------------------------------------------------------
+# Port 80 → 443 redirect.
+# ---------------------------------------------------------------------------
+<VirtualHost *:80>
+    ServerName __APEX__
+    ServerAlias www.__APEX__ __STAGING__
+    ServerAdmin webmaster@__APEX__
+
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^/?(.*) https://%{HTTP_HOST}/$1 [L,R=301]
+
+    # Health probe is a 200 on HTTP so Cloudflare / external pingers
+    # don't require TLS to confirm the box is up.
+    Alias /__healthz/probe /var/cache/cavecms-healthz.txt
+    <Location /__healthz/probe>
+        Require all granted
+    </Location>
+</VirtualHost>
+
+# ---------------------------------------------------------------------------
+# HTTPS — apex + www + staging.
+# ---------------------------------------------------------------------------
+<VirtualHost *:443>
+    ServerName __APEX__
+    ServerAlias www.__APEX__ __STAGING__
+    ServerAdmin webmaster@__APEX__
+    DocumentRoot __DOC_ROOT__
+
+    # ─── TLS ───────────────────────────────────────────────────────────
+    SSLEngine on
+    SSLCertificateFile      /etc/letsencrypt/live/__APEX__/fullchain.pem
+    SSLCertificateKeyFile   /etc/letsencrypt/live/__APEX__/privkey.pem
+    # Modern TLS only — no SSL3/TLS1.0/TLS1.1.
+    SSLProtocol             -all +TLSv1.2 +TLSv1.3
+    SSLCipherSuite          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+    SSLHonorCipherOrder     off
+    SSLSessionTickets       off
+
+    # HTTP/2 if mod_http2 is loaded (a2enmod http2). Falls back to
+    # HTTP/1.1 gracefully when the module isn't present.
+    Protocols h2 http/1.1
+
+    # ─── Security headers ─────────────────────────────────────────────
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Header unset X-Powered-By
+    Header unset Server
+
+    # ─── Static + uploads (served from disk, NOT proxied to Node) ─────
+    # Next.js build output: long-immutable cache because filenames are
+    # content-addressed.
+    Alias /_next/static/ __DOC_ROOT__/.next/static/
+    <Directory __DOC_ROOT__/.next/static/>
+        Options -Indexes +FollowSymLinks
+        AllowOverride None
+        Require all granted
+        Header set Cache-Control "public, max-age=31536000, immutable"
+        ExpiresActive On
+        ExpiresDefault "access plus 1 year"
+    </Directory>
+
+    # Operator-uploaded media (sharp variants + originals).
+    Alias /uploads/ /opt/cavecms/uploads/
+    <Directory /opt/cavecms/uploads/>
+        Options -Indexes +FollowSymLinks
+        AllowOverride None
+        Require all granted
+        Header set Cache-Control "public, max-age=2592000"
+        # Refuse PHP / executable extensions ever served from uploads.
+        <FilesMatch "\.(php|phtml|cgi|pl|sh|exe)$">
+            Require all denied
+        </FilesMatch>
+    </Directory>
+
+    # ─── Reverse proxy to Node — everything else ──────────────────────
+    # Pass through Host so siteUrl-derived logic (sitemap, email links)
+    # picks the right scheme + hostname.
+    ProxyPreserveHost On
+    ProxyAddHeaders On
+    # Trust the X-Forwarded-* headers we set, NOT what the client sent.
+    RequestHeader unset X-Forwarded-For
+    RequestHeader unset X-Forwarded-Proto
+    RequestHeader unset X-Forwarded-Host
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Host "%{HTTP_HOST}e"
+
+    # Static + uploads were aliased above, so they exit before reaching
+    # ProxyPass. Everything else goes to the Node app.
+    ProxyPass /_next/static/ !
+    ProxyPass /uploads/      !
+    ProxyPass /              http://127.0.0.1:__PORT__/  retry=0 timeout=60 connectiontimeout=10
+    ProxyPassReverse /        http://127.0.0.1:__PORT__/
+
+    # ─── Maintenance fallback ─────────────────────────────────────────
+    # When the Node app is mid-reload (502 Bad Gateway), serve a
+    # static maintenance page so visitors don't see Apache's default
+    # error. Override under setup with: cp /path/to/maint.html
+    # __DOC_ROOT__/public/maintenance.html
+    ErrorDocument 502 /maintenance.html
+    ErrorDocument 503 /maintenance.html
+    ErrorDocument 504 /maintenance.html
+
+    # ─── Logging (JSON-style for correlation with the Node logs) ─────
+    LogFormat "{\"ts\":\"%{%Y-%m-%dT%H:%M:%S%z}t\",\"ip\":\"%a\",\"method\":\"%m\",\"path\":\"%U%q\",\"status\":%>s,\"bytes\":%B,\"rt\":%D,\"ua\":\"%{User-Agent}i\",\"ref\":\"%{Referer}i\"}" cavecms_json
+    CustomLog ${APACHE_LOG_DIR}/cavecms.access.log cavecms_json
+    ErrorLog  ${APACHE_LOG_DIR}/cavecms.error.log
+
+    # ─── Hardening on the install root itself ─────────────────────────
+    # Don't expose env.production, .git, .env*, scripts/ over HTTP even
+    # if the proxy ever falls open.
+    <DirectoryMatch "^__DOC_ROOT__/\.(env|git|next/cache)">
+        Require all denied
+    </DirectoryMatch>
+    <FilesMatch "^(env\.production|\.env|package(-lock)?\.json|pnpm-lock\.yaml)$">
+        Require all denied
+    </FilesMatch>
+</VirtualHost>

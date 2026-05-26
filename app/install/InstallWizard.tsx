@@ -59,18 +59,43 @@ export function InstallWizard({
   const [step, setStep] = useState<Step>('welcome')
   const [finalLoginPath, setFinalLoginPath] = useState<string | null>(null)
 
-  // Push the CLI-issued bootstrap token into the module-level state
-  // `installFetch` consumes. Also strip ?t=… from the address bar so
-  // the token isn't visible in the URL, browser history, browser sync,
-  // screenshots, or sent as Referer to any same-origin sub-resource.
+  // Bootstrap-token lifecycle. Three concerns:
   //
-  // We DO NOT null the token on unmount: this component is the root
-  // of the install flow and may be transiently unmounted by
-  // React Strict Mode dev double-renders OR by a second tab opening
-  // the same URL. Nulling on unmount would leak the token in the
-  // other surviving instance.
+  // 1. URL hygiene — strip ?t=… from the address bar so the token
+  //    isn't visible in browser history, screenshots, browser sync,
+  //    or sent as Referer on same-origin sub-resources.
+  // 2. Refresh resilience — if the operator hits Cmd-R after the URL
+  //    is stripped, the page re-renders server-side with no `?t=`,
+  //    bootstrapToken arrives as `null`, and the wizard would brick.
+  //    We stash the token in sessionStorage on first mount and read
+  //    it back when bootstrapToken arrives null.
+  // 3. Multi-tab — module-level token state in installFetch.ts is
+  //    per-tab (each tab has its own JS module instance), so cross-tab
+  //    interference doesn't apply. But within a tab, do NOT null the
+  //    token on unmount (React Strict Mode double-renders would).
+  //
+  // sessionStorage scope: per-tab, cleared on tab close. Right scope —
+  // the token is only needed for the duration of the wizard, and a
+  // fresh tab opening /install should require a fresh CLI-printed URL.
+  const SS_KEY = 'cavecms.installBootstrapToken'
+  const [resolvedToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return bootstrapToken
+    if (bootstrapToken) return bootstrapToken
+    try {
+      return window.sessionStorage.getItem(SS_KEY)
+    } catch {
+      return null
+    }
+  })
   useEffect(() => {
-    setInstallToken(bootstrapToken)
+    setInstallToken(resolvedToken)
+    if (resolvedToken && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(SS_KEY, resolvedToken)
+      } catch {
+        /* private-mode / quota — best effort; banner-paste fallback remains */
+      }
+    }
     if (typeof window !== 'undefined' && window.location.search.includes('t=')) {
       try {
         window.history.replaceState(null, '', '/install')
@@ -78,14 +103,12 @@ export function InstallWizard({
         /* SSR/hydration race or older browser — best effort */
       }
     }
-  }, [bootstrapToken])
+  }, [resolvedToken])
 
-  // Show a clear "missing token" banner if the operator landed on
-  // /install without ?t=. They probably typed the URL manually — the
-  // CLI's printed URL ALWAYS includes the token. The wizard still
-  // renders so they can see what went wrong, but every API call will
-  // fail until they re-open the CLI-printed URL.
-  const tokenMissing = !bootstrapToken
+  // Show a clear "missing token" banner if NO token reached the wizard
+  // (URL had no ?t= AND sessionStorage was empty). They probably typed
+  // the URL manually — the CLI's printed URL ALWAYS includes the token.
+  const tokenMissing = !resolvedToken
 
   const goTo = (s: Step) => setStep(s)
 
@@ -192,8 +215,14 @@ function TokenRecoveryBanner() {
   // (VPS) or the equivalent on laptop/cPanel.
   const [pasted, setPasted] = useState('')
   const apply = () => {
-    if (!pasted.trim()) return
-    setInstallToken(pasted.trim())
+    const t = pasted.trim()
+    if (!t) return
+    setInstallToken(t)
+    try {
+      window.sessionStorage.setItem('cavecms.installBootstrapToken', t)
+    } catch {
+      /* best effort */
+    }
     window.location.reload()
   }
   return (

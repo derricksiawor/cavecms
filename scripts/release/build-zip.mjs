@@ -241,6 +241,8 @@ function manifestOfFiles(version) {
     { src: 'scripts/cavecms-update.sh', dst: 'scripts/cavecms-update.sh' },
     { src: 'scripts/cavecms-updates-check.sh', dst: 'scripts/cavecms-updates-check.sh' },
     { src: 'scripts/install-nginx.sh', dst: 'scripts/install-nginx.sh' },
+    { src: 'scripts/install-apache.sh', dst: 'scripts/install-apache.sh', optional: true },
+    { src: 'scripts/apache', dst: 'scripts/apache', dir: true, optional: true },
     { src: 'scripts/install-systemd.sh', dst: 'scripts/install-systemd.sh' },
     { src: 'scripts/install-migrate.mjs', dst: 'scripts/install-migrate.mjs' },
     { src: 'scripts/start-standalone.mjs', dst: 'scripts/start-standalone.mjs' },
