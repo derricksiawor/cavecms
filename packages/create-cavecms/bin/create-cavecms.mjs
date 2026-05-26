@@ -1185,8 +1185,18 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   if (finalMode !== 0o600) {
     die(`env.production ended up with mode ${finalMode.toString(8)}, expected 600. Filesystem may not support POSIX modes — operator must lock it manually.`)
   }
-  // mkdir uploads dir if it's inside targetDir.
-  mkdirSync(uploadsRoot, { recursive: true })
+  // Provision the uploads tree. Boot-time `assertSameFs` in
+  // lib/media/storage.ts requires all 4 subdirs to exist on the same
+  // filesystem before it'll let the process serve traffic; in prod
+  // mode a missing dir is a FATAL exit, not a warning. setup.sh does
+  // this for the bare-metal deploy.sh path; CLI installs need to
+  // replicate it. Mode 0o750 matches setup.sh's `install -d -m 750`
+  // for uploads dirs. chown to the runtime user happens later in the
+  // surface-specific startup (startPm2 / startVps chown -R the
+  // targetDir which contains these).
+  for (const sub of ['', '.tmp', 'originals', 'variants', 'brochures-private']) {
+    mkdirSync(sub ? join(uploadsRoot, sub) : uploadsRoot, { recursive: true, mode: 0o750 })
+  }
   return { envPath, databaseUrl, uploadsRoot }
 }
 
