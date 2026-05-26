@@ -42,7 +42,43 @@ export interface LatestRelease {
   minPreviousVersion: string | null
 }
 
+import { z } from 'zod'
 import { RELEASE_CHANGELOG_MAX_BYTES, RELEASE_FETCH_TIMEOUT_MS, UPDATE_CHECK_TTL_MS } from './constants'
+
+// Zod schema for the /updates/latest.json payload that scripts/release/
+// publish.mjs writes. Defence in depth — the CDN, an operator-pinned
+// manifest URL, or a tampered fork could serve a malformed body. Failing
+// fast here is safer than letting an unverified value flow into snapshot
+// path components, download URLs, or version comparisons downstream.
+//
+// Field shapes track publish.mjs's writeUpdatesManifest exactly. New
+// fields added there MUST be added here too — z.object() ignores unknown
+// keys by default, but missing-required-key errors surface clearly.
+const ManifestSchema = z.object({
+  channel: z.string().min(1).max(64).optional(),
+  version: z.string().max(64).regex(/^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$/, 'version must be semver'),
+  sha: z.string().regex(/^[0-9a-f]{7,64}$/i, 'sha must be 7-64 hex chars'),
+  publishedAt: z.string().datetime({ offset: true }),
+  // Scheme check here closes the gap where z.string().url() would accept
+  // ftp:// or file:// — those would pass schema and only fail at the
+  // downstream new URL().origin check (which doesn't itself reject them).
+  downloadUrl: z.string().max(2048).regex(/^https:\/\//i, 'downloadUrl must be HTTPS'),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i, 'sha256 must be 64 hex chars'),
+  // Ed25519 base64 signature is ~88 chars including padding. Cap at 256
+  // so a manifest that nulls signature can't blow the body either.
+  signature: z.string().max(256).nullable().optional(),
+  isSecurity: z.boolean().optional(),
+  minPreviousVersion: z.string().max(64).nullable().optional(),
+  // Cap changelog at 2x the post-fetch trim cap so a malicious manifest
+  // can't blow the parsed body even before the slice. The trim at
+  // line ~190 still applies for the value we expose to consumers.
+  changelog: z.string().max(RELEASE_CHANGELOG_MAX_BYTES * 2).optional(),
+  // Some build pipelines write `notes` into the manifest entry (the
+  // /manifest.json shape) instead of `changelog` (the /updates/latest.json
+  // shape). If the operator's CAVECMS_RELEASE_MANIFEST_URL is pointed at
+  // a manifest using the `notes` key, accept it as a fallback below.
+  notes: z.string().max(RELEASE_CHANGELOG_MAX_BYTES * 2).optional(),
+})
 
 interface CacheEntry {
   expiresAt: number
@@ -60,19 +96,6 @@ export function __resetCacheForTests(): void {
 }
 
 const DEFAULT_MANIFEST_URL = 'https://cavecms.derricksiawor.com/updates/latest.json'
-
-interface ManifestResponse {
-  channel?: unknown
-  version?: unknown
-  sha?: unknown
-  publishedAt?: unknown
-  downloadUrl?: unknown
-  sha256?: unknown
-  signature?: unknown
-  isSecurity?: unknown
-  minPreviousVersion?: unknown
-  changelog?: unknown
-}
 
 /**
  * Fetch the release manifest from the configured static endpoint.
@@ -130,28 +153,37 @@ export async function checkLatestRelease(_ignoredArgs?: {
     throw new Error(`manifest_http_${res.status}`)
   }
 
-  let body: ManifestResponse
+  let rawBody: unknown
   try {
-    body = (await res.json()) as ManifestResponse
+    rawBody = await res.json()
   } catch {
     throw new Error('manifest_malformed_json')
   }
 
-  const sha = typeof body.sha === 'string' ? body.sha : ''
-  const ts = typeof body.publishedAt === 'string' ? body.publishedAt : ''
-  const version = typeof body.version === 'string' ? body.version : ''
-  const downloadUrl = typeof body.downloadUrl === 'string' ? body.downloadUrl : ''
-  const sha256 = typeof body.sha256 === 'string' ? body.sha256 : ''
-  const rawChangelog = typeof body.changelog === 'string' ? body.changelog : ''
-  const minPreviousVersion =
-    typeof body.minPreviousVersion === 'string' ? body.minPreviousVersion : null
+  const parsed = ManifestSchema.safeParse(rawBody)
+  if (!parsed.success) {
+    // Zod issues are detailed but operator-noisy — surface a short
+    // machine-readable error tag plus a one-line summary. The check
+    // route logs the full Zod issue list at debug level for support.
+    const firstIssue = parsed.error.issues[0]
+    const path = firstIssue?.path.join('.') || '<root>'
+    throw new Error(`manifest_invalid_schema: ${path}: ${firstIssue?.message ?? 'unknown'}`)
+  }
+  const body = parsed.data
+  const sha = body.sha
+  const ts = body.publishedAt
+  const version = body.version
+  const downloadUrl = body.downloadUrl
+  const sha256 = body.sha256
+  // Prefer `changelog` (the /updates/latest.json shape that publish.mjs
+  // writes), fall back to `notes` (the /manifest.json shape that
+  // build-zip.mjs writes) so an operator who points
+  // CAVECMS_RELEASE_MANIFEST_URL at the full manifest still gets copy.
+  const rawChangelog = body.changelog ?? body.notes ?? ''
+  const minPreviousVersion = body.minPreviousVersion ?? null
   // isSecurity is authoritative from the manifest. We do NOT re-heuristic
   // the changelog body — publishers explicitly mark security releases.
   const isSecurity = body.isSecurity === true
-
-  if (!sha || !ts || !version || !downloadUrl || !sha256) {
-    throw new Error('manifest_malformed_fields')
-  }
 
   // Defensive validation of the downloadUrl. Must be HTTPS, and the
   // origin must match the manifest URL's origin OR an operator-pinned

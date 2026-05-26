@@ -70,10 +70,38 @@ const MIN_NODE_MAJOR = 20
 // to fetch it. When the operator-side key is rotated, this bundled
 // pubkey is updated in lockstep + the CLI version bumped.
 //
-// Empty string when the project hasn't published a signed release yet
-// — in that case signature verification is SKIPPED with a clear warning
-// (the SHA-256 from the manifest still anchors integrity over HTTPS).
-const BUNDLED_PUBKEY_PEM = process.env.CAVECMS_RELEASE_PUBKEY_PEM ?? ''
+// Rotation procedure (run on the publisher's box):
+//   1. openssl genpkey -algorithm ed25519 -out ~/.cavecms-release-private.pem
+//      (this overwrites the old key — back up the OLD .pem first if you
+//      want to keep verifying older releases)
+//   2. openssl pkey -in ~/.cavecms-release-private.pem \
+//                   -pubout -out ~/.cavecms-release-public.pem
+//   3. Replace the contents of BUNDLED_PUBKEY_PEM below with the new PEM
+//   4. Bump the CLI version in packages/create-cavecms/package.json
+//   5. Re-publish pubkey.pem to timemacro:/var/www/cavecms-releases/pubkey.pem
+//      (so older CLIs that never updated can still curl the new key as a
+//      fallback during the rotation window)
+//   6. npm publish the new CLI (npm publish --access=public)
+//   7. Rebuild + republish every release that should be signed with the
+//      new key (or honour the cutover by keeping the old key around to
+//      sign-back-fill prior releases).
+//
+// The env-var fallback `CAVECMS_RELEASE_PUBKEY_PEM` lets a contributor
+// override the bundled key for staging tests — but ONLY when the
+// CAVECMS_DEV_BUILD=1 env gate is set, mirroring how --skip-signature
+// is gated. Without the gate, an attacker who can set env vars on the
+// install host could swap the bundled key with their own + sign a
+// malicious release with the matching private key, and verification
+// would "pass" against the wrong key. Production installs MUST use
+// the bundled value.
+const BUNDLED_PUBKEY_PEM_LITERAL = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAgfwWFnEmpbmRzmmdExV5rjAG5YTeI44tGG1hziyWnJ8=
+-----END PUBLIC KEY-----
+`
+const BUNDLED_PUBKEY_PEM =
+  process.env.CAVECMS_DEV_BUILD === '1' && process.env.CAVECMS_RELEASE_PUBKEY_PEM
+    ? process.env.CAVECMS_RELEASE_PUBKEY_PEM
+    : BUNDLED_PUBKEY_PEM_LITERAL
 
 // ════════════════════════════════════════════════════════════════════
 // Tiny logging + prompt helpers (no deps)
@@ -618,6 +646,38 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
     log.warn('This is marked as a security release. Continuing.')
   }
 
+  // Same-origin guard on downloadUrl. Without this, a tampered manifest
+  // could point downloadUrl at attacker.com with a matching sha256 +
+  // signature from a key the attacker controls. The in-app updater
+  // (lib/updates/checkLatestRelease.ts) enforces the same gate via
+  // CAVECMS_RELEASE_DOWNLOAD_ORIGINS — mirror it here so the CLI path
+  // can't be the soft spot.
+  try {
+    const manifestOrigin = new URL(manifestUrl).origin
+    const downloadOrigin = new URL(target.downloadUrl).origin
+    if (downloadOrigin !== manifestOrigin) {
+      const allowedRaw = process.env.CAVECMS_RELEASE_DOWNLOAD_ORIGINS
+      const allowed = allowedRaw
+        ? allowedRaw.split(',').map((s) => s.trim()).filter(Boolean)
+        : []
+      if (!allowed.includes(downloadOrigin)) {
+        die(
+          `Manifest points downloadUrl at a different origin than the manifest itself.\n` +
+            `  manifest: ${manifestOrigin}\n` +
+            `  download: ${downloadOrigin}\n` +
+            `  Refusing to install. If your fork legitimately splits manifest + zip across origins,\n` +
+            `  set CAVECMS_RELEASE_DOWNLOAD_ORIGINS to the allowed list (comma-separated).`,
+        )
+      }
+    }
+    if (!/^https:\/\//i.test(target.downloadUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(target.downloadUrl)) {
+      die(`downloadUrl must be HTTPS (got: ${target.downloadUrl})`)
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Manifest points')) throw err
+    die(`Invalid downloadUrl in manifest: ${target.downloadUrl}`)
+  }
+
   // Download the zip via curl (memory-friendly for large files).
   const zipPath = join(stagingDir, `cavecms-${target.version}.zip`)
   log.info(`Downloading ${target.downloadUrl}…`)
@@ -646,9 +706,17 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
         'Future CLI versions will require this. SHA-256 + HTTPS still anchor integrity.',
     )
   } else if (!target.signature) {
-    log.warn(
-      'Manifest entry has no signature field — verification skipped. ' +
-        'This release was published before signing was enabled.',
+    // Since BUNDLED_PUBKEY_PEM is non-empty here (the prior else-if
+    // branch handled the empty case), we have a key and the manifest
+    // is unsigned. Refuse — an unsigned release with a bundled pubkey
+    // is either (a) a manifest tampered to null out signature for a
+    // sha256-only attack, or (b) a real publisher mistake. Either way,
+    // bailing is safer than installing.
+    die(
+      `Manifest entry for ${target.version} has no Ed25519 signature, but this CLI ships with a bundled public key.\n` +
+        `  Refusing to install unsigned releases. Either:\n` +
+        `    - publish a signed manifest (the publisher's release pipeline should sign by default), or\n` +
+        `    - downgrade to a CLI version without a bundled pubkey if you really mean to install unsigned releases.`,
     )
   } else {
     log.info('Verifying Ed25519 signature…')
@@ -823,6 +891,30 @@ function generateSecrets() {
 // Env writer (sealed)
 // ════════════════════════════════════════════════════════════════════
 
+function normalizeCommitSha(raw) {
+  // Manifest entries written by scripts/release/build-zip.mjs since the
+  // signing-pipeline change carry the full 40-char hex sha. Older entries
+  // (published before that change) have no `sha` field — we fall back to
+  // 'dev' so getCurrentVersion() classifies it as "no update possible" and
+  // the apply route refuses with cannot_apply_from_dev (matches local-dev
+  // semantics). lib/updates/getCurrentVersion.ts enforces a 7-64 hex regex,
+  // so we slice to 12 chars (short SHA) when valid hex is present.
+  //
+  // We log a warning when we fall through to 'dev' because the install
+  // will then be unable to use the in-app updater — operator must
+  // re-run with a newer CLI / manifest.
+  if (typeof raw !== 'string') {
+    log.warn('Manifest entry has no `sha` field — env.production will carry CAVECMS_COMMIT=dev. In-app updater will refuse to run until you re-install from a newer CLI.')
+    return 'dev'
+  }
+  const trimmed = raw.trim()
+  if (!/^[0-9a-f]{7,64}$/i.test(trimmed)) {
+    log.warn(`Manifest entry's \`sha\` field is not valid hex (${JSON.stringify(trimmed.slice(0, 16))}…) — env.production will carry CAVECMS_COMMIT=dev.`)
+    return 'dev'
+  }
+  return trimmed.slice(0, 12)
+}
+
 function buildDatabaseUrl({ host, port, user, password, name }) {
   // mysql2 accepts a URI directly. URL-encode credentials to survive
   // any non-alphanumeric chars in the password.
@@ -831,7 +923,7 @@ function buildDatabaseUrl({ host, port, user, password, name }) {
   return `mysql://${u}:${p}@${host}:${port}/${encodeURIComponent(name)}`
 }
 
-function writeSealedEnv({ targetDir, surface, config, secrets }) {
+function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   // env.production lives at the install root. The standalone server
   // reads it via the `node --env-file=env.production` flag from
   // scripts/start-standalone.mjs (and we patch start-standalone to
@@ -867,6 +959,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets }) {
     `INSTALL_BOOTSTRAP_TOKEN=${secrets.INSTALL_BOOTSTRAP_TOKEN}`,
     `UPLOADS_ROOT=${uploadsRoot}`,
     `# Release bookkeeping — re-stamped on every in-app update.`,
+    `# CAVECMS_COMMIT is the short (12-char) git SHA the release was built`,
+    `# from. The in-app updater compares this against the latest manifest's`,
+    `# sha via getCurrentVersion() to decide "is an update available?". A`,
+    `# missing or 'dev' value here disables the updater (cannot_apply_from_dev).`,
+    `CAVECMS_COMMIT=${normalizeCommitSha(release?.sha)}`,
     `CAVECMS_RELEASE_TS=${new Date().toISOString()}`,
     `# The CLI installed this from cavecms.derricksiawor.com — keep this in sync`,
     `# with the dist host on forks so the in-app updater stays in lockstep.`,
@@ -1215,6 +1312,7 @@ async function main(argv) {
       surface,
       config,
       secrets,
+      release,
     })
     installPhase = 'env-written'
     log.ok(`Sealed env at ${envPath} (mode 600)`)
