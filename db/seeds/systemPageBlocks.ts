@@ -96,59 +96,78 @@ const PH = {
 } as const
 
 // ── HOME ────────────────────────────────────────────────────────────
+// Default home is a CaveCMS welcome page. Fresh install lands here:
+// the operator sees what's running and what they can do next. They
+// edit this page (or replace it entirely) once they choose a template
+// from the install wizard's template chooser (planned).
 const HOME_SECTIONS: SectionSpec[] = [
+  // ── Hero — welcome
   {
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },
     columns: [{ kind: 'column', widgets: [
       { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Welcome', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_heading', data: { text: `${PH.company} — ${PH.tagline}`, level: 'h1', size: 'display-2xl', alignment: 'left', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
-      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>Replace this hero with a one-line description of who you are and what you do. Use the admin to edit any block.</p>', size: 'body-lg', alignment: 'left', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
-      { kind: 'widget', blockType: 'lx_action', data: { label: 'Get in touch', href: '/contact', variant: 'primary-gold', size: 'lg', alignment: 'left', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: `You're running CaveCMS.`, level: 'h1', size: 'display-2xl', alignment: 'left', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>This entire page is built from CMS blocks. Sign in to your admin URL to start editing — drag, drop, type, save.</p>', size: 'body-lg', alignment: 'left', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_action', data: { label: 'Read the docs', href: 'https://cavecms.derricksiawor.com', openInNew: true, variant: 'primary-gold', size: 'lg', alignment: 'left', animation: 'fade-in' }, meta: { marginTop: 'md' } },
     ] }],
   },
-  {
-    kind: 'section',
-    meta: { columns: 3, background: 'ivory', padding: 'md' },
-    columns: [
-      { kind: 'column', widgets: [
-        { kind: 'widget', blockType: 'lx_heading', data: { text: 'What we do', level: 'h3', size: 'display-sm', alignment: 'left', tone: 'obsidian', italic: false, animation: 'fade-in' } },
-        { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>A short description of your first value proposition. Replace this with the headline benefit you deliver.</p>', size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'wide', animation: 'fade-in' }, meta: { marginTop: 'xs' } },
-      ] },
-      { kind: 'column', widgets: [
-        { kind: 'widget', blockType: 'lx_heading', data: { text: 'How we work', level: 'h3', size: 'display-sm', alignment: 'left', tone: 'obsidian', italic: false, animation: 'fade-in' } },
-        { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>A short description of your process. Replace this with how clients engage with you — the steps from first contact to delivery.</p>', size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'wide', animation: 'fade-in' }, meta: { marginTop: 'xs' } },
-      ] },
-      { kind: 'column', widgets: [
-        { kind: 'widget', blockType: 'lx_heading', data: { text: 'Who we serve', level: 'h3', size: 'display-sm', alignment: 'left', tone: 'obsidian', italic: false, animation: 'fade-in' } },
-        { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>A short description of your audience. Replace this with the type of client, customer, or community you work with most.</p>', size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'wide', animation: 'fade-in' }, meta: { marginTop: 'xs' } },
-      ] },
-    ],
-  },
+
+  // ── 3 cards — what's in CaveCMS
   {
     kind: 'section',
     meta: { columns: 3, background: 'obsidian', padding: 'md' },
     columns: [
-      { kind: 'column', widgets: [{ kind: 'widget', blockType: 'lx_stat', data: { value: 10, suffix: '+', label: 'Years of experience', duration_ms: 1500, alignment: 'center', tone: 'champagne' } }] },
-      { kind: 'column', widgets: [{ kind: 'widget', blockType: 'lx_stat', data: { value: 100, suffix: '+', label: 'Projects delivered', duration_ms: 1900, alignment: 'center', tone: 'champagne' } }] },
-      { kind: 'column', widgets: [{ kind: 'widget', blockType: 'lx_stat', data: { value: 50, suffix: '+', label: 'Happy clients', duration_ms: 2300, alignment: 'center', tone: 'champagne' } }] },
+      { kind: 'column', widgets: [
+        { kind: 'widget', blockType: 'lx_heading', data: { text: 'Pages', level: 'h3', size: 'display-sm', alignment: 'left', tone: 'ivory', italic: false, animation: 'fade-in' } },
+        { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>Drag-and-drop block trees. Hero, columns, forms, media, embeds — edit inline on the live page or from the admin drawer.</p>', size: 'body-md', alignment: 'left', tone: 'ivory', maxWidth: 'wide', animation: 'fade-in' }, meta: { marginTop: 'xs' } },
+      ] },
+      { kind: 'column', widgets: [
+        { kind: 'widget', blockType: 'lx_heading', data: { text: 'Posts', level: 'h3', size: 'display-sm', alignment: 'left', tone: 'ivory', italic: false, animation: 'fade-in' } },
+        { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>Blog posts authored in markdown or the same block editor. Schedule, tag, and feature them anywhere a posts list block appears.</p>', size: 'body-md', alignment: 'left', tone: 'ivory', maxWidth: 'wide', animation: 'fade-in' }, meta: { marginTop: 'xs' } },
+      ] },
+      { kind: 'column', widgets: [
+        { kind: 'widget', blockType: 'lx_heading', data: { text: 'Settings', level: 'h3', size: 'display-sm', alignment: 'left', tone: 'ivory', italic: false, animation: 'fade-in' } },
+        { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>SMTP, integrations, AI assistant, security policies, auto-updates — all dashboard-configurable. No .env editing after install.</p>', size: 'body-md', alignment: 'left', tone: 'ivory', maxWidth: 'wide', animation: 'fade-in' }, meta: { marginTop: 'xs' } },
+      ] },
     ],
   },
-  {
-    kind: 'section',
-    meta: { columns: 1, background: 'obsidian', padding: 'lg' },
-    columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'A kind word', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_quote', data: { quote: 'Working with this team was the clearest decision we made this year. They listened, they delivered, and they did it on time.', attribution: 'A Happy Customer', alignment: 'center', tone: 'ivory', animation: 'slide-up' }, meta: { marginTop: 'md' } },
-    ] }],
-  },
+
+  // ── Get started (ivory breakout — keeps obsidian-dominant rhythm
+  // but lets the "next steps" section breathe with a lighter surface)
   {
     kind: 'section',
     meta: { columns: 1, background: 'ivory', padding: 'md' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Ready to talk?', level: 'h2', size: 'display-md', alignment: 'center', tone: 'obsidian', italic: false, animation: 'slide-up' } },
-      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: `<p>Tell us about what you're working on. We respond to every message.</p>`, size: 'body-md', alignment: 'center', tone: 'obsidian', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'sm' } },
-      { kind: 'widget', blockType: 'lx_action', data: { label: 'Start a conversation', href: '/contact', variant: 'primary-gold', size: 'md', alignment: 'center', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Get started', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Make this site yours', level: 'h2', size: 'display-md', alignment: 'left', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_text', data: {
+        body_richtext:
+          '<p>Three steps to take this from a fresh install to a real site:</p>' +
+          '<ol>' +
+            '<li><strong>Sign in</strong> at the secret admin URL you set during install.</li>' +
+            '<li><strong>Edit this page</strong> — and the other system pages (About, Services, Contact, Privacy, Terms) — from Admin → Pages.</li>' +
+            '<li><strong>Configure</strong> your site name, contact info, SMTP, and integrations under Admin → Settings.</li>' +
+          '</ol>' +
+          '<p>If you want a different starter template, run the install wizard’s template chooser (coming soon) or just replace this page block-by-block.</p>',
+        size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'medium', animation: 'fade-in',
+      }, meta: { marginTop: 'md' } },
+    ] }],
+  },
+
+  // ── Resources — links to docs and source
+  {
+    kind: 'section',
+    meta: { columns: 1, background: 'obsidian', padding: 'md' },
+    columns: [{ kind: 'column', widgets: [
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Resources', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Docs and source', level: 'h2', size: 'display-md', alignment: 'center', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_text', data: {
+        body_richtext:
+          '<p>Documentation, install guides, and release notes live at <a href="https://cavecms.derricksiawor.com" target="_blank" rel="noopener noreferrer">cavecms.derricksiawor.com</a>.</p>' +
+          '<p>Source and issues: <a href="https://github.com/derricksiawor/cavecms" target="_blank" rel="noopener noreferrer">github.com/derricksiawor/cavecms</a>.</p>',
+        size: 'body-md', alignment: 'center', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in',
+      }, meta: { marginTop: 'md' } },
     ] }],
   },
 ]
