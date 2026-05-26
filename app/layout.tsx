@@ -34,7 +34,17 @@ export const metadata = {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const nonce = (await headers()).get('x-csp-nonce') ?? ''
+  const h = await headers()
+  const nonce = h.get('x-csp-nonce') ?? ''
+
+  // Suppress the site chrome (header / footer / mobile CTA / admin
+  // bar) on the install wizard. The wizard owns its full viewport —
+  // showing a SiteHeader that links to /projects, /services, etc.
+  // while the operator is still in the install flow is confusing and
+  // can leak unconfigured links / brand text. Middleware sets
+  // `x-pathname` on every request; we read it here.
+  const pathname = h.get('x-pathname') ?? ''
+  const isInstallWizard = pathname === '/install' || pathname.startsWith('/install/')
 
   // AdminBar is a server-component bootstrap that gates ONLY on
   // session presence. If a session exists, it renders a client
@@ -93,13 +103,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
            children / SiteFooter visual order is unchanged. */}
         <ThirdPartyBodyScripts />
         <MotionProvider>
-          <AdminBar />
-          <SiteHeader />
-          <div className="flex flex-1 flex-col">
-            {children}
-          </div>
-          <SiteFooter />
-          <MobileCtaBar />
+          {isInstallWizard ? (
+            // Bare install-wizard chrome: no site header, no footer,
+            // no admin bar, no mobile CTA. The wizard renders its
+            // own bounded layout with the CaveCMS wordmark only.
+            <div className="flex flex-1 flex-col">{children}</div>
+          ) : (
+            <>
+              <AdminBar />
+              <SiteHeader />
+              <div className="flex flex-1 flex-col">{children}</div>
+              <SiteFooter />
+              <MobileCtaBar />
+            </>
+          )}
         </MotionProvider>
       </body>
     </html>

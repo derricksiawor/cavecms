@@ -1040,12 +1040,27 @@ function DoneStep({ loginPath }: { loginPath: string | null }) {
           method: 'POST',
           signal: ac.signal,
         })
-        if (r.ok) {
-          const j = (await r.json().catch(() => null)) as { completedAt?: string } | null
-          setCompletedAt(j?.completedAt ?? new Date().toISOString())
-        } else if (r.status === 410) {
-          // Already completed elsewhere — treat as success.
-          setCompletedAt(new Date().toISOString())
+        if (r.ok || r.status === 410) {
+          // Both "we just flipped it" (200) and "someone else flipped
+          // it already" (410) are success outcomes from the wizard's
+          // perspective — install is complete.
+          if (r.ok) {
+            const j = (await r.json().catch(() => null)) as { completedAt?: string } | null
+            setCompletedAt(j?.completedAt ?? new Date().toISOString())
+          } else {
+            setCompletedAt(new Date().toISOString())
+          }
+          // Install is done — drop the bootstrap token from
+          // sessionStorage so a browser-back or tab-revisit doesn't
+          // try to re-fire install API calls (which would 410 with
+          // confusing copy). Also scrubs the secret from persistent
+          // storage now that it's served its purpose.
+          try {
+            window.sessionStorage.removeItem('cavecms.installBootstrapToken')
+          } catch {
+            /* best-effort */
+          }
+          setInstallToken(null)
         } else {
           setError('Almost done — couldn\'t flip the install-complete flag. You can still log in.')
         }

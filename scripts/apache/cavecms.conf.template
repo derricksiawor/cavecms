@@ -100,6 +100,44 @@
         </FilesMatch>
     </Directory>
 
+    # ─── Edge-level denies (BEFORE the catch-all ProxyPass) ───────────
+    # These LocationMatch blocks take effect at request-routing time so
+    # they fire BEFORE ProxyPass / kicks in. Refuse direct access to
+    # secret files even though Node would 404 them — defence in depth.
+    <LocationMatch "^/(env\.production|\.env|package(-lock)?\.json|pnpm-lock\.yaml|drizzle\.config\..*)$">
+        Require all denied
+    </LocationMatch>
+    # Refuse /.git, /.next/cache, etc.
+    <LocationMatch "^/\.(git|next/cache|env)">
+        Require all denied
+    </LocationMatch>
+
+    # ─── /api/internal/* — loopback-only (matches nginx template) ─────
+    # The Node app's internal endpoints (security-config, revalidate-tags,
+    # updates trigger-check / maintenance, audit-terminal) require the
+    # request to originate on 127.0.0.1. We enforce that AT THE EDGE
+    # here AND in-app via Host + bearer; either layer alone is
+    # sufficient, but defence in depth survives the eventual day
+    # someone adds a new /api/internal/foo route without the in-app
+    # gate.
+    <Location /api/internal/>
+        Require ip 127.0.0.1
+        Require ip ::1
+    </Location>
+
+    # ─── Static maintenance page (served from disk, NEVER proxied) ────
+    # When the Node app is mid-reload (502 Bad Gateway), Apache's
+    # ErrorDocument handler subrequests /maintenance.html. The
+    # ProxyPass exclusion + the Alias makes that subrequest land on
+    # the file in __DOC_ROOT__/public/maintenance.html, bypassing the
+    # dead backend. Without the exclusion, /maintenance.html would
+    # also proxy to the dead Node → 502-loop.
+    ProxyPass /maintenance.html !
+    Alias /maintenance.html __DOC_ROOT__/public/maintenance.html
+    <Files maintenance.html>
+        Require all granted
+    </Files>
+
     # ─── Reverse proxy to Node — everything else ──────────────────────
     # Pass through Host so siteUrl-derived logic (sitemap, email links)
     # picks the right scheme + hostname.
@@ -112,18 +150,18 @@
     RequestHeader set X-Forwarded-Proto "https"
     RequestHeader set X-Forwarded-Host "%{HTTP_HOST}e"
 
-    # Static + uploads were aliased above, so they exit before reaching
-    # ProxyPass. Everything else goes to the Node app.
+    # Static + uploads + maintenance.html were aliased / excluded above
+    # so they exit before reaching ProxyPass. Everything else goes to
+    # the Node app.
     ProxyPass /_next/static/ !
     ProxyPass /uploads/      !
     ProxyPass /              http://127.0.0.1:__PORT__/  retry=0 timeout=60 connectiontimeout=10
     ProxyPassReverse /        http://127.0.0.1:__PORT__/
 
     # ─── Maintenance fallback ─────────────────────────────────────────
-    # When the Node app is mid-reload (502 Bad Gateway), serve a
-    # static maintenance page so visitors don't see Apache's default
-    # error. Override under setup with: cp /path/to/maint.html
-    # __DOC_ROOT__/public/maintenance.html
+    # Override the static maintenance page by writing your own to
+    # __DOC_ROOT__/public/maintenance.html. The alias above serves it
+    # directly from disk, bypassing the dead Node backend.
     ErrorDocument 502 /maintenance.html
     ErrorDocument 503 /maintenance.html
     ErrorDocument 504 /maintenance.html
@@ -133,13 +171,19 @@
     CustomLog ${APACHE_LOG_DIR}/cavecms.access.log cavecms_json
     ErrorLog  ${APACHE_LOG_DIR}/cavecms.error.log
 
-    # ─── Hardening on the install root itself ─────────────────────────
-    # Don't expose env.production, .git, .env*, scripts/ over HTTP even
-    # if the proxy ever falls open.
+    # ─── Disk-level hardening (belt-and-suspenders) ───────────────────
+    # Even though the LocationMatch above blocks these paths at the
+    # edge, refuse disk-level access too — protects against a future
+    # config change that allows direct disk mapping for the install
+    # root (operator switching the proxy off temporarily, etc.).
+    <Directory __DOC_ROOT__>
+        Options -Indexes
+        AllowOverride None
+    </Directory>
     <DirectoryMatch "^__DOC_ROOT__/\.(env|git|next/cache)">
         Require all denied
     </DirectoryMatch>
-    <FilesMatch "^(env\.production|\.env|package(-lock)?\.json|pnpm-lock\.yaml)$">
+    <FilesMatch "^(env\.production|\.env|package(-lock)?\.json|pnpm-lock\.yaml|drizzle\.config\..*)$">
         Require all denied
     </FilesMatch>
 </VirtualHost>
