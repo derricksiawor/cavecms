@@ -54,7 +54,7 @@ export async function generateMetadata() {
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,
-    fallbackTitle: 'Best World Properties',
+    fallbackTitle: 'CaveCMS',
     canonicalPath: '/',
   })
 }
@@ -268,7 +268,7 @@ function SplashFallback({
 
       <section className="relative z-10 mx-auto flex min-h-screen max-w-5xl flex-col items-start justify-center px-8 py-24 sm:px-12">
         <p className="text-xs font-semibold uppercase tracking-[0.42em] text-copper-600 animate-cavecms-rise">
-          Best World Properties
+          CaveCMS
         </p>
         <h1 className="mt-8 font-serif text-5xl font-bold tracking-tight text-near-black sm:text-7xl lg:text-[5.5rem] leading-[1.02] animate-cavecms-rise [animation-delay:120ms]">
           Built for those who notice the details.

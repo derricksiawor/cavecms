@@ -51,7 +51,7 @@ export function safeSubjectFragment(s: string): string {
 // MUST escape its own dynamic fragments before passing them in.
 export function wrap(
   body: string,
-  footerText = 'Best World Properties',
+  footerText = 'CaveCMS',
   footerHtml = '',
 ): string {
   return (

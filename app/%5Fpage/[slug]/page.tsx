@@ -61,7 +61,7 @@ export async function generateMetadata({ params }: { params: Params }) {
     return resolveMetadata({
       title: null,
       description: null,
-      fallbackTitle: 'Best World Properties',
+      fallbackTitle: 'CaveCMS',
       canonicalPath: '/',
     })
   }
@@ -86,15 +86,15 @@ export async function generateMetadata({ params }: { params: Params }) {
   ]
   const r = rows[0]
   // Fallback chain (audit V10 fix): seo_title → "{title} — Best World
-  // Properties" → "Best World Properties". The audit found every CMS
-  // page sharing the same <title>Best World Properties</title> when
+  // Properties" → "CaveCMS". The audit found every CMS
+  // page sharing the same <title>CaveCMS</title> when
   // seo_title wasn't set; pulling page.title into the fallback string
   // gives every page a distinct tab/SERP label without forcing
   // operators to also fill in seo_title every time they create a page.
   const titleFallback =
     r?.title && r.title.trim().length > 0
-      ? `${r.title} — Best World Properties`
-      : 'Best World Properties'
+      ? `${r.title} — CaveCMS`
+      : 'CaveCMS'
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,

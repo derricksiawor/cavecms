@@ -106,7 +106,7 @@ export default async function BlogPost({ params }: { params: Params }) {
     publishedAt,
     excerpt: post.excerpt,
     heroImage: heroVariants?.lg ?? null,
-    author: post.author_name ?? 'Best World Properties',
+    author: post.author_name ?? 'CaveCMS',
     siteOrigin,
   })
 

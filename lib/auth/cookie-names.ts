@@ -24,7 +24,7 @@ export const REAUTH_COOKIE_NAME = PROD ? '__Host-cavecms_reauth' : 'cavecms_reau
 // the same response as the session cookie, cleared in the same
 // response as the session cookie on logout / revocation. The
 // `__Host-` prefix in prod prevents a sibling subdomain or
-// `Domain=.bestworldcompany.com`-scoped attacker from planting a
+// `Domain=.yourdomain.com`-scoped attacker from planting a
 // shadowing jti cookie. Dev drops the prefix so HTTP-mode localhost
 // works.
 //

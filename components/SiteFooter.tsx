@@ -72,7 +72,7 @@ export async function SiteFooter() {
   let csrf = ''
   let contact: typeof DEFAULT_CONTACT = DEFAULT_CONTACT
   let footer: FooterShape = DEFAULT_FOOTER
-  let headerBrand = 'Best World Properties'
+  let headerBrand = 'CaveCMS'
   let headerLogoId: number | null = null
 
   // Promise.allSettled — one failed read (e.g. transient mysql blip on
@@ -167,14 +167,9 @@ export async function SiteFooter() {
               className="h-12 w-auto max-w-[200px] object-contain brightness-0 invert"
             />
           ) : (
-            <>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-400">
-                Best World
-              </p>
-              <p className="mt-2 font-serif text-2xl font-bold tracking-tight">
-                Properties
-              </p>
-            </>
+            <p className="font-serif text-2xl font-bold tracking-tight">
+              {headerBrand}
+            </p>
           )}
           {footer.tagline && (
             <p className="mt-4 text-sm text-cream-50/70 max-w-xs leading-relaxed">

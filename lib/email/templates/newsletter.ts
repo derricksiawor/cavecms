@@ -15,10 +15,10 @@ export function newsletterConfirm(
   // not nested inside it — keeps the "Didn't request this?" block-
   // level <p> separate from the brand footer's <p>.
   const html = wrap(
-    `<p>Please confirm your subscription to Best World Properties news ` +
+    `<p>Please confirm your subscription to CaveCMS news ` +
       `and project updates:</p>` +
       `<p><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#7a5230;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px">Confirm subscription</a></p>`,
-    'Best World Properties',
+    'CaveCMS',
     `<p style="font-size:11px;color:#888;margin-top:8px">Didn't request this? ` +
       `<a href="${escapeHtml(unsubscribeUrl)}" style="color:#888">Unsubscribe</a>.</p>`,
   )

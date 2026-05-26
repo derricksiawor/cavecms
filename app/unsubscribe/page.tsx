@@ -16,7 +16,7 @@ export const metadata = {
   // Confirmation page must never be indexed — the URL carries a
   // single-use token that should not appear in search.
   robots: { index: false, follow: false },
-  title: 'Unsubscribe — Best World Properties',
+  title: 'Unsubscribe — CaveCMS',
 }
 
 type SearchParams = Promise<{ token?: string }>

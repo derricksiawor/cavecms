@@ -26,7 +26,7 @@ vi.mock('@/lib/cms/getSettings', () => {
         footer: { tagline: 't', columns: [] },
         social_links: [],
         site_general: {
-          siteUrl: 'https://bestworldcompany.com',
+          siteUrl: 'https://yourdomain.com',
           siteName: 'CaveCMS',
         },
       }
@@ -100,10 +100,10 @@ describe('JSON-LD builders', () => {
       slug: 'x',
       tagline: 't',
       heroImage: '/h.jpg',
-      siteOrigin: 'https://bestworldcompany.com',
+      siteOrigin: 'https://yourdomain.com',
     })
     expect(ld['@type']).toBe('Residence')
-    expect(ld.url).toBe('https://bestworldcompany.com/projects/x')
+    expect(ld.url).toBe('https://yourdomain.com/projects/x')
     expect(ld.description).toBe('t')
   })
 

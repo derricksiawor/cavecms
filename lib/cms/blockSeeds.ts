@@ -637,9 +637,9 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   // operator flips to 'ivory' for cards in light sections.
   lx_channel_card: {
     label: 'Email',
-    value: 'hello@bestworldcompany.com',
+    value: 'hello@yourdomain.com',
     icon: 'mail',
-    href: 'mailto:hello@bestworldcompany.com',
+    href: 'mailto:hello@yourdomain.com',
   },
 
   // lx_stat — value + label are the required pair. duration_ms,
@@ -655,8 +655,8 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   // centered alignment, obsidian tone, no animation. line-reveal is
   // the canonical luxury treatment when operators opt in.
   lx_quote: {
-    quote: 'A short, signature closing thought from the principal.',
-    attribution: 'Best World Properties',
+    quote: 'A short, signature closing thought.',
+    attribution: 'A Happy Customer',
   },
 }
 

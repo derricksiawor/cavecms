@@ -9,12 +9,6 @@ import {
   seedProjectsPageBlocksIfEmpty,
   seedServicesPageBlocksIfEmpty,
   seedTermsPageBlocksIfEmpty,
-  seedTheKharisPageBlocksIfEmpty,
-  seedMantebeaGardensPageBlocksIfEmpty,
-  seedAnowaaGardensPageBlocksIfEmpty,
-  seedThankYouEnquiryPageBlocksIfEmpty,
-  seedThankYouTourPageBlocksIfEmpty,
-  seedThankYouBrochurePageBlocksIfEmpty,
 } from './seeds/systemPageBlocks'
 
 export async function seedAdminIfEmpty(
@@ -42,39 +36,16 @@ export async function seedAdminIfEmpty(
 // because the seed only inserts when missing.
 //
 // Pulls from settings-registry so any newly-added key gets a row on
-// the next deploy without touching this file. A handful of project-
-// specific overrides (real contact info, footer tagline) sit on top
-// so a fresh CaveCMS install isn't generic out of the box.
+// the next deploy without touching this file. CaveCMS ships with
+// registry defaults — operator-specific values are captured by the
+// install wizard and edited through /admin/settings.
 import { registry } from '@/lib/cms/settings-registry'
 
-const PROJECT_OVERRIDES: Partial<Record<keyof typeof registry, unknown>> = {
-  contact_info: {
-    phone: '+233 24 297 7639',
-    email: 'info@bestworldcompany.com',
-    address: 'Nuumo Kofi Anum Link, Okpegon-Ledzokuku, Accra',
-    hours: 'Mon-Fri 09:00-17:00',
-  },
-  default_seo: {
-    title: 'Best World Properties',
-    description: 'Luxury residential development in Accra, Ghana.',
-    ogImagePath: null,
-  },
-  footer: {
-    ...(registry.footer.default as object),
-    tagline: 'Building homes that reflect your aspirations.',
-  },
-}
-
-// Built lazily inside the function so a future registry edit whose
-// `default` throws (typo, regex slip, etc.) surfaces inside runCli's
-// try/finally — instead of at module-load time, where it would crash
-// before the `CAVECMS_SEED_OK=1` production guard or the pool-cleanup
-// finally block ever runs.
 function buildSettingsDefaults(): Record<string, unknown> {
   return Object.fromEntries(
     (Object.keys(registry) as Array<keyof typeof registry>).map((k) => [
       k,
-      PROJECT_OVERRIDES[k] ?? registry[k].default,
+      registry[k].default,
     ]),
   )
 }
@@ -243,42 +214,6 @@ async function runCli(): Promise<void> {
       termsInserted === false
         ? 'Terms page already has live blocks — skipped block seed.'
         : `Seeded Terms page block tree (${termsInserted} rows).`,
-    )
-    const kharisInserted = await seedTheKharisPageBlocksIfEmpty()
-    console.log(
-      kharisInserted === false
-        ? 'The Kharis page already has live blocks — skipped block seed.'
-        : `Seeded The Kharis page block tree (${kharisInserted} rows).`,
-    )
-    const mantebeaInserted = await seedMantebeaGardensPageBlocksIfEmpty()
-    console.log(
-      mantebeaInserted === false
-        ? 'Mantebea Gardens page already has live blocks — skipped block seed.'
-        : `Seeded Mantebea Gardens page block tree (${mantebeaInserted} rows).`,
-    )
-    const anowaaInserted = await seedAnowaaGardensPageBlocksIfEmpty()
-    console.log(
-      anowaaInserted === false
-        ? 'Anowaa Gardens page already has live blocks — skipped block seed.'
-        : `Seeded Anowaa Gardens page block tree (${anowaaInserted} rows).`,
-    )
-    const tyEnquiryInserted = await seedThankYouEnquiryPageBlocksIfEmpty()
-    console.log(
-      tyEnquiryInserted === false
-        ? 'Thank-you enquiry page already has live blocks — skipped block seed.'
-        : `Seeded thank-you enquiry page block tree (${tyEnquiryInserted} rows).`,
-    )
-    const tyTourInserted = await seedThankYouTourPageBlocksIfEmpty()
-    console.log(
-      tyTourInserted === false
-        ? 'Thank-you tour page already has live blocks — skipped block seed.'
-        : `Seeded thank-you tour page block tree (${tyTourInserted} rows).`,
-    )
-    const tyBrochureInserted = await seedThankYouBrochurePageBlocksIfEmpty()
-    console.log(
-      tyBrochureInserted === false
-        ? 'Thank-you brochure page already has live blocks — skipped block seed.'
-        : `Seeded thank-you brochure page block tree (${tyBrochureInserted} rows).`,
     )
   } finally {
     await pool.end()

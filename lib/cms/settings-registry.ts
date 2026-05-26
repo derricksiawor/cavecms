@@ -809,7 +809,7 @@ export const registry = {
   default_seo: {
     schema: defaultSeo,
     default: {
-      title: 'Best World Properties',
+      title: '',
       description: '',
       ogImagePath: null,
     } satisfies z.infer<typeof defaultSeo>,
@@ -835,7 +835,7 @@ export const registry = {
       ],
       logo: null,
       newsletterHeading: 'Stay informed',
-      newsletterBody: 'Quarterly updates on new launches and project milestones. One click to unsubscribe.',
+      newsletterBody: 'Updates and announcements. One click to unsubscribe.',
       newsletterCtaLabel: 'Subscribe',
       copyright: '',
       legalLinks: [
@@ -847,7 +847,7 @@ export const registry = {
   site_header: {
     schema: siteHeader,
     default: {
-      brandText: 'Best World Properties',
+      brandText: 'Your Site',
       logo: null,
       theme: 'cream',
       navItems: [
@@ -857,13 +857,13 @@ export const registry = {
         { label: 'About', href: '/about' },
         { label: 'Contact', href: '/contact' },
       ],
-      primaryCta: { text: 'Schedule a tour', href: '/contact' },
+      primaryCta: { text: 'Get in touch', href: '/contact' },
     } satisfies z.infer<typeof siteHeader>,
   },
   organization_json_ld: {
     schema: organizationJsonLd,
     default: {
-      name: 'Best World Properties',
+      name: '',
       logoUrl: '/brand/logo.svg',
       sameAs: [],
     } satisfies z.infer<typeof organizationJsonLd>,

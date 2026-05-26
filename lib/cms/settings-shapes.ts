@@ -58,7 +58,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       key: 'title',
       label: 'Default page title',
       maxLength: 180,
-      placeholder: 'Best World Properties',
+      placeholder: 'CaveCMS',
       help: 'Appears as the browser tab title when a page does not set its own.',
     },
     {
@@ -165,7 +165,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       key: 'copyright',
       label: 'Copyright text',
       maxLength: 220,
-      placeholder: 'Best World Properties',
+      placeholder: 'CaveCMS',
       help: 'Shown beside the year at the very bottom. Leave empty to use the brand name.',
     },
     {
@@ -196,7 +196,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       key: 'brandText',
       label: 'Brand name',
       maxLength: 120,
-      placeholder: 'Best World Properties',
+      placeholder: 'CaveCMS',
       help: 'Shown next to the logo, or in place of it if you haven’t uploaded one.',
     },
     {
@@ -257,7 +257,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       key: 'name',
       label: 'Organization name',
       maxLength: 180,
-      placeholder: 'Best World Properties',
+      placeholder: 'CaveCMS',
     },
     {
       kind: 'string',

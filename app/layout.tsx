@@ -29,8 +29,8 @@ const marcellus = Marcellus({
 // Matches the client's original brand identity.
 
 export const metadata = {
-  title: 'Best World Properties',
-  description: 'Best World Properties — luxury residential developments in Accra.',
+  title: 'CaveCMS',
+  description: 'A CaveCMS-powered site.',
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

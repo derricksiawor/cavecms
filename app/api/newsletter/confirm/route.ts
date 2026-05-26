@@ -99,6 +99,6 @@ export const POST = withError(async (req: Request) => {
     )
   }
   return htmlResponse(
-    "<h1>Subscription confirmed</h1><p>Thanks — you'll now receive updates from Best World Properties.</p>",
+    "<h1>Subscription confirmed</h1><p>Thanks — you'll now receive updates from CaveCMS.</p>",
   )
 })

@@ -143,7 +143,7 @@ export function NewPageForm({ role }: { role: Role }) {
             value={slug}
             onChange={setSlug}
             source={title}
-            baseUrl="bestworldcompany.com/"
+            baseUrl="yourdomain.com/"
           />
         </div>
         <p className="mt-1 text-[11px] text-warm-stone">

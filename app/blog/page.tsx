@@ -12,9 +12,9 @@ export const dynamic = 'force-dynamic'
 export async function generateMetadata() {
   return resolveMetadata({
     canonicalPath: '/blog',
-    fallbackTitle: 'News — Best World Properties',
+    fallbackTitle: 'News — CaveCMS',
     fallbackDescription:
-      'Updates, milestones and stories from Best World Properties.',
+      'Updates, milestones and stories from CaveCMS.',
   })
 }
 

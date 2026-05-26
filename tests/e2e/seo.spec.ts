@@ -41,7 +41,7 @@ test.describe('Plan 05 SEO', () => {
   test('sitemap.xml lists projects on apex; empty on non-apex hosts', async ({ request }) => {
     // Apex host: full sitemap with static + dynamic URLs.
     const apex = await request.get('/sitemap.xml', {
-      headers: { host: 'bestworldcompany.com' },
+      headers: { host: 'yourdomain.com' },
     })
     expect(apex.status()).toBe(200)
     const apexBody = await apex.text()
@@ -63,7 +63,7 @@ test.describe('Plan 05 SEO', () => {
   }) => {
     // Staging host: blanket Disallow:/
     const staging = await request.get('/robots.txt', {
-      headers: { host: 'staging.bestworldcompany.com' },
+      headers: { host: 'staging.yourdomain.com' },
     })
     expect(staging.status()).toBe(200)
     const stagingBody = await staging.text()
@@ -71,7 +71,7 @@ test.describe('Plan 05 SEO', () => {
 
     // Apex host: allow /, disallow /admin + /api/, sitemap link.
     const apex = await request.get('/robots.txt', {
-      headers: { host: 'bestworldcompany.com' },
+      headers: { host: 'yourdomain.com' },
     })
     expect(apex.status()).toBe(200)
     const apexBody = await apex.text()

@@ -60,16 +60,16 @@ export function contactSalesEmail(
 export function contactAutoReply(toName: string, toEmail: string) {
   const html = wrap(
     `<p>Hi ${escapeHtml(toName)},</p>` +
-      `<p>Thanks for reaching out to Best World Properties. ` +
+      `<p>Thanks for reaching out to CaveCMS. ` +
       `We've received your message and will be in touch shortly.</p>`,
   )
   const text =
     `Hi ${toName},\n\n` +
-    `Thanks for reaching out to Best World Properties. ` +
+    `Thanks for reaching out to CaveCMS. ` +
     `We've received your message and will be in touch shortly.`
   return {
     to: toEmail,
-    subject: 'Thanks for contacting Best World Properties',
+    subject: 'Thanks for contacting CaveCMS',
     html,
     text,
   }

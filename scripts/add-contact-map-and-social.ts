@@ -172,11 +172,11 @@ async function addSocialIconsToChannelsColumn(
         },
         {
           platform: 'facebook',
-          url: 'https://www.facebook.com/bestworldcompany',
+          url: 'https://www.facebook.com/yourcompany',
         },
         {
           platform: 'linkedin',
-          url: 'https://www.linkedin.com/company/bestworldcompany',
+          url: 'https://www.linkedin.com/company/yourcompany',
         },
         {
           platform: 'whatsapp',

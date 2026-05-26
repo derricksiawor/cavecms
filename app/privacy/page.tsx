@@ -24,7 +24,7 @@ export async function generateMetadata() {
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,
-    fallbackTitle: 'Privacy Policy — Best World Properties',
+    fallbackTitle: 'Privacy Policy — CaveCMS',
     canonicalPath: '/privacy',
   })
 }

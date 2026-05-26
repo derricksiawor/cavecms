@@ -6,7 +6,7 @@ import { getSetting } from '@/lib/cms/getSettings'
 //   1. entity-level title/description (page row's seo_title / project's
 //      seo_description / etc.)
 //   2. fallbackTitle / fallbackDescription — caller-provided per-route
-//      defaults (e.g. "Services — Best World Properties")
+//      defaults (e.g. "Services — CaveCMS")
 //   3. default_seo setting — site-wide fallback edited in /admin/settings
 //
 // The resolver is one source of truth so a future field rename only

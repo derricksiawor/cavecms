@@ -76,7 +76,7 @@ export async function SiteHeader() {
       }),
     )
     header = {
-      brandText: 'Best World Properties',
+      brandText: 'CaveCMS',
       logo: null,
       theme: 'cream' as const,
       navItems: [],
@@ -159,7 +159,7 @@ export async function SiteHeader() {
             />
           ) : (
             <span className="font-serif text-xl font-bold tracking-tight">
-              {header.brandText || 'Best World Properties'}
+              {header.brandText || 'CaveCMS'}
             </span>
           )}
           {logoSrc && header.brandText && (

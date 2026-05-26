@@ -28,7 +28,7 @@ export function HomePageEmptyState() {
 
       <section className="relative z-10 mx-auto flex min-h-screen max-w-3xl flex-col items-start justify-center px-8 py-24 sm:px-12">
         <p className="text-xs font-semibold uppercase tracking-[0.42em] text-copper-600 animate-cavecms-rise">
-          Best World Properties
+          CaveCMS
         </p>
         <h1 className="mt-8 font-serif text-4xl font-bold tracking-tight text-near-black sm:text-6xl lg:text-7xl leading-[1.05] animate-cavecms-rise [animation-delay:120ms]">
           This site is being updated.

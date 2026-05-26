@@ -253,7 +253,7 @@ function escapeHtml(s: string): string {
 function maintenanceResponse(message: string): NextResponse {
   // Generic branded HTML 503. The page is served to the END VISITOR of
   // whichever site is running CaveCMS — it must NOT carry the
-  // operator's tenant brand (no "Best World Properties", no logo) and
+  // operator's tenant brand (no "CaveCMS", no logo) and
   // must NOT advertise CaveCMS either (visitors hitting a momentary
   // 503 should not be marketed at). Just two lines on cream with a
   // copper ambient glow, mirroring the visual language of

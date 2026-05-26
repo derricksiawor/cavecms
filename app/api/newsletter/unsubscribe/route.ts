@@ -80,6 +80,6 @@ export const POST = withError(async (req: Request) => {
     WHERE unsubscribe_token = ${token}
   `)
   return htmlResponse(
-    '<h1>Unsubscribed</h1><p>You will no longer receive updates from Best World Properties.</p>',
+    '<h1>Unsubscribed</h1><p>You will no longer receive updates from CaveCMS.</p>',
   )
 })

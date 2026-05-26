@@ -24,7 +24,7 @@ export async function generateMetadata() {
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,
-    fallbackTitle: 'Terms of Service — Best World Properties',
+    fallbackTitle: 'Terms of Service — CaveCMS',
     canonicalPath: '/terms',
   })
 }

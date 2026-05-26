@@ -39,6 +39,7 @@ export const RESERVED: ReadonlySet<string> = new Set([
   'sitemap.xml',
   'robots.txt',
   'healthz',
+  'install',
   'projects',
   'blog',
   'contact',

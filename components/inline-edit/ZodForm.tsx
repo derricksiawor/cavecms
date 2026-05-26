@@ -2202,7 +2202,7 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
 
   lx_channel_card: [
     { kind: 'string', key: 'label', label: 'Kicker label', maxLength: TEXT_MAX.caption, placeholder: 'EMAIL / PHONE / ADDRESS' },
-    { kind: 'string', key: 'value', label: 'Display value', maxLength: TEXT_MAX.caption, placeholder: 'hello@bestworldcompany.com' },
+    { kind: 'string', key: 'value', label: 'Display value', maxLength: TEXT_MAX.caption, placeholder: 'hello@yourdomain.com' },
     { kind: 'string', key: 'description', label: 'Description', maxLength: TEXT_MAX.body, multiline: true, placeholder: 'Brief supporting copy' },
     {
       kind: 'string', key: 'href', label: 'Link target (optional)', maxLength: TEXT_MAX.url, placeholder: 'mailto:… or tel:… or https://…',

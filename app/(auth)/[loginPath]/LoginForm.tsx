@@ -230,7 +230,7 @@ export function LoginForm({
             transition={{ duration: 0.6, delay: 0.15, ease: easeLuxury }}
             className="text-xs font-semibold tracking-[0.32em] uppercase text-copper-600"
           >
-            Best World Properties
+            CaveCMS
           </motion.p>
 
           <motion.h1
