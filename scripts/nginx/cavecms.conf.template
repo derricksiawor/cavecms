@@ -1,8 +1,8 @@
 # scripts/nginx/cavecms.conf.template
 #
 # Placeholders (substituted by install-nginx.sh):
-#   __APEX__        apex domain (e.g. bestworldcompany.com)
-#   __STAGING__     staging host (e.g. staging.bestworldcompany.com)
+#   __APEX__        apex domain (e.g. your-domain.com)
+#   __STAGING__     staging host (e.g. staging.your-domain.com)
 #   __LOGIN_PATH__  hidden login path (e.g. baccess)
 #
 # Architecture: nginx terminates TLS, serves /_next/static and

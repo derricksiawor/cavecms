@@ -215,7 +215,7 @@ BROCHURE_SECRET=$BROCHURE_SECRET
 LOGIN_PATH=CHANGE_ME_LOGIN_PATH
 
 # Public origin — drives sitemap canonical URLs, JSON-LD, robots.
-SITE_ORIGIN=https://CHANGE_ME.bestworldcompany.com
+SITE_ORIGIN=https://CHANGE_ME.your-domain.com
 
 # Health-check bearer (required by deploy.sh).
 HEALTHZ_TOKEN=$HEALTHZ_TOKEN
@@ -230,7 +230,7 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
-SMTP_FROM_NAME=Best World Properties
+SMTP_FROM_NAME=Your Site
 SALES_EMAIL=
 ADMIN_ALERT_EMAIL=
 

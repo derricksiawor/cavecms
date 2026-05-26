@@ -100,7 +100,7 @@ export const GET = withError(async () => {
       const enc = new TextEncoder()
       try {
         // UTF-8 BOM: ﻿ (3-byte EF BB BF in UTF-8). Excel uses it
-        // to auto-detect Unicode; without it diacritics in Ghanaian
+        // to auto-detect Unicode; without it diacritics in non-ASCII
         // names degrade to ?-marks on Windows.
         controller.enqueue(enc.encode('\ufeff'))
         controller.enqueue(enc.encode(HEADER))

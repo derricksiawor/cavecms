@@ -301,7 +301,7 @@ export function ProjectEditor({
   // "Collapse all" gestures are first-class.
   const [openSection, setOpenSection] = useState<string | null>(null)
 
-  const projectUrl = `bestworldproperties.com/projects/${slug || pristine.slug}`
+  const projectUrl = `yourdomain.com/projects/${slug || pristine.slug}`
 
   return (
     <>
@@ -349,7 +349,7 @@ export function ProjectEditor({
                   value={slug}
                   onChange={(v) => setSlug(v)}
                   source={name}
-                  baseUrl="bestworldproperties.com/projects/"
+                  baseUrl="yourdomain.com/projects/"
                   invalidMessage={slugInvalid ?? undefined}
                 />
               </div>

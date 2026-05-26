@@ -72,7 +72,6 @@ const REGISTRY: Record<string, JsonLdShape> = {
     name: ctx.page.title,
     description: ctx.page.seo_description ?? undefined,
     url: pageUrl(ctx),
-    areaServed: 'GH',
   }),
   contact: (ctx) => ({
     '@context': 'https://schema.org',

@@ -33,7 +33,7 @@ const HttpsUrl = z
 //     non-/ guard blocks protocol-relative `//evil.com` injection)
 //   - On-page anchor: starts with # followed by ≥ 1 char
 //   - mailto:foo@bar.tld
-//   - tel:+233241234567 (digits, plus, dashes, spaces, parens)
+//   - tel:+15551234567 (digits, plus, dashes, spaces, parens)
 //   - Empty string — operators "remove" a CTA by clearing both
 //     fields; the public renderer hides any CTA whose text is empty.
 //
@@ -496,8 +496,8 @@ const organizationJsonLd = z.object({
 // `siteUrl` is REQUIRED for those surfaces to emit anything; until an
 // operator configures it, sitemap/robots fall back to relative URLs
 // and email-based notifications are skipped. This is intentional — a
-// freshly-installed CaveCMS shouldn't be putting "https://bestworld
-// company.com" links into emails by mistake.
+// freshly-installed CaveCMS shouldn't be putting a placeholder URL
+// into emails by mistake.
 const siteGeneral = z.object({
   siteUrl: z
     .string()

@@ -217,7 +217,7 @@ export function Editor({
   }
 
   const fieldset = readonly ? 'opacity-60 pointer-events-none' : ''
-  const postUrl = `bestworldproperties.com/blog/${slug || pristine.slug}`
+  const postUrl = `yourdomain.com/blog/${slug || pristine.slug}`
 
   return (
     <section className={`space-y-8 ${fieldset}`}>
@@ -275,7 +275,7 @@ export function Editor({
                   value={slug}
                   onChange={setSlug}
                   source={title}
-                  baseUrl="bestworldproperties.com/blog/"
+                  baseUrl="yourdomain.com/blog/"
                   invalidMessage={slugInvalid ?? undefined}
                 />
               </div>

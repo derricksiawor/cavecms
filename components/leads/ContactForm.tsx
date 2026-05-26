@@ -28,7 +28,7 @@ const RELOAD_COUNTER_TTL_MS = 60_000
 
 type EnquiryType = 'enquiry' | 'tour' | 'brochure'
 
-const PROJECTS = ['The Kharis', 'Mantebea Gardens', 'Anowaa Gardens'] as const
+const PROJECTS: readonly string[] = []
 
 type ReloadCounter = { count: number; ts: number }
 function readReloadCounter(): number {

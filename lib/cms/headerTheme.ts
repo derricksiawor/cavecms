@@ -118,7 +118,7 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
 // Active-link predicate for nav items. The home link ('/') needs strict
 // equality — otherwise `pathname.startsWith('/')` would match every
 // page on the site and Home would always read as active. Every other
-// link matches by prefix so /projects/the-kharis still highlights the
+// link matches by prefix so /projects/<any-slug> still highlights the
 // Projects entry.
 export function isNavLinkActive(href: string, pathname: string): boolean {
   if (!href.startsWith('/')) return false

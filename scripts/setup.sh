@@ -81,14 +81,14 @@ fi
 # __STAGING__ substitution, embed shell metachars in SITE_ORIGIN,
 # or land special chars in the LE cert's subjectAltName.
 hostname_re='^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'
-read -r -p "Apex domain [bestworldcompany.com]: " APEX
-APEX="${APEX:-bestworldcompany.com}"
+read -r -p "Apex domain [your-domain.com]: " APEX
+APEX="${APEX:-your-domain.com}"
 APEX="${APEX//[$'\r\n\t ']/}"
 if [[ ! "$APEX" =~ $hostname_re ]] || [ "${#APEX}" -gt 253 ]; then
   echo "Invalid apex domain '$APEX' — must be a valid DNS name." >&2; exit 1
 fi
-read -r -p "Staging hostname [staging.bestworldcompany.com]: " STAGING
-STAGING="${STAGING:-staging.bestworldcompany.com}"
+read -r -p "Staging hostname [staging.your-domain.com]: " STAGING
+STAGING="${STAGING:-staging.your-domain.com}"
 STAGING="${STAGING//[$'\r\n\t ']/}"
 if [[ ! "$STAGING" =~ $hostname_re ]] || [ "${#STAGING}" -gt 253 ]; then
   echo "Invalid staging hostname '$STAGING' — must be a valid DNS name." >&2; exit 1
@@ -478,7 +478,7 @@ cat > "$MAINT_TMP" <<'EOF'
 <body>
   <main>
     <h1>We&rsquo;ll be right back.</h1>
-    <p>Best World Properties</p>
+    <p>Your Site</p>
   </main>
 </body>
 </html>
@@ -711,7 +711,7 @@ SMTP_PORT=587
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
-SMTP_FROM_NAME=Best World Properties
+SMTP_FROM_NAME=Your Site
 SALES_EMAIL=${ALERT}
 
 # reCAPTCHA v3 — required in production (env.ts superRefine).

@@ -616,14 +616,15 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
 
   // lx_map — embedUrl is required and must pass isValidMapEmbedUrl
   // (www.google.com/maps/embed?pb=… OR maps.google.com/maps?…&output=embed).
-  // Default seed uses the keyless legacy form pointing at Accra centre;
-  // operators replace it via the EditDrawer immediately after picking
-  // the widget — but the seed must parse so the picker doesn't 422 on
-  // first save. The CI pin in blockSeeds.test.ts round-trips this
-  // through parseBlockData.
+  // Default seed uses a generic Google Maps embed (Greenwich/Royal
+  // Observatory, zoom 4 — neutral, recognisable, not associated with
+  // any specific operator's market); operators replace it via the
+  // EditDrawer immediately after picking the widget. The seed must
+  // parse so the picker doesn't 422 on first save. The CI pin in
+  // blockSeeds.test.ts round-trips this through parseBlockData.
   lx_map: {
     embedUrl:
-      'https://maps.google.com/maps?q=Accra,+Ghana&z=13&output=embed',
+      'https://maps.google.com/maps?q=Greenwich+Royal+Observatory&z=4&output=embed',
   },
 
   // lx_space — single optional `size` field defaults to 'section-md'.

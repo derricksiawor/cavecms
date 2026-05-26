@@ -50,7 +50,7 @@ import {
 //
 // The set is intentionally curated, not exhaustive. Each entry has
 // to earn its place — a freeform icon library would tempt operators
-// into icon soup. Common Ghana / Africa luxury real-estate amenities
+// into icon soup. Common residential and hospitality amenities
 // dominate the list; expand by addition only.
 
 const ICONS: Record<string, LucideIcon> = {

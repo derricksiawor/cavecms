@@ -81,7 +81,7 @@ export function NewPostForm() {
             value={slug}
             onChange={setSlug}
             source={title}
-            baseUrl="bestworldproperties.com/blog/"
+            baseUrl="yourdomain.com/blog/"
           />
         </div>
       </div>

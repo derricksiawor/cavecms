@@ -595,7 +595,7 @@ function SocialLinkArrayField({
           icon={Share2}
           title="Connect your social profiles"
           description="Your Instagram, Facebook, LinkedIn, YouTube, TikTok or X handles show up in the footer and feed Google’s knowledge panel."
-          example="e.g. instagram.com/bestworldproperties"
+          example="e.g. instagram.com/yourdomain"
           size="sm"
         />
       ) : (

@@ -34,7 +34,6 @@ export async function organizationLd(): Promise<Record<string, unknown>> {
     address: {
       '@type': 'PostalAddress',
       streetAddress: contact.address,
-      addressCountry: 'GH',
     },
     telephone: contact.phone,
     email: contact.email,
@@ -47,9 +46,9 @@ export async function organizationLd(): Promise<Record<string, unknown>> {
 // units; this site sells whole developments so Residence is correct.
 //
 // `address` is a schema.org PostalAddress; we emit the operator-
-// supplied free-text location as addressLocality and pin the
-// country to Ghana (this is a Ghana-market site — the addressCountry
-// hint helps Google Maps SERP geo-association).
+// supplied free-text location as addressLocality. addressCountry is
+// intentionally omitted — operators in different markets should set
+// it via a future Settings → SEO field (not hardcoded).
 //
 // `offers` is an AggregateOffer summarising the pricing range when
 // numeric prices + currency are present. Indexers use this for
@@ -82,7 +81,6 @@ export function residenceLd(p: {
     ld.address = {
       '@type': 'PostalAddress',
       addressLocality: p.location.trim(),
-      addressCountry: 'GH',
     }
   }
   // Emit offers only when we have both prices (or one + currency).
