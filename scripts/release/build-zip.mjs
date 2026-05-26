@@ -146,14 +146,28 @@ function readPkg() {
   return JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'))
 }
 
+// Strict semver: X.Y.Z(-prerelease)? where prerelease is dot-separated
+// alphanumerics. Refuses anything that could carry shell metacharacters
+// into downstream publish/install scripts (CVE-class defence).
+const SEMVER_RX = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
+
 function resolveVersion() {
-  if (args.version) return args.version
-  const pkg = readPkg()
-  if (!pkg.version) {
-    log.err('No --version given and package.json has no "version" field')
+  let v
+  if (args.version) v = args.version
+  else {
+    const pkg = readPkg()
+    if (!pkg.version) {
+      log.err('No --version given and package.json has no "version" field')
+      process.exit(1)
+    }
+    v = pkg.version
+  }
+  if (!SEMVER_RX.test(v)) {
+    log.err(`Version is not valid semver: ${JSON.stringify(v)}`)
+    log.gray('Use X.Y.Z or X.Y.Z-prerelease (alphanumerics + dots only).')
     process.exit(1)
   }
-  return pkg.version
+  return v
 }
 
 function verifyPrereqs() {
@@ -227,6 +241,7 @@ function manifestOfFiles(version) {
     { src: 'scripts/cavecms-updates-check.sh', dst: 'scripts/cavecms-updates-check.sh' },
     { src: 'scripts/install-nginx.sh', dst: 'scripts/install-nginx.sh' },
     { src: 'scripts/install-systemd.sh', dst: 'scripts/install-systemd.sh' },
+    { src: 'scripts/install-migrate.mjs', dst: 'scripts/install-migrate.mjs' },
     { src: 'scripts/start-standalone.mjs', dst: 'scripts/start-standalone.mjs' },
     // Nginx + systemd templates the install scripts apply.
     { src: 'scripts/nginx', dst: 'scripts/nginx', dir: true, optional: true },
@@ -416,7 +431,14 @@ function updateManifest({ version, sha256, signature, isSecurity }) {
   manifest.latestVersion = version
   manifest.publishedAt = publishedAt
 
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  // Atomic write: write to .tmp then rename. Closes the TOCTOU where
+  // two concurrent build-zip invocations could clobber each other's
+  // manifest. The rename itself is atomic on POSIX filesystems.
+  const tmpPath = manifestPath + '.tmp'
+  writeFileSync(tmpPath, JSON.stringify(manifest, null, 2) + '\n')
+  // fs.rename is atomic on the same filesystem; cross-fs would copy.
+  // Since dist/ is always inside the repo, same fs is guaranteed.
+  spawnSync('mv', [tmpPath, manifestPath], { stdio: 'inherit' })
   log.ok(`Updated manifest.json (latestVersion=${version}${signature ? '' : ' — UNSIGNED'})`)
   return manifestPath
 }

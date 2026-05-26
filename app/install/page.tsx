@@ -17,7 +17,11 @@ export function generateMetadata() {
   return { robots: { index: false, follow: false } }
 }
 
-export default async function InstallPage() {
+export default async function InstallPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const alreadyInstalled = await isInstalled()
   // Default site URL hint = whatever host the operator hit us at.
   // Stripped to https://<host> so they can confirm vs. edit. Most
@@ -26,6 +30,15 @@ export default async function InstallPage() {
   const host = h.get('host') ?? 'localhost:3040'
   const proto = h.get('x-forwarded-proto') ?? 'http'
   const guessedSiteUrl = `${proto}://${host}`
+
+  // Bootstrap token — the CLI prints a `/install?t=<token>` URL. The
+  // server-rendered wizard receives the token via this query param and
+  // hands it to the client component, which includes it in every
+  // /api/install/* fetch via the X-Install-Token header. The token
+  // gates the public-internet window between app-boot and
+  // wizard-complete: without it, the install endpoints return 401.
+  const tokenParam = (await searchParams)?.t
+  const bootstrapToken = typeof tokenParam === 'string' ? tokenParam : null
 
   if (alreadyInstalled) {
     return (
@@ -44,5 +57,5 @@ export default async function InstallPage() {
     )
   }
 
-  return <InstallWizard guessedSiteUrl={guessedSiteUrl} />
+  return <InstallWizard guessedSiteUrl={guessedSiteUrl} bootstrapToken={bootstrapToken} />
 }

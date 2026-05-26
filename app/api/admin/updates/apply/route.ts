@@ -7,8 +7,7 @@ import {
   existsSync,
   constants as fsConstants,
 } from 'node:fs'
-import { resolve } from 'node:path'
-import path from 'node:path'
+import path, { resolve } from 'node:path'
 import { z } from 'zod'
 import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
@@ -72,6 +71,23 @@ const Body = z
       .min(7)
       .max(64)
       .regex(/^[0-9a-f]+$/i, 'targetSha must be hex'),
+    // Static-manifest tarball coords. CLI-installed instances have no
+    // .git directory, so the orchestrator MUST use tarball mode (curl +
+    // sha256 verify + atomic extract) instead of git-fetch. These come
+    // from /api/admin/updates/check's response, which the client
+    // forwards verbatim. Both fields are required for the apply chain
+    // to function on non-git installs.
+    downloadUrl: z
+      .string()
+      .url('downloadUrl must be a valid URL')
+      // Defence-in-depth: orchestrator also validates origin against the
+      // manifest URL. We require https here so a stripped-down manifest
+      // can't downgrade to plaintext fetch.
+      .startsWith('https://', 'downloadUrl must be https')
+      .max(2048),
+    sha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i, 'sha256 must be 64 hex chars'),
     // Force re-running install on the SAME SHA — exposed in the UI as
     // "Re-run install" (visible when current === available). Used to
     // recover from a corrupted .next/ cache or a previously-interrupted
@@ -127,7 +143,7 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
 function buildScriptEnv(
   target: string,
   fromSha: string,
-  opts: { force: boolean },
+  opts: { force: boolean; downloadUrl: string; sha256: string },
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const k of SCRIPT_ENV_ALLOWLIST) {
@@ -136,6 +152,12 @@ function buildScriptEnv(
   }
   out.CAVECMS_UPDATE_TARGET = target
   out.CAVECMS_UPDATE_FROM = fromSha
+  // Tarball coords from the static manifest — the orchestrator's step 2
+  // switches to tarball mode (curl + sha256 verify + atomic extract)
+  // when these are present, so CLI-installed (no-git) instances can
+  // update without a .git directory.
+  out.CAVECMS_UPDATE_TARBALL_URL = opts.downloadUrl
+  out.CAVECMS_UPDATE_TARBALL_SHA256 = opts.sha256
   if (opts.force) {
     out.CAVECMS_UPDATE_FORCE = '1'
   }
@@ -162,6 +184,24 @@ function buildScriptEnv(
   return out
 }
 
+// Refuse any path that contains shell metacharacters. The detach
+// command runs `bash -c '... >>"$logPath" ... bash "$scriptPath" "$target"'`
+// — inside bash double-quotes, `$(...)`, backticks, and `${...}` are
+// still expanded. JSON.stringify escapes embedded double-quotes but
+// does NOT defang those substitution forms. Validate here so an
+// operator-controlled CAVECMS_LOG_DIR / CAVECMS_REPO_DIR with
+// `$(touch /tmp/pwn)` can't reach the shell.
+//
+// Allowed chars: POSIX path bytes (letters, digits, dot, dash, slash,
+// underscore). Refuse: $ ` " ' \ ; & | * ? < > ( ) [ ] { } whitespace.
+const SAFE_PATH_RX = /^[A-Za-z0-9._\-/]+$/
+
+function assertSafePathForShell(p: string, label: string): void {
+  if (!SAFE_PATH_RX.test(p)) {
+    throw new HttpError(500, `unsafe_${label}_path`)
+  }
+}
+
 // Resolve the orchestrator script path with integrity checks: must
 // be a regular file with mode bits 0o755 or stricter, and must NOT
 // be a symlink to anywhere outside the project tree.
@@ -176,6 +216,7 @@ function resolveScriptPath(): string {
   if (!st.isFile()) {
     throw new HttpError(500, 'script_not_a_file')
   }
+  assertSafePathForShell(scriptPath, 'script')
   return scriptPath
 }
 
@@ -188,7 +229,13 @@ function resolveSpawnLogPath(): string {
     process.env.CAVECMS_LOG_DIR ??
     (process.env.NODE_ENV === 'production' ? '/var/log/cavecms' : '/tmp')
   mkdirSync(dir, { recursive: true })
-  return resolve(dir, 'cavecms-update-spawn.log')
+  const logPath = resolve(dir, 'cavecms-update-spawn.log')
+  // The path will be interpolated into a `bash -c` command line.
+  // Refuse anything that could carry shell metacharacters into that
+  // context (operator-controlled CAVECMS_LOG_DIR with embedded $(...)
+  // would otherwise execute as the runtime user).
+  assertSafePathForShell(logPath, 'log')
+  return logPath
 }
 
 // Open a spawn-log file safely. Returns an fd in append mode that
@@ -232,6 +279,8 @@ export const POST = withError(async (req: Request) => {
   const body = Body.parse(await readJsonBody(req))
   const target = body.targetSha.toLowerCase()
   const force = body.force === true
+  const downloadUrl = body.downloadUrl
+  const sha256 = body.sha256.toLowerCase()
   const current = getCurrentVersion()
 
   // Refuse to "update" from dev — regardless of NODE_ENV. A
@@ -248,8 +297,20 @@ export const POST = withError(async (req: Request) => {
   // accidental double-click or stale browser tab can't trigger a
   // surprise rebuild of an already-current install. Force is the
   // escape hatch (corrupted `.next/`, stuck migration).
-  const isSameSha =
-    target.startsWith(current.sha) || current.sha.startsWith(target)
+  //
+  // Length-aware prefix match: only treat as same-SHA when the LONGER
+  // string starts with the SHORTER. A bidirectional `startsWith` would
+  // false-positive on `abc` vs `abcdef` (when `current.sha === 'abc'`
+  // from a malformed CAVECMS_COMMIT or a 'dev' partial). We also require
+  // the shorter side to be ≥ 7 chars so accidentally-short SHAs don't
+  // match unrelated tags.
+  const isSameSha = (() => {
+    const a = target
+    const b = current.sha
+    if (a.length < 7 || b.length < 7) return a === b
+    const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a]
+    return longer.startsWith(shorter)
+  })()
   if (isSameSha && !force) {
     throw new HttpError(409, 'already_on_target_version')
   }
@@ -367,7 +428,11 @@ export const POST = withError(async (req: Request) => {
 
     // (2) Build a NARROW env for the child — secrets stay in the
     //     parent. (3) Open the spawn log with O_NOFOLLOW + 0600.
-    const scriptEnv = buildScriptEnv(target, current.sha, { force })
+    const scriptEnv = buildScriptEnv(target, current.sha, {
+      force,
+      downloadUrl,
+      sha256,
+    })
     const logFd = openSpawnLog()
 
     // Double-fork orphan pattern. `detached: true` + `setsid` alone
@@ -410,6 +475,14 @@ export const POST = withError(async (req: Request) => {
     // still running. Without it, the Next.js process can't be cleanly
     // restarted by pm2 because there's a pending child reference.
     child.unref()
+    // Mark handed-off BEFORE the closeSync(lockFd) below. If closeSync
+    // itself threw mid-call (rare but possible on Node 22+), the
+    // finally would otherwise see (!handedOff && lockFd !== null) and
+    // call releaseUpdateLock — unlinking the lock file underneath the
+    // running orchestrator. The orchestrator's EXIT trap is already
+    // idempotent against double-unlink (catches ENOENT), so marking
+    // first + closing second is the strictly safer ordering.
+    handedOff = true
     // Close our copy of the fd — the child has its own dup. Without
     // this, every "Update now" click leaks one fd until pm2 reload.
     try {
@@ -418,9 +491,7 @@ export const POST = withError(async (req: Request) => {
       /* already closed during spawn fork on some platforms */
     }
     // Lock hand-off: from here on the orchestrator script's EXIT
-    // trap owns the lock file. We close our copy of the fd (the
-    // child has its own dup) and mark `handedOff` so the `finally`
-    // below DOESN'T unlink the file.
+    // trap owns the lock file.
     if (lockFd !== null) {
       try {
         closeSync(lockFd)
@@ -429,7 +500,6 @@ export const POST = withError(async (req: Request) => {
       }
       lockFd = null
     }
-    handedOff = true
 
     const meta = auditMetaFromRequest(req)
     // Audit insert is intentionally wrapped in its own try/catch and

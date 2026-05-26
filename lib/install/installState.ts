@@ -82,27 +82,29 @@ export async function isInstalled(): Promise<boolean> {
     return installed
   }
 
-  // Step 2: if an admin exists, also ensure install_state row
-  // reflects "installed". For pre-wizard installs upgrading to this
-  // code, the admin row exists but install_state doesn't — auto-
-  // migrate by INSERTing it so subsequent reads short-circuit.
+  // Step 2: trust the install_state.completedAt field if it exists.
+  // The CRITICAL invariant: while the install wizard is mid-flow,
+  // adminCount === 1 but completedAt is NOT set. We must NOT auto-flip
+  // completedAt during the wizard — doing so locks the wizard out of
+  // its own optional follow-up steps (branding, contact, smtp,
+  // security-baseline) because /api/install/* refuses once installed.
+  //
+  // Legacy auto-migrate: ONLY fires when there is no install_state row
+  // at all (truly pre-wizard install upgrading to this code, where an
+  // admin exists but the install_state machinery was never run). If the
+  // row exists, we trust whatever it says — empty completedAt means the
+  // wizard is mid-flow.
   if (adminCount > 0) {
     try {
       const [rows] = (await db.execute(sql`
         SELECT value FROM settings WHERE \`key\` = 'install_state'
       `)) as unknown as [SettingsRow[]]
-      const raw = rows[0]?.value
-      const parsed =
-        typeof raw === 'string'
-          ? (() => {
-              try {
-                return JSON.parse(raw) as { completedAt?: string }
-              } catch {
-                return null
-              }
-            })()
-          : (raw as { completedAt?: string } | null | undefined)
-      if (!parsed?.completedAt) {
+      const row = rows[0]
+      if (!row) {
+        // Legacy install: no row at all. Synthesize one with completedAt
+        // set so middleware locks /install. THIS PATH is for upgrades from
+        // a CaveCMS that predates the install_state machinery — current
+        // installs always have at least the pending row from admin-create.
         const value = JSON.stringify({
           completedAt: new Date().toISOString(),
           migratedFromLegacy: true,
@@ -114,12 +116,31 @@ export async function isInstalled(): Promise<boolean> {
             value = VALUES(value),
             version = version + 1
         `)
+        installed = true
+      } else {
+        const raw = row.value
+        const parsed =
+          typeof raw === 'string'
+            ? (() => {
+                try {
+                  return JSON.parse(raw) as { completedAt?: string }
+                } catch {
+                  return null
+                }
+              })()
+            : (raw as { completedAt?: string } | null | undefined)
+        // Row exists: trust completedAt. Empty/missing means wizard is
+        // mid-flow → NOT installed.
+        installed = Boolean(parsed?.completedAt)
       }
     } catch {
-      // Settings write/read failed but admin exists — still
-      // installed (canonical signal).
+      // Settings write/read failed. Conservative: if an admin exists
+      // but we can't read install_state, treat as installed so live
+      // visitors never bounce to /install during a hiccup. The
+      // wizard-mid-flow case here is rare (DB error between admin
+      // creation and the next step) and the operator can retry.
+      installed = true
     }
-    installed = true
   }
 
   cache = { isInstalled: installed, expiresAt: Date.now() + TTL_MS }

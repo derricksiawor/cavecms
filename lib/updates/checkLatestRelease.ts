@@ -153,15 +153,26 @@ export async function checkLatestRelease(_ignoredArgs?: {
     throw new Error('manifest_malformed_fields')
   }
 
-  // Defensive validation of the downloadUrl. Must be HTTPS + same-origin
-  // family as the manifest URL (eliminates open-redirect-style abuse if
-  // an attacker MITMs the manifest endpoint without a valid cert — they'd
-  // have to also serve a same-origin attacker-controlled zip).
+  // Defensive validation of the downloadUrl. Must be HTTPS, and the
+  // origin must match the manifest URL's origin OR an operator-pinned
+  // allowlist (CAVECMS_RELEASE_DOWNLOAD_ORIGINS, comma-separated). The
+  // allowlist is the escape hatch for forks that publish manifest +
+  // tarball on different hosts (e.g. CDN-fronted downloads with a
+  // separate manifest origin). Default: same-origin required.
   try {
     const manifestOrigin = new URL(url).origin
     const downloadOrigin = new URL(downloadUrl).origin
     if (downloadOrigin !== manifestOrigin) {
-      throw new Error(`manifest_cross_origin_download`)
+      const allowedRaw = process.env.CAVECMS_RELEASE_DOWNLOAD_ORIGINS
+      const allowed = allowedRaw
+        ? allowedRaw.split(',').map((s) => s.trim()).filter(Boolean)
+        : []
+      if (!allowed.includes(downloadOrigin)) {
+        throw new Error(`manifest_cross_origin_download`)
+      }
+    }
+    if (!/^https:\/\//i.test(downloadUrl)) {
+      throw new Error('manifest_insecure_download_url')
     }
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('manifest_')) throw err

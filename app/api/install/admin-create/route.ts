@@ -7,6 +7,7 @@ import { readJsonBody } from '@/lib/api/jsonBody'
 import { HttpError } from '@/lib/auth/requireRole'
 import { hashPassword } from '@/lib/auth/scrypt'
 import { hasAnyActiveAdmin } from '@/lib/install/installState'
+import { requireInstallToken } from '@/lib/install/installEndpointHelpers'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 
@@ -54,6 +55,12 @@ export const POST = withError(async (req: Request) => {
   if (!installLimit(ip)) {
     throw new HttpError(429, 'rate_limited')
   }
+
+  // Bootstrap-token gate — closes the public-internet window between
+  // app-boot and wizard-complete. Returns 401 if the token from the
+  // X-Install-Token header doesn't match env.INSTALL_BOOTSTRAP_TOKEN.
+  const tokenFail = requireInstallToken(req)
+  if (tokenFail) return tokenFail
 
   // Stricter check than isInstalled() — refuse if ANY active admin
   // already exists, even if the install_state flag hasn't been set

@@ -123,7 +123,11 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     const req = new Request('http://127.0.0.1:3040/api/admin/updates/apply', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ targetSha: '9999999999999999' }),
+      body: JSON.stringify({
+        targetSha: '9999999999999999',
+        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-9999.zip',
+        sha256: 'a'.repeat(64),
+      }),
     })
     const res = await POST(req, {})
 
@@ -179,7 +183,11 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     const req = new Request('http://127.0.0.1:3040/api/admin/updates/apply', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ targetSha: 'abcdef1' }),
+      body: JSON.stringify({
+        targetSha: 'abcdef1',
+        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-abcdef1.zip',
+        sha256: 'b'.repeat(64),
+      }),
     })
     const res = await POST(req, {})
     expect(res.status).toBe(409)
@@ -191,7 +199,12 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     const req = new Request('http://127.0.0.1:3040/api/admin/updates/apply', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ targetSha: 'abcdef1', force: true }),
+      body: JSON.stringify({
+        targetSha: 'abcdef1',
+        force: true,
+        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-abcdef1.zip',
+        sha256: 'c'.repeat(64),
+      }),
     })
     const res = await POST(req, {})
     expect(res.status).toBe(202)
@@ -224,7 +237,11 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     const req = new Request('http://127.0.0.1:3040/api/admin/updates/apply', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ targetSha: '!!nope!!' }),
+      body: JSON.stringify({
+        targetSha: '!!nope!!',
+        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-bad.zip',
+        sha256: 'd'.repeat(64),
+      }),
     })
     const res = await POST(req, {})
     expect(res.status).toBe(400)
@@ -237,7 +254,11 @@ describe('POST /api/admin/updates/apply (integration)', () => {
     const req = new Request('http://127.0.0.1:3040/api/admin/updates/apply', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ targetSha: '9999999999999999' }),
+      body: JSON.stringify({
+        targetSha: '9999999999999999',
+        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-9999.zip',
+        sha256: 'a'.repeat(64),
+      }),
     })
     const res = await POST(req, {})
     expect(res.status).toBe(409)

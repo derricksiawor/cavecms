@@ -43,6 +43,20 @@ interface AvailableUpdate {
   ts: string
   changelog: string
   isSecurity: boolean
+  // Static-manifest fields plumbed through to apply so the orchestrator
+  // can run tarball-mode without depending on a git checkout (CLI-installed
+  // instances have no .git directory).
+  version: string
+  downloadUrl: string
+  sha256: string
+  minPreviousVersion: string | null
+}
+
+interface ApplyPayload {
+  targetSha: string
+  downloadUrl: string
+  sha256: string
+  force?: boolean
 }
 
 interface CheckResponse {
@@ -70,6 +84,10 @@ export function UpdatesClient({
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
   const [release, setRelease] = useState<HumanRelease | null>(null)
   const [availableShaPrivate, setAvailableShaPrivate] = useState<string | null>(null)
+  // Stash the tarball coordinates so the apply call can pass them through
+  // to the orchestrator (no git-pull on fresh CLI installs).
+  const [availableDownloadUrl, setAvailableDownloadUrl] = useState<string | null>(null)
+  const [availableSha256, setAvailableSha256] = useState<string | null>(null)
   const [current, setCurrent] = useState<CurrentVersion>(currentVersion)
   const [modalOpen, setModalOpen] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -101,17 +119,11 @@ export function UpdatesClient({
     setChecking(true)
     try {
       const r = await csrfFetch('/api/admin/updates/check', { method: 'POST' })
-      // Distinguish the three real failure classes the check route now
-      // emits (per lib/updates/checkLatestRelease error classification):
-      //   - 429 check_rate_limited: GitHub throttled this IP
-      //   - 502 check_repo_not_found: misconfigured update channel
-      //   - 502 check_failed: generic upstream / network problem
-      if (r.status === 429) {
-        toast.error(
-          "GitHub is rate-limiting update checks from this server. Try again in about 30 minutes.",
-        )
-        return
-      }
+      // Distinguish the failure classes the check route emits (per
+      // lib/updates/checkLatestRelease error classification):
+      //   - 502 check_repo_not_found:  manifest URL returned 404 (misconfig)
+      //   - 502 check_unreachable:     network failure reaching the host
+      //   - 502 check_failed:          generic upstream (malformed JSON, etc.)
       if (r.status === 502) {
         let body: { error?: string } | null = null
         try {
@@ -121,10 +133,12 @@ export function UpdatesClient({
         }
         if (body?.error === 'check_repo_not_found') {
           toast.error(
-            "Couldn't find the CaveCMS release repository. Your update channel may be misconfigured — contact support.",
+            "Couldn't find the CaveCMS release manifest. Your update channel may be misconfigured — contact support.",
           )
+        } else if (body?.error === 'check_unreachable') {
+          toast.error("Couldn't reach the CaveCMS release server — check your server's internet access.")
         } else {
-          toast.error("Couldn't reach the CaveCMS release server.")
+          toast.error("The release server returned bad data. Try again later.")
         }
         return
       }
@@ -135,11 +149,15 @@ export function UpdatesClient({
       if (!j.available) {
         setRelease(null)
         setAvailableShaPrivate(null)
+        setAvailableDownloadUrl(null)
+        setAvailableSha256(null)
       } else {
         setRelease(humaniseRelease(j.available))
-        // SHA stays in a private state slot — used only as the apply
-        // payload, never rendered.
+        // SHA + tarball coords stay in private state slots — used only
+        // as the apply payload, never rendered.
         setAvailableShaPrivate(j.available.sha)
+        setAvailableDownloadUrl(j.available.downloadUrl)
+        setAvailableSha256(j.available.sha256)
       }
     } finally {
       setChecking(false)
@@ -152,13 +170,18 @@ export function UpdatesClient({
   }, [])
 
   const handleApply = useCallback(async () => {
-    if (!availableShaPrivate || applying) return
+    if (!availableShaPrivate || !availableDownloadUrl || !availableSha256 || applying) return
     setApplying(true)
     try {
+      const payload: ApplyPayload = {
+        targetSha: availableShaPrivate,
+        downloadUrl: availableDownloadUrl,
+        sha256: availableSha256,
+      }
       const r = await csrfFetch('/api/admin/updates/apply', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ targetSha: availableShaPrivate }),
+        body: JSON.stringify(payload),
       })
       if (r.status === 409) {
         toast.error('An update is already in progress.')
@@ -173,7 +196,7 @@ export function UpdatesClient({
     } finally {
       setApplying(false)
     }
-  }, [availableShaPrivate, applying, toast])
+  }, [availableShaPrivate, availableDownloadUrl, availableSha256, applying, toast])
 
   // Re-run install on the SAME SHA — recovery affordance for a stuck
   // migration / corrupted .next/ cache. The server-side guard refuses
@@ -183,10 +206,38 @@ export function UpdatesClient({
     if (!current.sha || current.sha === 'dev' || applying) return
     setApplying(true)
     try {
+      // Re-run install needs the tarball coords too — without them, the
+      // orchestrator would fall through to git-fetch mode and fail on
+      // CLI-installed (no .git) instances. If we don't have them cached
+      // (operator hit Re-run before a check), fetch them lazily.
+      let downloadUrl = availableDownloadUrl
+      let sha256 = availableSha256
+      if (!downloadUrl || !sha256) {
+        const c = await csrfFetch('/api/admin/updates/check', { method: 'POST' })
+        if (c.ok) {
+          const j = (await c.json()) as CheckResponse
+          if (j.available) {
+            downloadUrl = j.available.downloadUrl
+            sha256 = j.available.sha256
+            setAvailableDownloadUrl(downloadUrl)
+            setAvailableSha256(sha256)
+          }
+        }
+      }
+      if (!downloadUrl || !sha256) {
+        toast.error("Couldn't fetch the release manifest — try Check Now first.")
+        return
+      }
+      const payload: ApplyPayload = {
+        targetSha: current.sha,
+        downloadUrl,
+        sha256,
+        force: true,
+      }
       const r = await csrfFetch('/api/admin/updates/apply', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ targetSha: current.sha, force: true }),
+        body: JSON.stringify(payload),
       })
       if (r.status === 409) {
         toast.error('An update is already in progress.')
@@ -201,7 +252,7 @@ export function UpdatesClient({
     } finally {
       setApplying(false)
     }
-  }, [current.sha, applying, toast])
+  }, [current.sha, applying, toast, availableDownloadUrl, availableSha256])
 
   const handleSaveSettings = useCallback(async () => {
     if (savingSettings || !dirty) return

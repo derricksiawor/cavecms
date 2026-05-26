@@ -4,21 +4,17 @@ import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { HttpError } from '@/lib/auth/requireRole'
-import { isInstalled, __resetInstallStateCache } from '@/lib/install/installState'
+import { isInstalled } from '@/lib/install/installState'
+import { requireInstallToken } from '@/lib/install/installEndpointHelpers'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 
 // POST /api/install/site-init — wizard step 3.
-// Writes settings.site_general (siteUrl + siteName) AND flips the
-// install_state.completedAt flag, which makes the middleware:
-//   - lock /install permanently (subsequent /install GETs → /admin)
-//   - serve every other route normally (the redirect-everything-to-
-//     /install gate stops firing)
-//
-// We bundle site-init + completion into ONE endpoint because the
-// email step is fully skippable (configured later) and the site URL
-// is the last REQUIRED piece of config. If the operator skips email,
-// they land on /done with the install already marked complete.
+// Writes settings.site_general (siteUrl + siteName) ONLY. Completion
+// (flipping install_state.completedAt) was moved to its own endpoint
+// /api/install/complete so the wizard can walk through the optional
+// follow-up steps (branding, contact, SMTP, security baseline) without
+// being locked out by the install-complete middleware gate.
 //
 // Refuses if isInstalled() is already true — defence in depth.
 
@@ -50,6 +46,9 @@ export const POST = withError(async (req: Request) => {
     throw new HttpError(429, 'rate_limited')
   }
 
+  const tokenFail = requireInstallToken(req)
+  if (tokenFail) return tokenFail
+
   if (await isInstalled()) {
     return new Response(JSON.stringify({ error: 'already_installed' }), {
       status: 410,
@@ -59,56 +58,46 @@ export const POST = withError(async (req: Request) => {
 
   const body = Body.parse(await readJsonBody(req))
 
-  await db.transaction(async (tx) => {
-    // Write site_general.
-    const siteGeneralValue = JSON.stringify({
-      siteUrl: body.siteUrl,
-      siteName: body.siteName,
-    })
-    await tx.execute(sql`
-      INSERT INTO settings (\`key\`, value, version, updated_by)
-      VALUES ('site_general', ${siteGeneralValue}, 1, NULL)
-      ON DUPLICATE KEY UPDATE
-        value = VALUES(value),
-        version = version + 1
-    `)
-
-    // Mark install complete. Merge with the existing pending row
-    // that admin-create wrote, preserving its `adminCreatedAt`
-    // forensic marker.
-    const [existingRows] = (await tx.execute(sql`
-      SELECT value FROM settings WHERE \`key\` = 'install_state'
-    `)) as unknown as [Array<{ value: unknown }>]
-    const existingRaw = existingRows[0]?.value
-    const existing =
-      typeof existingRaw === 'string'
-        ? (() => {
-            try {
-              return JSON.parse(existingRaw) as Record<string, unknown>
-            } catch {
-              return {}
-            }
-          })()
-        : ((existingRaw as Record<string, unknown> | null | undefined) ?? {})
-    const installStateValue = JSON.stringify({
-      ...existing,
-      completedAt: new Date().toISOString(),
-      initialSiteUrl: body.siteUrl,
-    })
-    await tx.execute(sql`
-      INSERT INTO settings (\`key\`, value, version, updated_by)
-      VALUES ('install_state', ${installStateValue}, 1, NULL)
-      ON DUPLICATE KEY UPDATE
-        value = VALUES(value),
-        version = version + 1
-    `)
+  // Write site_general ONLY — completion lives in /api/install/complete.
+  const siteGeneralValue = JSON.stringify({
+    siteUrl: body.siteUrl,
+    siteName: body.siteName,
   })
-
-  // Bust the isInstalled() cache so the very next middleware request
-  // sees installed=true and locks /install. Without this, the
-  // operator could refresh /install during the 5s cache window and
-  // briefly re-enter the wizard.
-  __resetInstallStateCache()
+  await db.execute(sql`
+    INSERT INTO settings (\`key\`, value, version, updated_by)
+    VALUES ('site_general', ${siteGeneralValue}, 1, NULL)
+    ON DUPLICATE KEY UPDATE
+      value = VALUES(value),
+      version = version + 1
+  `)
+  // Also stash the initialSiteUrl on install_state so /complete has a
+  // forensic record of which URL the operator entered, surviving any
+  // later site_general edit.
+  const [existingRows] = (await db.execute(sql`
+    SELECT value FROM settings WHERE \`key\` = 'install_state'
+  `)) as unknown as [Array<{ value: unknown }>]
+  const existingRaw = existingRows[0]?.value
+  const existing =
+    typeof existingRaw === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(existingRaw) as Record<string, unknown>
+          } catch {
+            return {}
+          }
+        })()
+      : ((existingRaw as Record<string, unknown> | null | undefined) ?? {})
+  const installStateValue = JSON.stringify({
+    ...existing,
+    initialSiteUrl: body.siteUrl,
+  })
+  await db.execute(sql`
+    INSERT INTO settings (\`key\`, value, version, updated_by)
+    VALUES ('install_state', ${installStateValue}, 1, NULL)
+    ON DUPLICATE KEY UPDATE
+      value = VALUES(value),
+      version = version + 1
+  `)
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,

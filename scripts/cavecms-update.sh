@@ -305,6 +305,23 @@ rollback_to_previous() {
     fi
   fi
 
+  # Tarball-mode installs have no .git directory — `git reset` is a
+  # no-op AND throws "not a git repository" noise. Refuse rollback
+  # explicitly with an operator-actionable message instead of pretending
+  # the rollback worked.
+  if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ] || ! git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    write_status "failed" "${CURRENT_STEP:-1}" \
+      "We couldn't roll back automatically" \
+      "Your site was installed via the one-command CLI (no git history) so we can't auto-restore the previous version. Re-run \`npx create-cavecms\` with the previous version (--version=X.Y.Z) to recover, or contact support." \
+      ""
+    # Toggle maintenance off — site stays on partial state but visitors
+    # shouldn't see a generic 503; operator needs to act.
+    if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+      post_maintenance_toggle false
+    fi
+    return 1
+  fi
+
   (
     cd "$REPO_DIR"
     # Restore code first.
@@ -771,25 +788,32 @@ print((u.path or "/").lstrip("/").split("?")[0])
 fi
 
 # Git working-tree cleanliness: refuse to clobber operator-edited files.
+# SKIPPED ENTIRELY in tarball mode — CLI-installed instances (npx
+# create-cavecms) have no .git directory by design (the zip is the
+# source of truth, not a git checkout). The tarball extract handles
+# its own integrity via sha256, and rollback in tarball mode is
+# handled by keeping the previous release dir on disk.
 cd "$REPO_DIR"
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  write_status "failed" 1 "Your install directory isn't a git repository" "In-app updates need a git-cloned install. Contact support if you're not sure how your site was set up." ""
-  exit 1
+if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    write_status "failed" 1 "Your install directory isn't a git repository" "In-app updates need either a git-cloned install or the static-manifest tarball mode. Contact support if you're not sure how your site was set up." ""
+    exit 1
+  fi
+  # `db/schema-fingerprint.txt` is a derived artifact rewritten by
+  # `pnpm db:fingerprint` at the end of every db:migrate run — it's
+  # expected to be dirty after any prior update and isn't an
+  # operator-edit concern. Exclude it from the cleanliness check so
+  # the preflight doesn't refuse on its own bookkeeping.
+  DIRTY=$(git status --porcelain --untracked-files=no 2>/dev/null | grep -v 'db/schema-fingerprint\.txt' || true)
+  if [ -n "$DIRTY" ]; then
+    write_status "failed" 1 "Your server has unsaved changes" "Someone edited the site files directly on the server. Commit, stash, or discard those changes before updating." ""
+    exit 1
+  fi
+  # Discard any stray fingerprint mod so step 2's `git reset --hard` is
+  # a true no-op when target === HEAD (which it is when we're already
+  # on the version being installed).
+  git checkout -- db/schema-fingerprint.txt 2>/dev/null || true
 fi
-# `db/schema-fingerprint.txt` is a derived artifact rewritten by
-# `pnpm db:fingerprint` at the end of every db:migrate run — it's
-# expected to be dirty after any prior update and isn't an
-# operator-edit concern. Exclude it from the cleanliness check so
-# the preflight doesn't refuse on its own bookkeeping.
-DIRTY=$(git status --porcelain --untracked-files=no 2>/dev/null | grep -v 'db/schema-fingerprint\.txt' || true)
-if [ -n "$DIRTY" ]; then
-  write_status "failed" 1 "Your server has unsaved changes" "Someone edited the site files directly on the server. Commit, stash, or discard those changes before updating." ""
-  exit 1
-fi
-# Discard any stray fingerprint mod so step 2's `git reset --hard` is
-# a true no-op when target === HEAD (which it is when we're already
-# on the version being installed).
-git checkout -- db/schema-fingerprint.txt 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 2 — fetch
@@ -809,7 +833,14 @@ write_status "updating" 2 "Downloading the new version" "" ""
 
 # Save the previous version for rollback (works in both modes — the
 # tarball overlay is tracked by git as file modifications).
-PREVIOUS_SHA=$(git rev-parse HEAD)
+# Capture previous SHA for the rollback path. Skipped in tarball mode
+# (no .git directory) — rollback in that mode refuses with an
+# operator-facing message; there's no "previous commit" to reset to.
+if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ] && git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  PREVIOUS_SHA=$(git rev-parse HEAD)
+else
+  PREVIOUS_SHA=""
+fi
 
 if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
   # ──────── Tarball mode ────────
