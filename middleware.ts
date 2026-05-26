@@ -400,12 +400,19 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // so the safe default is to assume not-installed and route to
   // /install rather than serving the half-broken default site.
   const installed = cfg?.installed === true
+  // Static-asset bypass: requests whose path ends in a file extension
+  // (`/icons/paintbrush.svg`, `/templates/foo.png`, `/window.svg`) must
+  // be served from /public, NOT redirected to /install. Without this,
+  // the wizard's own assets (paintbrush + sparkle SVGs in the Wordmark)
+  // 307 to /install and the browser renders the broken-image glyph.
+  const looksLikeStaticAsset = /\.[a-z0-9]{1,8}$/i.test(pathname)
   if (
     !installed &&
     !pathname.startsWith('/install') &&
     !pathname.startsWith('/api/install') &&
     !pathname.startsWith('/_next/') &&
     !pathname.startsWith('/uploads/') &&
+    !looksLikeStaticAsset &&
     pathname !== '/healthz' &&
     pathname !== '/favicon.ico'
   ) {

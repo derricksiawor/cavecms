@@ -69,6 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html
       lang="en"
       className={`${montserrat.variable} ${marcellus.variable}`}
+      suppressHydrationWarning
     >
       <head>
         <meta name="csp-nonce" content={nonce} />

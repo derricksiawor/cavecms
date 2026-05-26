@@ -120,8 +120,24 @@ awk \
     print
   }' "$HERE/nginx/cavecms.conf.template" > "$TMP"
 
-install -m 644 "$TMP" /etc/nginx/sites-available/cavecms.conf
-ln -sfn /etc/nginx/sites-available/cavecms.conf /etc/nginx/sites-enabled/cavecms.conf
+# Refuse to clobber an existing cavecms.conf without explicit consent.
+# Pre-existing file likely means a prior install OR a different app
+# that happens to share the name — either way the operator should
+# acknowledge it. CAVECMS_FORCE=1 takes a timestamped backup + proceeds.
+NGINX_DEST=/etc/nginx/sites-available/cavecms.conf
+if [ -e "$NGINX_DEST" ]; then
+  if [ "${CAVECMS_FORCE:-}" = "1" ]; then
+    NGINX_BACKUP="$NGINX_DEST.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp "$NGINX_DEST" "$NGINX_BACKUP"
+    echo "[install-nginx.sh] backed up existing config → $NGINX_BACKUP"
+  else
+    echo "[install-nginx.sh] FAIL: $NGINX_DEST already exists." >&2
+    echo "             Either remove it manually, or re-run with CAVECMS_FORCE=1 to back it up first." >&2
+    exit 73
+  fi
+fi
+install -m 644 "$TMP" "$NGINX_DEST"
+ln -sfn "$NGINX_DEST" /etc/nginx/sites-enabled/cavecms.conf
 
 # Validate BEFORE reloading — a syntax error here would tear down
 # the listener and 502 every site nginx serves.

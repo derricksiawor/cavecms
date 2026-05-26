@@ -278,6 +278,51 @@ async function main() {
       logErr('Another migration is already running. Wait for it to finish then retry.')
       process.exit(75) // EX_TEMPFAIL
     }
+
+    // ─── Pre-flight: refuse to clobber an existing customer database ───
+    // CaveCMS's migrations CREATE TABLE IF NOT EXISTS for generic names
+    // (`users`, `posts`, `pages`, `settings`, `media`, `audit_log`,
+    // `content_blocks`, `leads`, `subscribers`, `login_attempts`,
+    // `notifications`). If the operator points us at a database that
+    // ALREADY has tables under those names from another app, our schema
+    // never overlays them — but CaveCMS will then query columns those
+    // foreign tables don't have and crash at runtime.
+    //
+    // Safer to refuse loud than to half-install. The operator can
+    // either create a fresh dedicated database OR explicitly OK the
+    // current state by setting CAVECMS_ALLOW_NONEMPTY_DB=1 (e.g. when
+    // they've manually verified the existing tables won't collide).
+    const [tablesRows] = await conn.query('SHOW TABLES')
+    const existingTables = Array.isArray(tablesRows)
+      ? tablesRows.map((row) => Object.values(row)[0]).filter(Boolean)
+      : []
+    const hasMigrationsTable = existingTables.includes('__drizzle_migrations')
+    const nonMigrationTables = existingTables.filter((t) => t !== '__drizzle_migrations')
+
+    if (nonMigrationTables.length > 0 && !hasMigrationsTable) {
+      logErr('Target database is not empty AND does not look like a previous CaveCMS install.')
+      logErr(`Found ${nonMigrationTables.length} existing table(s):`)
+      for (const t of nonMigrationTables.slice(0, 10)) logErr(`  - ${t}`)
+      if (nonMigrationTables.length > 10) {
+        logErr(`  ... and ${nonMigrationTables.length - 10} more`)
+      }
+      logErr('')
+      logErr('CaveCMS uses generic table names (users, posts, pages, settings, ...) that')
+      logErr('could collide with another app sharing this database. Refusing to proceed.')
+      logErr('')
+      logErr('Options:')
+      logErr('  1. (recommended) Point CaveCMS at a fresh dedicated database:')
+      logErr('       mysql> CREATE DATABASE cavecms CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;')
+      logErr('       mysql> GRANT ALL ON cavecms.* TO \'cavecms\'@\'%\' IDENTIFIED BY \'...\';')
+      logErr('  2. If you\'re SURE no name collisions exist, override:')
+      logErr('       CAVECMS_ALLOW_NONEMPTY_DB=1 ...rerun the installer...')
+      if (process.env.CAVECMS_ALLOW_NONEMPTY_DB !== '1') {
+        await conn.query("SELECT RELEASE_LOCK('cavecms_install_migrate')")
+        process.exit(78) // EX_CONFIG
+      }
+      logErr('CAVECMS_ALLOW_NONEMPTY_DB=1 is set — proceeding at your own risk.')
+    }
+
     await ensureMigrationsTable(conn)
     const applied = await getAppliedHashes(conn)
     log(`Already applied: ${applied.size}`)

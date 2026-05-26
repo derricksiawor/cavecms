@@ -87,6 +87,22 @@ awk -v apex="$APEX" -v staging="$STAGING" -v login="$LOGIN_PATH" -v doc="$DOC_RO
 ' "$TEMPLATE" > "$TMP"
 
 DEST="$VHOST_DIR/cavecms.conf"
+# Refuse to clobber an existing vhost without explicit consent.
+# A pre-existing cavecms.conf likely means a previous install OR a
+# different app that happens to use the same name — either way the
+# operator should know before we overwrite. CAVECMS_FORCE=1 takes a
+# timestamped backup and proceeds.
+if [ -e "$DEST" ]; then
+  if [ "${CAVECMS_FORCE:-}" = "1" ]; then
+    BACKUP="$DEST.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+    sudo cp "$DEST" "$BACKUP"
+    echo "  backed up existing config → $BACKUP"
+  else
+    echo "Refusing to overwrite existing $DEST" >&2
+    echo "  Either remove it manually, or re-run with CAVECMS_FORCE=1 to back it up first." >&2
+    exit 73
+  fi
+fi
 sudo mv "$TMP" "$DEST"
 sudo chmod u=rw,go=r "$DEST"
 echo "Wrote $DEST"

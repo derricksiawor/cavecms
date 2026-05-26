@@ -12,10 +12,14 @@ export function Wordmark({
   size = 'md',
   animated = true,
   label = 'CaveCMS',
+  tone = 'light',
 }: {
   size?: 'sm' | 'md' | 'lg'
   animated?: boolean
   label?: string
+  /** 'light' = ivory text (for dark backgrounds — admin sidebar).
+   *  'dark'  = near-black text (for cream backgrounds — install wizard). */
+  tone?: 'light' | 'dark'
 }) {
   const dim = size === 'lg' ? 30 : size === 'sm' ? 18 : 22
   const wrapDim = dim + 22
@@ -100,7 +104,9 @@ export function Wordmark({
       </span>
 
       <span
-        className="font-display text-[15px] font-semibold tracking-[0.04em] text-ivory"
+        className={`font-display text-[15px] font-semibold tracking-[0.04em] ${
+          tone === 'dark' ? 'text-near-black' : 'text-ivory'
+        }`}
         style={{ fontFeatureSettings: '"ss01"' }}
       >
         {label}

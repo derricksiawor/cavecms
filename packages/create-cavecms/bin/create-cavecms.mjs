@@ -370,6 +370,115 @@ function preflightDeps() {
   }
 }
 
+/**
+ * Refuse if the chosen app port is already bound. Without this, the
+ * service starts up and silently fails to listen — operator sees the
+ * "running on https://…" banner but the public URL 502s.
+ *
+ * Linux: `ss -tnl` (preferred — coreutils on every modern distro).
+ * macOS: `lsof -nP -iTCP:PORT -sTCP:LISTEN`.
+ * Falls back to /dev/tcp probe if neither is available.
+ */
+function preflightPort(port) {
+  const portStr = String(port)
+
+  // Linux: ss is part of iproute2, present everywhere.
+  let ss = spawnSync('ss', ['-tnl'], { encoding: 'utf8' })
+  if (ss.status === 0 && typeof ss.stdout === 'string') {
+    // Match the "Local Address:Port" column: `:PORT ` or `:PORT$`.
+    const re = new RegExp(`[:.]${portStr}\\b`)
+    for (const line of ss.stdout.split('\n').slice(1)) {
+      if (re.test(line)) {
+        die(
+          `Port ${port} is already bound on this host.\n` +
+            `  ${line.trim()}\n` +
+            `  Pick a different port with --port=NNNN (any 4-digit unused port works).`,
+        )
+      }
+    }
+    return
+  }
+  // macOS / BSD: lsof.
+  const lsof = spawnSync(
+    'lsof',
+    ['-nP', `-iTCP:${portStr}`, '-sTCP:LISTEN'],
+    { encoding: 'utf8' },
+  )
+  if (lsof.status === 0 && typeof lsof.stdout === 'string' && lsof.stdout.trim().length > 0) {
+    die(
+      `Port ${port} is already bound on this host.\n` +
+        `  ${lsof.stdout.trim().split('\n').slice(1, 2).join(' ').slice(0, 100)}\n` +
+        `  Pick a different port with --port=NNNN.`,
+    )
+  }
+  // Neither ss nor lsof — quiet pass; the actual bind failure on start
+  // will be loud enough.
+}
+
+/**
+ * VPS-only collision guards. Run before download/install so the
+ * operator finds out about a conflict in <2 seconds instead of after
+ * a 70 MB download + extraction.
+ *
+ * 1. /etc/systemd/system/cavecms.service must NOT exist (would otherwise
+ *    be overwritten by startVps).
+ * 2. The operator's siteUrl host must NOT already appear in an
+ *    existing nginx/apache vhost (would collide on ServerName +
+ *    confuse the certbot flow).
+ */
+function preflightVpsCollisions({ targetDir, siteUrl }) {
+  if (existsSync('/etc/systemd/system/cavecms.service')) {
+    die(
+      'A cavecms.service systemd unit already exists at /etc/systemd/system/cavecms.service.\n' +
+        '  This installer refuses to overwrite it. If you want to replace it:\n' +
+        '    sudo systemctl disable --now cavecms.service\n' +
+        '    sudo rm /etc/systemd/system/cavecms.service\n' +
+        '  Then re-run the installer.',
+    )
+  }
+  if (!siteUrl) return
+  let host = ''
+  try {
+    host = new URL(siteUrl).host.toLowerCase()
+  } catch {
+    return // siteUrl will be re-validated later
+  }
+  if (!host) return
+  // grep -rIl ServerName/server_name across the standard config trees.
+  // -I skips binary; -l prints filenames only. Quiet failure if grep
+  // isn't installed.
+  const places = [
+    '/etc/nginx',
+    '/etc/apache2/sites-available',
+    '/etc/apache2/sites-enabled',
+    '/etc/httpd/conf.d',
+  ].filter((p) => existsSync(p))
+  if (places.length === 0) return
+  // Patterns we'd see in either nginx or Apache config.
+  const patterns = [
+    `\\bserver_name[ \\t][^;]*\\b${host.replace(/\./g, '\\.')}\\b`,
+    `\\bServerName[ \\t]+${host.replace(/\./g, '\\.')}\\b`,
+    `\\bServerAlias[ \\t][^\\n]*\\b${host.replace(/\./g, '\\.')}\\b`,
+  ]
+  for (const dir of places) {
+    for (const pattern of patterns) {
+      const r = spawnSync(
+        'grep',
+        ['-rIlE', pattern, dir],
+        { encoding: 'utf8' },
+      )
+      if (r.status === 0 && typeof r.stdout === 'string' && r.stdout.trim().length > 0) {
+        const files = r.stdout.trim().split('\n').slice(0, 3)
+        die(
+          `The hostname ${host} is already in an existing web-server config:\n` +
+            files.map((f) => `  ${f}`).join('\n') +
+            '\n  Pick a different subdomain OR remove the existing config first.',
+        )
+      }
+    }
+  }
+}
+
 function defaultInstallDir(surface, siteName) {
   if (surface === 'vps') return `/opt/cavecms`
   if (surface === 'cpanel') return join(homedir(), siteName || 'cavecms')
@@ -1065,6 +1174,18 @@ async function main(argv) {
 
   log.step(1, 7, 'Pre-flight checks…')
   const createdTargetDir = preflightTargetDir(targetDir)
+  // Port collision check runs early, BEFORE we download the zip — so a
+  // misconfigured --port doesn't waste minutes on a download that
+  // can't bind. The default 3040 from DEFAULT_PORT may already be in
+  // use on a server with other Node apps.
+  const portToProbe = args.port ?? Number(envOr('CAVECMS_PORT', String(DEFAULT_PORT)))
+  preflightPort(portToProbe)
+  // VPS-only safety: refuse to overwrite an existing cavecms.service
+  // and refuse if the operator's chosen ServerName already appears in
+  // an nginx / Apache vhost on this box.
+  if (surface === 'vps') {
+    preflightVpsCollisions({ targetDir, siteUrl: envOr('CAVECMS_SITE_URL', '') })
+  }
   log.ok('Pre-flight OK.')
 
   // Track which phase we're in so the catch handler can clean up

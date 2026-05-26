@@ -116,7 +116,7 @@ export function InstallWizard({
     <main className="min-h-screen bg-cream py-12 px-4">
       <div className="mx-auto max-w-2xl">
         <div className="flex items-center justify-center pb-8">
-          <Wordmark label="CaveCMS" />
+          <Wordmark label="CaveCMS" tone="dark" />
         </div>
 
         {tokenMissing && (
