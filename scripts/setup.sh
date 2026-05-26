@@ -339,6 +339,28 @@ install -d -o root -g cavecms -m 750 /etc/cavecms
 # scripts/systemd/cavecms-{db,uploads}-backup.service and
 # scripts/systemd/cavecms-cron-purge.service.
 install -d -o root -g cavecmsstate -m 2770 /var/lib/cavecms
+# Snapshot root for the in-app updater. Mode 2770 (setgid +
+# group-rwx) so the orchestrator running as the cavecms-user group
+# can write here; the setgid bit ensures every child snapshot dir
+# inherits the cavecmsstate group, so a later watchdog rollback can
+# read it back even if it runs under a different (but cavecmsstate-
+# group-member) user. snapshot_current_tree in
+# scripts/lib/cavecms-update-helpers.sh assumes this dir exists and
+# is writable at runtime — provisioning here gives the orchestrator
+# its first snapshot a stable home.
+install -d -o root -g cavecmsstate -m 2770 /var/lib/cavecms/snapshots
+
+# Logrotate config for /var/log/cavecms/*.log. The in-app updater
+# + watchdog write ~20 distinct log streams that accumulate over
+# the install's lifetime — without rotation, a weekly-updating
+# install grows the log dir by ~50 MB/year. Ship the config from
+# deploy/logrotate.d/cavecms; install via root:root 0644 so any
+# logrotate runner (default cron.daily) can read it.
+if [ -f "$(dirname "$0")/../deploy/logrotate.d/cavecms" ]; then
+  install -o root -g root -m 0644 \
+    "$(dirname "$0")/../deploy/logrotate.d/cavecms" \
+    /etc/logrotate.d/cavecms
+fi
 
 # Same-FS assertion: uploads-move semantics (originals → variants and
 # .tmp → originals on commit) require a single filesystem. If an

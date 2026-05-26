@@ -1,0 +1,44 @@
+# /etc/logrotate.d/cavecms — install rotation for the in-app updater +
+# watchdog log streams. Provisioned by `scripts/setup.sh` (install -m
+# 0644 deploy/logrotate.d/cavecms /etc/logrotate.d/cavecms).
+#
+# Streams created over a typical install life:
+#   /var/log/cavecms/cavecms-update-spawn.log    (apply route annotation)
+#   /var/log/cavecms/watchdog.log                (post-completion guard)
+#   /var/log/cavecms/watchdog-spawn.log
+#   /var/log/cavecms/snapshot.log
+#   /var/log/cavecms/restore.log
+#   /var/log/cavecms/maintenance-toggle.log
+#   /var/log/cavecms/audit-terminal.log
+#   /var/log/cavecms/verify-loop.log             (~10 KB / update)
+#   /var/log/cavecms/db-backup.log
+#   /var/log/cavecms/db-restore.log
+#   /var/log/cavecms/pm2-reload.log
+#   /var/log/cavecms/pm2-save.log
+#   /var/log/cavecms/build.log
+#   /var/log/cavecms/pnpm-install.log
+#   /var/log/cavecms/tarball-download.log
+#   /var/log/cavecms/tarball-extract.log
+#   /var/log/cavecms/preflight.log
+#   /var/log/cavecms/rollback-install.log
+#   /var/log/cavecms/watchdog-install.log
+#   /var/log/cavecms/force-clean.log
+#
+# Worst case (weekly updates) ~50 MB/year without rotation; rotation
+# caps the footprint while keeping enough history for post-mortem.
+#
+# `copytruncate` is used so we don't need to coordinate with the
+# orchestrator / watchdog — they hold the file open via append-mode
+# fds; sending HUP would require integrating with their (non-
+# existent) reload protocol.
+
+/var/log/cavecms/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0640 root root
+}

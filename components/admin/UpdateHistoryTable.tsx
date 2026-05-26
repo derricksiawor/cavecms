@@ -66,6 +66,16 @@ interface DiffShape {
   durationMs?: number
   error?: string
   force?: boolean
+  /** Machine-readable cause of a terminal transition. The watchdog
+   *  sets this to 'post_completion_watchdog' on automatic rollback
+   *  after a delayed crash. The history row uses it to swap the
+   *  "Rolled back" label for "Rolled back automatically". */
+  reason?: string
+  /** Detach mechanism the apply route picked for this run. Captured
+   *  on the kick-off (apply / force_apply) row only. Surfaced as a
+   *  tiny hint on the row so an operator can spot when a host drops
+   *  from systemd-run-user → nohup-only. */
+  detachMechanism?: string
 }
 
 function parseDiff(raw: unknown): DiffShape {
@@ -99,6 +109,20 @@ const STATUS_TONE: Record<string, string> = {
   completed: 'bg-emerald-100 text-emerald-700',
   failed: 'bg-red-100 text-red-700',
   rolled_back: 'bg-red-100 text-red-700',
+}
+
+// Render the human-readable label for a history row. For most rows
+// the regular audit-action label is enough ("Update applied",
+// "Update succeeded", etc.). The watchdog-triggered rollback is the
+// one exception — operators NEED to distinguish "the update itself
+// failed" from "the update succeeded but the site went unhealthy
+// 4 minutes later and we rolled it back automatically". Both are
+// `rolled_back` rows in the DB but they tell very different stories.
+function renderActionLabel(action: string, reason: string | undefined): string {
+  if (action === 'rolled_back' && reason === 'post_completion_watchdog') {
+    return 'Rolled back automatically'
+  }
+  return humaniseAuditAction(action)
 }
 
 export function UpdateHistoryTable() {
@@ -218,7 +242,7 @@ export function UpdateHistoryTable() {
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-medium ${tone}`}
                       >
-                        {humaniseAuditAction(r.action)}
+                        {renderActionLabel(r.action, d.reason)}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-[11px] text-warm-stone">

@@ -40,3 +40,25 @@ export const RELEASE_CHANGELOG_MAX_BYTES = 4096
 
 /** Hard timeout on the outbound GitHub fetch. */
 export const RELEASE_FETCH_TIMEOUT_MS = 10_000
+
+// ─── Post-completion watchdog (gap D close) ─────────────────────────
+// After a successful update, scripts/cavecms-watchdog.sh is spawned
+// detached to poll /healthz. On WATCHDOG_FAIL_THRESHOLD consecutive
+// fails it rolls back from the pre-update snapshot. Numbers below are
+// mirrored in scripts/cavecms-watchdog.sh defaults — keep them in sync.
+
+/** Poll cadence inside the watchdog. 30 s balances "catches a crash
+ *  fast enough that visitors don't get a long broken window" against
+ *  "doesn't churn the DB / log files / health endpoint". */
+export const WATCHDOG_INTERVAL_MS = 30_000
+
+/** Total guard window after a successful update. 1 h covers the most
+ *  common "delayed crash" failure modes (memory-leak first-OOM, route
+ *  compiled-on-first-hit fails, dep that only loads under traffic). */
+export const WATCHDOG_DURATION_MS = 60 * 60 * 1000
+
+/** Consecutive healthz failures required before triggering rollback.
+ *  3 × 30 s = 90 s sustained unhealthy is the threshold — short
+ *  enough that a real crash gets caught quickly, long enough that
+ *  one transient blip can't rollback a healthy install. */
+export const WATCHDOG_FAIL_THRESHOLD = 3

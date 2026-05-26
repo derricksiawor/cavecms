@@ -61,6 +61,14 @@ export interface UpdateStatus {
   error?: string
   /** Last 16 lines of script stderr/stdout for the modal's "details". */
   log?: string
+  /** ISO timestamp until which the post-completion watchdog is
+   *  guarding the install. Set by the orchestrator at the end of a
+   *  successful update (typically completedAt + 1h). The UI surfaces
+   *  a "we'll keep an eye on your site for the next hour" hint while
+   *  this is in the future and the state is `completed`. Cleared
+   *  by the watchdog when the window elapses or when it triggers a
+   *  rollback. */
+  watchdogUntil?: string | null
 }
 
 const TERMINAL_STATES: ReadonlySet<UpdateState> = new Set<UpdateState>([
@@ -85,13 +93,19 @@ export function __setStatusPathForTests(path: string | null): void {
 
 function ensureAllowedPath(candidate: string): string {
   const resolved = resolve(candidate)
-  // Allow the per-platform temp dir (matches os.tmpdir() — on macOS
-  // that's $TMPDIR i.e. /var/folders/.../T/, on Linux it's /tmp).
-  if (resolved.startsWith(resolve(tmpdir()) + '/')) return resolved
-  // Also explicitly allow literal /tmp/* for dev/test paths that
-  // hardcode the Linux-default temp location. Both are widely-used
-  // dev conventions; both are safe (not under /etc/, /usr/, etc.).
-  if (resolved.startsWith('/tmp/')) return resolved
+  const isProd = process.env.NODE_ENV === 'production'
+  // /tmp + os.tmpdir() are ALLOWED in dev/test only. On production
+  // /tmp is world-writable and prone to symlink-precreate attacks —
+  // an attacker (or another low-priv process) can create the status
+  // file as a symlink to /etc/cron.d/cavecms.cron before we open it.
+  // Our atomic-rename via writeFileSync would then follow the symlink
+  // and stomp the target. In production we lock the allowlist to
+  // /var/lib/cavecms/* (root:cavecmsstate 2770), which is provisioned
+  // by setup.
+  if (!isProd) {
+    if (resolved.startsWith(resolve(tmpdir()) + '/')) return resolved
+    if (resolved.startsWith('/tmp/')) return resolved
+  }
   for (const prefix of ALLOWED_DIR_PREFIXES) {
     if (resolved === prefix.replace(/\/$/, '') || resolved.startsWith(prefix)) {
       return resolved
@@ -280,6 +294,42 @@ export function readLockPid(): number | null {
  * and let a second operator acquire a second lock while the first
  * is still running.
  */
+// Check whether the PID-holding process is one of our update scripts
+// by reading /proc/<pid>/cmdline (Linux). Closes two gaps:
+//   1. EPERM on cross-user PIDs — kill(0) returns EPERM if the lock-
+//      holding PID exists but is owned by a different user. Without
+//      this check, we'd treat ANY alive PID at that number as "our
+//      orchestrator" and refuse new updates for the full mtime
+//      stale window.
+//   2. PID recycling — on a busy host, the orchestrator's PID can
+//      recycle to an unrelated process within seconds of orchestrator
+//      death. kill(0) returns success against the recycled PID,
+//      lockIsStale() falsely returns false, operator gets stuck.
+// Returns true ONLY when /proc/<pid>/cmdline confirms one of our
+// scripts. Returns null on platforms without /proc (macOS dev).
+function pidIsCaveCmsScript(pid: number): boolean | null {
+  try {
+    const raw = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+    // /proc cmdline uses NUL separators. Look for our known script
+    // names anywhere in the joined cmdline. Both the orchestrator and
+    // watchdog scripts qualify.
+    const joined = raw.replace(/\0/g, ' ')
+    return (
+      joined.includes('cavecms-update.sh') ||
+      joined.includes('cavecms-watchdog.sh')
+    )
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    // ENOENT — process is gone.
+    if (code === 'ENOENT') return false
+    // EACCES — different user owns /proc/<pid>; we can't read its
+    // cmdline. Treat as "unknown" — fall back to PID liveness only.
+    // ENOTDIR / not Linux → null (caller falls through).
+    if (code === 'EACCES') return null
+    return null
+  }
+}
+
 export function lockIsStale(): boolean {
   try {
     statSync(getLockPath())
@@ -287,38 +337,44 @@ export function lockIsStale(): boolean {
     // No lock file → not stale (and nothing to clean up).
     return false
   }
-  // Primary check: PID liveness. If the orchestrator stamped its PID
-  // into the lock (newer apply route) we can probe the process
-  // directly with kill(0). If the process is gone (ESRCH) the lock
-  // is stale regardless of how recently the status file was written.
-  // This closes the SIGKILL-orphans-15min-wedge gap where the
-  // orchestrator dies untrappably but its status file's `updatedAt`
-  // looks fresh — apply route would otherwise refuse new updates
-  // for the full UPDATE_STALE_AFTER_MS window.
+  // Primary check: PID liveness + script-identity. We need BOTH:
+  //   - kill(pid, 0) confirms a process exists at that PID
+  //   - /proc/<pid>/cmdline confirms it's our script (closes PID-
+  //     recycling false positives, closes cross-user EPERM stalls)
   const pid = readLockPid()
   if (pid !== null) {
+    let aliveByKill: boolean | null = null
     try {
-      // POSIX kill(pid, 0) sends no signal but returns success only
-      // if the caller has permission to signal the process — i.e.,
-      // if the process exists. ESRCH means "no such process".
       process.kill(pid, 0)
-      // Process is alive → lock NOT stale (regardless of status mtime).
-      return false
+      aliveByKill = true
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
-      if (code === 'ESRCH') {
-        // Definitively dead.
-        return true
-      }
-      // EPERM means it exists but we can't signal it (different
-      // user). Treat as alive — better to refuse a duplicate apply
-      // than race a real running orchestrator.
-      if (code === 'EPERM') return false
-      // Anything else, fall through to the status-mtime heuristic.
+      if (code === 'ESRCH') aliveByKill = false
+      else aliveByKill = null // EPERM or unknown — can't decide via kill
     }
+    if (aliveByKill === false) return true // definitively dead
+
+    const isOurs = pidIsCaveCmsScript(pid)
+    if (isOurs === false) {
+      // Process exists at that PID but it's NOT one of our scripts.
+      // Either PID recycled to an unrelated process OR something
+      // else stamped this PID into our lock. Lock is effectively
+      // stale.
+      return true
+    }
+    if (isOurs === true) {
+      // Definitely our script. We already returned early on
+      // aliveByKill === false, so the PID is either alive (kill
+      // returned true) or "EPERM but cmdline matched ours" — either
+      // way, NOT stale.
+      return false
+    }
+    // isOurs === null (no /proc, e.g. macOS dev) — fall through
+    // to the mtime heuristic. On macOS dev we can't do better.
   }
-  // Fallback (unstamped lock from an older apply route, or readLockPid
-  // failure): use the status file's `updatedAt`.
+  // Fallback (unstamped lock from an older apply route, no /proc
+  // available, or readLockPid failure): use the status file's
+  // `updatedAt`.
   const status = readStatus()
   if (!status) {
     // Lock exists but status file is gone → the orchestrator

@@ -46,6 +46,12 @@ const Body = z
       .regex(/^[0-9a-fA-F]+$/),
     durationMs: z.number().int().min(0).max(86_400_000).optional(),
     error: z.string().max(500).optional(),
+    // Machine-readable cause for the terminal transition. Stored in
+    // diff.reason; the Update History UI surfaces a distinct copy
+    // variant when reason === 'post_completion_watchdog' (an automatic
+    // rollback triggered by the 1h post-update health guard, not a
+    // failure during the update itself).
+    reason: z.string().max(100).optional(),
   })
   .strict()
 
@@ -81,7 +87,7 @@ export async function POST(req: Request): Promise<Response> {
     return jsonInternal({ error: 'invalid_payload' }, 400)
   }
 
-  const { action, fromSha, toSha, durationMs, error } = parsed.data
+  const { action, fromSha, toSha, durationMs, error, reason } = parsed.data
   const fromLower = fromSha.toLowerCase()
   const toLower = toSha.toLowerCase()
 
@@ -96,6 +102,7 @@ export async function POST(req: Request): Promise<Response> {
         toSha: toLower,
         ...(typeof durationMs === 'number' ? { durationMs } : {}),
         ...(typeof error === 'string' && error.length > 0 ? { error } : {}),
+        ...(typeof reason === 'string' && reason.length > 0 ? { reason } : {}),
       },
       ip: null,
       userAgent: null,

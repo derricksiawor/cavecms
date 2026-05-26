@@ -28,6 +28,19 @@ export function getCurrentVersion(): CurrentVersion {
   if (!rawSha || rawSha === 'unknown') {
     return { sha: 'dev', ts: null }
   }
+  // Hex-shape validation. CAVECMS_COMMIT is meant to be a git short
+  // SHA (7-64 hex chars) — that's what scripts/deploy.sh and the
+  // orchestrator's env-rewrite write. A non-hex value here means
+  // env tampering, a malformed deploy, or a manual edit. The Update
+  // surface uses this value as a *directory name* (snapshot path),
+  // so falling through with an arbitrary string would let a value
+  // like `../../etc` redirect snapshot/restore primitives outside
+  // SNAPSHOT_ROOT. Coerce to 'dev' (the safe "no update available"
+  // signal) so the orchestrator's apply-time check at /api/admin/
+  // updates/apply refuses cleanly.
+  if (!/^[0-9a-f]{7,64}$/i.test(rawSha)) {
+    return { sha: 'dev', ts: null }
+  }
   return {
     sha: rawSha,
     ts: rawTs ?? null,

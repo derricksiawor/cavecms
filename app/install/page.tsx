@@ -40,6 +40,17 @@ export default async function InstallPage({
   const tokenParam = (await searchParams)?.t
   const bootstrapToken = typeof tokenParam === 'string' ? tokenParam : null
 
+  // Mirror the server-side gate in requireInstallToken(): the token is
+  // only required when (a) we're in production, or (b) the env var is
+  // set to a real-looking value. In contributor dev (`pnpm dev` with no
+  // INSTALL_BOOTSTRAP_TOKEN in .env.local) the server falls through,
+  // so the wizard must NOT show the "Missing install token" banner —
+  // it would just confuse the contributor.
+  const envToken = process.env.INSTALL_BOOTSTRAP_TOKEN
+  const tokenRequired =
+    process.env.NODE_ENV === 'production' ||
+    (typeof envToken === 'string' && envToken.length >= 32)
+
   if (alreadyInstalled) {
     return (
       <main className="mx-auto max-w-xl px-6 py-24 text-center">
@@ -57,5 +68,11 @@ export default async function InstallPage({
     )
   }
 
-  return <InstallWizard guessedSiteUrl={guessedSiteUrl} bootstrapToken={bootstrapToken} />
+  return (
+    <InstallWizard
+      guessedSiteUrl={guessedSiteUrl}
+      bootstrapToken={bootstrapToken}
+      tokenRequired={tokenRequired}
+    />
+  )
 }

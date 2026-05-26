@@ -52,9 +52,15 @@ const STEP_LABELS: Record<Step, string> = {
 export function InstallWizard({
   guessedSiteUrl,
   bootstrapToken,
+  tokenRequired,
 }: {
   guessedSiteUrl: string
   bootstrapToken: string | null
+  /** Mirrors the server's requireInstallToken() gate. False in
+   *  contributor dev with no INSTALL_BOOTSTRAP_TOKEN — banner stays
+   *  hidden so the contributor isn't told to paste a token that the
+   *  server isn't going to check anyway. */
+  tokenRequired: boolean
 }) {
   const [step, setStep] = useState<Step>('welcome')
   const [finalLoginPath, setFinalLoginPath] = useState<string | null>(null)
@@ -108,7 +114,11 @@ export function InstallWizard({
   // Show a clear "missing token" banner if NO token reached the wizard
   // (URL had no ?t= AND sessionStorage was empty). They probably typed
   // the URL manually — the CLI's printed URL ALWAYS includes the token.
-  const tokenMissing = !resolvedToken
+  // Only show when the server actually requires a token. In contributor
+  // dev (NODE_ENV !== production AND no INSTALL_BOOTSTRAP_TOKEN env)
+  // the server falls through; nagging the contributor would be a UX
+  // leak with no security benefit.
+  const tokenMissing = tokenRequired && !resolvedToken
 
   const goTo = (s: Step) => setStep(s)
 
@@ -1023,7 +1033,11 @@ function SecurityStep({
 function DoneStep({ loginPath }: { loginPath: string | null }) {
   const [completing, setCompleting] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [completedAt, setCompletedAt] = useState<string | null>(null)
+  // `completedAt` is captured for future use (timestamp on the
+  // success screen, telemetry on first-login analytics). Setter only
+  // for now — read-side wiring lives in a follow-up. Prefixed with
+  // _ so the no-unused-vars rule passes.
+  const [, setCompletedAt] = useState<string | null>(null)
   const firedRef = useRef(false)
 
   // Completion runs once on mount via useEffect — NOT inside the render

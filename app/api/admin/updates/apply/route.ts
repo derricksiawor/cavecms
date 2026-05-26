@@ -5,6 +5,7 @@ import {
   statSync,
   mkdirSync,
   existsSync,
+  appendFileSync,
   constants as fsConstants,
 } from 'node:fs'
 import path, { resolve } from 'node:path'
@@ -27,6 +28,10 @@ import {
   releaseUpdateLock,
   lockIsStale,
 } from '@/lib/updates/statusFile'
+import {
+  detectDetachMechanism,
+  buildDetachCommand,
+} from '@/lib/updates/detachMechanism'
 
 // POST /api/admin/updates/apply — kick off the update orchestrator
 // asynchronously and return 202 immediately. The shell script runs
@@ -125,6 +130,24 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_RELEASE_PROBE_URL',
   'CAVECMS_LOG_DIR',
   'CAVECMS_INTERNAL_URL',
+  // Tells the orchestrator (and via env-inheritance, the watchdog
+  // it spawns) which detach mechanism the apply route chose. Keeps
+  // orchestrator + watchdog using the same mechanism the apply
+  // route already validated was available.
+  'CAVECMS_DETACH_MECHANISM',
+  // Pass XDG_RUNTIME_DIR through so spawn_detached's user-systemd
+  // probe inside the orchestrator agrees with the apply route's
+  // selection. Without it, the child would re-probe with no bus
+  // env and fall back to setsid-nohup spuriously.
+  'XDG_RUNTIME_DIR',
+  // PM2_HOME: required so the orchestrator's + watchdog's `pm2 reload`
+  // talks to the SAME pm2 daemon the Node process was launched under.
+  // Without this, a non-default PM2_HOME (e.g. `/var/www/.pm2` on the
+  // www-data-managed prod install) silently reloads a daemon that
+  // doesn't know about the cavecms process — healthz keeps returning
+  // ok because the old process is still up, and the apply path
+  // appears to succeed while the actual reload did nothing.
+  'PM2_HOME',
   // DB connectivity for db:migrate inside step 3.
   'DATABASE_URL',
   'DATABASE_MIGRATOR_URL',
@@ -187,24 +210,27 @@ function buildScriptEnv(
   return out
 }
 
-// Refuse any path that contains bytes bash will interpret inside the
-// double-quotes of the detach command. The wrapper is:
-//   bash -c '... >>"$logPath" ... bash "$scriptPath" "$target"'
-// Inside bash double-quotes, only `$`, `` ` ``, `\`, `"`, and newline
-// are special. JSON.stringify already escapes `"` and `\` (turns
-// internal `"` into `\"`). The remaining injection vectors are:
-//   - `$(...)` / `${...}` / `$VAR`  — `$` + following char
-//   - `` `...` `` — backtick command substitution
-//   - newline — argument-list desync
-// We refuse those three plus controls — letting through spaces and
-// non-ASCII letters so legitimate install paths like
-// `/srv/café/cavecms` or `/Users/Derrick OConnor/cavecms` keep working.
+// Refuse any path that contains bytes bash will interpret in EITHER
+// the double-quote OR single-quote contexts the detach mechanisms use.
+// Mechanisms in scope:
+//   - setsid-nohup / nohup-only: `bash -c '... >>"$logPath" ... bash
+//     "$scriptPath" "$target"'` — outer single quotes, inner double.
+//   - systemd-run-user: `systemd-run … -- /bin/bash -c 'exec …
+//     >>"$logPath" 2>&1; /bin/bash "$scriptPath" "$target"'` — same
+//     pattern; outer single-quoted block contains the bash command.
 //
-// Allowlist regexes were tried first; they false-positive on perfectly
-// valid Unicode dirs. A denylist scoped to the actual bash-double-quote
-// active set is more precise.
-// eslint-disable-next-line no-control-regex
-const SHELL_DOUBLEQUOTE_DANGEROUS = /[$`\\\x00-\x1f]/
+// Inside the outer single-quoted block, `'` is the active terminator
+// (no escape inside single quotes — closing + reopening is the only
+// way to embed one, and operator-controlled paths must not be able
+// to do that). Inside the inner double quotes, `$`, `` ` ``, `\`, `"`,
+// and newline are special. JSON.stringify covers `"` and `\` for the
+// inner context — but `'` is NOT a JSON metacharacter and survives
+// stringification verbatim. So we must denylist it here.
+//
+// Denylist scope: `$`, `` ` ``, `\`, `'`, controls. Spaces and non-
+// ASCII letters pass so legitimate install paths like
+// `/srv/café/cavecms` or `/Users/Derrick OConnor/cavecms` keep working.
+const SHELL_DOUBLEQUOTE_DANGEROUS = /[$`\\'\x00-\x1f]/
 
 function assertSafePathForShell(p: string, label: string): void {
   if (SHELL_DOUBLEQUOTE_DANGEROUS.test(p)) {
@@ -314,12 +340,14 @@ export const POST = withError(async (req: Request) => {
   // from a malformed CAVECMS_COMMIT or a 'dev' partial). We also require
   // the shorter side to be ≥ 7 chars so accidentally-short SHAs don't
   // match unrelated tags.
-  // Refuse a malformed current.sha up front. CAVECMS_COMMIT shorter
-  // than 7 chars (anything except 'dev', already filtered above) is
-  // either a typo or an old environment that predates the new
-  // release-pipeline conventions. Better to fail loud than silently
-  // proceed with an unreliable prefix match.
-  if (current.sha.length < 7) {
+  // Refuse a malformed current.sha up front. CAVECMS_COMMIT must be
+  // hex of length 7-64 (or 'dev', filtered above). The script side
+  // uses this value as a directory name for snapshots, so a
+  // path-traversal-shaped value (`../../etc`) would let the
+  // snapshot/restore primitives operate outside SNAPSHOT_ROOT. Hex
+  // shape is the canonical shape git produces; anything else is
+  // a typo or a tampering attempt — reject loud.
+  if (!/^[0-9a-f]{7,64}$/i.test(current.sha)) {
     throw new HttpError(409, 'current_sha_malformed')
   }
   const isSameSha = (() => {
@@ -453,38 +481,41 @@ export const POST = withError(async (req: Request) => {
       downloadUrl,
       sha256,
     })
+    // (4) Choose the strongest detach mechanism the host supports.
+    //     systemd-run-user (cgroup escape) → setsid-nohup (session
+    //     escape) → nohup-only (POSIX baseline). Propagate the choice
+    //     to the orchestrator so the watchdog it later spawns uses
+    //     the same one (no per-process re-probing).
+    const detachMechanism = detectDetachMechanism()
+    scriptEnv.CAVECMS_DETACH_MECHANISM = detachMechanism
     const logFd = openSpawnLog()
 
-    // Double-fork orphan pattern. `detached: true` + `setsid` alone
-    // is NOT enough on macOS to escape pm2's reload-time
-    // process-tree walk — when the pm2 daemon kill_timeouts the OLD
-    // Node process (8s default), it can deliver SIGKILL to children
-    // even after setsid. The orchestrator script then dies mid-step-6
-    // with no trap fire (SIGKILL untrappable). On Linux + systemd
-    // this isn't an issue because systemd-run --no-block creates a
-    // fresh scope.
+    // Build the detach command for the chosen mechanism. The detail
+    // of each mechanism lives in lib/updates/detachMechanism.ts; here
+    // we just thread paths + target through.
     //
-    // To get equivalent isolation without systemd: wrap the script
-    // invocation in a subshell that re-opens its own log fd, then
-    // backgrounds the orchestrator with nohup + disown so the child
-    // has no inherited fds from Node, no controlling terminal, and
-    // no parent process group. pm2's kill-tree walk finds nothing.
-    //
-    // Pattern:
-    //   ( exec </dev/null >>$LOG 2>&1
-    //     nohup /bin/bash $SCRIPT $TARGET >>$LOG 2>&1 &
-    //     disown
-    //   ) ; exit 0
-    //
-    // The outer subshell exits with status 0 immediately; pm2 sees
-    // the spawn complete cleanly. The orchestrator runs as an
-    // orphaned grandchild, reparented to launchd (PID 1) on macOS.
+    // The orchestrator runs as an orphaned grandchild reparented to
+    // PID 1 (launchd on macOS, init/systemd on Linux). pm2's
+    // kill-tree walk on reload finds nothing under our process.
     const logPath = resolveSpawnLogPath()
-    // Shell-quoting: paths and target are operator/route-controlled
-    // strings; targetSha has been Zod-validated to /^[0-9a-f]+$/i.
-    // scriptPath is the route's own resolved path. Both safe to inline
-    // single-quoted with no operator-controlled escape risk.
-    const detachCommand = `( exec </dev/null >>${JSON.stringify(logPath)} 2>&1; nohup /bin/bash ${JSON.stringify(scriptPath)} ${JSON.stringify(target)} >>${JSON.stringify(logPath)} 2>&1 & disown ) ; exit 0`
+    // Annotate the spawn log with the chosen mechanism BEFORE
+    // spawning so a post-mortem can correlate which path was taken
+    // even if the orchestrator dies before its own first write_status.
+    try {
+      appendFileSync(
+        logPath,
+        `[${new Date().toISOString()}] [apply] detach_mechanism=${detachMechanism} target=${target.slice(0, 12)} from=${current.sha.slice(0, 12)}\n`,
+        { mode: 0o600 },
+      )
+    } catch {
+      /* best-effort annotation — spawn proceeds regardless */
+    }
+    const detachCommand = buildDetachCommand({
+      mechanism: detachMechanism,
+      scriptPath,
+      args: [target],
+      logPath,
+    })
     const child = spawn('/bin/bash', ['-c', detachCommand], {
       detached: true,
       stdio: ['ignore', logFd, logFd],
@@ -545,6 +576,11 @@ export const POST = withError(async (req: Request) => {
           fromSha: current.sha,
           toSha: target,
           ...(force ? { force: true } : {}),
+          // Which detach mechanism the apply route picked for this
+          // run. Operators can spot a host that downgraded from
+          // systemd-run-user (cgroup-safe) to nohup-only (POSIX
+          // baseline) — a signal that user systemd isn't running.
+          detachMechanism,
         },
         ip: meta.ip,
         userAgent: meta.userAgent,

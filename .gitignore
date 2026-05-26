@@ -128,9 +128,19 @@ next-env.d.ts
 !/scripts/systemd/**
 !/scripts/cavecms-update.sh
 !/scripts/cavecms-updates-check.sh
+# The watchdog + shared helpers ship in the customer release zip and
+# are sourced by cavecms-update.sh; both must be tracked + bundled.
+!/scripts/cavecms-watchdog.sh
+!/scripts/lib/
+!/scripts/lib/**
 !/scripts/install-migrate.mjs
-!/scripts/release/
-!/scripts/release/**
+
+# Publisher-only tooling — NEVER tracked. `scripts/release/build-zip.mjs`,
+# `publish.mjs`, the SSH known_hosts, and the releases-host nginx config
+# live locally on the publisher's box and produce + push the customer
+# zip to cavecms.derricksiawor.com. Customers + the public must not
+# see how releases are built or pushed.
+/scripts/release/
 
 # Release artifacts (built by scripts/release/build-zip.mjs) — never committed.
 # Published to cavecms.derricksiawor.com via scripts/release/publish.mjs.

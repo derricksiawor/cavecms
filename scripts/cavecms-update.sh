@@ -106,78 +106,16 @@ if ! ( touch "$LOG_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$LOG_DIR/.cav
 fi
 
 # ---------------------------------------------------------------------------
-# Status helpers — atomic JSON write via tmp + rename(2).
+# Shared helpers — write_status, snapshot_current_tree,
+# restore_from_snapshot, prune_old_snapshots, post_maintenance_toggle,
+# post_audit_terminal, db_backup, restore_db_backup, spawn_detached,
+# internal_base_url, now_iso, rand_suffix, json_escape, read_status_state.
+# All sourced from scripts/lib/cavecms-update-helpers.sh so the watchdog
+# (scripts/cavecms-watchdog.sh) sees the same primitives.
 # ---------------------------------------------------------------------------
-# Portable ISO-ish timestamp. macOS BSD `date` does not support %N
-# (nanoseconds); GNU date does. We emit second-precision so the output
-# is identical across both, and the dev-on-macOS / prod-on-Linux paths
-# write byte-identical fields.
-now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
-
-# Portable random suffix — BSD/macOS `date +%s%N` emits a literal "%N".
-# Use ${RANDOM} (bash builtin, both 3.2 and 5.x). $$.$RANDOM is unique
-# enough for tmp filename collision avoidance under a single PID.
-rand_suffix() { echo "$$.$RANDOM.$RANDOM"; }
-
-# write_status <state> <step> <stepLabel> [error] [log]
-write_status() {
-  local state="$1"
-  local step="$2"
-  local label="$3"
-  local err="${4:-}"
-  local log="${5:-}"
-
-  local tmp="${STATUS_PATH}.tmp.$(rand_suffix)"
-  # JSON-escape strings. Prefer jq when available (handles every
-  # control byte + non-ASCII correctly); else fall back to awk for
-  # the common case (\\, ", \r, \n, \t). The inputs are our own copy
-  # so the awk fallback's gap on bytes < 0x20 (apart from CR/LF/TAB)
-  # is acceptable — we never write raw stderr into these fields.
-  local esc_label esc_err esc_log
-  if command -v jq >/dev/null 2>&1; then
-    # jq -Rs . wraps the input in JSON quotes; we want only the
-    # ESCAPED INNER content, so strip the surrounding quotes.
-    esc_label=$(printf '%s' "$label" | jq -Rs . | awk '{print substr($0, 2, length($0)-2)}')
-    esc_err=$(printf '%s' "$err" | jq -Rs . | awk '{print substr($0, 2, length($0)-2)}')
-    esc_log=$(printf '%s' "$log" | jq -Rs . | awk '{print substr($0, 2, length($0)-2)}')
-  else
-    esc_label=$(printf '%s' "$label" | awk 'BEGIN{ORS=""} {gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\r/, ""); gsub(/\n/, "\\n"); gsub(/\t/, "\\t"); print}')
-    esc_err=$(printf '%s' "$err" | awk 'BEGIN{ORS=""} {gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\r/, ""); gsub(/\n/, "\\n"); gsub(/\t/, "\\t"); print}')
-    esc_log=$(printf '%s' "$log" | awk 'BEGIN{ORS=""} {gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\r/, ""); gsub(/\n/, "\\n"); gsub(/\t/, "\\t"); print}')
-  fi
-
-  cat > "$tmp" << EOF
-{
-  "state": "$state",
-  "step": $step,
-  "totalSteps": 6,
-  "startedAt": "${STARTED_AT}",
-  "updatedAt": "$(now_iso)",
-  "fromSha": "$FROM_SHA",
-  "toSha": "$TARGET_SHA",
-  "stepLabel": "$esc_label",
-  "error": "$esc_err",
-  "log": "$esc_log"
-}
-EOF
-  chmod 0600 "$tmp" 2>/dev/null || true
-  mv -f "$tmp" "$STATUS_PATH"
-}
-
-# Read the current state from the status file using python3 (portable
-# JSON parse, no field-position guessing). Falls back to a coarse awk
-# grep if python3 isn't available.
-read_status_state() {
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import json,sys
-try:
-  print(json.load(open(sys.argv[1])).get("state",""))
-except Exception:
-  print("")' "$STATUS_PATH" 2>/dev/null || true
-  else
-    awk -F'"' '/"state"[[:space:]]*:/ {for(i=1;i<=NF;i++) if ($i ~ /^state$/) {print $(i+2); exit}}' "$STATUS_PATH" 2>/dev/null || true
-  fi
-}
+HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+# shellcheck source=scripts/lib/cavecms-update-helpers.sh
+. "${HELPERS_DIR}/cavecms-update-helpers.sh"
 
 STARTED_AT="$(now_iso)"
 # Export so the python3 subprocess in post_audit_terminal can read it
@@ -218,12 +156,15 @@ on_exit() {
       fi
       ;;
   esac
-  # Always toggle maintenance OFF on any exit. Step 5 turned it on
-  # before pm2 reload; if the orchestrator dies BEFORE step 6's
-  # explicit `post_maintenance_toggle false` (success path) or
-  # `rollback_to_previous` (failure path), the site is stuck in
-  # maintenance forever. This is the floor — defence in depth.
-  if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+  # Toggle maintenance OFF only if WE turned it on. Step 5 sets
+  # CAVECMS_MAINT_TOGGLED_BY_US=1 right before its
+  # `post_maintenance_toggle true` call. A preflight failure that
+  # exits in step 1 must NOT clobber an operator-set
+  # security_maintenance.enabled=true (e.g. they planned a
+  # maintenance window and the update happened to fail loud). Only
+  # touch the flag when this orchestrator is the one that set it.
+  if [ "${CAVECMS_MAINT_TOGGLED_BY_US:-0}" = "1" ] \
+    && declare -F post_maintenance_toggle >/dev/null 2>&1; then
     post_maintenance_toggle false
   fi
   rm -f "$LOCK_PATH" 2>/dev/null || true
@@ -242,9 +183,11 @@ on_signal() {
       fi
       ;;
   esac
-  # Floor: always toggle maintenance off, always release the lock,
-  # always clear the EXIT trap so it doesn't double-fire.
-  if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+  # Floor: only toggle maintenance off if WE turned it on (step 5
+  # sets CAVECMS_MAINT_TOGGLED_BY_US=1). Release the lock and clear
+  # the EXIT trap so it doesn't double-fire after our explicit exit.
+  if [ "${CAVECMS_MAINT_TOGGLED_BY_US:-0}" = "1" ] \
+    && declare -F post_maintenance_toggle >/dev/null 2>&1; then
     post_maintenance_toggle false
   fi
   rm -f "$LOCK_PATH" 2>/dev/null || true
@@ -278,6 +221,10 @@ trap '' INT HUP
 # Rollback helper — defined BEFORE the steps that call it so bash has
 # registered the function in its table by the time we hit a failure.
 #
+# Snapshot-based: works uniformly in git AND tarball mode. The pre-
+# destructive snapshot taken at the top of step 2 is the source of
+# truth — git's history is a secondary sanity check (best-effort).
+#
 # The rollback verifies its own success via /healthz after pm2 reload.
 # If the rollback ITSELF fails, we surface a distinct hard-failure
 # state so the operator knows their site may be offline.
@@ -288,78 +235,77 @@ rollback_to_previous() {
   echo "[cavecms-update] rolling back to $prev (had_migration=$had_migration, backup=$backup_dump)" >&2
 
   # Empty $prev is a sign something went wrong upstream (git rev-parse
-  # returned nothing, tarball mode left PREVIOUS_SHA="", caller passed
-  # the wrong variable). Refuse explicitly instead of falling through
-  # to git reset --hard "" (which silently no-ops to HEAD).
+  # returned nothing, snapshot was never taken). Refuse explicitly.
   if [ -z "$prev" ]; then
     write_status "failed" "${CURRENT_STEP:-1}" \
       "We couldn't determine your previous version" \
       "Automatic rollback can't run without a known previous version. Re-run \`npx create-cavecms\` to reinstall, or contact support." \
       ""
-    if declare -F post_maintenance_toggle >/dev/null 2>&1; then
-      post_maintenance_toggle false
-    fi
+    post_maintenance_toggle false
     return 1
   fi
 
   # Pre-flight: if we ran a migration but don't have a usable schema
   # backup (SKIPPED or empty), rolling back code only would leave
   # schema ahead of code — the old app would 500 on missing columns.
-  # Refuse instead, with copy that tells the operator their site is
-  # on the new (partially-updated) version and what to do next.
   if [ "$had_migration" = "1" ]; then
     if [ -z "$backup_dump" ] || [ "$backup_dump" = "SKIPPED" ] || [ ! -f "$backup_dump" ]; then
       write_status "failed" "${CURRENT_STEP:-1}" "Your data was updated but the rest of the install failed" "Your site is on the new database structure but the new code couldn't be installed. Contact support — we have logs to recover from." ""
-      # Toggle maintenance off — site is in a degraded state but visitors
-      # shouldn't be locked behind a generic 503. Operator needs to act,
-      # not the visitors.
-      if declare -F post_maintenance_toggle >/dev/null 2>&1; then
-        post_maintenance_toggle false
-      fi
+      post_maintenance_toggle false
       return 1
     fi
   fi
 
-  # Tarball-mode installs have no .git directory — `git reset` is a
-  # no-op AND throws "not a git repository" noise. Refuse rollback
-  # explicitly with an operator-actionable message instead of pretending
-  # the rollback worked.
-  if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ] || ! git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # Snapshot-based restore. Works for git AND tarball mode — the
+  # snapshot dir was populated BEFORE any destructive step in step 2.
+  # If the snapshot is missing (older orchestrator, manual disk
+  # cleanup), refuse cleanly with operator-actionable copy.
+  local snap_dir="${SNAPSHOT_ROOT}/${prev}"
+  if [ ! -d "$snap_dir" ]; then
     write_status "failed" "${CURRENT_STEP:-1}" \
-      "We couldn't roll back automatically" \
-      "Your site was installed via the one-command CLI (no git history) so we can't auto-restore the previous version. Re-run \`npx create-cavecms\` with the previous version (--version=X.Y.Z) to recover, or contact support." \
+      "We couldn't find a snapshot of your previous version" \
+      "Automatic rollback needs a snapshot, but we couldn't find one. Re-run \`npx create-cavecms\` with the previous version (--version=X.Y.Z) to recover, or contact support." \
       ""
-    # Toggle maintenance off — site stays on partial state but visitors
-    # shouldn't see a generic 503; operator needs to act.
-    if declare -F post_maintenance_toggle >/dev/null 2>&1; then
-      post_maintenance_toggle false
-    fi
+    post_maintenance_toggle false
     return 1
   fi
 
-  (
-    cd "$REPO_DIR"
-    # Restore code first.
-    git reset --hard "$prev" || return 1
-    # Restore the schema if a migration ran.
-    if [ "$had_migration" = "1" ]; then
-      restore_db_backup "$backup_dump" || return 1
-    fi
-    pnpm install --frozen-lockfile >/dev/null 2>&1 || return 1
-    pnpm build >/dev/null 2>&1 || return 1
-    # Do NOT trust pm2's CLI exit code here — same lesson as the
-    # forward path (commit b1129f8 / e31652e): pm2 reload can SIGINT
-    # mid-operation and exit non-zero while the worker successfully
-    # restarted. The authoritative gate is the healthz poll below.
-    # Suppress the exit code so a SIGINT doesn't spuriously fail an
-    # otherwise-successful rollback.
-    pm2 reload ecosystem.config.cjs --update-env >/dev/null 2>&1 || true
-  )
-  local rc=$?
-  if [ $rc -ne 0 ]; then
+  if ! restore_from_snapshot "$prev"; then
     write_status "failed" "${CURRENT_STEP:-1}" "We tried to restore your previous version but couldn't" "Your site may be offline — contact support immediately." ""
     return 1
   fi
+
+  # Best-effort: keep git's HEAD aligned with the restored file tree
+  # in git mode so future operations (manual git ops, the next update's
+  # preflight cleanliness check) see a consistent view. Failure here
+  # doesn't fail the rollback — the on-disk files are the truth.
+  if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$REPO_DIR" reset --hard "$prev" >/dev/null 2>&1 || true
+  fi
+
+  # Restore the schema if a migration ran.
+  if [ "$had_migration" = "1" ]; then
+    if ! restore_db_backup "$backup_dump"; then
+      write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version's files but couldn't restore your database" "Your site may be in a half-restored state — contact support immediately." ""
+      return 1
+    fi
+  fi
+
+  # Reinstall node_modules — they're excluded from the snapshot
+  # (pnpm's CAS makes copying them risky). Pinned by the snapshot's
+  # pnpm-lock.yaml so this is a fast no-op when the previous lockfile
+  # matches what pnpm already cached.
+  if ! (cd "$REPO_DIR" && pnpm install --frozen-lockfile >/dev/null 2>>"${LOG_DIR}/rollback-install.log"); then
+    write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version's files but couldn't reinstall its dependencies" "Your site may be offline — contact support immediately." ""
+    return 1
+  fi
+
+  # Reload pm2. Exit code intentionally suppressed — same reasoning as
+  # the forward path (pm2 CLI can SIGINT mid-reload and exit non-zero
+  # while the daemon completes successfully). Healthz below is the
+  # canonical signal.
+  (cd "$REPO_DIR" && pm2 reload ecosystem.config.cjs --update-env >/dev/null 2>&1 || true)
+
   # Verify rollback health before claiming success.
   local healthz_args=()
   if [ -n "$HEALTHZ_TOKEN" ]; then
@@ -379,243 +325,6 @@ rollback_to_previous() {
     return 1
   fi
   return 0
-}
-
-# mysqldump the cavecms DB to $LOG_DIR/pre-update-<sha>.sql.gz.
-#
-# Returns one of three sentinels on stdout (so the caller can tell
-# "we don't have a backup-net" from "we tried and failed"):
-#   SKIPPED          — mysqldump/python3 not installed, OR no DATABASE_URL.
-#                      Acceptable on dev / first-time-setup boxes.
-#   <path/to/file>   — backup ran successfully; restore_db_backup
-#                      can later restore from this path.
-# A NON-zero exit code on stderr-empty stdout indicates an attempted-
-# and-failed backup — caller MUST refuse to proceed past the migration
-# step.
-db_backup() {
-  local sha="$1"
-  local out="${LOG_DIR}/pre-update-${sha}.sql.gz"
-  if ! command -v mysqldump >/dev/null 2>&1; then
-    echo "SKIPPED"; return 0
-  fi
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "SKIPPED"; return 0
-  fi
-  local db_url="${DATABASE_URL:-}"
-  if [ -z "$db_url" ]; then echo "SKIPPED"; return 0; fi
-
-  # Safe URL parse via python3 — handles URL-encoded passwords, raw
-  # @/: in the credential portion, missing port, etc. Output is
-  # newline-separated host\nport\nuser\npass\ndb.
-  local parsed
-  parsed=$(DATABASE_URL="$db_url" python3 -c '
-import os, sys
-from urllib.parse import urlparse, unquote
-u = urlparse(os.environ["DATABASE_URL"])
-print(u.hostname or "127.0.0.1")
-print(u.port or 3306)
-print(unquote(u.username or ""))
-print(unquote(u.password or ""))
-print((u.path or "/").lstrip("/").split("?")[0])
-') || { echo ""; return 1; }
-  local db_host db_port db_user db_pass db_name
-  # awk-based line picker (sed is banned per project conventions).
-  db_host=$(echo "$parsed" | awk 'NR==1')
-  db_port=$(echo "$parsed" | awk 'NR==2')
-  db_user=$(echo "$parsed" | awk 'NR==3')
-  db_pass=$(echo "$parsed" | awk 'NR==4')
-  db_name=$(echo "$parsed" | awk 'NR==5')
-  if [ -z "$db_name" ]; then echo ""; return 1; fi
-
-  # Write credentials to a real temp file rather than a process-
-  # substitution `<(...)` — MariaDB's mysqldump rejects /dev/fd/* paths
-  # via `--defaults-extra-file=` ("unknown variable
-  # 'defaults-extra-file=/dev/fd/63'"). Real file, mode 0600, cleaned
-  # up after dump regardless of outcome.
-  #
-  # `--column-statistics=0` is a MySQL 8 flag MariaDB doesn't know
-  # about — dropped. The flag was a no-op for MariaDB targets and a
-  # hard error: "unknown variable 'column-statistics=0'".
-  local cred_file
-  cred_file=$(mktemp "${TMPDIR:-/tmp}/cavecms-mysqldump-cred.XXXXXX")
-  chmod 0600 "$cred_file"
-  printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
-    "$db_host" "$db_port" "$db_user" "$db_pass" > "$cred_file"
-
-  local dump_rc=0
-  mysqldump --defaults-extra-file="$cred_file" \
-    --single-transaction --skip-lock-tables \
-    "$db_name" 2>"${LOG_DIR}/db-backup.log" | gzip > "$out" \
-    || dump_rc=$?
-
-  rm -f "$cred_file"
-
-  if [ $dump_rc -eq 0 ] && [ -s "$out" ]; then
-    echo "$out"
-  else
-    rm -f "$out"
-    echo ""
-    return 1
-  fi
-}
-
-restore_db_backup() {
-  local dump="$1"
-  if [ ! -f "$dump" ]; then return 1; fi
-  local db_url="${DATABASE_URL:-}"
-  if [ -z "$db_url" ]; then return 1; fi
-  if ! command -v python3 >/dev/null 2>&1; then return 1; fi
-
-  local parsed
-  parsed=$(DATABASE_URL="$db_url" python3 -c '
-import os, sys
-from urllib.parse import urlparse, unquote
-u = urlparse(os.environ["DATABASE_URL"])
-print(u.hostname or "127.0.0.1")
-print(u.port or 3306)
-print(unquote(u.username or ""))
-print(unquote(u.password or ""))
-print((u.path or "/").lstrip("/").split("?")[0])
-') || return 1
-  local db_host db_port db_user db_pass db_name
-  # awk-based line picker (sed is banned per project conventions).
-  db_host=$(echo "$parsed" | awk 'NR==1')
-  db_port=$(echo "$parsed" | awk 'NR==2')
-  db_user=$(echo "$parsed" | awk 'NR==3')
-  db_pass=$(echo "$parsed" | awk 'NR==4')
-  db_name=$(echo "$parsed" | awk 'NR==5')
-  if [ -z "$db_name" ]; then return 1; fi
-
-  # Same MariaDB / process-substitution constraint as db_backup —
-  # real temp file with creds, mode 0600, cleaned up regardless.
-  local cred_file
-  cred_file=$(mktemp "${TMPDIR:-/tmp}/cavecms-mysql-cred.XXXXXX")
-  chmod 0600 "$cred_file"
-  printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
-    "$db_host" "$db_port" "$db_user" "$db_pass" > "$cred_file"
-
-  local restore_rc=0
-  gunzip -c "$dump" | mysql --defaults-extra-file="$cred_file" \
-    "$db_name" 2>>"${LOG_DIR}/db-restore.log" \
-    || restore_rc=$?
-
-  rm -f "$cred_file"
-  return $restore_rc
-}
-
-# ---------------------------------------------------------------------------
-# Internal-endpoint helpers — POST to /api/internal/updates/* over
-# loopback with the bearer token. Best-effort: if the secret isn't
-# available (dev, first-time setup) or the endpoint is down, we log
-# and continue. The update flow doesn't depend on these calls
-# succeeding — they're for UX (maintenance page) and observability
-# (audit history) only.
-# ---------------------------------------------------------------------------
-# Derive the loopback base URL from HEALTHZ_URL by stripping the trailing
-# `/healthz` path. If HEALTHZ_URL is non-standard, fall back to the env
-# var CAVECMS_INTERNAL_URL or the conventional 127.0.0.1:3040.
-internal_base_url() {
-  if [ -n "${CAVECMS_INTERNAL_URL:-}" ]; then
-    printf '%s' "${CAVECMS_INTERNAL_URL%/}"
-    return
-  fi
-  local base="${HEALTHZ_URL%/healthz}"
-  base="${base%/}"
-  if [ -n "$base" ]; then
-    printf '%s' "$base"
-  else
-    printf '%s' "http://127.0.0.1:3040"
-  fi
-}
-
-post_maintenance_toggle() {
-  local enabled="$1"  # "true" or "false"
-  if [ -z "${INTERNAL_REVALIDATE_SECRET:-}" ]; then
-    echo "[cavecms-update] INTERNAL_REVALIDATE_SECRET unset — skipping maintenance toggle ($enabled)" >&2
-    return 0
-  fi
-  local base
-  base=$(internal_base_url)
-  local url="${base}/api/internal/updates/maintenance"
-  # Loopback Host header — the endpoint refuses non-127.0.0.1 hosts.
-  local host="${base#http://}"
-  host="${host#https://}"
-  # `|| true` — best-effort. The flow continues even if the toggle
-  # fails; the worst case is visitors see a connection-error instead
-  # of the branded 503 for a few seconds during pm2 reload.
-  curl -fsS --max-time 10 \
-    -X POST \
-    -H "Authorization: Bearer ${INTERNAL_REVALIDATE_SECRET}" \
-    -H "Host: ${host}" \
-    -H "Content-Type: application/json" \
-    -d "{\"enabled\":${enabled}}" \
-    "$url" >/dev/null 2>>"${LOG_DIR}/maintenance-toggle.log" || \
-    echo "[cavecms-update] maintenance toggle ($enabled) failed (non-fatal)" >&2
-}
-
-# post_audit_terminal <action> [error]
-#   action: completed | failed | rolled_back
-#   error : optional error message (truncated to 500 chars by the API)
-#
-# Writes a terminal audit_log row so the Update History table on
-# /admin/settings/updates can render the outcome alongside the
-# apply row (written by the admin /apply route at kick-off).
-post_audit_terminal() {
-  local action="$1"
-  local err="${2:-}"
-  if [ -z "${INTERNAL_REVALIDATE_SECRET:-}" ]; then
-    return 0
-  fi
-  local base
-  base=$(internal_base_url)
-  local url="${base}/api/internal/updates/audit-terminal"
-  local host="${base#http://}"
-  host="${host#https://}"
-  local started_epoch
-  if command -v python3 >/dev/null 2>&1; then
-    started_epoch=$(python3 -c '
-import os, sys
-from datetime import datetime, timezone
-try:
-  print(int(datetime.fromisoformat(os.environ["STARTED_AT"].replace("Z","+00:00")).timestamp() * 1000))
-except Exception:
-  print(0)
-' 2>/dev/null || echo 0)
-  else
-    started_epoch=0
-  fi
-  local now_epoch=0
-  if command -v python3 >/dev/null 2>&1; then
-    now_epoch=$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)
-  fi
-  local duration_ms=0
-  if [ "$started_epoch" -gt 0 ] && [ "$now_epoch" -gt "$started_epoch" ]; then
-    duration_ms=$((now_epoch - started_epoch))
-  fi
-  # JSON-escape the error string for embedding. Reuse jq if available;
-  # else a minimal awk escape (same as write_status).
-  local esc_err
-  if command -v jq >/dev/null 2>&1; then
-    esc_err=$(printf '%s' "$err" | jq -Rs . | awk '{print substr($0, 2, length($0)-2)}')
-  else
-    esc_err=$(printf '%s' "$err" | awk 'BEGIN{ORS=""} {gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\r/, ""); gsub(/\n/, "\\n"); gsub(/\t/, "\\t"); print}')
-  fi
-  local body
-  if [ -n "$err" ]; then
-    body=$(printf '{"action":"%s","fromSha":"%s","toSha":"%s","durationMs":%d,"error":"%s"}' \
-      "$action" "$FROM_SHA" "$TARGET_SHA" "$duration_ms" "$esc_err")
-  else
-    body=$(printf '{"action":"%s","fromSha":"%s","toSha":"%s","durationMs":%d}' \
-      "$action" "$FROM_SHA" "$TARGET_SHA" "$duration_ms")
-  fi
-  curl -fsS --max-time 10 \
-    -X POST \
-    -H "Authorization: Bearer ${INTERNAL_REVALIDATE_SECRET}" \
-    -H "Host: ${host}" \
-    -H "Content-Type: application/json" \
-    -d "$body" \
-    "$url" >/dev/null 2>>"${LOG_DIR}/audit-terminal.log" || \
-    echo "[cavecms-update] audit-terminal POST ($action) failed (non-fatal)" >&2
 }
 
 # ---------------------------------------------------------------------------
@@ -729,11 +438,40 @@ fi
 CURRENT_STEP=1
 write_status "preflight" 1 "Getting ready" "" ""
 
-# Disk: need >= 500 MB free on the partition holding the repo.
-free_kb=$(df -k "$REPO_DIR" | awk 'NR==2 {print $4}')
+# Stale `.tarball-old.*` cleanup. The orchestrator's tarball-mode
+# atomic swap creates `<file>.tarball-old.<pid>` aside-files (line
+# tracking the move-aside). On an orchestrator that died after the
+# move-aside but before the post-success cleanup, those files
+# accumulate. Newer apply runs have a different PID, so they'd be
+# left behind forever. Clean any that's older than 24h on startup.
+find "$REPO_DIR" -maxdepth 2 -name '.tarball-old.*' -type d -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find "$REPO_DIR" -maxdepth 2 -name '*.tarball-old.*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+
+# Disk: need >= 500 MB free on the partition holding the repo. `-kP`
+# is POSIX-portable (vs BSD `df`'s long-name line-wrap, which can
+# make NR==2 yield the wrong row).
+free_kb=$(df -kP "$REPO_DIR" | awk 'NR==2 {print $4}')
 if [ -z "${free_kb:-}" ] || [ "$free_kb" -lt 512000 ]; then
   write_status "failed" 1 "Not enough free disk space" "Your server needs at least 500 MB of free space to install an update." ""
   exit 1
+fi
+
+# Memory: need >= 512 MB available. The `pnpm build` in step 4 spins up
+# Next 15's compiler + a child V8 process whose default
+# --max-old-space-size lands around 512 MB; on a 1 GB droplet with no
+# free memory the build OOMs partway and `set -e` aborts mid-flight,
+# leaving the snapshot the only restore path. Refuse here so the
+# operator can free memory before we touch anything.
+#
+# /proc/meminfo exists on every Linux. macOS dev boxes don't have it —
+# skip the check there since dev never hits the in-app update path
+# anyway (CAVECMS_UPDATE_DRY_RUN handles dev demos).
+if [ -r /proc/meminfo ]; then
+  mem_avail_kb=$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo)
+  if [ -n "${mem_avail_kb:-}" ] && [ "$mem_avail_kb" -lt 524288 ]; then
+    write_status "failed" 1 "Not enough free memory" "Your server needs at least 512 MB of free memory to build an update. Try closing other programs on this server and try again." ""
+    exit 1
+  fi
 fi
 
 # Network: release server reachable.
@@ -801,7 +539,11 @@ print((u.path or "/").lstrip("/").split("?")[0])
     esac
     if [ -n "$db_major" ] && [ -n "$db_minor" ]; then
       if [ "$db_major" -lt 10 ] || { [ "$db_major" -eq 10 ] && [ "$db_minor" -lt 6 ]; }; then
-        write_status "failed" 1 "Your database needs to be upgraded" "CaveCMS needs MariaDB 10.6 or newer. Yours is $version_line. Ask your hosting provider to upgrade before installing this update." ""
+        # Don't leak the full MariaDB build string into operator-
+        # visible copy (e.g. `10.4.34-MariaDB-1:10.4.34+maria~deb10`).
+        # Surface major.minor only; full string lives in the log.
+        echo "[cavecms-update] full MariaDB version: $version_line" >> "${LOG_DIR}/preflight.log" 2>/dev/null || true
+        write_status "failed" 1 "Your database needs to be upgraded" "CaveCMS needs MariaDB 10.6 or newer. Yours is ${db_major}.${db_minor}. Ask your hosting provider to upgrade before installing this update." ""
         exit 1
       fi
     fi
@@ -852,15 +594,47 @@ fi
 CURRENT_STEP=2
 write_status "updating" 2 "Downloading the new version" "" ""
 
-# Save the previous version for rollback (works in both modes — the
-# tarball overlay is tracked by git as file modifications).
-# Capture previous SHA for the rollback path. Skipped in tarball mode
-# (no .git directory) — rollback in that mode refuses with an
-# operator-facing message; there's no "previous commit" to reset to.
-if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ] && git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  PREVIOUS_SHA=$(git rev-parse HEAD)
-else
-  PREVIOUS_SHA=""
+# Capture the PREVIOUS_SHA for rollback. Snapshot mode means this is
+# the on-disk identity we'll restore from — fall back to a deterministic
+# "from-<epoch>" handle when neither git nor a meaningful FROM_SHA is
+# available (very first install). The snapshot dir is named after this
+# handle, and rollback looks it up the same way.
+if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  PREVIOUS_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+fi
+if [ -z "${PREVIOUS_SHA:-}" ]; then
+  if [ -n "${FROM_SHA:-}" ] && [ "$FROM_SHA" != "unknown" ]; then
+    PREVIOUS_SHA="$FROM_SHA"
+  else
+    # Last-resort handle so a brand-new tarball install still has a
+    # snapshot key. Operator can still recover via re-running the CLI
+    # if this rolls back to a "from-<epoch>" snapshot.
+    PREVIOUS_SHA="from-$(date -u +%s)"
+  fi
+fi
+
+# Defence in depth: validate PREVIOUS_SHA shape before using it as a
+# path component. is_safe_snapshot_sha lives in helpers; it accepts
+# 7-64 hex chars OR `from-<digits>`. A non-hex / path-traversal value
+# (`../../etc`) would let snapshot_current_tree's `rm -rf "$snap_dir"`
+# escape SNAPSHOT_ROOT. The apply route already validates current.sha
+# is hex (so FROM_SHA shouldn't carry traversal), but we re-check here
+# in case PREVIOUS_SHA was derived from something else.
+if ! is_safe_snapshot_sha "$PREVIOUS_SHA"; then
+  write_status "failed" 2 "Couldn't identify your current version" "Internal: snapshot key is not a valid SHA. Contact support." ""
+  post_audit_terminal failed "previous_sha_invalid"
+  exit 1
+fi
+
+# Snapshot the current tree BEFORE any destructive step. Both modes
+# (tarball overlay + git reset) clobber files in-place; the snapshot
+# is the only thing that gives us a reliable restore path on either.
+# Failure to snapshot is fatal — refusing to proceed is safer than
+# running a destructive op with no escape hatch.
+if ! snapshot_current_tree "$PREVIOUS_SHA" > /dev/null; then
+  write_status "failed" 2 "Couldn't take a safety snapshot of your current version" "Your site is unchanged. Free up disk space (we need a few hundred MB), or install rsync if it isn't already." ""
+  post_audit_terminal failed "snapshot_failed"
+  exit 1
 fi
 
 if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
@@ -925,8 +699,18 @@ if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
       4) reason="copy into install directory failed" ;;
       *) reason="unknown error" ;;
     esac
-    write_status "failed" 2 "Couldn't install the new version" "We rolled back any partial changes. ($reason)" ""
-    post_audit_terminal failed "tarball_extract_${rc}"
+    # extract_tarball_atomic's mode-4 path (copy failed partway) can
+    # leave a half-populated tree on disk. Its own in-function
+    # restore only puts back the explicit allowlist of tracked dirs
+    # it moved aside — any new file the tarball partially wrote in
+    # (new admin routes, new migration files) remains. Use the
+    # pre-destructive snapshot to restore deterministically.
+    write_status "failed" 2 "Couldn't install the new version" "Your previous version is being restored. ($reason)" ""
+    if rollback_to_previous "$PREVIOUS_SHA" 0 ""; then
+      post_audit_terminal rolled_back "tarball_extract_${rc}"
+    else
+      post_audit_terminal failed "rollback_refused:tarball_extract_${rc}"
+    fi
     exit 1
   fi
   rm -f "$TARBALL_TMP"
@@ -1101,6 +885,10 @@ write_status "restarting" 5 "Switching to the new version" "" ""
 # (typically 30-90s on small instances). Best-effort — see the helper
 # comments. If the toggle fails the update still proceeds; the worst
 # case is visitors see a connection-error instead of the styled page.
+# Mark the toggle-on as ours so the EXIT/SIGTERM traps know to flip
+# it back off. Without this sentinel, a preflight failure in step 1
+# would silently clobber an operator-set maintenance window.
+export CAVECMS_MAINT_TOGGLED_BY_US=1
 post_maintenance_toggle true
 
 # Write the new commit + ts to the env file so the new process picks
@@ -1239,6 +1027,90 @@ pm2 save 2>&1 | tail -n 16 > "${LOG_DIR}/pm2-save.log" || true
 # healthy, so we don't expose a half-loaded build.
 post_maintenance_toggle false
 
+# Compute watchdog window — the new version is presumed healthy now,
+# but delayed crashes (memory leak triggered at the 4-min mark, a
+# never-imported route compiling on first hit, etc.) can still take
+# the site down without an immediate "build/restart broke it" signal.
+# The watchdog will poll /healthz every 30s for 1 hour; on 3
+# consecutive failures it acquires the update lock, restores from the
+# pre-update snapshot, and writes a rolled_back terminal audit. The
+# status file carries `watchdogUntil` so the UI can show the operator
+# "we'll keep an eye on your site for the next hour".
+WATCHDOG_DURATION_S=3600
+# python3 ISO computation — `date -d "+N seconds"` (GNU) and
+# `date -v "+NS"` (BSD) differ across hosts. Falling back to a busybox
+# date silently yields empty string, blanking the UI banner. python3
+# is already a hard dep for this script so it's the canonical path.
+WATCHDOG_UNTIL=$(WATCHDOG_DURATION_S="$WATCHDOG_DURATION_S" python3 -c '
+import os
+from datetime import datetime, timezone, timedelta
+delta = timedelta(seconds=int(os.environ["WATCHDOG_DURATION_S"]))
+print((datetime.now(timezone.utc) + delta).strftime("%Y-%m-%dT%H:%M:%SZ"))
+' 2>/dev/null || echo "")
+export CAVECMS_STATUS_WATCHDOG_UNTIL="$WATCHDOG_UNTIL"
+
 write_status "completed" 6 "Update successful — you're on the new version" "" ""
 post_audit_terminal completed
+
+# Prune old snapshots — keep the most recent N (default 3), drop the
+# rest. Done AFTER terminal audit + status write so a prune failure
+# can't mask the successful update.
+prune_old_snapshots || true
+
+# Spawn the post-completion watchdog (gap D close). Detached so it
+# survives this orchestrator's exit AND the next pm2 reload. Failure
+# to spawn is non-fatal — the update itself is already complete; the
+# watchdog is a belt-and-suspenders guard against delayed crashes.
+WATCHDOG_SCRIPT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/cavecms-watchdog.sh"
+if [ -f "$WATCHDOG_SCRIPT" ]; then
+  # Pass identifying state through env so the watchdog can write the
+  # same shape of status/audit rows the orchestrator did. STARTED_AT
+  # is rewritten to "now" so the watchdog's durationMs calculation
+  # measures its own runtime, not the original update's.
+  export CAVECMS_WATCHDOG_FROM_SHA="$FROM_SHA"
+  export CAVECMS_WATCHDOG_TO_SHA="$TARGET_SHA"
+  export CAVECMS_WATCHDOG_PREVIOUS_SHA="$PREVIOUS_SHA"
+  export CAVECMS_WATCHDOG_DURATION_S="$WATCHDOG_DURATION_S"
+  export CAVECMS_WATCHDOG_HAD_MIGRATION="${HAD_MIGRATION:-0}"
+  export CAVECMS_WATCHDOG_BACKUP_DUMP="${BACKUP_DUMP:-}"
+
+  # Kick-off token — defence against a low-priv shell spawning the
+  # watchdog script with attacker-controlled env (e.g. malicious
+  # BACKUP_DUMP pointing at a planted SQL dump that would execute
+  # via mysql on restore). We write a one-shot token file owned by
+  # THIS process's uid + gid with mode 0600, hand the path + value
+  # to the watchdog via env, and the watchdog verifies the token
+  # contents + file ownership before doing any destructive op. A
+  # malicious actor who can't read this orchestrator's process env
+  # AND can't read the token file can't forge a watchdog kick-off.
+  KICKOFF_TOKEN=""
+  if command -v python3 >/dev/null 2>&1; then
+    KICKOFF_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))' 2>/dev/null || echo "")
+  fi
+  if [ -z "$KICKOFF_TOKEN" ] && [ -r /dev/urandom ]; then
+    KICKOFF_TOKEN=$(head -c 24 /dev/urandom | base64 | tr -d '/+=\n' 2>/dev/null || echo "")
+  fi
+  if [ -n "$KICKOFF_TOKEN" ]; then
+    KICKOFF_TOKEN_FILE="$(dirname "$STATUS_PATH")/.watchdog-kickoff.token"
+    # Write the token at mode 0600 BEFORE spawning. `set -C` (noclobber)
+    # makes the redirect O_EXCL on bash 4.2+ Linux so an attacker
+    # who pre-creates the path as a symlink to `/etc/cron.d/x` can't
+    # redirect our write. rm + create pattern is also safe (we own
+    # the parent dir) but the noclobber path is one fewer syscall
+    # window for races.
+    rm -f "$KICKOFF_TOKEN_FILE" 2>/dev/null || true
+    ( set -C; umask 0177; printf '%s' "$KICKOFF_TOKEN" > "$KICKOFF_TOKEN_FILE" ) 2>/dev/null
+    export CAVECMS_KICKOFF_TOKEN="$KICKOFF_TOKEN"
+    export CAVECMS_KICKOFF_TOKEN_FILE="$KICKOFF_TOKEN_FILE"
+  else
+    echo "[cavecms-update] no kickoff token (python3 + /dev/urandom both unavailable); watchdog will refuse to start" >&2
+    echo "[cavecms-update] $(now_iso) no kickoff token generated; watchdog will refuse" >> "${LOG_DIR}/watchdog-spawn.log"
+  fi
+
+  spawn_detached "$WATCHDOG_SCRIPT" || \
+    echo "[cavecms-update] watchdog spawn failed (non-fatal)" >&2
+else
+  echo "[cavecms-update] watchdog script not found at $WATCHDOG_SCRIPT (skipping)" >&2
+fi
+
 exit 0
