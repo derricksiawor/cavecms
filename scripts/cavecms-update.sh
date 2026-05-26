@@ -259,6 +259,12 @@ rollback_to_previous() {
   if [ "$had_migration" = "1" ]; then
     if [ -z "$backup_dump" ] || [ "$backup_dump" = "SKIPPED" ] || [ ! -f "$backup_dump" ]; then
       write_status "failed" "${CURRENT_STEP:-1}" "Your data was updated but the rest of the install failed" "Your site is on the new database structure but the new code couldn't be installed. Contact support — we have logs to recover from." ""
+      # Toggle maintenance off — site is in a degraded state but visitors
+      # shouldn't be locked behind a generic 503. Operator needs to act,
+      # not the visitors.
+      if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+        post_maintenance_toggle false
+      fi
       return 1
     fi
   fi
@@ -623,7 +629,7 @@ if [ "${CAVECMS_UPDATE_DRY_RUN:-}" = "1" ]; then
   # can assert the 503 page renders mid-update.
   post_maintenance_toggle true
   CURRENT_STEP=5; write_status "restarting" 5 "Restarting" "" ""; sleep 1
-  CURRENT_STEP=6; write_status "completed" 6 "You're on the new version" "" ""
+  CURRENT_STEP=6; write_status "completed" 6 "Update successful — you're on the new version" "" ""
   post_maintenance_toggle false
   post_audit_terminal completed
   exit 0
@@ -911,7 +917,7 @@ ln -sfn "$REPO_DIR/.next/static" "$REPO_DIR/.next/standalone/.next/static" 2>>"$
 # Step 5 — restart
 # ---------------------------------------------------------------------------
 CURRENT_STEP=5
-write_status "restarting" 5 "Restarting" "" ""
+write_status "restarting" 5 "Switching to the new version" "" ""
 
 # Flip security_maintenance.enabled=true BEFORE pm2 reload so visitors
 # see the branded 503 page during the brief Next.js re-compile window
@@ -968,7 +974,7 @@ pm2 reload ecosystem.config.cjs --update-env 2>&1 | tail -n 16 > "${LOG_DIR}/pm2
 # tight per ops review.
 # ---------------------------------------------------------------------------
 CURRENT_STEP=6
-write_status "restarting" 6 "Making sure everything works" "" ""
+write_status "restarting" 6 "Verifying the new version" "" ""
 
 # Defensive: disable set -e for the verify loop. The loop's curl can
 # SIGPIPE when the pm2 reload is mid-flight (stdio fds to the
@@ -976,10 +982,18 @@ write_status "restarting" 6 "Making sure everything works" "" ""
 # SIGPIPE in a pipeline would terminate the script silently. The
 # explicit if/grep handling here is the source of truth — set +e
 # just stops the silent kill.
+#
+# Heartbeat write_status EVERY iteration. Without this the modal
+# sees state=restarting / step=6 for the full 120s of the loop with
+# NO progress signal — the user reads it as "stuck" even when the
+# loop is making real progress. The stepLabel carries the
+# iteration count + healthy-check count so the modal renders
+# meaningful sub-text ("Verifying the new version — 1 of 3 healthy
+# checks · attempt 17/60").
 set +e
 success=0
 healthz_log="${LOG_DIR}/verify-loop.log"
-echo "[verify] starting at $(now_iso) healthz=$HEALTHZ_URL" > "$healthz_log"
+echo "[verify] starting at $(now_iso) healthz=$HEALTHZ_URL target=${TARGET_FULL:0:12}" > "$healthz_log"
 for i in $(seq 1 60); do
   sleep 2
   response=$(curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>>"$healthz_log")
@@ -987,12 +1001,14 @@ for i in $(seq 1 60); do
   if [ $rc -eq 0 ] && echo "$response" | grep -q '"status":"ok"'; then
     success=$((success + 1))
     echo "[verify] iter=$i rc=0 ok success=$success" >> "$healthz_log"
+    write_status "restarting" 6 "Verifying the new version — ${success}/3 healthy checks (attempt ${i}/60)" "" ""
     if [ $success -ge 3 ]; then
       break
     fi
   else
     echo "[verify] iter=$i rc=$rc body=${response:0:80}" >> "$healthz_log"
     success=0
+    write_status "restarting" 6 "Verifying the new version (attempt ${i}/60)" "" ""
   fi
 done
 set -e
@@ -1016,6 +1032,6 @@ pm2 save 2>&1 | tail -n 16 > "${LOG_DIR}/pm2-save.log" || true
 # healthy, so we don't expose a half-loaded build.
 post_maintenance_toggle false
 
-write_status "completed" 6 "You're on the new version" "" ""
+write_status "completed" 6 "Update successful — you're on the new version" "" ""
 post_audit_terminal completed
 exit 0

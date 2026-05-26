@@ -31,8 +31,8 @@ const STEP_LABELS = [
   'Downloading the new version',
   'Preparing your data',
   'Building your site',
-  'Restarting',
-  'Making sure everything works',
+  'Switching to the new version',
+  'Verifying the new version',
 ]
 
 const TERMINAL: ReadonlySet<UpdateState> = new Set<UpdateState>([
@@ -168,7 +168,14 @@ export function UpdatesProgressModal({
   const progressPct = Math.min(100, Math.max(0, (step / totalSteps) * 100))
   const isFailed = state === 'failed' || state === 'rolled_back'
   const isCompleted = state === 'completed'
-  const isReconnecting = state === 'restarting' || networkErrorCount > 0
+  // Split the "restart in progress" phase (server is reachable, just
+  // mid-handover via pm2 reload) from "actually lost contact with the
+  // server" (fetch failing). The old combined flag rendered
+  // "Reconnecting…" any time state=restarting — which was a lie
+  // because pm2 reload is graceful and the existing worker keeps
+  // serving until the new one is healthy.
+  const isRestartPhase = state === 'restarting'
+  const isReconnecting = networkErrorCount > 0
   // `idle` arriving mid-restart means the status file was cleared
   // (manual ops, another tab, lock-stale) — neither success nor
   // failure, but the modal can't usefully continue. Show a recovery
@@ -214,32 +221,62 @@ export function UpdatesProgressModal({
         />
 
         <header className="relative px-8 pt-8 pb-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-600">
-            CaveCMS
+          {/* Eyebrow carries the phase + state, with colour cue.
+              Terminal states swap palette (emerald success, red
+              failure, amber rollback/orphan); in-flight stays copper. */}
+          <p
+            className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${
+              isCompleted
+                ? 'text-emerald-700'
+                : state === 'failed'
+                  ? 'text-red-700'
+                  : state === 'rolled_back' || isOrphaned
+                    ? 'text-amber-700'
+                    : 'text-copper-600'
+            }`}
+          >
+            {isCompleted
+              ? 'Update complete'
+              : state === 'failed'
+                ? 'Update failed'
+                : state === 'rolled_back'
+                  ? 'Rolled back safely'
+                  : isOrphaned
+                    ? 'Update interrupted'
+                    : `Installing update · step ${Math.max(1, step)} of ${totalSteps}`}
           </p>
+          {/* Hero icon on success — emerald check sits above the
+              title for an unambiguous "done" signal. */}
+          {isCompleted && (
+            <div className="mt-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+          )}
           <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-near-black">
             {isCompleted
-              ? "You're on the new version"
-              : isFailed
-                ? state === 'rolled_back'
-                  ? 'We put your site back the way it was'
-                  : 'Something went wrong'
-                : isOrphaned
-                  ? 'Update interrupted'
-                  : isReconnecting
-                    ? 'Almost there — restarting…'
-                    : 'Updating your site'}
+              ? 'Update successful'
+              : state === 'failed'
+                ? 'Update failed'
+                : state === 'rolled_back'
+                  ? 'Update reverted — your site is safe'
+                  : isOrphaned
+                    ? 'Update interrupted'
+                    : 'Installing your update'}
           </h2>
           <p className="mt-2 text-sm text-warm-stone">
             {isCompleted
-              ? 'Your site is now running the latest CaveCMS.'
-              : isFailed && state === 'rolled_back'
-                ? 'Your site is still online and running the previous version.'
-                : isFailed
-                  ? 'Your site is still online on the previous version. Nothing was lost.'
+              ? 'CaveCMS is now on the latest version. Reload this page to see the changes.'
+              : state === 'failed'
+                ? 'Your site is still live on the previous version. Nothing was changed.'
+                : state === 'rolled_back'
+                  ? "The new version didn't pass health checks, so we restored your previous version automatically. Your site is live and unchanged."
                   : isOrphaned
-                    ? "We can't tell what happened. Refresh the page and check if your site is running normally."
-                    : 'This usually takes about a minute. Keep this window open.'}
+                    ? "The installer cleared its status before finishing. Reload to see your site's current state."
+                    : isRestartPhase
+                      ? 'Switching to the new version. Your site may flicker briefly while the new processes start.'
+                      : 'About a minute. Your site stays live on the current version until the new one is verified.'}
           </p>
         </header>
 
@@ -308,23 +345,49 @@ export function UpdatesProgressModal({
           })}
         </ol>
 
+        {/* "Reconnecting" — ONLY fires when we genuinely can't reach
+            /api/admin/updates/status. The previous combined flag (state
+            === 'restarting' OR networkErrorCount > 0) rendered the
+            banner during the normal pm2-reload window when the existing
+            worker was still serving requests fine. Now it only shows
+            when status polling itself is failing, and the counter
+            telegraphs the retry budget. */}
         {isReconnecting && !isFailed && !isCompleted && !isOrphaned && (
-          <div className="relative mx-8 mt-2 flex items-start gap-3 rounded-xl border border-copper-200 bg-copper-50/60 px-4 py-3 text-xs text-near-black">
-            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-copper-600" />
-            <p>
-              Reconnecting… this usually takes 10–30 seconds. Keep this window
-              open.
-            </p>
+          <div className="relative mx-8 mt-2 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-xs text-near-black">
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-700" />
+            <div>
+              <p className="font-medium">Lost contact with your server — retrying.</p>
+              <p className="mt-0.5 text-warm-stone">
+                Attempt {networkErrorCount} of {UPDATE_RECONNECT_MAX_RETRIES}. Usually clears within 10–30 seconds.
+              </p>
+            </div>
           </div>
         )}
 
-        {isFailed && state === 'rolled_back' && (
+        {/* Failure/rollback recovery panel — gives the operator
+            actionable next steps instead of a vague apology. Three
+            buttons: try again (re-runs the update), open audit log
+            (closes modal + scrolls to history table), close (ghost,
+            tertiary). Rendered between the step list and the footer
+            so it's the dominant element when in a terminal failure
+            state. */}
+        {(isFailed || isOrphaned) && (
           <div className="relative mx-8 mt-2 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-xs text-near-black">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-            <p>
-              Your site is still online and running fine. If this keeps
-              happening, contact support.
-            </p>
+            <div className="flex-1">
+              <p className="font-medium">
+                {state === 'rolled_back'
+                  ? 'Your site is on the previous version and serving traffic.'
+                  : isOrphaned
+                    ? "Your site is still up. Reload to check what version it's running."
+                    : 'Your site is still on the previous version. Nothing was changed.'}
+              </p>
+              <p className="mt-0.5 text-warm-stone">
+                {state === 'rolled_back'
+                  ? 'You can try the update again, or check the audit log for the failed step.'
+                  : 'Try again, or check the audit log to see exactly which step failed.'}
+              </p>
+            </div>
           </div>
         )}
 
@@ -337,29 +400,52 @@ export function UpdatesProgressModal({
               }}
             >
               <RefreshCcw className="h-4 w-4" />
-              Reload now
+              Reload to see changes
             </Button>
           ) : isFailed || isOrphaned ? (
-            <Button
-              type="button"
-              variant={isOrphaned ? 'primary' : 'ghost'}
-              onClick={() => {
-                if (isOrphaned) {
-                  window.location.reload()
-                } else {
+            <>
+              {/* Three-button recovery row: Try again, Open audit log,
+                  Close. Try again is the primary in this terminal
+                  state — operator's first impulse should be "rerun
+                  it" not "give up". Open audit log scrolls to the
+                  history table so they can see exactly which step
+                  failed across runs. */}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
                   onClose()
-                }
-              }}
-            >
-              {isOrphaned ? (
-                <>
-                  <RefreshCcw className="h-4 w-4" />
-                  Refresh
-                </>
-              ) : (
-                'Close'
-              )}
-            </Button>
+                  // Best-effort scroll into the history table.
+                  window.location.hash = ''
+                  setTimeout(() => {
+                    const el = document.querySelector('[data-update-history]')
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }, 0)
+                }}
+              >
+                View audit log
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  if (isOrphaned) {
+                    window.location.reload()
+                  } else {
+                    onClose()
+                  }
+                }}
+              >
+                {isOrphaned ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4" />
+                    Reload page
+                  </>
+                ) : (
+                  'Close'
+                )}
+              </Button>
+            </>
           ) : (
             <Button
               type="button"

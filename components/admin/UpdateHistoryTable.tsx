@@ -132,7 +132,10 @@ export function UpdateHistoryTable() {
   }, [load])
 
   return (
-    <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
+    <article
+      data-update-history
+      className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm"
+    >
       <header className="flex items-end justify-between gap-3">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
