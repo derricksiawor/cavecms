@@ -32,11 +32,13 @@ export const dynamic = 'force-dynamic'
 const Body = z
   .object({
     action: z.enum(['completed', 'failed', 'rolled_back']),
-    fromSha: z
-      .string()
-      .min(1)
-      .max(64)
-      .regex(/^[0-9a-fA-F]+$|^unknown$/),
+    // fromSha is informational only — the value the running app
+    // reported as its current commit at the moment the update was
+    // kicked off. In prod this is always 12-char hex from the env
+    // file. In dev or freshly-provisioned installs it can be 'dev'
+    // / 'unknown'. We accept any short opaque string rather than
+    // gate the audit write on a strict hex shape.
+    fromSha: z.string().min(1).max(64),
     toSha: z
       .string()
       .min(1)

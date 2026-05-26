@@ -123,3 +123,5 @@ next-env.d.ts
 !/scripts/nginx/**
 !/scripts/systemd/
 !/scripts/systemd/**
+!/scripts/cavecms-update.sh
+!/scripts/cavecms-updates-check.sh
