@@ -191,6 +191,10 @@ export STARTED_AT
 # in-progress status orphaned.
 on_exit() {
   local rc=$?
+  # Disable errexit inside the trap so any failed command here can't
+  # cause re-entry or silent abort. The trap MUST always reach the
+  # lock cleanup at the bottom.
+  set +e
   local current_state
   current_state=$(read_status_state)
   case "$current_state" in
@@ -214,13 +218,34 @@ on_exit() {
       fi
       ;;
   esac
+  # Always toggle maintenance OFF on any exit. Step 5 turned it on
+  # before pm2 reload; if the orchestrator dies BEFORE step 6's
+  # explicit `post_maintenance_toggle false` (success path) or
+  # `rollback_to_previous` (failure path), the site is stuck in
+  # maintenance forever. This is the floor — defence in depth.
+  if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+    post_maintenance_toggle false
+  fi
   rm -f "$LOCK_PATH" 2>/dev/null || true
 }
 on_signal() {
+  set +e
   local sig="$1"
-  write_status "failed" "${CURRENT_STEP:-1}" "Your update was interrupted" "Your previous version is still running. You can try again." ""
-  if declare -F post_audit_terminal >/dev/null 2>&1; then
-    post_audit_terminal failed "interrupted_by_signal"
+  local current_state
+  current_state=$(read_status_state)
+  case "$current_state" in
+    completed|failed|rolled_back) ;;  # already terminal, don't overwrite
+    *)
+      write_status "failed" "${CURRENT_STEP:-1}" "Your update was interrupted" "Your previous version is still running. You can try again." ""
+      if declare -F post_audit_terminal >/dev/null 2>&1; then
+        post_audit_terminal failed "interrupted_by_signal_${sig}"
+      fi
+      ;;
+  esac
+  # Floor: always toggle maintenance off, always release the lock,
+  # always clear the EXIT trap so it doesn't double-fire.
+  if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+    post_maintenance_toggle false
   fi
   rm -f "$LOCK_PATH" 2>/dev/null || true
   trap - EXIT
