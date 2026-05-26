@@ -466,6 +466,11 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   //      - /api/internal (loopback only)
   //      - /api/auth (logout etc — operators may still be active)
   //      - /_next (asset serving for the maintenance page itself)
+  //      - /healthz (deploy verification path — the in-app updater's
+  //         step 6 polls this while maintenance is on, and a 503 here
+  //         would make the orchestrator think the new build is unhealthy
+  //         and trigger an unwarranted rollback. Healthz returns
+  //         minimal {status} json regardless of maintenance state.)
   //    Operator's bypassIps lets them keep browsing the live site.
   if (
     cfg?.maintenance?.enabled &&
@@ -474,6 +479,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     !pathname.startsWith('/api/internal/') &&
     !pathname.startsWith('/api/auth/') &&
     !pathname.startsWith('/_next/') &&
+    pathname !== '/healthz' &&
     !cidrListMatch(ip, cfg.maintenance.bypassIps)
   ) {
     return maintenanceResponse(cfg.maintenance.message)

@@ -191,24 +191,29 @@ export STARTED_AT
 # in-progress status orphaned.
 on_exit() {
   local rc=$?
-  if [ $rc -ne 0 ]; then
-    local current_state
-    current_state=$(read_status_state)
-    case "$current_state" in
-      completed|failed|rolled_back) ;;
-      *)
-        # Use bash arithmetic ternary safely.
-        local step
-        if [ "${CURRENT_STEP:-0}" -gt 0 ]; then step="$CURRENT_STEP"; else step=1; fi
-        write_status "failed" "$step" "Something went wrong" "Your site is still online on the previous version. Try again in a moment." ""
-        # Best-effort terminal audit — declare functions may not be
-        # defined yet if the trap fires before the helpers are loaded.
-        if declare -F post_audit_terminal >/dev/null 2>&1; then
-          post_audit_terminal failed "unexpected_exit"
-        fi
-        ;;
-    esac
-  fi
+  local current_state
+  current_state=$(read_status_state)
+  case "$current_state" in
+    completed|failed|rolled_back)
+      # Terminal state already written by the explicit step handlers
+      # or rollback path — nothing to do here.
+      ;;
+    *)
+      # Script exited (cleanly or not) without writing a terminal
+      # state. That's either rc != 0 (an unhandled set -e failure)
+      # OR rc == 0 with a step missing its terminal write — both
+      # are bugs we need to flag rather than leave the UI spinning
+      # forever on the last "restarting" / "updating" state.
+      local step
+      if [ "${CURRENT_STEP:-0}" -gt 0 ]; then step="$CURRENT_STEP"; else step=1; fi
+      write_status "failed" "$step" "Something went wrong" "Your site is still online on the previous version. Try again in a moment." ""
+      # Best-effort terminal audit — `declare -F` guard in case the
+      # exit fires before the helper functions are loaded.
+      if declare -F post_audit_terminal >/dev/null 2>&1; then
+        post_audit_terminal failed "unexpected_exit_rc${rc}"
+      fi
+      ;;
+  esac
   rm -f "$LOCK_PATH" 2>/dev/null || true
 }
 on_signal() {
@@ -890,6 +895,18 @@ if ! CAVECMS_SKIP_PORT_CHECK=1 CAVECMS_BUILD_OK=1 pnpm build 2>&1 | tail -n 16 >
   exit 1
 fi
 
+# Re-link the standalone bundle's static assets. Next.js's
+# `output: 'standalone'` mode emits a minimal server.js but does NOT
+# copy `public/` or `.next/static/` into the standalone directory —
+# they're expected to be supplied alongside (per Next docs:
+# https://nextjs.org/docs/app/api-reference/config/next-config-js/output#automatically-copying-traced-files).
+# scripts/deploy.sh's tarball path handles this by rsync; in the
+# in-app updater's git path we re-create the two symlinks pm2
+# serves from. Without them, every page is missing CSS + every icon
+# returns 404 after the next reload.
+ln -sfn "$REPO_DIR/public" "$REPO_DIR/.next/standalone/public" 2>>"${LOG_DIR}/build.log" || true
+ln -sfn "$REPO_DIR/.next/static" "$REPO_DIR/.next/standalone/.next/static" 2>>"${LOG_DIR}/build.log" || true
+
 # ---------------------------------------------------------------------------
 # Step 5 — restart
 # ---------------------------------------------------------------------------
@@ -953,18 +970,32 @@ pm2 reload ecosystem.config.cjs --update-env 2>&1 | tail -n 16 > "${LOG_DIR}/pm2
 CURRENT_STEP=6
 write_status "restarting" 6 "Making sure everything works" "" ""
 
+# Defensive: disable set -e for the verify loop. The loop's curl can
+# SIGPIPE when the pm2 reload is mid-flight (stdio fds to the
+# parent's spawn log get re-pointed); under `set -eo pipefail` any
+# SIGPIPE in a pipeline would terminate the script silently. The
+# explicit if/grep handling here is the source of truth — set +e
+# just stops the silent kill.
+set +e
 success=0
+healthz_log="${LOG_DIR}/verify-loop.log"
+echo "[verify] starting at $(now_iso) healthz=$HEALTHZ_URL" > "$healthz_log"
 for i in $(seq 1 60); do
   sleep 2
-  if curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>/dev/null | grep -q '"status":"ok"'; then
+  response=$(curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>>"$healthz_log")
+  rc=$?
+  if [ $rc -eq 0 ] && echo "$response" | grep -q '"status":"ok"'; then
     success=$((success + 1))
+    echo "[verify] iter=$i rc=0 ok success=$success" >> "$healthz_log"
     if [ $success -ge 3 ]; then
       break
     fi
   else
+    echo "[verify] iter=$i rc=$rc body=${response:0:80}" >> "$healthz_log"
     success=0
   fi
 done
+set -e
 
 if [ $success -lt 3 ]; then
   write_status "rolled_back" 6 "We put your site back the way it was" "The new version didn't come up healthy, so we restored your previous version automatically." ""
