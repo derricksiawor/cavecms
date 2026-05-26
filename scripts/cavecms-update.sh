@@ -862,7 +862,12 @@ fi
 # — `next build` itself overwrites NODE_ENV=production internally for
 # webpack/swc/Next's compiler, so the produced bundle is still a
 # production build.
-if ! NODE_ENV=development pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
+# `dev-bootstrap.mjs` (prebuild hook) refuses if port 3040 is already
+# bound — that check is for fresh `pnpm dev` runs. The in-app update
+# explicitly RELIES on the existing pm2 process being up on 3040
+# (so the healthz preflight passed and the maintenance toggle can
+# fire). Pass CAVECMS_SKIP_PORT_CHECK=1 to clear that gate.
+if ! CAVECMS_SKIP_PORT_CHECK=1 NODE_ENV=development pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
   write_status "failed" 4 "Couldn't build your site" "Your previous version is being restored." ""
   rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"
   post_audit_terminal rolled_back "build_failed"
