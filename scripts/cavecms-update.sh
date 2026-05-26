@@ -675,10 +675,20 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   write_status "failed" 1 "Your install directory isn't a git repository" "In-app updates need a git-cloned install. Contact support if you're not sure how your site was set up." ""
   exit 1
 fi
-if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+# `db/schema-fingerprint.txt` is a derived artifact rewritten by
+# `pnpm db:fingerprint` at the end of every db:migrate run — it's
+# expected to be dirty after any prior update and isn't an
+# operator-edit concern. Exclude it from the cleanliness check so
+# the preflight doesn't refuse on its own bookkeeping.
+DIRTY=$(git status --porcelain --untracked-files=no 2>/dev/null | grep -v 'db/schema-fingerprint\.txt' || true)
+if [ -n "$DIRTY" ]; then
   write_status "failed" 1 "Your server has unsaved changes" "Someone edited the site files directly on the server. Commit, stash, or discard those changes before updating." ""
   exit 1
 fi
+# Discard any stray fingerprint mod so step 2's `git reset --hard` is
+# a true no-op when target === HEAD (which it is when we're already
+# on the version being installed).
+git checkout -- db/schema-fingerprint.txt 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Step 2 — fetch
@@ -916,13 +926,21 @@ if [ -f "$ENV_FILE" ]; then
   mv -f "$ENV_TMP" "$ENV_FILE"
 fi
 
-if ! pm2 reload ecosystem.config.cjs --update-env 2>&1 | tail -n 16 > "${LOG_DIR}/pm2-reload.log"; then
-  write_status "failed" 5 "Couldn't restart your site" "Your previous version is being restored." ""
-  rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"
-  post_maintenance_toggle false
-  post_audit_terminal rolled_back "pm2_reload_failed"
-  exit 1
-fi
+# Don't trust pm2 CLI's exit code. The pm2 CLI process is a child of
+# the bash orchestrator and inherits the bash process group; when the
+# OLD Node process receives SIGINT during reload, the kernel can
+# deliver SIGINT to the whole group, killing the pm2 CLI mid-wait
+# even though the pm2 daemon completes the reload successfully (new
+# PID alive, healthz green). Bash's `trap '' INT` does NOT propagate
+# to fork-exec'd children, so we can't shield pm2 CLI from the
+# signal that way.
+#
+# Instead: capture the CLI's exit code but don't bail on it. Step 6's
+# healthz poll is the canonical "did the reload work" signal — if the
+# new process is healthy, the reload worked regardless of what pm2 CLI
+# reported. If healthz fails step 6 will trigger rollback.
+pm2 reload ecosystem.config.cjs --update-env 2>&1 | tail -n 16 > "${LOG_DIR}/pm2-reload.log" || \
+  echo "[cavecms-update] pm2 reload CLI exit non-zero (likely SIGINT'd by reload signal — verifying via healthz)" >> "${LOG_DIR}/pm2-reload.log"
 
 # ---------------------------------------------------------------------------
 # Step 6 — verify
