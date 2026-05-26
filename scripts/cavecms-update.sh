@@ -287,6 +287,21 @@ rollback_to_previous() {
   local backup_dump="${3:-}"
   echo "[cavecms-update] rolling back to $prev (had_migration=$had_migration, backup=$backup_dump)" >&2
 
+  # Empty $prev is a sign something went wrong upstream (git rev-parse
+  # returned nothing, tarball mode left PREVIOUS_SHA="", caller passed
+  # the wrong variable). Refuse explicitly instead of falling through
+  # to git reset --hard "" (which silently no-ops to HEAD).
+  if [ -z "$prev" ]; then
+    write_status "failed" "${CURRENT_STEP:-1}" \
+      "We couldn't determine your previous version" \
+      "Automatic rollback can't run without a known previous version. Re-run \`npx create-cavecms\` to reinstall, or contact support." \
+      ""
+    if declare -F post_maintenance_toggle >/dev/null 2>&1; then
+      post_maintenance_toggle false
+    fi
+    return 1
+  fi
+
   # Pre-flight: if we ran a migration but don't have a usable schema
   # backup (SKIPPED or empty), rolling back code only would leave
   # schema ahead of code — the old app would 500 on missing columns.
@@ -948,8 +963,11 @@ write_status "updating" 3 "Preparing your data" "" ""
 
 if ! pnpm install --frozen-lockfile 2>&1 | tail -n 16 > "${LOG_DIR}/pnpm-install.log"; then
   write_status "failed" 3 "Couldn't prepare the new version" "Something went wrong while setting up. Your previous version is being restored." ""
-  rollback_to_previous "$PREVIOUS_SHA" 0 ""
-  post_audit_terminal rolled_back "pnpm_install_failed"
+  if rollback_to_previous "$PREVIOUS_SHA" 0 ""; then
+    post_audit_terminal rolled_back "pnpm_install_failed"
+  else
+    post_audit_terminal failed "rollback_refused:pnpm_install_failed"
+  fi
   exit 1
 fi
 
@@ -1006,8 +1024,11 @@ fi
 # the gate.
 if ! CAVECMS_MIGRATE_OK=1 pnpm db:migrate 2>&1 | tail -n 16 > "${LOG_DIR}/db-migrate.log"; then
   write_status "failed" 3 "Couldn't update your data" "Your previous version is being restored. No data was lost." ""
-  rollback_to_previous "$PREVIOUS_SHA" 0 "$BACKUP_DUMP"
-  post_audit_terminal rolled_back "db_migrate_failed"
+  if rollback_to_previous "$PREVIOUS_SHA" 0 "$BACKUP_DUMP"; then
+    post_audit_terminal rolled_back "db_migrate_failed"
+  else
+    post_audit_terminal failed "rollback_refused:db_migrate_failed"
+  fi
   exit 1
 fi
 HAD_MIGRATION=1
@@ -1043,8 +1064,11 @@ fi
 # for db-migrate-with-lock.
 if ! CAVECMS_SKIP_PORT_CHECK=1 CAVECMS_BUILD_OK=1 pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
   write_status "failed" 4 "Couldn't build your site" "Your previous version is being restored." ""
-  rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"
-  post_audit_terminal rolled_back "build_failed"
+  if rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"; then
+    post_audit_terminal rolled_back "build_failed"
+  else
+    post_audit_terminal failed "rollback_refused:build_failed"
+  fi
   exit 1
 fi
 
@@ -1187,9 +1211,14 @@ set -e
 
 if [ $success -lt 3 ]; then
   write_status "rolled_back" 6 "We put your site back the way it was" "The new version didn't come up healthy, so we restored your previous version automatically." ""
-  rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"
-  post_maintenance_toggle false
-  post_audit_terminal rolled_back "healthz_unhealthy_after_reload"
+  if rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"; then
+    post_maintenance_toggle false
+    post_audit_terminal rolled_back "healthz_unhealthy_after_reload"
+  else
+    # Rollback refused (tarball mode) — leave the "failed" status that
+    # rollback_to_previous wrote, and emit a matching audit row.
+    post_audit_terminal failed "rollback_refused:healthz_unhealthy_after_reload"
+  fi
   exit 1
 fi
 

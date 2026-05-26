@@ -60,12 +60,24 @@ export function InstallWizard({
   const [finalLoginPath, setFinalLoginPath] = useState<string | null>(null)
 
   // Push the CLI-issued bootstrap token into the module-level state
-  // `installFetch` consumes. The token is gone from the URL once the
-  // wizard mounts (we read it from searchParams server-side), so this
-  // is the only place it gets cached for the wizard's lifetime.
+  // `installFetch` consumes. Also strip ?t=… from the address bar so
+  // the token isn't visible in the URL, browser history, browser sync,
+  // screenshots, or sent as Referer to any same-origin sub-resource.
+  //
+  // We DO NOT null the token on unmount: this component is the root
+  // of the install flow and may be transiently unmounted by
+  // React Strict Mode dev double-renders OR by a second tab opening
+  // the same URL. Nulling on unmount would leak the token in the
+  // other surviving instance.
   useEffect(() => {
     setInstallToken(bootstrapToken)
-    return () => setInstallToken(null)
+    if (typeof window !== 'undefined' && window.location.search.includes('t=')) {
+      try {
+        window.history.replaceState(null, '', '/install')
+      } catch {
+        /* SSR/hydration race or older browser — best effort */
+      }
+    }
   }, [bootstrapToken])
 
   // Show a clear "missing token" banner if the operator landed on
@@ -85,12 +97,7 @@ export function InstallWizard({
         </div>
 
         {tokenMissing && (
-          <div className="mb-8 rounded-xl border border-amber-300 bg-amber-50/60 px-4 py-3 text-sm text-amber-900">
-            <strong>Missing install token.</strong> The CLI printed an
-            <code className="mx-1 rounded bg-amber-100/80 px-1 font-mono">/install?t=…</code>
-            URL — reopen that link to continue. The wizard&rsquo;s API calls
-            will fail until the token is present.
-          </div>
+          <TokenRecoveryBanner />
         )}
 
         <ol className="mb-10 flex items-center justify-center gap-2 flex-wrap">
@@ -174,6 +181,49 @@ export function InstallWizard({
         </article>
       </div>
     </main>
+  )
+}
+
+function TokenRecoveryBanner() {
+  // Inline recovery for the operator who lost the CLI's printed URL
+  // (closed the terminal, copy-pasted only the bare /install link,
+  // etc.). They can retrieve the token from env.production on the
+  // server: `cat /opt/cavecms/env.production | grep INSTALL_BOOTSTRAP_TOKEN`
+  // (VPS) or the equivalent on laptop/cPanel.
+  const [pasted, setPasted] = useState('')
+  const apply = () => {
+    if (!pasted.trim()) return
+    setInstallToken(pasted.trim())
+    window.location.reload()
+  }
+  return (
+    <div className="mb-8 rounded-xl border border-amber-300 bg-amber-50/60 px-4 py-4 text-sm text-amber-900">
+      <p className="font-medium">Missing install token.</p>
+      <p className="mt-1 text-amber-800">
+        Reopen the URL the installer printed (it includes{' '}
+        <code className="rounded bg-amber-100/80 px-1 font-mono">?t=…</code>),
+        OR paste the token below. On your server it&rsquo;s at{' '}
+        <code className="rounded bg-amber-100/80 px-1 font-mono">env.production</code>{' '}
+        under <code className="rounded bg-amber-100/80 px-1 font-mono">INSTALL_BOOTSTRAP_TOKEN</code>.
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          type="password"
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+          placeholder="Paste your INSTALL_BOOTSTRAP_TOKEN"
+          className="flex-1 rounded-lg border border-amber-400 bg-white px-3 py-2 text-near-black focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+        />
+        <button
+          type="button"
+          onClick={apply}
+          disabled={!pasted.trim()}
+          className="rounded-lg bg-amber-700 px-4 py-2 text-cream-50 text-[11px] font-semibold uppercase tracking-[0.18em] disabled:opacity-50"
+        >
+          Use this token
+        </button>
+      </div>
+    </div>
   )
 }
 

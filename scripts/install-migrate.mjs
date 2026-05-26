@@ -244,10 +244,13 @@ async function main() {
   const journalTags = new Set(journal.entries.map((e) => e.tag))
   const orphans = [...sqlFiles].filter((s) => !journalTags.has(s))
   if (orphans.length > 0) {
-    log(
-      `WARNING: ${orphans.length} .sql file(s) not referenced in the journal — these will be skipped:`,
+    logErr(
+      `${orphans.length} .sql file(s) not referenced in db/migrations/meta/_journal.json:`,
     )
-    for (const o of orphans) log(`  ${o}.sql`)
+    for (const o of orphans) logErr(`  ${o}.sql`)
+    logErr('The release zip is inconsistent — refusing to apply migrations.')
+    logErr('Report this as a build-pipeline bug (the build-zip step is missing journal entries).')
+    process.exit(70) // EX_SOFTWARE — release artifact bug
   }
 
   const conn = await mysql.createConnection({
@@ -269,8 +272,9 @@ async function main() {
     // crashes mid-DDL (MySQL has no transactional DDL). MariaDB's
     // GET_LOCK is connection-scoped; we hold it for the duration of
     // this script's run.
-    const [lockRows] = (await conn.query("SELECT GET_LOCK('cavecms_install_migrate', 60) AS got")) as unknown as [Array<{ got: number | null }>]
-    if (lockRows[0]?.got !== 1) {
+    const [lockRows] = await conn.query("SELECT GET_LOCK('cavecms_install_migrate', 60) AS got")
+    const got = Array.isArray(lockRows) && lockRows.length > 0 ? lockRows[0].got : null
+    if (got !== 1) {
       logErr('Another migration is already running. Wait for it to finish then retry.')
       process.exit(75) // EX_TEMPFAIL
     }

@@ -134,12 +134,24 @@ export async function isInstalled(): Promise<boolean> {
         installed = Boolean(parsed?.completedAt)
       }
     } catch {
-      // Settings write/read failed. Conservative: if an admin exists
-      // but we can't read install_state, treat as installed so live
-      // visitors never bounce to /install during a hiccup. The
-      // wizard-mid-flow case here is rare (DB error between admin
-      // creation and the next step) and the operator can retry.
+      // Settings write/read failed. Two scenarios:
+      //   (1) Live install hit a transient DB hiccup on a request that
+      //       triggered a fresh isInstalled() check — we want to
+      //       treat-as-installed so live visitors don't bounce to /install.
+      //   (2) Wizard mid-flow: admin row was just created but the
+      //       follow-up settings query failed. We DO NOT want to
+      //       treat-as-installed here — that would lock the wizard
+      //       out of its own follow-up steps.
+      //
+      // Tiebreaker: cache the "treat as installed" answer for ONLY a
+      // brief TTL (1s) so the next request re-probes. If we're truly
+      // wizard-mid-flow, the operator's next step retries within 1s
+      // and gets the correct answer. If we're really hiccupping on a
+      // live install, the 1s window during which we treat-as-installed
+      // is preferable to flashing the wizard to live visitors.
       installed = true
+      cache = { isInstalled: installed, expiresAt: Date.now() + 1_000 }
+      return installed
     }
   }
 

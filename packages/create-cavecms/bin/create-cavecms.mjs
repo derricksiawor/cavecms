@@ -40,6 +40,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  statSync,
   writeFileSync,
   chmodSync,
   rmSync,
@@ -149,7 +150,19 @@ function parseArgv(argv) {
     const a = argv[i]
     if (a === '-h' || a === '--help') out.help = true
     else if (a === '-y' || a === '--yes') out.yes = true
-    else if (a === '--skip-signature') out.skipSignature = true
+    else if (a === '--skip-signature') {
+      // Gate the signature-skip behind a dev-build env. Production
+      // installs MUST verify the Ed25519 signature; advertising
+      // --skip-signature in the help text was an attack surface
+      // ("support says run this with --skip-signature").
+      if (process.env.CAVECMS_DEV_BUILD !== '1') {
+        die(
+          '--skip-signature is not allowed on production builds.\n' +
+            '  Set CAVECMS_DEV_BUILD=1 if you are developing the CaveCMS release pipeline.',
+        )
+      }
+      out.skipSignature = true
+    }
     else if (a === '--skip-migrate') out.skipMigrate = true
     else if (a === '--skip-start') out.skipStart = true
     else if (a.startsWith('--surface=')) out.surface = a.slice('--surface='.length)
@@ -177,7 +190,7 @@ function showHelp() {
     '  --port=NUMBER                      Port the app listens on (default: 3040)',
     '  --version=X.Y.Z|latest             Release to install (default: latest)',
     '  --dir=PATH                         Override the install directory',
-    '  --skip-signature                   Skip Ed25519 signature check (SHA-256 still verified)',
+    '  --skip-signature                   (dev-build only) Skip Ed25519 signature check',
     '  --skip-migrate                     Don\'t run database migrations',
     '  --skip-start                       Don\'t start the service',
     '  -y, --yes                          Non-interactive: accept defaults + env-supplied answers',
@@ -852,10 +865,11 @@ function startForeground({ targetDir, envPath }) {
 
 function startVps({ targetDir, envPath, config }) {
   log.info('VPS surface: writing systemd unit to /etc/systemd/system/cavecms.service')
+  const runUser = process.env.SUDO_USER || 'cavecms'
   const unitText = writeSystemdUnit({
     targetDir,
     envPath,
-    runUser: process.env.SUDO_USER || 'cavecms',
+    runUser,
   })
   // Need sudo to write to /etc/systemd/system/. The CLI prints the
   // unit + a one-liner; doing the actual write requires escalated
@@ -864,8 +878,26 @@ function startVps({ targetDir, envPath, config }) {
   writeFileSync(tmpUnit, unitText)
   const sudoOk = spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0
   if (sudoOk) {
+    // Ensure the runtime user exists before systemd tries to su to it.
+    // On a fresh Ubuntu VPS the default `cavecms` user doesn't exist;
+    // without this the unit's User= would fail with "no such process".
+    if (runUser === 'cavecms') {
+      const userCheck = spawnSync('id', ['cavecms'], { stdio: 'ignore' })
+      if (userCheck.status !== 0) {
+        log.info('Creating cavecms system user…')
+        spawnSync('sudo', ['useradd', '--system', '--no-create-home', '--shell', '/usr/sbin/nologin', 'cavecms'], { stdio: 'inherit' })
+      }
+    }
+    // env.production is mode 600 — chown to the runtime user so the
+    // unit can actually read it. Without this the service crashes at
+    // boot with EACCES env.production.
+    spawnSync('sudo', ['chown', `${runUser}:${runUser}`, envPath], { stdio: 'inherit' })
+    // Same for the install dir + uploads — the runtime user must
+    // own everything it reads/writes at runtime.
+    spawnSync('sudo', ['chown', '-R', `${runUser}:${runUser}`, targetDir], { stdio: 'inherit' })
     spawnSync('sudo', ['mv', tmpUnit, '/etc/systemd/system/cavecms.service'], { stdio: 'inherit' })
     spawnSync('sudo', ['mkdir', '-p', '/var/log/cavecms'], { stdio: 'inherit' })
+    spawnSync('sudo', ['chown', `${runUser}:${runUser}`, '/var/log/cavecms'], { stdio: 'inherit' })
     spawnSync('sudo', ['systemctl', 'daemon-reload'], { stdio: 'inherit' })
     spawnSync('sudo', ['systemctl', 'enable', '--now', 'cavecms.service'], { stdio: 'inherit' })
     log.ok('cavecms.service installed + started.')
@@ -886,9 +918,31 @@ function startCpanel({ targetDir, envPath }) {
   // operator points it at the install dir + an app.js entry. We write
   // an app.js shim that the standalone server.js can be invoked through.
   log.info('cPanel surface: writing app.js Passenger shim.')
+  // Inline env-file parser — `node:dotenv` does NOT exist (the real
+  // module is the third-party `dotenv` package which isn't bundled).
+  // cPanel's Passenger doesn't accept --env-file flags, so we parse
+  // env.production into process.env ourselves before requiring the
+  // standalone server.
   const shim = `// CaveCMS Passenger shim — cPanel "Setup Node.js App" invokes this.
 // Reads env.production at boot and execs the standalone server.
-require('node:dotenv').config({ path: __dirname + '/env.production' })
+const fs = require('node:fs')
+const path = require('node:path')
+const envPath = path.join(__dirname, 'env.production')
+try {
+  const text = fs.readFileSync(envPath, 'utf8')
+  for (const raw of text.split(/\\r?\\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq < 0) continue
+    const key = line.slice(0, eq).trim()
+    const value = line.slice(eq + 1).trim()
+    if (!process.env[key]) process.env[key] = value
+  }
+} catch (err) {
+  console.error('[cavecms] failed to read env.production:', err && err.message)
+  process.exit(1)
+}
 require('./.next/standalone/server.js')
 `
   writeFileSync(join(targetDir, 'app.js'), shim)
@@ -1033,7 +1087,8 @@ async function main(argv) {
     console.log(c('gray', '  2. Walk the in-app wizard: admin account → site identity → branding → contact → SMTP → security → done'))
     console.log(c('gray', '  3. Sign in at ') + c('bold', `${config.siteUrl}/${secrets.LOGIN_PATH}`))
     console.log('')
-    console.log(c('yellow', '  Note: ') + c('gray', 'the ?t=… token in the install URL is a one-shot bootstrap secret. Do NOT share it.'))
+    console.log(c('yellow', '  Note: ') + c('gray', 'the ?t=… token is a one-shot bootstrap secret. Do NOT share it.'))
+    console.log(c('gray', '  Lost the URL? Run:  ') + c('bold', `grep INSTALL_BOOTSTRAP_TOKEN ${envPath}`))
     console.log('')
 
     startService({ surface, targetDir, envPath, config, skipStart: args.skipStart })

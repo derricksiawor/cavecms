@@ -165,6 +165,9 @@ function buildScriptEnv(
   // under `~/.local/share/pnpm/`. Without this, the script fails at
   // step 3 with `pnpm: command not found`.
   const home = out.HOME ?? '/root'
+  // Split the inherited PATH too so we can drop empty segments —
+  // `::` in PATH means CWD, which postinstall scripts could exploit.
+  const inheritedPathSegments = (out.PATH ?? '').split(':').filter(Boolean)
   out.PATH = [
     '/usr/local/sbin',
     '/usr/local/bin',
@@ -174,7 +177,7 @@ function buildScriptEnv(
     '/bin',
     `${home}/.local/share/pnpm`,
     `${home}/.npm-global/bin`,
-    out.PATH ?? '',
+    ...inheritedPathSegments,
   ]
     .filter(Boolean)
     .join(':')
@@ -184,20 +187,27 @@ function buildScriptEnv(
   return out
 }
 
-// Refuse any path that contains shell metacharacters. The detach
-// command runs `bash -c '... >>"$logPath" ... bash "$scriptPath" "$target"'`
-// — inside bash double-quotes, `$(...)`, backticks, and `${...}` are
-// still expanded. JSON.stringify escapes embedded double-quotes but
-// does NOT defang those substitution forms. Validate here so an
-// operator-controlled CAVECMS_LOG_DIR / CAVECMS_REPO_DIR with
-// `$(touch /tmp/pwn)` can't reach the shell.
+// Refuse any path that contains bytes bash will interpret inside the
+// double-quotes of the detach command. The wrapper is:
+//   bash -c '... >>"$logPath" ... bash "$scriptPath" "$target"'
+// Inside bash double-quotes, only `$`, `` ` ``, `\`, `"`, and newline
+// are special. JSON.stringify already escapes `"` and `\` (turns
+// internal `"` into `\"`). The remaining injection vectors are:
+//   - `$(...)` / `${...}` / `$VAR`  — `$` + following char
+//   - `` `...` `` — backtick command substitution
+//   - newline — argument-list desync
+// We refuse those three plus controls — letting through spaces and
+// non-ASCII letters so legitimate install paths like
+// `/srv/café/cavecms` or `/Users/Derrick OConnor/cavecms` keep working.
 //
-// Allowed chars: POSIX path bytes (letters, digits, dot, dash, slash,
-// underscore). Refuse: $ ` " ' \ ; & | * ? < > ( ) [ ] { } whitespace.
-const SAFE_PATH_RX = /^[A-Za-z0-9._\-/]+$/
+// Allowlist regexes were tried first; they false-positive on perfectly
+// valid Unicode dirs. A denylist scoped to the actual bash-double-quote
+// active set is more precise.
+// eslint-disable-next-line no-control-regex
+const SHELL_DOUBLEQUOTE_DANGEROUS = /[$`\\\x00-\x1f]/
 
 function assertSafePathForShell(p: string, label: string): void {
-  if (!SAFE_PATH_RX.test(p)) {
+  if (SHELL_DOUBLEQUOTE_DANGEROUS.test(p)) {
     throw new HttpError(500, `unsafe_${label}_path`)
   }
 }
@@ -304,10 +314,20 @@ export const POST = withError(async (req: Request) => {
   // from a malformed CAVECMS_COMMIT or a 'dev' partial). We also require
   // the shorter side to be ≥ 7 chars so accidentally-short SHAs don't
   // match unrelated tags.
+  // Refuse a malformed current.sha up front. CAVECMS_COMMIT shorter
+  // than 7 chars (anything except 'dev', already filtered above) is
+  // either a typo or an old environment that predates the new
+  // release-pipeline conventions. Better to fail loud than silently
+  // proceed with an unreliable prefix match.
+  if (current.sha.length < 7) {
+    throw new HttpError(409, 'current_sha_malformed')
+  }
   const isSameSha = (() => {
     const a = target
     const b = current.sha
-    if (a.length < 7 || b.length < 7) return a === b
+    // Both lengths ≥ 7 (Zod min on target, just-validated b). Compare
+    // by the LONGER side starting with the SHORTER. A 7-char short
+    // SHA is unambiguous prefix of its 40-char full form.
     const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a]
     return longer.startsWith(shorter)
   })()

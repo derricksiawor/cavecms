@@ -39,6 +39,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -433,12 +434,12 @@ function updateManifest({ version, sha256, signature, isSecurity }) {
 
   // Atomic write: write to .tmp then rename. Closes the TOCTOU where
   // two concurrent build-zip invocations could clobber each other's
-  // manifest. The rename itself is atomic on POSIX filesystems.
+  // manifest. renameSync is atomic on the same filesystem (dist/ is
+  // always inside the repo so same-fs is guaranteed) and throws on
+  // failure — no silent "looks like it worked" failure mode.
   const tmpPath = manifestPath + '.tmp'
   writeFileSync(tmpPath, JSON.stringify(manifest, null, 2) + '\n')
-  // fs.rename is atomic on the same filesystem; cross-fs would copy.
-  // Since dist/ is always inside the repo, same fs is guaranteed.
-  spawnSync('mv', [tmpPath, manifestPath], { stdio: 'inherit' })
+  renameSync(tmpPath, manifestPath)
   log.ok(`Updated manifest.json (latestVersion=${version}${signature ? '' : ' — UNSIGNED'})`)
   return manifestPath
 }

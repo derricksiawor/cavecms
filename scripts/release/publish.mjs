@@ -189,6 +189,24 @@ function sshInstallScript(version, fileNames) {
   // version is asserted semver-valid by the caller, so the {version}
   // interpolations below cannot inject shell metacharacters. Other
   // string slots are static or constant.
+  // Ordering invariant (to close the publish-time race a poller hits):
+  //
+  // FIRST land the per-version zip + sha256 (+ sig if signed) into
+  // releases/, where they're addressable by exact version. Pollers
+  // hitting /releases/cavecms-X.Y.Z.zip during this phase get the
+  // brand-new bytes; nobody reads "what's latest" yet.
+  //
+  // THEN flip BOTH manifests (manifest.json + updates/latest.json)
+  // to advertise the new version. Use .new -> rename so the flip
+  // is atomic per-file. Both pollers (npx create-cavecms reading
+  // manifest.json; in-app updater reading updates/latest.json) only
+  // ever see the OLD version OR the NEW version, never a mix.
+  //
+  // FINALLY flip the latest.zip + latest.zip.sha256 symlinks.
+  // The invariant: when latest.zip points at vN, both manifests
+  // already advertise vN. If we flipped the symlink first, an in-app
+  // updater that polled the OLD manifest (still advertising vN-1)
+  // would attempt a sha256 mismatch against the NEW zip and fail.
   const RELEASES_DIR = '/var/www/cavecms-releases'
   const lines = [
     'set -euo pipefail',
@@ -199,16 +217,7 @@ function sshInstallScript(version, fileNames) {
   if (fileNames.includes(`cavecms-${version}.zip.sig`)) {
     lines.push(`mv /home/time/cavecms-${version}.zip.sig ${RELEASES_DIR}/releases/cavecms-${version}.zip.sig`)
   }
-  // Flip the `latest.zip` + `latest.zip.sha256` symlinks BEFORE the
-  // manifest writes — that way the new manifest's downloadUrl always
-  // points at a file that is already in place. ln -snf rename-overwrites
-  // the existing symlink atomically.
-  lines.push(
-    `ln -snf releases/cavecms-${version}.zip ${RELEASES_DIR}/latest.zip`,
-    `ln -snf releases/cavecms-${version}.zip.sha256 ${RELEASES_DIR}/latest.zip.sha256`,
-  )
-  // Manifest goes LAST. Write to .new then atomic-rename. updates/latest.json
-  // (the in-app updater's poll target) flips after the full release manifest.
+  // Manifests flip atomically before any "latest"-pointer advances.
   lines.push(
     `mv /home/time/manifest.json ${RELEASES_DIR}/manifest.json.new`,
     `mv ${RELEASES_DIR}/manifest.json.new ${RELEASES_DIR}/manifest.json`,
@@ -219,6 +228,13 @@ function sshInstallScript(version, fileNames) {
   lines.push(
     `mv /home/time/updates-latest.json ${RELEASES_DIR}/updates/latest.json.new`,
     `mv ${RELEASES_DIR}/updates/latest.json.new ${RELEASES_DIR}/updates/latest.json`,
+  )
+  // Latest-pointer symlinks LAST — at this point the manifests already
+  // declare the new version, so a poller that flips between manifest
+  // and latest.zip sees a consistent (version, zip-bytes) pair.
+  lines.push(
+    `ln -snf releases/cavecms-${version}.zip ${RELEASES_DIR}/latest.zip`,
+    `ln -snf releases/cavecms-${version}.zip.sha256 ${RELEASES_DIR}/latest.zip.sha256`,
     `echo "publish-complete version=${version}"`,
   )
   return lines.join('\n')

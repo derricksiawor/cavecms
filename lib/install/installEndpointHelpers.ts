@@ -66,9 +66,15 @@ export async function refuseIfInstalled(): Promise<Response | null> {
  */
 export function requireInstallToken(req: Request): Response | null {
   const expected = process.env.INSTALL_BOOTSTRAP_TOKEN
-  if (!expected) {
-    // Token not configured — fall through (legacy install path).
-    // The isInstalled() gate is still in front of every endpoint.
+  // Refuse hard in production if the env var is missing or
+  // suspiciously short. Cycle-1 fallthrough behavior ("legacy install
+  // path") silently opened the gate on misconfigured prod boxes —
+  // closing that vector. Dev mode keeps the fallthrough so contributor
+  // tests don't need to fake an env.
+  if (!expected || expected.length < 32) {
+    if (process.env.NODE_ENV === 'production') {
+      return tokenRejection()
+    }
     return null
   }
   const provided = req.headers.get('x-install-token') ?? ''
