@@ -1,28 +1,45 @@
-// Query the GitHub commits API for the tip of `main` in the CaveCMS
-// repo and decide whether it represents a newer revision than what's
-// running locally.
+// Query the static release manifest at cavecms.derricksiawor.com/updates/latest.json
+// for the current stable-channel release and decide whether it represents a
+// newer revision than what's running locally.
 //
 // Strategy notes:
-// - We pull `commits/main` (not `releases/latest`) because CaveCMS is
-//   not currently tagging GitHub Releases — every push to main is the
-//   shipped revision. When we start tagging, this can flip to
-//   `/releases/latest` without changing the public shape returned here.
-// - The endpoint is public for a public repo. If the user runs CaveCMS
-//   from a private fork, set `GITHUB_PAT` and we add an Authorization
-//   header. We never log or echo the token.
-// - 5-minute in-memory cache keyed by `<owner>/<repo>` keeps repeated
-//   "Check Now" clicks from hammering the GitHub API rate budget
-//   (60 unauthenticated / 5000 authenticated reqs per hour).
+// - The manifest is updated by scripts/release/publish.mjs whenever a new
+//   zip is built + signed + uploaded to timemacro. Every CaveCMS install in
+//   the wild polls the same static endpoint, so a single release push
+//   propagates to every operator on the next scheduler tick (12h default).
+// - We DON'T poll GitHub commits/tags directly anymore — every push to main
+//   would otherwise surface as "Update available" within 12h. The static
+//   manifest decouples "code in main" from "release ready for operators".
+// - 5-minute in-memory cache keyed by the manifest URL keeps repeated
+//   "Check Now" clicks from hammering the origin.
+// - For forks running off a different release host, set CAVECMS_RELEASE_MANIFEST_URL
+//   to your own /updates/latest.json. The shape MUST match what
+//   scripts/release/publish.mjs writes.
 
 export interface LatestRelease {
-  /** Full git SHA of the tip of main. */
+  /**
+   * Full git SHA the release was built from. Compared against
+   * `process.env.CAVECMS_COMMIT` via `latest.sha.startsWith(current.sha)`
+   * to decide "up to date".
+   */
   sha: string
-  /** ISO timestamp of the commit. */
+  /** ISO timestamp the release was published (manifest's publishedAt). */
   ts: string
-  /** Commit message body (first line + any body). Truncated upstream. */
+  /** Human-readable changelog. Markdown supported by the modal. */
   changelog: string
   /** Heuristic: does the changelog mention security / CVE / vuln? */
   isSecurity: boolean
+  /** Semver-ish version string (e.g. "0.1.0", "1.2.3-beta.4"). */
+  version: string
+  /** Public URL of the release zip. Used by the apply route to set
+   *  CAVECMS_UPDATE_TARBALL_URL for the orchestrator. */
+  downloadUrl: string
+  /** SHA-256 of the zip bytes. Used by the apply route to set
+   *  CAVECMS_UPDATE_TARBALL_SHA256 for the orchestrator. */
+  sha256: string
+  /** Cap on auto-upgrade jumps. If the running version is older than this,
+   *  the operator must step through manually. null = no constraint. */
+  minPreviousVersion: string | null
 }
 
 import { RELEASE_CHANGELOG_MAX_BYTES, RELEASE_FETCH_TIMEOUT_MS, UPDATE_CHECK_TTL_MS } from './constants'
@@ -36,103 +53,140 @@ const CACHE = new Map<string, CacheEntry>()
 const TTL_MS = UPDATE_CHECK_TTL_MS
 
 // Test-only escape hatch — the unit suite needs to start from a clean
-// cache between cases. NOT exported from the module's normal entry
-// path; the suite imports it directly.
+// cache between cases. NOT exported from the module's normal entry path;
+// the suite imports it directly.
 export function __resetCacheForTests(): void {
   CACHE.clear()
 }
 
-interface GithubCommitResponse {
+const DEFAULT_MANIFEST_URL = 'https://cavecms.derricksiawor.com/updates/latest.json'
+
+interface ManifestResponse {
+  channel?: unknown
+  version?: unknown
   sha?: unknown
-  commit?: {
-    committer?: { date?: unknown } | null
-    author?: { date?: unknown } | null
-    message?: unknown
-  }
+  publishedAt?: unknown
+  downloadUrl?: unknown
+  sha256?: unknown
+  signature?: unknown
+  isSecurity?: unknown
+  minPreviousVersion?: unknown
+  changelog?: unknown
 }
 
-export async function checkLatestRelease({
-  owner,
-  repo,
-}: {
-  owner: string
-  repo: string
+/**
+ * Fetch the release manifest from the configured static endpoint.
+ *
+ * The `owner` + `repo` args are retained for back-compat with the old
+ * GitHub-polling shape (callers pass them from env defaults), but they
+ * are NOT used — the URL is determined by CAVECMS_RELEASE_MANIFEST_URL
+ * or the default. We keep the arguments so the check route's signature
+ * doesn't have to change in lockstep.
+ */
+export async function checkLatestRelease(_ignoredArgs?: {
+  owner?: string
+  repo?: string
 }): Promise<LatestRelease> {
-  const cacheKey = `${owner}/${repo}`
+  const url = process.env.CAVECMS_RELEASE_MANIFEST_URL ?? DEFAULT_MANIFEST_URL
+  const cacheKey = url
   const hit = CACHE.get(cacheKey)
   if (hit && hit.expiresAt > Date.now()) {
     return hit.value
   }
 
-  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/main`
   const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    // User-Agent is required by the GitHub API. Identify ourselves so
-    // GitHub support can correlate misbehaviour to the project, not the
-    // generic Node fetch UA.
+    Accept: 'application/json',
+    // User-Agent so origin-side log analysis can correlate per-install poll
+    // activity if needed.
     'User-Agent': 'CaveCMS-Updates-Check',
   }
-  // Optional PAT for private forks / higher rate budget. Read directly
-  // from process.env (NOT lib/env.ts) so this module can be tested
-  // standalone without dragging the full env validator in.
-  const pat = process.env.GITHUB_PAT
-  if (pat) {
-    // Defensive PAT shape validation. GitHub PATs are alphanumeric +
-    // underscore. Anything outside that (especially control bytes
-    // like \r\n) could enable Authorization-header injection.
-    if (!/^[A-Za-z0-9_]+$/.test(pat)) {
-      throw new Error('github_pat_malformed')
-    }
-    headers.Authorization = `Bearer ${pat}`
-  }
 
-  const res = await fetch(url, {
-    method: 'GET',
-    headers,
-    signal: AbortSignal.timeout(RELEASE_FETCH_TIMEOUT_MS),
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers,
+      // No-store on the origin side, but a Cloudflare or other CDN cache
+      // could still serve stale. The scheduler tick is 12h so a stale
+      // manifest at the edge is bounded — fine for now.
+      cache: 'no-store',
+      signal: AbortSignal.timeout(RELEASE_FETCH_TIMEOUT_MS),
+    })
+  } catch (err) {
+    // Distinguish network-class failures so the check route can surface
+    // operator-friendly copy. Timeout via AbortSignal manifests as either
+    // AbortError or TimeoutError depending on the runtime — both mean
+    // "we couldn't reach the release server".
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`manifest_unreachable: ${msg}`)
+  }
 
   if (!res.ok) {
-    // Distinguish rate-limit (403/429 with x-ratelimit-remaining: 0)
-    // from generic upstream failures so the check route can emit
-    // operator-friendly copy ("GitHub is rate-limiting your IP —
-    // try again in ~X minutes") instead of a flat "couldn't check
-    // for updates". 404 for typo'd repo / private repo without PAT
-    // gets its own class so configuration mistakes don't masquerade
-    // as transient failures.
-    if (res.status === 403 || res.status === 429) {
-      const remaining = res.headers.get('x-ratelimit-remaining')
-      if (remaining === '0' || res.status === 429) {
-        const reset = res.headers.get('x-ratelimit-reset') ?? ''
-        throw new Error(`github_rate_limited_${reset}`)
-      }
-    }
     if (res.status === 404) {
-      throw new Error('github_repo_not_found')
+      // The manifest path is misconfigured (operator-controlled env var
+      // or upstream dist host moved).
+      throw new Error('manifest_not_found')
     }
-    throw new Error(`github_api_failed_${res.status}`)
+    throw new Error(`manifest_http_${res.status}`)
   }
 
-  const body = (await res.json()) as GithubCommitResponse
+  let body: ManifestResponse
+  try {
+    body = (await res.json()) as ManifestResponse
+  } catch {
+    throw new Error('manifest_malformed_json')
+  }
+
   const sha = typeof body.sha === 'string' ? body.sha : ''
-  const dateRaw = body.commit?.committer?.date ?? body.commit?.author?.date
-  const ts = typeof dateRaw === 'string' ? dateRaw : ''
-  const message = typeof body.commit?.message === 'string' ? body.commit.message : ''
+  const ts = typeof body.publishedAt === 'string' ? body.publishedAt : ''
+  const version = typeof body.version === 'string' ? body.version : ''
+  const downloadUrl = typeof body.downloadUrl === 'string' ? body.downloadUrl : ''
+  const sha256 = typeof body.sha256 === 'string' ? body.sha256 : ''
+  const rawChangelog = typeof body.changelog === 'string' ? body.changelog : ''
+  const minPreviousVersion =
+    typeof body.minPreviousVersion === 'string' ? body.minPreviousVersion : null
+  // isSecurity is authoritative from the manifest. We do NOT re-heuristic
+  // the changelog body — publishers explicitly mark security releases.
+  const isSecurity = body.isSecurity === true
 
-  if (!sha || !ts) {
-    throw new Error('github_api_malformed')
+  if (!sha || !ts || !version || !downloadUrl || !sha256) {
+    throw new Error('manifest_malformed_fields')
   }
 
-  // Trim the changelog at the configured cap so a runaway commit
-  // message can't blow the response payload (one famous case: a
-  // 60KB AUTOGENERATED block pasted into the commit body).
-  const changelog = message.slice(0, RELEASE_CHANGELOG_MAX_BYTES)
-  const isSecurity = /\b(?:cve-\d{4}-\d+|security|vulnerability|vuln(?:erab)?)\b/i.test(
-    changelog,
-  )
+  // Defensive validation of the downloadUrl. Must be HTTPS + same-origin
+  // family as the manifest URL (eliminates open-redirect-style abuse if
+  // an attacker MITMs the manifest endpoint without a valid cert — they'd
+  // have to also serve a same-origin attacker-controlled zip).
+  try {
+    const manifestOrigin = new URL(url).origin
+    const downloadOrigin = new URL(downloadUrl).origin
+    if (downloadOrigin !== manifestOrigin) {
+      throw new Error(`manifest_cross_origin_download`)
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('manifest_')) throw err
+    throw new Error('manifest_invalid_download_url')
+  }
 
-  const value: LatestRelease = { sha, ts, changelog, isSecurity }
+  // Defensive validation of the sha256 shape. 64 hex chars.
+  if (!/^[a-f0-9]{64}$/i.test(sha256)) {
+    throw new Error('manifest_invalid_sha256')
+  }
+
+  // Trim the changelog at the configured cap so a runaway notes blob can't
+  // blow the response payload.
+  const changelog = rawChangelog.slice(0, RELEASE_CHANGELOG_MAX_BYTES)
+
+  const value: LatestRelease = {
+    sha,
+    ts,
+    changelog,
+    isSecurity,
+    version,
+    downloadUrl,
+    sha256,
+    minPreviousVersion,
+  }
   CACHE.set(cacheKey, { expiresAt: Date.now() + TTL_MS, value })
   return value
 }

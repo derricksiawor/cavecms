@@ -6,14 +6,12 @@ import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
 
 // POST /api/admin/updates/check — operator-triggered version check
-// against the configured upstream (GitHub: derricksiawor/cavecms by
-// default; future cavecms.derricksiawor.com manifest will swap behind a provider
-// interface).
+// against the static release manifest at cavecms.derricksiawor.com/updates/latest.json
+// (override with CAVECMS_RELEASE_MANIFEST_URL for forks).
 //
 // Marked POST (not GET) so it sits behind CSRF + mutation rate-limit
-// — each call burns a slot in our GitHub-API rate budget (60 unauth
-// /hr). Without rate-limiting + CSRF, a logged-in admin's browser
-// could be coerced (via CSRF) to drain our budget remotely.
+// — without rate-limiting + CSRF, a logged-in admin's browser could be
+// coerced (via CSRF) to drain our outbound bandwidth budget remotely.
 //
 // The actual upstream fetch is cached for 5 minutes in
 // lib/updates/checkLatestRelease.ts, so the banner + dashboard card
@@ -27,9 +25,6 @@ import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
 
 export const dynamic = 'force-dynamic'
 
-const REPO_OWNER = process.env.CAVECMS_REPO_OWNER ?? 'derricksiawor'
-const REPO_NAME = process.env.CAVECMS_REPO_NAME ?? 'cavecms'
-
 interface CheckResponse {
   current: { sha: string; ts: string | null }
   available: {
@@ -37,6 +32,10 @@ interface CheckResponse {
     ts: string
     changelog: string
     isSecurity: boolean
+    version: string
+    downloadUrl: string
+    sha256: string
+    minPreviousVersion: string | null
   } | null
 }
 
@@ -48,36 +47,36 @@ export const POST = withError(async (req: Request) => {
   const current = getCurrentVersion()
   let latest: Awaited<ReturnType<typeof checkLatestRelease>>
   try {
-    latest = await checkLatestRelease({ owner: REPO_OWNER, repo: REPO_NAME })
+    latest = await checkLatestRelease()
   } catch (err) {
-    // Distinguish the three real failure classes so the UI can render
+    // Distinguish the failure classes so the UI can render
     // operator-friendly copy:
-    //   - rate-limited (GitHub 403/429 with x-ratelimit-remaining: 0)
-    //     → "GitHub is rate-limiting your IP, try again in ~X min"
-    //   - repo not found (404)
-    //     → "Couldn't find the release repository — check your
-    //        update channel configuration"
-    //   - generic upstream (anything else)
+    //   - manifest_not_found (HTTP 404 on the manifest URL)
+    //     → "Couldn't find the release manifest — check
+    //        CAVECMS_RELEASE_MANIFEST_URL"
+    //   - manifest_unreachable / network class
     //     → "Couldn't reach the release server, try again later"
+    //   - manifest_malformed_* / generic
+    //     → "The release server returned bad data"
     //
-    // We DON'T echo the GitHub body verbatim — it may carry IP-tied
-    // rate-limit context that doesn't belong in operator UI.
+    // We DON'T echo the upstream body verbatim — it may carry context
+    // that doesn't belong in operator UI.
     const msg = err instanceof Error ? err.message : String(err)
-    if (msg.startsWith('github_rate_limited_')) {
-      throw new HttpError(429, 'check_rate_limited')
-    }
-    if (msg === 'github_repo_not_found') {
+    if (msg === 'manifest_not_found') {
       throw new HttpError(502, 'check_repo_not_found')
+    }
+    if (msg.startsWith('manifest_unreachable')) {
+      throw new HttpError(502, 'check_unreachable')
     }
     throw new HttpError(502, 'check_failed')
   }
 
   // "Up to date" when the upstream SHA matches our running SHA.
-  // Comparison: upstream returns full 40-char SHA; current.sha is
-  // whatever `CAVECMS_COMMIT` is set to (typically 12-char short SHA).
+  // Upstream returns full 40-char SHA; current.sha is whatever
+  // `CAVECMS_COMMIT` is set to (typically 12-char short SHA).
   // `latest.sha.startsWith(current.sha)` correctly matches "abc1234"
   // against the long form. For dev (sha='dev') we always surface the
-  // latest commit so the operator can see what they would update to
+  // latest release so the operator can see what they would update to
   // once deployed — useful for screenshots + demos.
   const upToDate = current.sha !== 'dev' && latest.sha.startsWith(current.sha)
 
@@ -90,6 +89,10 @@ export const POST = withError(async (req: Request) => {
           ts: latest.ts,
           changelog: latest.changelog,
           isSecurity: latest.isSecurity,
+          version: latest.version,
+          downloadUrl: latest.downloadUrl,
+          sha256: latest.sha256,
+          minPreviousVersion: latest.minPreviousVersion,
         },
   }
 

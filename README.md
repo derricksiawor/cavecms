@@ -36,82 +36,72 @@ install.**
 
 ---
 
-## Install — the 5-minute path
+## Install — one command, then a browser wizard
 
-> **TL;DR for the impatient**: provision a VPS with MariaDB, run the
-> bootstrap script, open the URL it prints, finish the browser wizard.
+> **TL;DR**: `npx create-cavecms my-site` on your server, open the URL it
+> prints, finish the browser wizard.
+
+CaveCMS installs on three surfaces with the same one command:
+
+- **VPS** (Ubuntu/Debian 22.04 LTS+ with systemd + nginx)
+- **Laptop** (macOS / Linux dev box, for local evaluation)
+- **cPanel** (shared host with Node.js Selector + Passenger)
 
 ### Prerequisites
 
-- A Linux VPS (Ubuntu 22.04 LTS+ tested), 1 GB RAM minimum (2 GB recommended)
-- A domain name pointed at the VPS (for HTTPS via Let's Encrypt)
-- **MariaDB 10.11+** running locally (`apt install mariadb-server`)
-- **Node 22** + **pnpm 10** (via [corepack](https://nodejs.org/api/corepack.html)
-  or [nvm](https://github.com/nvm-sh/nvm))
-- Root or sudo access during install
+- **Node 20+** on the target machine (via [nvm](https://github.com/nvm-sh/nvm)
+  on Linux, the installer on macOS, or Node.js Selector on cPanel)
+- **MariaDB 10.11+** reachable from the install target (local socket on VPS;
+  local install on a laptop; provider-managed on cPanel)
+- On VPS only: a domain pointed at the box (for HTTPS via Let's Encrypt) and
+  sudo access during the CLI run
 
-### Step 1 — Download + verify the release
-
-```bash
-# Download the latest signed release manifest
-curl -sSL https://cavecms.derricksiawor.com/manifest.json -o /tmp/manifest.json
-
-# Fetch the tarball + signature listed in the manifest
-LATEST=$(awk -F'"' '/"version":/ {print $4; exit}' /tmp/manifest.json)
-curl -sSL "https://cavecms.derricksiawor.com/releases/cavecms-${LATEST}.zip" \
-  -o /tmp/cavecms.zip
-
-# Verify SHA256 against the manifest (one-liner; replace with the value
-# from manifest.json's `sha256` field for that release)
-EXPECTED=$(awk -F'"' '/"sha256":/ {print $4; exit}' /tmp/manifest.json)
-echo "$EXPECTED  /tmp/cavecms.zip" | sha256sum -c
-```
-
-### Step 2 — Extract + bootstrap
+### One command
 
 ```bash
-sudo mkdir -p /opt/cavecms/releases
-sudo unzip -q /tmp/cavecms.zip -d /opt/cavecms/releases
-sudo ln -sfn "/opt/cavecms/releases/cavecms-${LATEST}" /opt/cavecms/current
-
-# Run the one-shot bootstrap. Prompts for MariaDB root password, creates
-# the `cavecms` user + database, generates ALL secrets, writes
-# /etc/cavecms/env.production, runs migrations, provisions the systemd
-# unit, starts the service.
-sudo /opt/cavecms/current/scripts/bootstrap.sh
+npx create-cavecms my-site
 ```
 
-The bootstrap script prints the next step:
+The CLI:
+
+1. Detects whether you're on **VPS / laptop / cPanel** and picks the right adapter
+2. Downloads and signature-verifies the latest release from `cavecms.derricksiawor.com`
+3. Unpacks the runtime to the canonical location for the surface
+4. Prompts for the minimum it cannot auto-supply: database connection, public
+   site URL, port
+5. Generates **every** bootstrap secret (JWT, CSRF, preview, brochure, internal
+   revalidate, secrets-encryption key, hidden login path)
+6. Writes **one** sealed `env.production` file (mode `600`, owned by the
+   service user) that you **never open or edit**
+7. Runs database migrations
+8. Starts the service (systemd on VPS, foreground on laptop, Passenger on cPanel)
+
+On VPS installs the CLI also writes a ready-to-use nginx vhost. Total time:
+about 2 minutes. Output:
 
 ```
-✓ CaveCMS is running on 127.0.0.1:3040
-✓ Configure your domain in nginx, then open:
-  https://your-domain.com/install
+✓ CaveCMS is running on https://your-domain.com
+✓ Open https://your-domain.com/install to finish setup.
 ```
 
-### Step 3 — Point your domain at the server
+### Finish setup in the browser
 
-Install nginx + a Let's Encrypt cert. The bootstrap script writes a
-ready-to-use nginx vhost at `/etc/nginx/sites-available/cavecms`:
+The install wizard takes 3-5 minutes and writes everything to the database
+— never to any file:
 
-```bash
-sudo ln -s /etc/nginx/sites-available/cavecms /etc/nginx/sites-enabled/
-sudo certbot --nginx -d your-domain.com
-sudo systemctl reload nginx
-```
-
-### Step 4 — Finish setup in the browser
-
-Open `https://your-domain.com/install` and walk through the wizard:
-
-1. **Welcome** — confirm you're ready
+1. **Welcome**
 2. **Admin account** — create your administrator user (email + 12+ char password)
-3. **Site identity** — your public site URL + site name
-4. **Email** — paste SMTP credentials, OR skip and configure later under Settings → Email
-5. **Done** — sign in at the obscured admin path the bootstrap script printed
+3. **Site identity** — public site URL + site name
+4. **Branding** — logo, brand color, footer text
+5. **Contact info** — phone, email, address (used by contact forms + footer)
+6. **Email (SMTP)** — paste credentials + test-send, or skip and configure later
+7. **Security baseline** — pick a memorable login path, add reCAPTCHA keys, set
+   an IP allowlist (all optional)
+8. **Done** — sign in at the hidden admin path the wizard shows you
 
-That's the whole install. There is no `wp-config.php` to edit, no `.env`
-to fill in. Everything else is in the dashboard.
+That's the whole install. There is **no** `wp-config.php` to edit, **no**
+`.env` to fill in, **no** SSH after the CLI finishes. Everything operator-facing
+lives in the dashboard.
 
 ---
 
