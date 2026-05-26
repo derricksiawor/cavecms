@@ -852,22 +852,20 @@ if [ "$FORCE" = "1" ]; then
   rm -rf "$REPO_DIR/.next" 2>>"${LOG_DIR}/force-clean.log" || true
 fi
 
-# Override NODE_ENV for the build subprocess only. Several
-# prebuild/postbuild scripts (verify-route-collisions.ts,
-# postbuild-check-slug-collisions.ts) hard-refuse NODE_ENV=production
-# — the gate exists to stop someone running `pnpm build` directly on
-# the prod box. The in-app update flow IS a legitimate operator-
-# initiated prod build but the hooks don't have an opt-in flag. Setting
-# NODE_ENV=development here only affects the prebuild + postbuild hooks
-# — `next build` itself overwrites NODE_ENV=production internally for
-# webpack/swc/Next's compiler, so the produced bundle is still a
-# production build.
-# `dev-bootstrap.mjs` (prebuild hook) refuses if port 3040 is already
-# bound — that check is for fresh `pnpm dev` runs. The in-app update
-# explicitly RELIES on the existing pm2 process being up on 3040
-# (so the healthz preflight passed and the maintenance toggle can
-# fire). Pass CAVECMS_SKIP_PORT_CHECK=1 to clear that gate.
-if ! CAVECMS_SKIP_PORT_CHECK=1 NODE_ENV=development pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
+# Three prebuild/postbuild gates need clearing for the in-app
+# update path:
+#   - dev-bootstrap.mjs port-check: CAVECMS_SKIP_PORT_CHECK=1 (pm2 IS
+#     on 3040 during the update — that's the whole point)
+#   - verify-route-collisions.ts (prebuild): CAVECMS_BUILD_OK=1
+#   - postbuild-check-slug-collisions.ts (postbuild): CAVECMS_BUILD_OK=1
+#
+# NODE_ENV stays at production. Overriding to development causes
+# Next.js's prerender step to import legacy pages-router `<Html>` and
+# the build fails on the /404 export with
+# "<Html> should not be imported outside of pages/_document".
+# CAVECMS_BUILD_OK is the same opt-in pattern as CAVECMS_MIGRATE_OK
+# for db-migrate-with-lock.
+if ! CAVECMS_SKIP_PORT_CHECK=1 CAVECMS_BUILD_OK=1 pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
   write_status "failed" 4 "Couldn't build your site" "Your previous version is being restored." ""
   rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"
   post_audit_terminal rolled_back "build_failed"

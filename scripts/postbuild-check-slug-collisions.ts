@@ -38,9 +38,18 @@
 // annotation below resolves at compile time.
 import type mysql from 'mysql2/promise'
 
-if (process.env['NODE_ENV'] === 'production') {
+// CAVECMS_BUILD_OK=1 is the in-app updater's opt-in (same pattern as
+// CAVECMS_MIGRATE_OK for db-migrate-with-lock). The in-app update
+// flow runs `pnpm build` under NODE_ENV=production legitimately.
+if (
+  process.env['NODE_ENV'] === 'production' &&
+  process.env['CAVECMS_BUILD_OK'] !== '1'
+) {
   console.error(
     '[postbuild-check-slug-collisions] refusing to run with NODE_ENV=production.',
+  )
+  console.error(
+    '[postbuild-check-slug-collisions]   In-app updater path: set CAVECMS_BUILD_OK=1.',
   )
   process.exit(1)
 }

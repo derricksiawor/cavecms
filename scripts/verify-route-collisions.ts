@@ -29,9 +29,21 @@
 // fires BEFORE any module imports (the `node:fs/promises`,
 // `node:path` resolves are inside the async IIFE below).
 
-if (process.env['NODE_ENV'] === 'production') {
+// CAVECMS_BUILD_OK=1 is the in-app updater's opt-in: scripts/cavecms-update.sh
+// invokes `pnpm build` as part of step 4 with NODE_ENV=production live,
+// and that flow IS a legitimate operator-initiated prod build. Honour
+// the same opt-in pattern that db-migrate-with-lock uses for
+// CAVECMS_MIGRATE_OK so the prebuild gate isn't a hard floor against
+// the legitimate in-app path.
+if (
+  process.env['NODE_ENV'] === 'production' &&
+  process.env['CAVECMS_BUILD_OK'] !== '1'
+) {
   console.error(
     '[verify-route-collisions] refusing to run with NODE_ENV=production.',
+  )
+  console.error(
+    '[verify-route-collisions]   In-app updater path: set CAVECMS_BUILD_OK=1.',
   )
   process.exit(1)
 }
