@@ -18,7 +18,17 @@ const config: NextConfig = {
   // calls that webpack tries to polyfill and fails on. Turbopack handles
   // these transparently — webpack needs the explicit allowlist. Marking
   // them external keeps them as runtime requires.
-  serverExternalPackages: ['sharp', 'isomorphic-dompurify', 'jsdom', 'nodemailer'],
+  // mysql2 + drizzle-orm are listed externals so:
+  //   (1) the Next standalone build leaves them as runtime requires
+  //       instead of inlining them into webpack chunks, AND
+  //   (2) they get copied to .next/standalone/node_modules/ at build
+  //       time — `scripts/install-migrate.mjs` (a standalone Node script
+  //       outside the Next route graph, run by `npx create-cavecms`)
+  //       resolves them from there via `createRequire`. Without these
+  //       in the externals list, the release zip ships without mysql2,
+  //       and the first `npx create-cavecms` install dies at step 6
+  //       with "mysql2 not found — looked in […]".
+  serverExternalPackages: ['sharp', 'isomorphic-dompurify', 'jsdom', 'nodemailer', 'mysql2', 'drizzle-orm'],
   // instrumentation.ts runs only on Node (`if (NEXT_RUNTIME !== 'nodejs') return`
   // at the top of register()) but webpack still tries to BUNDLE it for the
   // Edge runtime, where `await import('node:crypto')` (and the chain of
