@@ -224,7 +224,15 @@ on_signal() {
 CURRENT_STEP=0
 trap on_exit EXIT
 trap 'on_signal SIGTERM' TERM
-trap 'on_signal SIGINT' INT
+# Ignore SIGINT and SIGHUP. Step 5 (pm2 reload) sends SIGINT to the
+# managed Node process; on some platforms (macOS especially) the
+# signal leaks to the orchestrator via the shared controlling
+# terminal or process group despite the apply route's
+# `detached: true` setsid. SIGHUP fires when the parent Node process
+# exits during the reload. Both signals are NORMAL for the in-app
+# update flow and must NOT abort the orchestrator — only an explicit
+# SIGTERM from systemd / pm2 stop / operator kill should.
+trap '' INT HUP
 
 # Rollback helper — defined BEFORE the steps that call it so bash has
 # registered the function in its table by the time we hit a failure.
