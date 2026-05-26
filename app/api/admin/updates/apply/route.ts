@@ -179,6 +179,18 @@ function resolveScriptPath(): string {
   return scriptPath
 }
 
+// Resolve the spawn-log path (without opening). The double-fork
+// orchestrator uses the path directly so nohup can re-open the file
+// independently of any fd Node holds — closing Node's fd doesn't
+// affect the orphaned child's file handle.
+function resolveSpawnLogPath(): string {
+  const dir =
+    process.env.CAVECMS_LOG_DIR ??
+    (process.env.NODE_ENV === 'production' ? '/var/log/cavecms' : '/tmp')
+  mkdirSync(dir, { recursive: true })
+  return resolve(dir, 'cavecms-update-spawn.log')
+}
+
 // Open a spawn-log file safely. Returns an fd in append mode that
 // the child will write its stdout/stderr into.
 function openSpawnLog(): number {
@@ -358,11 +370,39 @@ export const POST = withError(async (req: Request) => {
     const scriptEnv = buildScriptEnv(target, current.sha, { force })
     const logFd = openSpawnLog()
 
-    const child = spawn('/bin/bash', [scriptPath, target], {
+    // Double-fork orphan pattern. `detached: true` + `setsid` alone
+    // is NOT enough on macOS to escape pm2's reload-time
+    // process-tree walk — when the pm2 daemon kill_timeouts the OLD
+    // Node process (8s default), it can deliver SIGKILL to children
+    // even after setsid. The orchestrator script then dies mid-step-6
+    // with no trap fire (SIGKILL untrappable). On Linux + systemd
+    // this isn't an issue because systemd-run --no-block creates a
+    // fresh scope.
+    //
+    // To get equivalent isolation without systemd: wrap the script
+    // invocation in a subshell that re-opens its own log fd, then
+    // backgrounds the orchestrator with nohup + disown so the child
+    // has no inherited fds from Node, no controlling terminal, and
+    // no parent process group. pm2's kill-tree walk finds nothing.
+    //
+    // Pattern:
+    //   ( exec </dev/null >>$LOG 2>&1
+    //     nohup /bin/bash $SCRIPT $TARGET >>$LOG 2>&1 &
+    //     disown
+    //   ) ; exit 0
+    //
+    // The outer subshell exits with status 0 immediately; pm2 sees
+    // the spawn complete cleanly. The orchestrator runs as an
+    // orphaned grandchild, reparented to launchd (PID 1) on macOS.
+    const logPath = resolveSpawnLogPath()
+    // Shell-quoting: paths and target are operator/route-controlled
+    // strings; targetSha has been Zod-validated to /^[0-9a-f]+$/i.
+    // scriptPath is the route's own resolved path. Both safe to inline
+    // single-quoted with no operator-controlled escape risk.
+    const detachCommand = `( exec </dev/null >>${JSON.stringify(logPath)} 2>&1; nohup /bin/bash ${JSON.stringify(scriptPath)} ${JSON.stringify(target)} >>${JSON.stringify(logPath)} 2>&1 & disown ) ; exit 0`
+    const child = spawn('/bin/bash', ['-c', detachCommand], {
       detached: true,
       stdio: ['ignore', logFd, logFd],
-      // Cast to ProcessEnv — our allowlist already filtered to strings,
-      // but the node typings demand the NODE_ENV property be present.
       env: scriptEnv as NodeJS.ProcessEnv,
       cwd: scriptEnv.CAVECMS_REPO_DIR ?? process.cwd(),
     })
