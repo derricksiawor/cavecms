@@ -25,6 +25,41 @@ const FALLBACK_HTML =
 
 let cachedHtml: Promise<string> | null = null
 
+// Inject `id` slug attributes on h2/h3/h4 in the sanitized HTML so
+// /admin/help#ai-assistant scrolls to the right section. The shared
+// `renderMarkdown` sanitizer strips `id` to keep the blog pipeline
+// strict; we add them back here because this source is a fixed,
+// repo-controlled file with no untrusted input.
+function slugifyHeading(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]+>/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+}
+
+function injectHeadingAnchors(html: string): string {
+  // [\s\S]+? (rather than [^<]+?) so headings with inline children
+  // — e.g. `<h3>Use the <code>token</code></h3>` — still get an id.
+  // slugifyHeading strips inner tags before slugging.
+  //
+  // Two same-text headings under different sections would otherwise
+  // produce duplicate ids; we suffix collisions with `-2`, `-3`, ...
+  // so each id stays unique and the browser scrolls to the closest
+  // one when an anchor URL is followed.
+  const seen = new Map<string, number>()
+  return html.replace(/<(h[234])>([\s\S]+?)<\/\1>/g, (full, tag, inner) => {
+    const base = slugifyHeading(inner)
+    if (!base) return full
+    const count = (seen.get(base) ?? 0) + 1
+    seen.set(base, count)
+    const slug = count === 1 ? base : `${base}-${count}`
+    return `<${tag} id="${slug}">${inner}</${tag}>`
+  })
+}
+
 function loadHelpHtml(): Promise<string> {
   cachedHtml ??= (async () => {
     try {
@@ -32,7 +67,8 @@ function loadHelpHtml(): Promise<string> {
         path.join(process.cwd(), 'docs/admin-help.md'),
         'utf8',
       )
-      return await renderMarkdown(md)
+      const rendered = await renderMarkdown(md)
+      return injectHeadingAnchors(rendered)
     } catch (err) {
       // On failure DO NOT cache the error path — a transient EBUSY /
       // EMFILE should be retried on the next request. Reset the cache

@@ -1,0 +1,45 @@
+[Unit]
+Description=CaveCMS update availability check
+# Network-online + the running dashboard. Without the latter, the
+# wrapper script can't reach 127.0.0.1:3040/api/internal/updates/trigger-check
+# and the timer just logs a 502 on every fire until the dashboard
+# comes back up.
+After=network-online.target cavecms.service
+Wants=network-online.target
+OnFailure=cavecms-alert@%n.service
+
+[Service]
+Type=oneshot
+# 5-minute hard ceiling. The wrapper does exactly one curl POST to an
+# internal endpoint that completes in under a second on a healthy
+# install; 5min is generous but bounds the worst-case wedge if the
+# Next.js process hangs or undici doesn't respect its own timeout.
+TimeoutStartSec=5min
+User=cavecms
+Group=cavecms
+# EnvironmentFile loads INTERNAL_REVALIDATE_SECRET + PORT.
+EnvironmentFile=/etc/cavecms/env.production
+# `-` prefix tolerates missing symlink pre-first-deploy.
+WorkingDirectory=-/opt/cavecms/current
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+# 128M is plenty for `curl` + a small bash wrapper.
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=32
+# The wrapper is shipped in the release artifact at scripts/.
+# ExecCondition refuses to fire if it doesn't exist (pre-first-deploy
+# or operator-rolled-back to a version that predates this feature).
+ExecCondition=/usr/bin/test -x /opt/cavecms/current/scripts/cavecms-updates-check.sh
+ExecStart=/opt/cavecms/current/scripts/cavecms-updates-check.sh

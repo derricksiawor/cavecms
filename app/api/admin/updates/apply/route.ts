@@ -72,6 +72,12 @@ const Body = z
       .min(7)
       .max(64)
       .regex(/^[0-9a-f]+$/i, 'targetSha must be hex'),
+    // Force re-running install on the SAME SHA — exposed in the UI as
+    // "Re-run install" (visible when current === available). Used to
+    // recover from a corrupted .next/ cache or a previously-interrupted
+    // migration. The orchestrator script honours --force / CAVECMS_UPDATE_FORCE=1
+    // by deleting .next/ before rebuild.
+    force: z.boolean().optional(),
   })
   .strict()
 
@@ -95,23 +101,34 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_UPDATE_FROM',
   'CAVECMS_UPDATE_STATUS_PATH',
   'CAVECMS_UPDATE_DRY_RUN',
+  'CAVECMS_UPDATE_FORCE',
+  'CAVECMS_UPDATE_TARBALL_URL',
+  'CAVECMS_UPDATE_TARBALL_SHA256',
   'CAVECMS_REPO_DIR',
   'CAVECMS_HEALTHZ_URL',
   'CAVECMS_RELEASE_PROBE_URL',
   'CAVECMS_LOG_DIR',
+  'CAVECMS_INTERNAL_URL',
   // DB connectivity for db:migrate inside step 3.
   'DATABASE_URL',
   'DATABASE_MIGRATOR_URL',
   // Healthz auth — the script polls /healthz with verbose mode to
   // verify the new build's commit matches the target.
   'HEALTHZ_TOKEN',
+  // Internal-endpoint auth — the script POSTs to /api/internal/updates/*
+  // for the maintenance toggle and terminal-state audit row.
+  'INTERNAL_REVALIDATE_SECRET',
   // Deploy-time invariants. The script exports new values to pm2
   // reload; the new process picks them up via `--update-env`.
   'CAVECMS_COMMIT',
   'CAVECMS_RELEASE_TS',
 ]
 
-function buildScriptEnv(target: string, fromSha: string): Record<string, string> {
+function buildScriptEnv(
+  target: string,
+  fromSha: string,
+  opts: { force: boolean },
+): Record<string, string> {
   const out: Record<string, string> = {}
   for (const k of SCRIPT_ENV_ALLOWLIST) {
     const v = process.env[k]
@@ -119,6 +136,9 @@ function buildScriptEnv(target: string, fromSha: string): Record<string, string>
   }
   out.CAVECMS_UPDATE_TARGET = target
   out.CAVECMS_UPDATE_FROM = fromSha
+  if (opts.force) {
+    out.CAVECMS_UPDATE_FORCE = '1'
+  }
   // Hard-PATH augmentation — on a hardened systemd unit, pm2 lives
   // under `~/.local/share/pnpm/`. Without this, the script fails at
   // step 3 with `pnpm: command not found`.
@@ -199,6 +219,7 @@ export const POST = withError(async (req: Request) => {
 
   const body = Body.parse(await readJsonBody(req))
   const target = body.targetSha.toLowerCase()
+  const force = body.force === true
   const current = getCurrentVersion()
 
   // Refuse to "update" from dev — regardless of NODE_ENV. A
@@ -207,6 +228,18 @@ export const POST = withError(async (req: Request) => {
   // dev` which fails opaquely at step 2. Better to fail loud here.
   if (current.sha === 'dev') {
     throw new HttpError(409, 'cannot_apply_from_dev')
+  }
+
+  // No-op guard: refuse a target that's already the running SHA unless
+  // the operator explicitly asked for `force: true`. The UI surfaces
+  // "Re-run install" as a separate affordance precisely so an
+  // accidental double-click or stale browser tab can't trigger a
+  // surprise rebuild of an already-current install. Force is the
+  // escape hatch (corrupted `.next/`, stuck migration).
+  const isSameSha =
+    target.startsWith(current.sha) || current.sha.startsWith(target)
+  if (isSameSha && !force) {
+    throw new HttpError(409, 'already_on_target_version')
   }
 
   // (1) Acquire the cross-process lock before reading status — closes
@@ -322,7 +355,7 @@ export const POST = withError(async (req: Request) => {
 
     // (2) Build a NARROW env for the child — secrets stay in the
     //     parent. (3) Open the spawn log with O_NOFOLLOW + 0600.
-    const scriptEnv = buildScriptEnv(target, current.sha)
+    const scriptEnv = buildScriptEnv(target, current.sha, { force })
     const logFd = openSpawnLog()
 
     const child = spawn('/bin/bash', [scriptPath, target], {
@@ -361,10 +394,13 @@ export const POST = withError(async (req: Request) => {
     const meta = auditMetaFromRequest(req)
     await db.insert(auditLog).values({
       userId: ctx.userId,
-      action: 'apply',
+      // Distinguish forced rebuilds in the audit thread so the history
+      // table can surface them differently ("Re-ran install" vs.
+      // "Updated to X").
+      action: force ? 'force_apply' : 'apply',
       resourceType: 'updates',
       resourceId: target.slice(0, 12),
-      diff: { fromSha: current.sha, toSha: target },
+      diff: { fromSha: current.sha, toSha: target, ...(force ? { force: true } : {}) },
       ip: meta.ip,
       userAgent: meta.userAgent,
       requestId: meta.requestId,

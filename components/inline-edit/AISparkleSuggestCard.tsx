@@ -53,7 +53,7 @@ export function AISparkleSuggestCard(p: Props) {
       <div className="flex justify-end">
         <button
           type="submit"
-          className="rounded-full bg-copper-500 px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.16em] text-cream-50 hover:bg-copper-600 transition-colors"
+          className="inline-flex h-11 items-center rounded-full bg-copper-500 px-5 text-[12px] font-semibold uppercase tracking-[0.16em] text-cream-50 hover:bg-copper-600 transition-colors sm:h-9 sm:py-2"
         >
           Suggest three
         </button>

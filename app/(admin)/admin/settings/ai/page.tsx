@@ -1,7 +1,9 @@
+import Link from 'next/link'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { registry } from '@/lib/cms/settings-registry'
+import { BetaPill } from '@/components/ui/BetaPill'
 import { AiAssistantClient } from './AiAssistantClient'
 
 // Admin-only AI Assistant (Gemini, BYOK) configuration.
@@ -89,15 +91,19 @@ export default async function AiAssistantSettingsPage() {
         <h1 className="font-serif text-4xl font-bold tracking-tight text-near-black sm:text-5xl">
           AI Assistant
         </h1>
-        <span className="rounded-full bg-copper-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-copper-700">
-          Beta
-        </span>
+        <BetaPill feature="ai-assistant-settings" size="md" dismissible />
       </div>
       <p className="mt-4 max-w-2xl text-sm font-medium leading-relaxed text-warm-stone">
         Bring your own Gemini API key. The AI writing partner appears as a
         sparkle on every section and as a Page Assistant chat in the
         bottom-left. AI never touches your settings, users, or files — only
-        the words inside your blocks.
+        the words inside your blocks.{' '}
+        <Link
+          href="/admin/help#ai-assistant"
+          className="font-medium text-copper-700 underline-offset-2 hover:underline"
+        >
+          Read the AI Assistant guide →
+        </Link>
       </p>
 
       <AiAssistantClient initial={initial} />

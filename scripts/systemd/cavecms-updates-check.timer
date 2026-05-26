@@ -1,0 +1,19 @@
+[Unit]
+Description=CaveCMS update-availability check timer
+
+[Timer]
+# Fire 5 minutes after boot (give the dashboard service time to come
+# up healthy) then every 12 hours thereafter. Random delay staggers
+# the call so 1000 self-hosted CaveCMS installs don't synchronise
+# their GitHub API calls on the wall clock.
+OnBootSec=5min
+OnUnitActiveSec=12h
+RandomizedDelaySec=10min
+# `Persistent=true` means a box that was down at the firing window
+# catches up the next time it boots — useful for installs that aren't
+# running 24/7.
+Persistent=true
+Unit=cavecms-updates-check.service
+
+[Install]
+WantedBy=timers.target

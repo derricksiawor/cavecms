@@ -93,3 +93,87 @@ Schema validation refuses malformed values before they touch the database.
   cache revalidation, reCAPTCHA degradation, RBAC field rejections.
 
 Use the **Email alerts** card on the dashboard as a quick deep-link.
+The **AI activity** chip at the top of the audit log narrows the view
+to proposals, accepts, and dismisses from the AI writing partner.
+
+## AI Assistant
+
+The AI writing partner appears as a sparkle on every section in edit
+mode, and as a Page Assistant chat in the bottom-left of any page
+you're editing.
+
+### Get a key
+
+The AI uses your Google Gemini API key — you bring your own. Free
+tier is generous; you'll pay pennies for typical use.
+
+1. Go to https://aistudio.google.com/apikey
+2. Create a key, copy it
+3. Paste it into **Settings → AI Assistant**
+4. Click **Test connection**, then **Save**
+
+### What the AI can touch
+
+- The words inside your blocks (headings, body text, captions, button
+  labels, eyebrows, quotes, etc.)
+- The arrangement of blocks on the current page (only when using the
+  Page Assistant chatbot)
+- Block visibility / inserts / deletes on the current page (chat only;
+  fixed blocks like the contact form on `/contact` can't be removed)
+
+### What the AI cannot touch
+
+- Your settings, users, or security configuration
+- Your media library (it can refer to existing images by ID, but it
+  cannot upload, alter, or generate images)
+- Pages other than the one you're editing
+- Any code or files on your server
+
+This isn't a promise — it's enforced by what the AI has access to.
+The tools we give it never reach beyond block content on the current
+page. There is no way for a clever prompt to break out.
+
+### Tones
+
+Click the sparkle on any block, then pick a tone:
+
+- **Punchier** — same meaning, fewer words, more energy
+- **Shorter** — reduce length ~30% without losing meaning
+- **Longer** — expand with concrete detail
+- **Warmer / Friendlier** — more inviting, conversational
+- **More professional** — crisper, business-appropriate
+- **More casual** — loosen up, drop formality
+- **More playful** — light, witty
+- **More authoritative** — confident, declarative
+- **Simpler** — plain language, drop jargon
+- **More elegant** — considered, editorial quality
+
+You can also type a free-form instruction in your own words.
+
+### The Page Assistant chat
+
+Bottom-left sparkle on any edit page → expands into a chat panel. Ask
+it to rework the whole page, restructure sections, add a closing
+quote, translate everything to French — whatever you'd ask a human
+editor. The AI proposes a set of changes; you review each one in the
+proposal tray and accept or dismiss individually.
+
+### Troubleshooting
+
+- **"Stored key could not be decrypted"** — usually means the
+  `SECRETS_ENCRYPTION_KEY` in your env file rotated. Re-paste your
+  Gemini key in **Settings → AI Assistant** to refresh.
+- **"Gemini rejected the API key"** — the key is invalid or revoked.
+  Generate a new one at AI Studio.
+- **"Could not reach generativelanguage.googleapis.com"** — your
+  server's firewall is blocking outbound to Google. Allow that host.
+- **"Slow down — only N checks per minute"** — you've hit the rate
+  limit. Wait a moment and try again.
+
+### Privacy
+
+Block content goes to Gemini so it can write the rewrite. Your
+settings, users, secrets, leads, audit log, and other pages never
+leave your server. The encrypted Gemini key stays in your database;
+the dashboard only shows the last 4 characters to confirm which key
+is on file.

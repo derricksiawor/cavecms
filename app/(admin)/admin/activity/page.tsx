@@ -28,6 +28,11 @@ const ActivityParams = z.object({
       'user',
       'setting',
       'auth',
+      // ai_proposal lets the "AI activity" chip persist across reload
+      // — the activity feed's API already accepts arbitrary lowercase
+      // resource_type values; we also tighten the page-level enum so
+      // a crafted URL can't echo an unexpected value into the form.
+      'ai_proposal',
     ])
     .optional(),
 })

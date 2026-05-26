@@ -26,6 +26,8 @@ import {
 } from 'lucide-react'
 
 import { csrfFetch } from '@/lib/client/csrf'
+import { acquireScrollLock, releaseScrollLock } from '@/lib/client/bodyScrollLock'
+import { BetaPill } from '@/components/ui/BetaPill'
 import { useAiSnapshot, useInlineEditState } from './InlineEditContext'
 
 // ════════════════════════════════════════════════════════════════════
@@ -169,6 +171,15 @@ export function PageAssistant({ pageId }: PageAssistantProps) {
   // visual semantics (info vs warn) demand separate channels.
   const [assistantReply, setAssistantReply] = useState<string | null>(null)
   const [thinkingHint, setThinkingHint] = useState('Reading the page…')
+  // PR 5 review fix: cache the freshest pageVersion returned by a
+  // successful /apply so a rapid second-prompt-then-apply doesn't
+  // race against router.refresh() landing the new server cursor. The
+  // chat surface doesn't dispatch into the InlineEditContext on apply
+  // (multi-block applies have mixed op kinds; inline-style
+  // block-saved dispatch isn't a fit). Instead we keep this local
+  // cursor and Math.max() against editState.pageVersion at the next
+  // /apply request body.
+  const lastApplyPageVersionRef = useRef<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const editState = useInlineEditState()
   const router = useRouter()
@@ -432,6 +443,14 @@ export function PageAssistant({ pageId }: PageAssistantProps) {
     setStage('applying')
     setErrorMessage(null)
     let response: Response
+    // Use the higher of (a) the cursor from InlineEditContext (synced
+    // from the latest server render) and (b) the cursor returned by
+    // our LAST successful /apply. If router.refresh() from the prior
+    // apply hasn't landed yet, (a) is stale and (b) covers the gap.
+    const effectivePageVersion = Math.max(
+      editState.pageVersion,
+      lastApplyPageVersionRef.current ?? 0,
+    )
     try {
       response = await csrfFetch(`/api/ai/proposals/${cur.token}/apply`, {
         method: 'POST',
@@ -439,7 +458,7 @@ export function PageAssistant({ pageId }: PageAssistantProps) {
         body: JSON.stringify({
           accept:
             indices.length === cur.changeset.length ? 'all' : indices,
-          pageVersion: editState.pageVersion,
+          pageVersion: effectivePageVersion,
         }),
       })
     } catch (err) {
@@ -476,6 +495,23 @@ export function PageAssistant({ pageId }: PageAssistantProps) {
       }
       setStage('review')
       return
+    }
+    // Capture the new pageVersion from the response so the NEXT
+    // /apply request doesn't 409 on a stale InlineEditContext cursor
+    // (router.refresh() is async; the new server tree may not have
+    // hydrated by the time the operator clicks Apply again).
+    try {
+      const body = (await response.json().catch(() => ({}))) as {
+        pageVersion?: number
+      }
+      if (typeof body.pageVersion === 'number') {
+        lastApplyPageVersionRef.current = Math.max(
+          lastApplyPageVersionRef.current ?? 0,
+          body.pageVersion,
+        )
+      }
+    } catch {
+      /* swallow — best-effort cursor cache */
     }
     setPending(null)
     setStage('idle')
@@ -565,9 +601,16 @@ function TriggerPill() {
       aria-label={hasPending ? 'View AI proposal' : 'Ask the Page Assistant'}
       // Stacked above the EditModePill ("Stop editing" / "Edit") which
       // sits at fixed bottom-6 right-6 (44px pill + 24px gap = top edge
-      // at 68px from bottom). Anchor at bottom-[4.5rem] (72px) so the
-      // two pills sit a single 4px hairline apart — tight visual pair.
-      className="motion-safe:animate-cavecms-scale-in fixed bottom-[4.5rem] right-6 z-[80] hidden h-11 md:inline-flex items-center gap-2 rounded-full bg-near-black px-5 text-sm font-medium text-ivory shadow-[0_18px_40px_-12px_rgba(14,14,16,0.55)] ring-1 ring-copper-500/20 transition-all duration-standard hover:-translate-y-0.5 hover:bg-obsidian hover:ring-copper-400/40 hover:shadow-[0_22px_50px_-12px_rgba(184,115,51,0.35)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300"
+      // at 68px from bottom). Desktop anchors at bottom-[4.5rem]; on
+      // mobile we sit higher (bottom-24) so the iOS home-bar +
+      // EditModePill don't crowd the same vertical band. The inset is
+      // also tweaked via env(safe-area-inset-bottom) so a notch device
+      // doesn't clip the pill.
+      // Mobile bottom anchors above the EditModePill + iOS home-bar
+      // safe-area inset. Desktop returns to the 4.5rem stack tight
+      // against the EditModePill. The arbitrary calc() class lets
+      // Tailwind compile the safe-area expression at build time.
+      className="motion-safe:animate-cavecms-scale-in fixed right-4 sm:right-6 z-[80] inline-flex h-11 items-center gap-2 rounded-full bg-near-black px-5 text-sm font-medium text-ivory shadow-[0_18px_40px_-12px_rgba(14,14,16,0.55)] ring-1 ring-copper-500/20 transition-all duration-standard hover:-translate-y-0.5 hover:bg-obsidian hover:ring-copper-400/40 hover:shadow-[0_22px_50px_-12px_rgba(184,115,51,0.35)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300 bottom-[calc(env(safe-area-inset-bottom,0px)+6rem)] md:bottom-[4.5rem]"
     >
       <Sparkles
         className="h-4 w-4 text-copper-400"
@@ -638,14 +681,23 @@ function CommandBar() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-[80] pb-4 sm:pb-6">
-      <div className="mx-auto max-w-2xl px-4">
+    // Mobile: anchor the card to the viewport bottom and reserve room
+    // for the iOS home-bar via env(safe-area-inset-bottom). Desktop
+    // keeps the 4–6px breathing room above the EditModePill.
+    <div
+      className="fixed bottom-0 left-0 right-0 z-[80]"
+      style={{
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 1rem)',
+      }}
+    >
+      <div className="mx-auto max-w-2xl px-4 sm:pb-2">
         <div className="motion-safe:animate-cavecms-slide-up overflow-hidden rounded-2xl bg-obsidian/95 shadow-[0_28px_60px_-18px_rgba(14,14,16,0.75)] ring-1 ring-copper-500/25 backdrop-blur-xl">
           {/* Header strip */}
           <div className="flex items-center justify-between border-b border-ivory/10 px-4 py-2.5">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-copper-400">
+            <div className="flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-copper-400">
               <Sparkles className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-              Page Assistant
+              <span>Page Assistant</span>
+              <BetaPill feature="ai-page-assistant" size="sm" dismissible />
             </div>
             <button
               type="button"
@@ -655,9 +707,11 @@ function CommandBar() {
                 setStage('idle')
               }}
               aria-label="Close"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ivory/55 transition-colors hover:bg-ivory/5 hover:text-ivory focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400"
+              // 44px tap target on mobile (matches the popover close)
+              // and the slim 28px desktop chrome the bar was tuned for.
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-ivory/55 transition-colors hover:bg-ivory/5 hover:text-ivory focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-7 sm:w-7"
             >
-              <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" strokeWidth={1.75} aria-hidden="true" />
             </button>
           </div>
 
@@ -673,6 +727,9 @@ function CommandBar() {
                   onSubmit()
                 }
               }}
+              // Mobile gets 3 visible rows so a thumb-typed multi-
+              // sentence prompt doesn't truncate before the operator
+              // can read what they wrote. Desktop auto-grows from 1.
               rows={1}
               maxLength={2000}
               disabled={isThinking}
@@ -681,7 +738,7 @@ function CommandBar() {
                   ? thinkingHint
                   : 'Tell the assistant what to change on this page…'
               }
-              className="w-full resize-none bg-transparent text-base leading-snug text-ivory placeholder:text-ivory/40 focus:outline-none disabled:cursor-wait"
+              className="block w-full resize-none bg-transparent text-base leading-snug text-ivory placeholder:text-ivory/40 focus:outline-none disabled:cursor-wait min-h-[3.5em] sm:min-h-0"
               aria-label="Prompt"
             />
             <div className="mt-2 flex items-center justify-between">
@@ -698,12 +755,24 @@ function CommandBar() {
                   </kbd>
                   to close
                 </span>
+                {!isThinking && text.length === 0 && (
+                  <a
+                    href="/admin/help#ai-assistant"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-ivory/55 underline-offset-2 transition-colors hover:text-copper-300 hover:underline focus:outline-none focus-visible:underline focus-visible:text-copper-300"
+                  >
+                    Learn more
+                  </a>
+                )}
               </div>
               <button
                 type="submit"
                 disabled={isThinking || text.trim().length === 0}
                 aria-label="Send prompt"
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-copper-500 px-4 text-xs font-semibold uppercase tracking-[0.12em] text-near-black transition-all duration-standard hover:bg-copper-400 disabled:cursor-not-allowed disabled:bg-ivory/10 disabled:text-ivory/35 motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300"
+                // Mobile: 44px tall, full chrome. Desktop: tighter
+                // 36px chrome to keep the bar slim.
+                className="inline-flex h-11 items-center gap-1.5 rounded-full bg-copper-500 px-5 text-xs font-semibold uppercase tracking-[0.12em] text-near-black transition-all duration-standard hover:bg-copper-400 disabled:cursor-not-allowed disabled:bg-ivory/10 disabled:text-ivory/35 motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300 sm:h-9 sm:px-4"
               >
                 {isThinking ? (
                   <>
@@ -779,7 +848,17 @@ function ProposalModal() {
     applyAccepted,
     dismissAll,
   } = useAssistant()
-  if (stage !== 'review' && stage !== 'applying') return null
+  // Lock body scroll for the duration of the modal — without this, a
+  // touch-drag on the mobile fullscreen sheet's backdrop scrolls the
+  // underlying page and the page jumps when the modal closes. The
+  // cooperative counter cleanly handles other modals stacking.
+  const isOpen = stage === 'review' || stage === 'applying'
+  useEffect(() => {
+    if (!isOpen) return
+    acquireScrollLock()
+    return () => releaseScrollLock()
+  }, [isOpen])
+  if (!isOpen) return null
   if (!pending) return null
 
   const acceptedCount = pending.accepted.filter(Boolean).length
@@ -809,7 +888,12 @@ function ProposalModal() {
           disabled={isApplying}
           className="motion-safe:animate-cavecms-fade-in absolute inset-0 cursor-default bg-obsidian/55 backdrop-blur-sm disabled:cursor-wait"
         />
-        <div className="motion-safe:animate-cavecms-scale-in relative flex max-h-[min(680px,calc(100vh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-ivory shadow-[0_40px_80px_-20px_rgba(14,14,16,0.6)] ring-1 ring-obsidian/10">
+        <div
+          className="motion-safe:animate-cavecms-scale-in relative flex h-full max-h-[100vh] w-full flex-col overflow-hidden bg-ivory shadow-[0_40px_80px_-20px_rgba(14,14,16,0.6)] ring-1 ring-obsidian/10 sm:h-auto sm:max-h-[min(680px,calc(100vh-3rem))] sm:max-w-2xl sm:rounded-2xl"
+          style={{
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          }}
+        >
           {/* Header */}
           <div className="flex items-start justify-between gap-4 border-b border-obsidian/8 px-6 pt-5 pb-4">
             <div>
@@ -830,11 +914,17 @@ function ProposalModal() {
             </div>
             <button
               type="button"
-              onClick={() => setStage('idle')}
+              onClick={guardedDismiss}
+              disabled={isApplying}
               aria-label="Close"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-warm-stone transition-colors hover:bg-obsidian/5 hover:text-near-black focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400"
+              // PR 5 review fix: gated on isApplying to match the
+              // Esc-handler + backdrop guards. The apply fetch has no
+              // AbortController; clicking X mid-flight would hide a
+              // successful commit OR pop a misleading error when the
+              // failure branch re-mounts the modal.
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-warm-stone transition-colors hover:bg-obsidian/5 hover:text-near-black disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-8 sm:w-8"
             >
-              <X className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              <X className="h-5 w-5 sm:h-4 sm:w-4" strokeWidth={1.75} aria-hidden="true" />
             </button>
           </div>
 
@@ -879,7 +969,7 @@ function ProposalModal() {
               type="button"
               onClick={() => void dismissAll()}
               disabled={isApplying}
-              className="inline-flex h-9 items-center rounded-md px-4 text-sm font-medium text-warm-stone transition-colors hover:bg-obsidian/5 hover:text-near-black disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400"
+              className="inline-flex h-11 items-center rounded-md px-5 text-sm font-medium text-warm-stone transition-colors hover:bg-obsidian/5 hover:text-near-black disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-9 sm:px-4"
             >
               Discard
             </button>
@@ -887,7 +977,7 @@ function ProposalModal() {
               type="button"
               onClick={() => void applyAccepted()}
               disabled={isApplying || acceptedCount === 0}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-near-black px-5 text-sm font-semibold tracking-tight text-ivory shadow-[0_14px_30px_-10px_rgba(14,14,16,0.4)] transition-all duration-standard hover:bg-obsidian hover:shadow-[0_18px_36px_-10px_rgba(184,115,51,0.35)] disabled:cursor-not-allowed disabled:bg-obsidian/40 disabled:shadow-none motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400"
+              className="inline-flex h-11 items-center gap-2 rounded-md bg-near-black px-5 text-sm font-semibold tracking-tight text-ivory shadow-[0_14px_30px_-10px_rgba(14,14,16,0.4)] transition-all duration-standard hover:bg-obsidian hover:shadow-[0_18px_36px_-10px_rgba(184,115,51,0.35)] disabled:cursor-not-allowed disabled:bg-obsidian/40 disabled:shadow-none motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-10"
             >
               {isApplying ? (
                 <>
@@ -941,8 +1031,12 @@ function ProposalCard({
           role="switch"
           aria-checked={accepted}
           aria-label={accepted ? 'Skip this change' : 'Include this change'}
+          // The visual checkbox stays 20px so the card layout reads
+          // the same on all viewports, but the touch target wraps a
+          // larger invisible area on mobile via padding so a thumb
+          // tap doesn't miss.
           className={
-            'mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border transition-colors duration-standard motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 ' +
+            'mt-0.5 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border transition-colors duration-standard motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-5 sm:w-5 ' +
             (accepted
               ? 'border-copper-500 bg-copper-500'
               : 'border-obsidian/20 bg-white hover:border-obsidian/40')
@@ -950,7 +1044,7 @@ function ProposalCard({
         >
           {accepted && (
             <Check
-              className="h-3 w-3 text-near-black"
+              className="h-4 w-4 text-near-black sm:h-3 sm:w-3"
               strokeWidth={3}
               aria-hidden="true"
             />

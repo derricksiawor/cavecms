@@ -293,6 +293,19 @@ export async function register(): Promise<void> {
             signal,
           }),
         )
+        // Stop the AI proposal sweeper BEFORE closing the pool — if a
+        // sweep tick fires during the drain it would hold a pool
+        // connection that pool.end() then cuts mid-statement,
+        // producing spurious `ai_proposal_sweep_failed` log lines on
+        // every reload. stopAiProposalSweeper awaits any in-flight
+        // tick (bounded at 2s so the rest of the drain fits inside
+        // PM2's 8s kill_timeout).
+        try {
+          const { stopAiProposalSweeper } = await import('@/lib/ai/sweeper')
+          await raceTimeout(stopAiProposalSweeper(), 2_500)
+        } catch {
+          /* swallow — sweep module may not be loaded in test mode */
+        }
         try {
           const { pool } = await import('@/db/client')
           await raceTimeout(pool.end(), 3_000)
@@ -390,59 +403,19 @@ export async function register(): Promise<void> {
     updateSchedGlobal.__cavecmsUpdateChecker.unref()
   }
 
-  // ─── AI proposal expiry sweeper (PR 1 + PR 4) ──────────────────
+  // ─── AI proposal lifecycle sweeper (PR 5) ──────────────────────
   //
-  // Flips ai_proposals rows from `pending` → `expired` once past
-  // their 30-minute window. Without this sweeper the row stays
-  // `pending` in storage until an apply attempt notices the expiry
-  // on-read (which itself flips it). The sweeper makes the state
-  // transition timely so the admin dashboard's pending-list always
-  // reflects truth + so a stale token presented out-of-band fails
-  // closed.
-  //
-  // 5-minute interval. Best-effort — a missed tick (e.g. process
-  // restart) catches up on the next one; an apply against a still-
-  // pending-but-actually-expired row also flips the status inline
-  // (see applyInlineProposalByToken / applyChatProposalByToken).
+  // Two responsibilities on a 5-min tick: flip pending → expired past
+  // expires_at, and hard-delete terminal-status rows older than 7
+  // days so the table stays small. Implementation + structured logs
+  // live in lib/ai/sweeper.ts — kept as a separate module so the
+  // integration test can invoke sweepExpiredProposals() directly.
   //
   // PM2 cluster-mode is refused upstream so two workers can't both
-  // sweep concurrently.
-  const proposalSweeperGlobal = globalThis as unknown as {
-    __cavecmsAiProposalSweeper?: ReturnType<typeof setInterval>
-  }
-  if (!proposalSweeperGlobal.__cavecmsAiProposalSweeper) {
-    const SWEEP_INTERVAL_MS = 5 * 60 * 1000
-    const sweepOnce = async (): Promise<void> => {
-      try {
-        const { db } = await import('@/db/client')
-        const { sql } = await import('drizzle-orm')
-        await db.execute(sql`
-          UPDATE ai_proposals
-          SET status = 'expired'
-          WHERE status = 'pending'
-            AND expires_at < NOW(3)
-        `)
-      } catch (err) {
-        console.error(
-          JSON.stringify({
-            level: 'error',
-            msg: 'ai_proposal_sweep_failed',
-            err:
-              err instanceof Error
-                ? err.message.slice(0, 200)
-                : String(err).slice(0, 200),
-          }),
-        )
-      }
-    }
-    // First sweep 60s after boot so DB pool settles. Subsequent
-    // sweeps every 5 min via setInterval.
-    setTimeout(() => {
-      void sweepOnce()
-    }, 60_000)
-    proposalSweeperGlobal.__cavecmsAiProposalSweeper = setInterval(() => {
-      void sweepOnce()
-    }, SWEEP_INTERVAL_MS)
-    proposalSweeperGlobal.__cavecmsAiProposalSweeper.unref()
+  // sweep concurrently. NODE_ENV='test' opts out so the vitest pool
+  // doesn't spawn timers in every child worker.
+  if (env.NODE_ENV !== 'test') {
+    const { startAiProposalSweeper } = await import('@/lib/ai/sweeper')
+    startAiProposalSweeper()
   }
 }

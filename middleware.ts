@@ -234,15 +234,110 @@ function forbiddenResponse(): NextResponse {
   })
 }
 
+// HTML entity escape for the operator-configurable maintenance message.
+// The message field is operator-edited via /admin/settings/security — a
+// hostile operator isn't the threat model here, but the SAME field is
+// surfaced on the public 503 to every visitor, so a careless paste of
+// HTML-like text (`<3 BWC`) would otherwise render or break the page.
+// Escape `& < > " '` so the field is rendered as text regardless of
+// content.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function maintenanceResponse(message: string): NextResponse {
-  // Plain text + 503 so search engines treat it as temporary and
-  // crawlers back off without dropping the site from the index.
-  // `Retry-After: 120` per RFC 7231 §7.1.3 — a soft signal that the
-  // outage is short.
-  return new NextResponse(message, {
+  // Generic branded HTML 503. The page is served to the END VISITOR of
+  // whichever site is running CaveCMS — it must NOT carry the
+  // operator's tenant brand (no "Best World Properties", no logo) and
+  // must NOT advertise CaveCMS either (visitors hitting a momentary
+  // 503 should not be marketed at). Just two lines on cream with a
+  // copper ambient glow, mirroring the visual language of
+  // `components/HomePageEmptyState.tsx` without the tenant eyebrow.
+  //
+  // The operator-configurable `message` (settings → security →
+  // maintenance) becomes the subtitle when set; otherwise the generic
+  // "Please check back in a moment." renders. The headline is always
+  // the same generic line.
+  //
+  // Self-contained: inline styles, system fonts, no JS, no external
+  // requests. The 503 is served from middleware before Next.js's
+  // asset pipeline runs, so the page can't depend on any /_next/*
+  // asset (which would itself be re-routed through the maintenance
+  // gate on hosts where the matcher caught it).
+  //
+  // Status stays 503 + `Retry-After: 120` per RFC 7231 §7.1.3 — search
+  // engines back off without dropping the site from the index. SEO
+  // behaviour is identical to the previous plain-text response;
+  // visitors get a styled page instead.
+  const subtitle =
+    typeof message === 'string' && message.trim().length > 0
+      ? escapeHtml(message.trim())
+      : 'Please check back in a moment.'
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Updating…</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{color-scheme:light}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{min-height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  background:#FAF7F2;color:#0E0D0C;
+  min-height:100vh;display:flex;align-items:center;justify-content:flex-start;
+  padding:clamp(1.5rem,5vw,3rem);
+  position:relative;overflow:hidden;
+}
+.glow{position:fixed;pointer-events:none;border-radius:50%;filter:blur(140px);z-index:0}
+.g1{top:-8rem;left:10%;width:520px;height:520px;background:rgba(229,201,168,.4)}
+.g2{bottom:-10rem;right:5%;width:480px;height:480px;background:rgba(204,165,122,.3)}
+main{position:relative;z-index:1;max-width:42rem}
+h1{
+  font-family:ui-serif,Georgia,"Times New Roman",serif;
+  font-size:clamp(2.25rem,6vw,4.5rem);
+  font-weight:700;line-height:1.05;letter-spacing:-.02em;color:#0E0D0C;
+}
+p{
+  margin-top:1.25rem;max-width:32rem;
+  font-size:clamp(1rem,1.6vw,1.125rem);
+  font-weight:500;line-height:1.6;color:#6F6B66;
+}
+@media (prefers-color-scheme:dark){
+  body{background:#0E0D0C;color:#FAF7F2}
+  h1{color:#FAF7F2}
+  p{color:#A8A39C}
+  .g1{background:rgba(184,115,51,.18)}
+  .g2{background:rgba(184,115,51,.12)}
+}
+@media (prefers-reduced-motion:no-preference){
+  main>*{opacity:0;transform:translateY(8px);animation:rise .6s ease-out forwards}
+  main>h1{animation-delay:80ms}
+  main>p{animation-delay:240ms}
+  @keyframes rise{to{opacity:1;transform:none}}
+}
+</style>
+</head>
+<body>
+<div class="glow g1" aria-hidden="true"></div>
+<div class="glow g2" aria-hidden="true"></div>
+<main>
+<h1>This website is being updated.</h1>
+<p>${subtitle}</p>
+</main>
+</body>
+</html>`
+  return new NextResponse(html, {
     status: 503,
     headers: {
-      'content-type': 'text/plain; charset=utf-8',
+      'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
       'retry-after': '120',
     },

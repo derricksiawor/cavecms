@@ -6,6 +6,7 @@ import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { humaniseAuditAction, humaniseResourceType } from '@/lib/admin/humanise'
 import { UpdateAvailableCard } from '@/components/admin/UpdateAvailableCard'
+import { AiUsageCard } from '@/components/admin/AiUsageCard'
 import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 
 export const dynamic = 'force-dynamic'
@@ -117,6 +118,12 @@ export default async function AdminHome() {
           value={s.publishedProjects}
           href="/admin/projects"
         />
+        {/* Renders only for admin role AND when ai_config.enabled is
+            true; returns null otherwise so the grid collapses
+            cleanly. The role gate keeps financial / token telemetry
+            off the editor + viewer surfaces, mirroring the dashboard's
+            existing PII-scrub stance. */}
+        <AiUsageCard role={ctx.role as 'admin' | 'editor' | 'viewer'} />
       </div>
 
       <section className="mt-16">

@@ -6,6 +6,7 @@ import {
   humaniseResourceType,
   humaniseAlertKind,
 } from '@/lib/admin/humanise'
+import { isAiAction, renderAiActivityLine } from '@/lib/admin/aiActivity'
 
 interface AuditRow {
   id: number
@@ -117,7 +118,16 @@ export function ActivityClient({
   initialResourceType: string
 }) {
   const [tab, setTab] = useState<Tab>(initialTab)
-  const [resourceType, setResourceType] = useState(initialResourceType)
+  // "AI activity" is a virtual chip on top of resource_type — selecting
+  // it pins the underlying filter to `ai_proposal` and hides the
+  // resource_type dropdown so the two affordances don't fight. The URL
+  // round-trips this as `resource_type=ai_proposal`, so a reload keeps
+  // the operator in AI-only mode.
+  const initialAiOnly = initialResourceType === 'ai_proposal'
+  const [aiOnly, setAiOnly] = useState(initialAiOnly)
+  const [resourceType, setResourceType] = useState(
+    initialAiOnly ? '' : initialResourceType,
+  )
   const [kind, setKind] = useState(initialKind)
   const [showRaw, setShowRaw] = useState(false)
   // The audit log is append-only and can grow huge; cursor pagination
@@ -149,7 +159,11 @@ export function ActivityClient({
       setError(null)
       try {
         const p = new URLSearchParams({ limit: String(pageSize) })
-        if (resourceType) p.set('resource_type', resourceType)
+        // AI chip pins resource_type=ai_proposal and supersedes the
+        // dropdown. When the chip is off, the dropdown's value is
+        // the authoritative filter (empty = everything).
+        const effectiveResourceType = aiOnly ? 'ai_proposal' : resourceType
+        if (effectiveResourceType) p.set('resource_type', effectiveResourceType)
         if (cur) p.set('cursor', cur)
         const r = await fetch('/api/admin/audit-log?' + p.toString(), {
           credentials: 'include',
@@ -177,7 +191,7 @@ export function ActivityClient({
         }
       }
     },
-    [resourceType, pageSize],
+    [resourceType, pageSize, aiOnly],
   )
 
   const loadAlerts = useCallback(
@@ -284,20 +298,61 @@ export function ActivityClient({
 
       {tab === 'audit' ? (
         <>
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <select
-              value={resourceType}
-              onChange={(e) => setResourceType(e.target.value)}
-              className="rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
-              aria-label="Filter by what was changed"
+          <div
+            role="group"
+            aria-label="Activity scope"
+            className="mt-6 flex flex-wrap items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={() => setAiOnly(false)}
+              aria-pressed={!aiOnly}
+              className={
+                !aiOnly
+                  ? 'rounded-full bg-near-black px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-cream-50'
+                  : 'rounded-full border border-warm-stone/30 bg-transparent px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black transition-colors hover:border-copper-400'
+              }
             >
-              <option value="">Everything</option>
-              {RESOURCE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {humaniseResourceType(t)}
-                </option>
-              ))}
-            </select>
+              Everything
+            </button>
+            <button
+              type="button"
+              onClick={() => setAiOnly(true)}
+              aria-pressed={aiOnly}
+              title="Proposals, accepts, and dismisses from the AI writing partner."
+              className={
+                aiOnly
+                  ? 'inline-flex items-center gap-1.5 rounded-full bg-copper-500 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black'
+                  : 'inline-flex items-center gap-1.5 rounded-full border border-warm-stone/30 bg-transparent px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black transition-colors hover:border-copper-400'
+              }
+            >
+              <span
+                aria-hidden="true"
+                className={
+                  aiOnly
+                    ? 'inline-block h-1.5 w-1.5 rounded-full bg-near-black'
+                    : 'inline-block h-1.5 w-1.5 rounded-full bg-copper-500'
+                }
+              />
+              AI activity
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            {!aiOnly && (
+              <select
+                value={resourceType}
+                onChange={(e) => setResourceType(e.target.value)}
+                className="rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
+                aria-label="Filter by what was changed"
+              >
+                <option value="">Everything</option>
+                {RESOURCE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {humaniseResourceType(t)}
+                  </option>
+                ))}
+              </select>
+            )}
             <label className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-warm-stone">
               Show
               <select
@@ -347,17 +402,36 @@ export function ActivityClient({
                     </td>
                   </tr>
                 ) : (
-                  audit.map((r) => {
+                  audit.map((r, idx) => {
                     const diffStr =
                       r.diff == null
                         ? ''
                         : typeof r.diff === 'string'
                           ? r.diff
                           : JSON.stringify(r.diff)
+                    const isAi = isAiAction(r.action)
+                    // Group consecutive AI rows under a thin copper
+                    // accent stripe so a chain of "propose → apply" reads
+                    // as a story rather than three orphan rows.
+                    const prevIsAi = idx > 0 && isAiAction(audit[idx - 1]!.action)
+                    const aiClass = isAi
+                      ? prevIsAi
+                        ? 'border-l-2 border-l-copper-300/60'
+                        : 'border-l-2 border-l-copper-500'
+                      : ''
+                    const friendly = isAi
+                      ? renderAiActivityLine({
+                          action: r.action as Parameters<typeof renderAiActivityLine>[0]['action'],
+                          diff: r.diff,
+                          userEmail: r.user_email,
+                        })
+                      : null
                     return (
                       <tr
                         key={r.id}
-                        className="border-b border-warm-stone/10 last:border-b-0"
+                        className={
+                          'border-b border-warm-stone/10 last:border-b-0 ' + aiClass
+                        }
                       >
                         <td className="px-5 py-4 text-xs text-warm-stone">
                           {new Date(r.created_at)
@@ -376,15 +450,21 @@ export function ActivityClient({
                           {r.resource_id ? ` · ${r.resource_id}` : ''}
                         </td>
                         <td
-                          className="max-w-md truncate px-5 py-4 text-[11px]"
-                          title={diffStr}
+                          className="max-w-md px-5 py-4 text-[11px]"
+                          title={friendly ?? diffStr}
                         >
                           {showRaw ? (
-                            <code className="font-mono text-[10px] text-warm-stone truncate">
+                            <code className="font-mono text-[10px] text-warm-stone truncate block">
                               {diffStr.length > 80 ? diffStr.slice(0, 80) + '…' : diffStr}
                             </code>
+                          ) : friendly ? (
+                            <span className="block truncate text-near-black/85">
+                              {friendly}
+                            </span>
                           ) : (
-                            <span className="text-near-black/80">{summarizeDiff(r.diff)}</span>
+                            <span className="block truncate text-near-black/80">
+                              {summarizeDiff(r.diff)}
+                            </span>
                           )}
                         </td>
                       </tr>

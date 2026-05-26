@@ -46,6 +46,18 @@ const ACTION_LABELS: Record<string, string> = {
   'auth.login': 'Signed in',
   'auth.logout': 'Signed out',
   'alert.resolve': 'Resolved an alert',
+  ai_proposal_created: 'Proposed an AI change',
+  ai_proposal_accepted: 'Applied an AI proposal',
+  ai_proposal_dismissed: 'Dismissed an AI proposal',
+  // CaveCMS self-update lifecycle. `apply` and `force_apply` are
+  // written by the admin /apply route at kick-off; `completed`,
+  // `failed`, `rolled_back` are written by the orchestrator script
+  // at terminal transition (via /api/internal/updates/audit-terminal).
+  apply: 'Started update',
+  force_apply: 'Re-ran install',
+  completed: 'Update succeeded',
+  failed: 'Update failed',
+  rolled_back: 'Update rolled back',
 }
 
 const RESOURCE_LABELS: Record<string, string> = {
@@ -64,6 +76,8 @@ const RESOURCE_LABELS: Record<string, string> = {
   notification_failure: 'Background alert',
   team_member: 'Team member',
   auth: 'Sign-in',
+  ai_proposal: 'AI proposal',
+  updates: 'CaveCMS update',
 }
 
 const ALERT_KIND_LABELS: Record<string, string> = {

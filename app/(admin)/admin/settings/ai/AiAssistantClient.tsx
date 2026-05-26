@@ -364,7 +364,7 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                   Inline sparkle
                 </span>
                 <select
-                  className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-sm text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[44px]"
+                  className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-base text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[44px] sm:text-sm"
                   value={form.models?.inline ?? ''}
                   onChange={(e) => setModel('inline', e.target.value)}
                 >
@@ -381,7 +381,7 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                   Page Assistant
                 </span>
                 <select
-                  className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-sm text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[44px]"
+                  className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-base text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[44px] sm:text-sm"
                   value={form.models?.chat ?? ''}
                   onChange={(e) => setModel('chat', e.target.value)}
                 >
@@ -407,7 +407,10 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
             <div className="mt-4 space-y-2">
               {(Object.keys(VOICE_LABELS) as Array<keyof typeof VOICE_LABELS>).map(
                 (preset) => (
-                  <label key={preset} className="flex items-center gap-3">
+                  <label
+                    key={preset}
+                    className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-md px-1 hover:bg-cream-50/60 sm:min-h-0 sm:rounded-none sm:hover:bg-transparent"
+                  >
                     <input
                       type="radio"
                       name="voicePreset"
@@ -427,7 +430,7 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                   Custom voice notes (max 800 chars)
                 </span>
                 <textarea
-                  className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-sm text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[120px]"
+                  className="mt-2 w-full rounded-xl border border-warm-stone/25 bg-cream-50/80 px-4 py-3 text-base text-near-black hover:border-warm-stone/40 focus:border-copper-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-copper-300/40 min-h-[120px] sm:text-sm"
                   maxLength={800}
                   value={form.customVoiceNotes ?? ''}
                   onChange={(e) => setField('customVoiceNotes', e.target.value)}
@@ -441,19 +444,20 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
           </fieldset>
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <Button
             type="button"
-            size="sm"
+            size="md"
             onClick={() => void handleSave()}
             disabled={saving || !dirty}
+            className="w-full sm:w-auto"
           >
             {saving ? 'Saving…' : 'Save'}
           </Button>
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="md"
             onClick={() => void handleVerify()}
             disabled={
               verifying ||
@@ -465,6 +469,7 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                 ? 'Paste your Gemini key first.'
                 : 'Probes Gemini with the key (stored or just-typed) without saving.'
             }
+            className="w-full sm:w-auto"
           >
             {verifying ? 'Testing…' : 'Test connection'}
           </Button>
@@ -472,9 +477,10 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="md"
               onClick={() => setForm(pristine)}
               disabled={saving}
+              className="w-full sm:w-auto"
             >
               Undo changes
             </Button>

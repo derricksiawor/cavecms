@@ -6,6 +6,7 @@ import {
   ShieldAlert,
   Sparkles,
   Clock,
+  RefreshCw,
 } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
@@ -14,6 +15,7 @@ import { useToast } from '@/components/inline-edit/Toast'
 import { structuralEqual } from '@/lib/structuralEqual'
 import { SETTINGS_SHAPES, SETTINGS_HELP } from '@/lib/cms/settings-shapes'
 import { UpdatesProgressModal } from '@/components/admin/UpdatesProgressModal'
+import { UpdateHistoryTable } from '@/components/admin/UpdateHistoryTable'
 import {
   humaniseRelease,
   formatRelativeDays,
@@ -150,6 +152,34 @@ export function UpdatesClient({
     }
   }, [availableShaPrivate, applying, toast])
 
+  // Re-run install on the SAME SHA — recovery affordance for a stuck
+  // migration / corrupted .next/ cache. The server-side guard refuses
+  // same-SHA targets unless force === true, so the UI MUST opt in
+  // here explicitly. Same modal flow as a normal update.
+  const handleForceApply = useCallback(async () => {
+    if (!current.sha || current.sha === 'dev' || applying) return
+    setApplying(true)
+    try {
+      const r = await csrfFetch('/api/admin/updates/apply', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetSha: current.sha, force: true }),
+      })
+      if (r.status === 409) {
+        toast.error('An update is already in progress.')
+        setModalOpen(true)
+        return
+      }
+      if (!r.ok) {
+        toast.error("Couldn't start the re-run — try again.")
+        return
+      }
+      setModalOpen(true)
+    } finally {
+      setApplying(false)
+    }
+  }, [current.sha, applying, toast])
+
   const handleSaveSettings = useCallback(async () => {
     if (savingSettings || !dirty) return
     setSavingSettings(true)
@@ -285,15 +315,43 @@ export function UpdatesClient({
         !checking &&
         checkedAt && (
           <article className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-6 backdrop-blur-sm">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-              <div>
-                <h2 className="font-serif text-xl font-bold tracking-tight text-near-black">
-                  You&rsquo;re up to date
-                </h2>
-                <p className="mt-1 text-sm text-warm-stone">
-                  CaveCMS will keep checking for new releases on the schedule
-                  below.
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                <div>
+                  <h2 className="font-serif text-xl font-bold tracking-tight text-near-black">
+                    You&rsquo;re up to date
+                  </h2>
+                  <p className="mt-1 text-sm text-warm-stone">
+                    CaveCMS will keep checking for new releases on the
+                    schedule below.
+                  </p>
+                </div>
+              </div>
+              {/* Re-run install — recovery affordance for a stuck
+                  migration, corrupted .next/ cache, or a previously-
+                  interrupted update. Same modal flow as a normal
+                  update; the orchestrator script honours --force by
+                  wiping .next/ before rebuild and re-running any
+                  idempotent migrations. */}
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void handleForceApply()}
+                  disabled={applying || isDev}
+                  title={
+                    isDev
+                      ? 'Re-run install is disabled while running locally.'
+                      : 'Re-run install on the current version. Use this if your last update left the site in a broken state.'
+                  }
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  {applying ? 'Starting…' : 'Re-run install'}
+                </Button>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-warm-stone/70">
+                  Recovery
                 </p>
               </div>
             </div>
@@ -347,6 +405,10 @@ export function UpdatesClient({
           )}
         </div>
       </article>
+
+      {/* History — append-only log of every update event. Reads from
+          /api/admin/audit-log?resource_type=updates&limit=20. */}
+      <UpdateHistoryTable />
 
       <UpdatesProgressModal
         open={modalOpen}

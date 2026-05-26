@@ -16,6 +16,7 @@ import {
   isMostlyEmpty,
   supportsSuggest,
 } from '@/lib/ai/inlineEligibility'
+import { BetaPill } from '@/components/ui/BetaPill'
 import { useAiSparkleSession, type SparkleIntent } from './AiSparkleSessionContext'
 import { useEffectiveVersions } from './InlineEditContext'
 import { AISparkleRewriteCard } from './AISparkleRewriteCard'
@@ -47,12 +48,39 @@ interface TabSpec {
 
 const POPOVER_WIDTH = 380
 const POPOVER_MARGIN = 8
+// Viewport breakpoint that flips us from "anchored floating popover"
+// to "bottom-sheet". 640px matches Tailwind's `sm` breakpoint.
+const MOBILE_BREAKPOINT_PX = 640
 
 export function AISparklePopover(p: Props) {
   const ai = useAiSparkleSession()
   const session = ai.session
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // Track viewport size client-side. Default false so SSR renders the
+  // desktop affordance — the popover is portal-mounted to document.body
+  // and only ever runs client-side anyway, so the initial false is just
+  // a paint-flicker guard, not a layout commitment.
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`)
+    setIsMobile(mql.matches)
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    // Safari < 14 doesn't have addEventListener on MediaQueryList; fall
+    // back to addListener. Both are no-ops on the unmount path.
+    try {
+      mql.addEventListener('change', onChange)
+      return () => mql.removeEventListener('change', onChange)
+    } catch {
+      const legacy = mql as MediaQueryList & {
+        addListener: (l: (e: MediaQueryListEvent) => void) => void
+        removeListener: (l: (e: MediaQueryListEvent) => void) => void
+      }
+      legacy.addListener(onChange)
+      return () => legacy.removeListener(onChange)
+    }
+  }, [])
 
   // Tabs available for this block.
   const tabs: TabSpec[] = useMemo(() => {
@@ -94,6 +122,12 @@ export function AISparklePopover(p: Props) {
   // screen.
   useLayoutEffect(() => {
     if (!p.anchor) return
+    // Skip anchor-positioning on mobile — the bottom-sheet branch uses
+    // fixed-bottom CSS positioning and ignores `pos`.
+    if (isMobile) {
+      setPos({ top: 0, left: 0 })
+      return
+    }
     const compute = () => {
       const rect = p.anchor!.getBoundingClientRect()
       const viewportWidth = window.innerWidth
@@ -119,20 +153,29 @@ export function AISparklePopover(p: Props) {
       window.removeEventListener('resize', compute)
       window.removeEventListener('scroll', compute, true)
     }
-  }, [p.anchor])
+  }, [p.anchor, isMobile])
 
   // Esc + click-outside dismiss. Dismiss path ALSO calls ai.dismiss()
   // so a half-finished session doesn't leave a phantom preview on
   // the block.
+  //
+  // PR 5 review fix: depend on stable values (blockId, onClose)
+  // rather than the entire props object `p` — `p` is a fresh ref each
+  // render, so a streaming session that flips state frequently would
+  // otherwise remove + re-add three document listeners on every
+  // re-render. Between those removes and re-adds a synchronous
+  // third-party event could fire while no listener is bound, missing
+  // a click-outside dismiss.
+  const { blockId: pBlockId, onClose: pOnClose } = p
   const close = useCallback(() => {
     // If a session is in-flight or ready against THIS block, dismiss it
     // (cancels stream + cleans up pending tokens). Sessions targeting a
     // different block are untouched.
-    if (session && session.blockId === p.blockId) {
+    if (session && session.blockId === pBlockId) {
       void ai.dismiss()
     }
-    p.onClose()
-  }, [ai, session, p])
+    pOnClose()
+  }, [ai, session, pBlockId, pOnClose])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -141,21 +184,28 @@ export function AISparklePopover(p: Props) {
         close()
       }
     }
-    const onClick = (e: MouseEvent) => {
+    const onPress = (e: MouseEvent | TouchEvent) => {
       if (!popoverRef.current) return
       const target = e.target as Node
       if (popoverRef.current.contains(target)) return
       // Don't dismiss when clicking the anchor button — it has its
       // own toggle logic and would otherwise close + immediately
-      // re-open on the same click.
+      // re-open on the same press.
       if (p.anchor && p.anchor.contains(target)) return
       close()
     }
     document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onClick)
+    // Listen for BOTH mousedown and touchstart so iOS Safari's
+    // synthetic-event timing doesn't make the bottom-sheet dismiss
+    // feel laggy. The handler is idempotent — same press fires
+    // either path, and the popoverRef.contains check prevents double
+    // dismiss on a single tap.
+    document.addEventListener('mousedown', onPress)
+    document.addEventListener('touchstart', onPress, { passive: true })
     return () => {
       document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('mousedown', onPress)
+      document.removeEventListener('touchstart', onPress)
     }
   }, [close, p.anchor])
 
@@ -198,6 +248,28 @@ export function AISparklePopover(p: Props) {
     })
   }
 
+  // Two layout shapes:
+  //   - Desktop (≥ sm): anchored floating popover at computed pos.
+  //   - Mobile (< sm): full-width bottom-sheet sliding up from the
+  //     viewport edge. Same content; different chrome. The bottom
+  //     sheet respects iOS safe-area-inset-bottom so the home-bar /
+  //     notch don't eat the action row.
+  const sharedClasses =
+    'flex flex-col overflow-hidden bg-ivory shadow-[0_30px_80px_-20px_rgba(14,14,16,0.45)] ring-1 ring-obsidian/8 focus:outline-none'
+  const desktopClasses =
+    'motion-safe:animate-cavecms-scale-in fixed z-[60] w-[380px] rounded-2xl'
+  const mobileClasses =
+    'motion-safe:animate-cavecms-slide-up fixed inset-x-0 bottom-0 z-[60] w-full rounded-t-2xl pb-[env(safe-area-inset-bottom,0px)]'
+  const desktopStyle: React.CSSProperties = {
+    top: pos.top,
+    left: pos.left,
+    maxHeight: 480,
+  }
+  const mobileStyle: React.CSSProperties = {
+    // Use ~75vh so there's a peek of the page behind the sheet —
+    // makes it feel like a sheet, not a modal takeover.
+    maxHeight: '75vh',
+  }
   return createPortal(
     <div
       ref={popoverRef}
@@ -208,19 +280,23 @@ export function AISparklePopover(p: Props) {
       // High z so it floats above the EditableBlock toolbar AND the
       // OutlinePanel. EditDrawer sits at z-50; we go higher (z-[60])
       // so a sparkle pop while the drawer is open is reachable.
-      //
-      // PR 4 visual redesign: lighter chrome, copper top-strip instead
-      // of a heavy obsidian header, scale-in entrance animation, more
-      // generous padding. Anchored below the toolbar sparkle for now;
-      // a future iteration may re-anchor to the block itself.
-      className="motion-safe:animate-cavecms-scale-in fixed z-[60] flex w-[380px] flex-col overflow-hidden rounded-2xl bg-ivory shadow-[0_30px_80px_-20px_rgba(14,14,16,0.45)] ring-1 ring-obsidian/8 focus:outline-none"
-      style={{ top: pos.top, left: pos.left, maxHeight: 480 }}
+      className={`${sharedClasses} ${isMobile ? mobileClasses : desktopClasses}`}
+      style={isMobile ? mobileStyle : desktopStyle}
       onClick={(e) => e.stopPropagation()}
     >
+      {/* Mobile drag handle — visual cue + tap target for the
+          imagined swipe-to-dismiss (not wired yet — Esc + backdrop
+          still drive close). Tiny copper stub. */}
+      {isMobile && (
+        <span
+          aria-hidden="true"
+          className="mx-auto mt-2 mb-1 h-1 w-10 flex-shrink-0 rounded-full bg-warm-stone/30"
+        />
+      )}
       {/* Top strip — slim copper accent + label + close. Replaces the
           heavy obsidian header. */}
       <header className="flex items-center justify-between gap-3 border-b border-obsidian/8 bg-ivory px-4 py-2.5">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Sparkles
             size={13}
             strokeWidth={1.75}
@@ -230,6 +306,7 @@ export function AISparklePopover(p: Props) {
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-copper-600">
             Inline AI
           </p>
+          <BetaPill feature="ai-sparkle" size="sm" dismissible />
           <span aria-hidden="true" className="text-[10px] text-warm-stone/40">
             ·
           </span>
@@ -241,9 +318,13 @@ export function AISparklePopover(p: Props) {
           type="button"
           onClick={close}
           aria-label="Close"
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-warm-stone transition-colors hover:bg-obsidian/5 hover:text-near-black focus-visible:bg-obsidian/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400"
+          // sm:h-6 keeps the desktop chrome tight; the base h-11
+          // ensures a 44px touch target on mobile, where the popover
+          // is a bottom sheet and operators are reaching for it with
+          // a thumb.
+          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-md text-warm-stone transition-colors hover:bg-obsidian/5 hover:text-near-black focus-visible:bg-obsidian/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-6 sm:w-6"
         >
-          <X size={13} aria-hidden="true" />
+          <X size={14} aria-hidden="true" />
         </button>
       </header>
 
@@ -267,7 +348,11 @@ export function AISparklePopover(p: Props) {
                 aria-controls={`ai-sparkle-tab-${t.key}`}
                 onClick={() => setActiveTab(t.key)}
                 className={clsx(
-                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium tracking-tight transition-all duration-standard motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400',
+                  // Larger touch target on mobile (h-10 = 40px ≈ Apple's
+                  // 44pt recommended minimum given the chip's wider
+                  // bounding box). Desktop keeps the tighter h-auto +
+                  // py-1.5 sizing.
+                  'inline-flex h-10 items-center gap-1.5 rounded-full px-3.5 text-[11px] font-medium tracking-tight transition-all duration-standard motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 sm:h-auto sm:py-1.5',
                   isActive
                     ? 'bg-near-black text-ivory shadow-[0_6px_16px_-6px_rgba(14,14,16,0.35)]'
                     : 'bg-obsidian/5 text-warm-stone hover:bg-obsidian/10 hover:text-near-black',

@@ -38,9 +38,15 @@ export default defineConfig({
     },
   },
   css: { postcss: { plugins: [] } },
+  esbuild: {
+    // Match Next's automatic JSX runtime so .test.tsx files don't need
+    // `import React`. tsconfig.json leaves jsx: preserve for Next to
+    // handle; vitest's esbuild needs an explicit hint.
+    jsx: 'automatic',
+  },
   test: {
     environment: 'node',
-    include: ['tests/unit/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.{ts,tsx}'],
     pool: 'forks',
     setupFiles: ['./tests/setup.ts'],
   },

@@ -67,7 +67,7 @@ export function AISparkleRewriteCard(p: Props) {
               aria-pressed={active}
               onClick={() => setTone(active ? null : chip)}
               className={clsx(
-                'rounded-full px-3 py-1.5 text-[11px] font-medium tracking-tight transition-colors',
+                'inline-flex min-h-[40px] items-center rounded-full px-3 py-1.5 text-[11px] font-medium tracking-tight transition-colors sm:min-h-0',
                 active
                   ? 'bg-copper-500 text-cream-50'
                   : 'bg-cream-100 text-near-black hover:bg-copper-50 hover:text-copper-700',
@@ -98,7 +98,7 @@ export function AISparkleRewriteCard(p: Props) {
         <button
           type="submit"
           disabled={!canSubmit}
-          className="rounded-full bg-copper-500 px-5 py-2 text-[12px] font-semibold uppercase tracking-[0.16em] text-cream-50 hover:bg-copper-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-11 items-center rounded-full bg-copper-500 px-5 text-[12px] font-semibold uppercase tracking-[0.16em] text-cream-50 hover:bg-copper-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:py-2"
         >
           Rewrite
         </button>
