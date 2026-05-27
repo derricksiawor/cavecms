@@ -145,3 +145,6 @@ next-env.d.ts
 # Release artifacts (built by scripts/release/build-zip.mjs) — never committed.
 # Published to cavecms.derricksiawor.com via scripts/release/publish.mjs.
 /dist/
+
+# Local operator notes — never tracked.
+/instructions.md
