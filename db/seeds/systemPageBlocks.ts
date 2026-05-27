@@ -14,35 +14,30 @@ import { sql } from 'drizzle-orm'
 import { db } from '../client-node'
 import { contentBlocks } from '../schema'
 import { parseAndSanitize } from '@/lib/cms/parse'
+import type {
+  SectionSpec,
+  ColumnSpec,
+  WidgetSpec,
+} from '@/lib/cms/siteTemplates/types'
 
-interface WidgetSpec {
-  kind: 'widget'
-  blockType: string
-  data: Record<string, unknown>
-  meta?: Record<string, unknown>
-}
-interface ColumnSpec {
-  kind: 'column'
-  meta?: Record<string, unknown>
-  widgets: WidgetSpec[]
-}
-interface SectionSpec {
-  kind: 'section'
-  meta: Record<string, unknown>
-  columns: ColumnSpec[]
-}
+// Re-export so existing consumers of these interfaces inside this
+// module remain explicit. The canonical definitions live in
+// lib/cms/siteTemplates/types.ts because the install-template path
+// also needs them.
+export type { SectionSpec, ColumnSpec, WidgetSpec }
 
 const POS_STEP = 1000
 
 async function insertSections(pageId: number, sections: SectionSpec[]): Promise<number> {
+  // IMPORTANT: this function MUST NOT mutate `sections`, `sec`, `col`,
+  // or `w` — the SECTION arrays are exported and re-imported by
+  // lib/cms/siteTemplates/default-welcome.ts. Mutating `w.data` on the
+  // shared module-scope reference would corrupt the install-template
+  // re-seed path (which reads the same arrays). Always produce a local
+  // sanitized copy and pass that to the DB write.
   let inserted = 0
   let secPos = POS_STEP
   for (const sec of sections) {
-    for (const col of sec.columns) {
-      for (const w of col.widgets) {
-        w.data = parseAndSanitize(w.blockType, w.data) as Record<string, unknown>
-      }
-    }
     const [secRes] = (await db.execute(sql`
       INSERT INTO content_blocks
         (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
@@ -66,13 +61,14 @@ async function insertSections(pageId: number, sections: SectionSpec[]): Promise<
       inserted++
       let widPos = POS_STEP
       for (const w of col.widgets) {
+        const cleaned = parseAndSanitize(w.blockType, w.data) as Record<string, unknown>
         const widgetMetaJson = w.meta ? JSON.stringify(w.meta) : null
         await db.execute(sql`
           INSERT INTO content_blocks
             (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
           VALUES
             (${pageId}, ${columnId}, 'widget', NULL, ${w.blockType}, ${widPos},
-             ${JSON.stringify(w.data)}, ${widgetMetaJson}, 0)
+             ${JSON.stringify(cleaned)}, ${widgetMetaJson}, 0)
         `)
         inserted++
         widPos += POS_STEP
@@ -100,7 +96,7 @@ const PH = {
 // the operator sees what's running and what they can do next. They
 // edit this page (or replace it entirely) once they choose a template
 // from the install wizard's template chooser (planned).
-const HOME_SECTIONS: SectionSpec[] = [
+export const HOME_SECTIONS: SectionSpec[] = [
   // ── Hero — welcome
   {
     kind: 'section',
@@ -174,7 +170,7 @@ const HOME_SECTIONS: SectionSpec[] = [
 export async function seedHomePageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('home', HOME_SECTIONS) }
 
 // ── ABOUT ───────────────────────────────────────────────────────────
-const ABOUT_SECTIONS: SectionSpec[] = [
+export const ABOUT_SECTIONS: SectionSpec[] = [
   {
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },
@@ -223,7 +219,7 @@ const ABOUT_SECTIONS: SectionSpec[] = [
 export async function seedAboutPageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('about', ABOUT_SECTIONS) }
 
 // ── SERVICES ────────────────────────────────────────────────────────
-const SERVICES_SECTIONS: SectionSpec[] = [
+export const SERVICES_SECTIONS: SectionSpec[] = [
   {
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },
@@ -263,7 +259,7 @@ const SERVICES_SECTIONS: SectionSpec[] = [
 export async function seedServicesPageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('services', SERVICES_SECTIONS) }
 
 // ── PROJECTS ────────────────────────────────────────────────────────
-const PROJECTS_SECTIONS: SectionSpec[] = [
+export const PROJECTS_SECTIONS: SectionSpec[] = [
   {
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },
@@ -284,7 +280,7 @@ const PROJECTS_SECTIONS: SectionSpec[] = [
 export async function seedProjectsPageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('projects', PROJECTS_SECTIONS) }
 
 // ── CONTACT ─────────────────────────────────────────────────────────
-const CONTACT_SECTIONS: SectionSpec[] = [
+export const CONTACT_SECTIONS: SectionSpec[] = [
   {
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },

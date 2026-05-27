@@ -139,3 +139,52 @@ export function okJson(body: Record<string, unknown> = { ok: true }): Response {
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   })
 }
+
+/**
+ * Symmetric error helper. Mirrors okJson's shape so all install
+ * endpoints emit a consistent { error: <code> } body. Default status
+ * is 400 (client-side request shape); pass 422 for "your request was
+ * well-formed but template-author/payload-author is wrong", 429 for
+ * rate / busy, 500 for genuine server faults.
+ */
+export function errJson(
+  status: number,
+  error: string,
+  extra: Record<string, unknown> = {},
+): Response {
+  return new Response(JSON.stringify({ error, ...extra }), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  })
+}
+
+/**
+ * Best-effort JSON parse for a settings.value cell. mysql2 returns
+ * JSON columns as strings on raw SQL; this helper handles both the
+ * string and pre-parsed object cases (drizzle's higher-level select
+ * uses the object form). Returns an empty object on any parse
+ * failure — but logs a structured warn so corrupted settings rows
+ * are observable in stderr rather than silently treated as missing.
+ */
+export function parseSettingsValue(
+  raw: unknown,
+  keyForLogging?: string,
+): Record<string, unknown> {
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      if (keyForLogging) {
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            msg: 'install_settings_parse_failed',
+            key: keyForLogging,
+          }),
+        )
+      }
+      return {}
+    }
+  }
+  return (raw as Record<string, unknown> | null | undefined) ?? {}
+}

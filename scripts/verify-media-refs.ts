@@ -146,6 +146,53 @@ async function rebuildFromPostFks(tx: Tx): Promise<number> {
   return inserted
 }
 
+/**
+ * Rebuild media_references for media_ids embedded inside `settings`
+ * row JSON. Settings rows are keyed by string `key`, not by integer
+ * PK; we use referent_id = 0 as a sentinel + the dotted field-path
+ * (e.g. `site_header.logo`) to disambiguate references inside the
+ * same row.
+ *
+ * Today we only walk site_header.logo (uploaded via the install
+ * wizard's logo step + the future Settings → Branding logo picker).
+ * When a new settings key gains a media_id reference, add the
+ * walker here so the cron rebuild knows to preserve it — otherwise
+ * the verify pass will silently delete the live row and the next
+ * /api/cms/media/[id] hard-delete will succeed unguarded.
+ */
+async function rebuildFromSettings(tx: Tx): Promise<number> {
+  const [rows] = (await tx.execute(
+    sql`SELECT \`key\`, value FROM settings WHERE \`key\` IN ('site_header')`,
+  )) as unknown as [Array<{ key: string; value: unknown }>]
+  let inserted = 0
+  for (const r of rows) {
+    let parsed: Record<string, unknown> = {}
+    if (typeof r.value === 'string') {
+      try {
+        parsed = JSON.parse(r.value) as Record<string, unknown>
+      } catch {
+        continue
+      }
+    } else if (r.value && typeof r.value === 'object') {
+      parsed = r.value as Record<string, unknown>
+    }
+
+    if (r.key === 'site_header') {
+      const logo = parsed.logo as { media_id?: unknown } | null | undefined
+      const mediaId =
+        logo && typeof logo.media_id === 'number' ? logo.media_id : null
+      if (mediaId !== null && mediaId > 0) {
+        await tx.execute(
+          sql`INSERT IGNORE INTO _refs_new (media_id, referent_type, referent_id, field)
+              VALUES (${mediaId}, 'settings', 0, 'site_header.logo')`,
+        )
+        inserted += 1
+      }
+    }
+  }
+  return inserted
+}
+
 async function main(): Promise<void> {
   const startedAt = Date.now()
   logInfo('started')
@@ -167,6 +214,7 @@ async function main(): Promise<void> {
     totalRebuilt += await rebuildFromProjectSections(tx)
     totalRebuilt += await rebuildFromProjectFks(tx)
     totalRebuilt += await rebuildFromPostFks(tx)
+    totalRebuilt += await rebuildFromSettings(tx)
 
     // Strip orphan references — _refs_new rows whose media_id no
     // longer points at a live media row. This happens when an editor

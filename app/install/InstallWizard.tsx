@@ -1,9 +1,18 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, ArrowRight, Loader2, ExternalLink, SkipForward } from 'lucide-react'
+import {
+  CheckCircle2,
+  ArrowRight,
+  Loader2,
+  ExternalLink,
+  SkipForward,
+  Upload,
+  X as XIcon,
+} from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Wordmark } from '@/components/Wordmark'
+import { TEMPLATE_CLIENT_META } from '@/lib/cms/siteTemplates/clientMeta'
 import { setInstallToken, installFetch } from './installFetch'
 
 // Single-page multi-step install wizard. Modelled on WordPress's
@@ -30,6 +39,7 @@ const STEPS = [
   'welcome',
   'admin',
   'site',
+  'template',
   'branding',
   'contact',
   'smtp',
@@ -42,6 +52,7 @@ const STEP_LABELS: Record<Step, string> = {
   welcome: 'Welcome',
   admin: 'Admin',
   site: 'Site',
+  template: 'Template',
   branding: 'Branding',
   contact: 'Contact',
   smtp: 'Email',
@@ -179,7 +190,13 @@ export function InstallWizard({
               {step === 'welcome' && <WelcomeStep onNext={() => goTo('admin')} />}
               {step === 'admin' && <AdminStep onNext={() => goTo('site')} />}
               {step === 'site' && (
-                <SiteStep defaultUrl={guessedSiteUrl} onNext={() => goTo('branding')} />
+                <SiteStep defaultUrl={guessedSiteUrl} onNext={() => goTo('template')} />
+              )}
+              {step === 'template' && (
+                <TemplateStep
+                  onNext={() => goTo('branding')}
+                  onSkip={() => goTo('branding')}
+                />
               )}
               {step === 'branding' && (
                 <BrandingStep
@@ -334,7 +351,8 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
         {[
           ['Admin account', 'Required — your login to the dashboard'],
           ['Site identity', 'Required — site URL + name'],
-          ['Branding', 'Brand text + theme — (Optional)'],
+          ['Template', 'Pick a starting layout — (Optional)'],
+          ['Branding', 'Brand text + theme + logo — (Optional)'],
           ['Contact', 'Lead-notification email — (Optional)'],
           ['Email (SMTP)', 'Outbound email with a live test — (Optional)'],
           ['Security', 'A memorable hidden admin URL — (Optional)'],
@@ -634,13 +652,327 @@ function SiteStep({
   )
 }
 
-// ─── Step 4: Branding (optional) ──────────────────────────────────
+// ─── Step 4 (NEW): Pick a template (optional) ─────────────────────
+
+function TemplateStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+  // Default to 'default-welcome' — the no-op tile. If the operator
+  // skips the step entirely or picks this tile, the install ends up
+  // identical to the pre-template-chooser default (CaveCMS welcome
+  // one-pager, empty nav, empty footer columns). Submitting the
+  // default IS the no-regression path.
+  const [selected, setSelected] = useState<string>('default-welcome')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [alreadyInstalled, setAlreadyInstalled] = useState(false)
+  // Re-entrancy guard: React strict-mode double-renders the wizard's
+  // step components and an over-eager double-click could fire two
+  // applyTemplate POSTs ~16ms apart, both passing the `submitting`
+  // check before either commits its state. The /api/install/template
+  // endpoint already has a server-side busyToken, but mirroring the
+  // pattern here means the UI doesn't even attempt the second call.
+  const inFlightRef = useRef(false)
+
+  async function applyTemplate(slug: string): Promise<boolean> {
+    if (inFlightRef.current) return false
+    inFlightRef.current = true
+    setError(null)
+    setSubmitting(true)
+    try {
+      const r = await installFetch('/api/install/template', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ templateSlug: slug }),
+      })
+      if (r.status === 410) {
+        // Install was completed by another tab / a stale-tab race.
+        // Show a clear "already finished" message and stop the wizard
+        // — operator should sign in via the hidden admin URL.
+        setAlreadyInstalled(true)
+        return false
+      }
+      if (r.status === 429) {
+        setError('Another wizard tab is already saving — wait a few seconds and try again.')
+        return false
+      }
+      if (!r.ok) {
+        const body = (await r.json().catch(() => null)) as { error?: string } | null
+        const code = body?.error
+        if (code === 'unknown_template') {
+          setError("We couldn't find that template — pick another and try again.")
+        } else if (code === 'template_has_no_home_page' || code === 'template_has_multiple_home_pages' || code === 'template_has_no_pages' || code === 'template_page_slug_duplicate' || code === 'template_page_slug_collides_with_preserved') {
+          setError("This template is mis-configured — try a different one.")
+        } else {
+          // Don't render raw server error tokens to the operator.
+          setError("Couldn't seed the template. Skip or try again.")
+          if (code) {
+            console.warn('[install/template] server error:', code)
+          }
+        }
+        return false
+      }
+      return true
+    } finally {
+      setSubmitting(false)
+      inFlightRef.current = false
+    }
+  }
+
+  async function handleContinue() {
+    if (submitting) return
+    const ok = await applyTemplate(selected)
+    if (ok) onNext()
+  }
+
+  async function handleSkip() {
+    if (submitting) return
+    // Skip = seed the default template so the install ends up in a
+    // well-defined state regardless of whether the operator clicked
+    // Skip or picked the default tile and clicked Continue.
+    const ok = await applyTemplate('default-welcome')
+    if (ok) onSkip()
+  }
+
+  return (
+    <div>
+      <StepHeader
+        kicker="Step 3 — optional"
+        title="Pick a starting template"
+        lede="A template seeds your pages, navigation, and footer with a layout that fits your industry. You can edit every block afterwards, or replace pages entirely."
+      />
+
+      <div
+        role="radiogroup"
+        aria-label="Site template"
+        className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        {TEMPLATE_CLIENT_META.map((t) => {
+          const isSelected = selected === t.slug
+          return (
+            <button
+              key={t.slug}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              onClick={() => setSelected(t.slug)}
+              disabled={submitting}
+              className={`group relative overflow-hidden rounded-2xl border text-left transition-all focus:outline-none focus:ring-2 focus:ring-copper-500/40 disabled:opacity-50 ${
+                isSelected
+                  ? 'border-copper-500 ring-2 ring-copper-500/30 shadow-[0_18px_40px_-22px_rgba(176,116,56,0.55)]'
+                  : 'border-warm-stone/30 hover:border-copper-300'
+              }`}
+            >
+              {/* Visual mini-preview — palette swatch + tagline rendered IN
+                  the template's own colours. Not a real screenshot, but
+                  enough to communicate the vibe without dragging real
+                  assets into the wizard. */}
+              <div
+                className="h-28 px-4 py-3"
+                style={{ background: t.themePalette.bg, color: t.themePalette.fg }}
+                aria-hidden="true"
+              >
+                <p
+                  className="text-[9px] font-semibold uppercase tracking-[0.22em]"
+                  style={{ color: t.themePalette.accent }}
+                >
+                  {t.kind}
+                </p>
+                <p
+                  className="mt-2 font-serif text-base font-semibold leading-tight"
+                  style={{ color: t.themePalette.fg }}
+                >
+                  {t.name}
+                </p>
+                <p
+                  className="mt-1 text-[10px] leading-snug"
+                  style={{ color: t.themePalette.muted }}
+                >
+                  {t.tagline}
+                </p>
+                <div
+                  className="mt-3 h-px w-10"
+                  style={{ background: t.themePalette.accent }}
+                />
+              </div>
+              <div className="bg-cream-50/90 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black">
+                  {t.name}
+                </p>
+                <p className="mt-1 text-[11px] leading-snug text-warm-stone">
+                  {t.description}
+                </p>
+                {isSelected && (
+                  <p className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-copper-700">
+                    <CheckCircle2 className="h-3 w-3" /> Selected
+                  </p>
+                )}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {alreadyInstalled && (
+        <div className="mt-8 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-4 text-sm text-emerald-900">
+          <p className="font-medium">This install is already set up.</p>
+          <p className="mt-1 text-emerald-800">
+            Sign in at the hidden admin URL the installer printed.
+          </p>
+        </div>
+      )}
+      {error && <ErrorBanner>{error}</ErrorBanner>}
+
+      <div className="mt-8 flex flex-wrap items-center justify-end gap-3">
+        <Button type="button" variant="ghost" onClick={handleSkip} disabled={submitting || alreadyInstalled}>
+          <SkipForward className="h-4 w-4" /> Skip
+        </Button>
+        <Button type="button" onClick={handleContinue} disabled={submitting || alreadyInstalled}>
+          {submitting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Seeding…
+            </>
+          ) : (
+            <>
+              Continue <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Step 5: Branding (optional) ──────────────────────────────────
 
 function BrandingStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const [brandText, setBrandText] = useState('')
   const [theme, setTheme] = useState<'cream' | 'obsidian' | 'ivory'>('cream')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Logo upload state. Lives in this step (not its own step) so the
+  // operator sees "Brand your site" as a single decision — text + colour
+  // + mark — rather than a wizard that splits the brand into pieces.
+  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [logoError, setLogoError] = useState<string | null>(null)
+  // Re-entrancy guard for the multipart upload — see TemplateStep's
+  // inFlightRef for rationale. Sharp pipelines on a slow CPU can take
+  // 10s+; double-clicks on the file picker would otherwise queue two
+  // 5MB POSTs which is wasteful even when the server-side busyToken
+  // rejects the second one.
+  const uploadFlightRef = useRef(false)
+
+  async function handleLogoFile(file: File) {
+    if (uploadFlightRef.current) return
+    uploadFlightRef.current = true
+    setLogoError(null)
+    // 5 MB cap matches the server-side check; local rejection saves a
+    // round-trip.
+    if (file.size > 5 * 1024 * 1024) {
+      setLogoError('Logo must be under 5 MB.')
+      uploadFlightRef.current = false
+      return
+    }
+    setUploading(true)
+    // Hard timeout on the upload: a hung sharp pipeline on the server
+    // would otherwise keep the spinner indefinitely. 60s is generous
+    // for the heaviest 5MB AVIF; longer than that = something's wrong.
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), 60_000)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append(
+        'alt',
+        (brandText || file.name.replace(/\.[^.]+$/, '') || 'Site logo').slice(0, 320),
+      )
+      let r: Response
+      try {
+        r = await installFetch('/api/install/logo', {
+          method: 'POST',
+          body: fd,
+          signal: ac.signal,
+        })
+      } catch (err) {
+        if (ac.signal.aborted) {
+          setLogoError('Upload took too long. Try a smaller image.')
+        } else {
+          setLogoError("Couldn't upload the logo. Try again.")
+          if (err instanceof Error) console.warn('[install/logo] fetch error:', err.message)
+        }
+        return
+      }
+      if (r.status === 410) {
+        setLogoError('This install is already set up.')
+        return
+      }
+      if (r.status === 429) {
+        setLogoError('Another upload is in progress — wait a few seconds and try again.')
+        return
+      }
+      if (!r.ok) {
+        const body = (await r.json().catch(() => null)) as { error?: string } | null
+        const code = body?.error
+        if (code === 'mime_rejected' || code === 'mime_format_mismatch' || code === 'mime_unknown') {
+          setLogoError('PNG, JPEG, WebP, or AVIF only.')
+        } else if (code === 'too_large') {
+          setLogoError('Logo must be under 5 MB.')
+        } else if (code === 'alt_required') {
+          setLogoError('Logo needs descriptive text. Add a brand name first.')
+        } else {
+          setLogoError("Couldn't upload the logo. Try again.")
+          if (code) console.warn('[install/logo] server error:', code)
+        }
+        return
+      }
+      const j = (await r.json().catch(() => null)) as {
+        variants?: { md?: string }
+      } | null
+      if (j?.variants?.md) setLogoPreview(j.variants.md)
+    } finally {
+      clearTimeout(timer)
+      setUploading(false)
+      uploadFlightRef.current = false
+    }
+  }
+
+  async function handleRemoveLogo() {
+    if (removing) return
+    setRemoving(true)
+    setLogoError(null)
+    // Same timeout discipline as the upload path — a hung backend
+    // shouldn't leave the X button spinner stuck. 15s is generous
+    // for a settings update + one media UPDATE.
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), 15_000)
+    try {
+      try {
+        const r = await installFetch('/api/install/logo', {
+          method: 'DELETE',
+          signal: ac.signal,
+        })
+        // Even if the DELETE fails (server transient), clear the local
+        // preview — the operator pressed X. The wizard's next step
+        // will re-confirm settings state; a stale logo binding is
+        // recoverable by re-uploading.
+        if (!r.ok && r.status !== 410) {
+          console.warn('[install/logo DELETE] server status', r.status)
+        }
+      } catch (err) {
+        if (ac.signal.aborted) {
+          setLogoError('Remove took too long — try again.')
+        } else if (err instanceof Error) {
+          console.warn('[install/logo DELETE] fetch error:', err.message)
+        }
+      }
+      setLogoPreview(null)
+    } finally {
+      clearTimeout(timer)
+      setRemoving(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -667,7 +999,7 @@ function BrandingStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
   return (
     <form onSubmit={handleSubmit}>
       <StepHeader
-        kicker="Step 3 — optional"
+        kicker="Step 4 — optional"
         title="Brand your site"
         lede="Shown in the site header. You can refine this anytime under Settings → Branding."
       />
@@ -700,6 +1032,72 @@ function BrandingStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
               </button>
             ))}
           </div>
+        </div>
+        <div>
+          <FormLabel>Logo (optional)</FormLabel>
+          <div className="mt-2 flex items-start gap-4">
+            {logoPreview ? (
+              <div className="relative flex h-24 w-24 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-warm-stone/30 bg-cream-50">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={logoPreview}
+                  alt="Uploaded logo preview"
+                  className="max-h-20 max-w-20 object-contain"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleRemoveLogo()}
+                  disabled={removing}
+                  className="absolute -right-1 -top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-near-black text-cream-50 shadow disabled:opacity-50"
+                  aria-label="Remove logo"
+                >
+                  {removing ? <Loader2 className="h-3 w-3 animate-spin" /> : <XIcon className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            ) : (
+              <label
+                className={`flex h-24 w-24 flex-shrink-0 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-warm-stone/40 bg-cream-50/40 text-warm-stone transition-all hover:border-copper-300 hover:text-copper-700 ${
+                  uploading ? 'cursor-wait opacity-60' : ''
+                }`}
+              >
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/avif"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) void handleLogoFile(f)
+                    // Reset so re-picking the same file refires onChange
+                    e.target.value = ''
+                  }}
+                  disabled={uploading}
+                  className="hidden"
+                />
+                {uploading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <Upload className="h-5 w-5" />
+                    <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
+                      Upload
+                    </span>
+                  </>
+                )}
+              </label>
+            )}
+            <div className="flex-1 text-xs leading-relaxed text-warm-stone">
+              <p>PNG, JPEG, WebP, or AVIF. 5 MB max.</p>
+              <p className="mt-1">
+                {logoPreview
+                  ? 'Logo uploaded. It will replace the brand text in the site header.'
+                  : 'Once uploaded, the logo replaces the brand text in the header. Skip if you only want a wordmark for now.'}
+              </p>
+            </div>
+          </div>
+          {logoError && (
+            <p className="mt-3 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-xs text-red-800">
+              {logoError}
+            </p>
+          )}
         </div>
       </div>
       {error && <ErrorBanner>{error}</ErrorBanner>}
@@ -757,7 +1155,7 @@ function ContactStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
   return (
     <form onSubmit={handleSubmit}>
       <StepHeader
-        kicker="Step 4 — optional"
+        kicker="Step 5 — optional"
         title="Contact info"
         lede="Powers the contact form and lead notifications. You can add address + hours later."
       />
@@ -885,7 +1283,7 @@ function SmtpStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }
   return (
     <form onSubmit={handleSubmit}>
       <StepHeader
-        kicker="Step 5 — optional"
+        kicker="Step 6 — optional"
         title="Outbound email (SMTP)"
         lede="Powers password reset, lead notifications, and update alerts. Test before saving."
       />
@@ -1049,7 +1447,7 @@ function SecurityStep({
   return (
     <form onSubmit={handleSubmit}>
       <StepHeader
-        kicker="Step 6 — optional"
+        kicker="Step 7 — optional"
         title="Pick a memorable login URL"
         lede="The installer generated a random one — replacing it with something you'll remember is fine. Keep it secret."
       />
