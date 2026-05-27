@@ -847,11 +847,18 @@ function TemplateStep({
 
   async function handleSkip() {
     if (submitting) return
-    // Skip = seed the default template so the install ends up in a
-    // well-defined state regardless of whether the operator clicked
-    // Skip or picked the default tile and clicked Continue.
-    const ok = await applyTemplate('default-welcome')
-    if (ok) onSkip('default-welcome')
+    // Skip preserves whatever the operator visibly picked. The button
+    // copy is "Skip" but the operator's framing on this step is "I'm
+    // not going to customise further — use whatever I selected". Until
+    // 0.1.37 this unconditionally forced 'default-welcome', which
+    // silently wiped the operator's Hotel Solenne / Studio Folio /
+    // etc tile pick if they clicked Skip after selecting one (e.g.
+    // they came back to this step and tapped Skip thinking it advanced
+    // their selection). The seed-the-default contract still holds for
+    // the truly-untouched path because `selected` starts at
+    // 'default-welcome'.
+    const ok = await applyTemplate(selected)
+    if (ok) onSkip(selected)
   }
 
   return (

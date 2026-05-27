@@ -620,14 +620,27 @@ export const POST = withError(async (req) => {
       body.kind === 'widget' ? widgetBlockType! : undefined
     const tags = tagsForBlockSave(pageSlug, tagBlockType).tags
     const queueRowId = await enqueueRevalidate(tx, tags)
-    return { blockId, queueRowId, tags }
+    return { blockId, queueRowId, tags, childColumnIds }
   })
 
   queueMicrotask(() => {
     void drainRevalidate(txResult.queueRowId, txResult.tags)
   })
 
-  return new Response(JSON.stringify({ id: txResult.blockId, version: 0 }), {
+  // childColumnIds populated only when kind='section' + withColumns was
+  // set. Clients that issue the section-create + widget-attach two-step
+  // (useInsertBlock's empty-page auto-wrap path) need the column id to
+  // anchor the follow-up widget POST — without it they'd have to GET
+  // /api/cms/blocks/<sectionId>/children to discover the child, which
+  // doubles round trips and races against concurrent edits.
+  const responseBody: { id: number; version: 0; columnIds?: number[] } = {
+    id: txResult.blockId,
+    version: 0,
+  }
+  if (txResult.childColumnIds.length > 0) {
+    responseBody.columnIds = txResult.childColumnIds
+  }
+  return new Response(JSON.stringify(responseBody), {
     status: 201,
     headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
   })

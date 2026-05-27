@@ -1,12 +1,14 @@
 'use client'
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   KeyboardSensor,
   useSensor,
   useSensors,
   closestCenter,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -15,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 // Wrapper that lets any list of items become drag-reorderable. The
 // caller renders the row content via `renderItem`; we provide the
@@ -25,6 +27,17 @@ import type { ReactNode } from 'react'
 // index for arrays of primitives. The handle is scoped to a grip
 // icon so click handlers inside the row (buttons, inputs) work
 // without triggering drag.
+//
+// Visual drag affordance:
+//   • The in-place row dims to opacity 0.25 while dragging — the
+//     operator can still see the slot it left and the other rows
+//     reflowing around the gap.
+//   • A `<DragOverlay>` portal renders a floating clone of the row
+//     that follows the cursor, with a copper ring + drop shadow.
+//   • The fade-in mount animation is intentionally NOT applied on the
+//     row root — that keyframe targets `transform`, which overrides
+//     dnd-kit's inline transform during drag and made the dragging
+//     row appear visually frozen in place.
 export function SortableList<T>({
   items,
   onChange,
@@ -54,13 +67,20 @@ export function SortableList<T>({
     useSensor(KeyboardSensor),
   )
 
+  const [activeId, setActiveId] = useState<string | null>(null)
+
+  const onDragStart = (e: DragStartEvent) => {
+    setActiveId(String(e.active.id))
+  }
   const onDragEnd = (e: DragEndEvent) => {
+    setActiveId(null)
     if (!e.over || e.active.id === e.over.id) return
     const oldIdx = items.findIndex((it, i) => String(getId(it, i)) === String(e.active.id))
     const newIdx = items.findIndex((it, i) => String(getId(it, i)) === String(e.over!.id))
     if (oldIdx < 0 || newIdx < 0) return
     onChange(arrayMove(items, oldIdx, newIdx))
   }
+  const onDragCancel = () => setActiveId(null)
 
   // Callers (all three live in ZodForm) coerce non-arrays to `[]`
   // before passing through — see SocialLinkArrayField / ObjectArrayField
@@ -72,8 +92,25 @@ export function SortableList<T>({
     return <>{emptyState}</>
   }
 
+  const activeIdx =
+    activeId === null
+      ? -1
+      : items.findIndex((it, i) => String(getId(it, i)) === activeId)
+  // `items[activeIdx]` is `T | undefined` under strict
+  // noUncheckedIndexedAccess. The activeIdx >= 0 guard pairs with a
+  // non-null assertion so the variable narrows cleanly to T for the
+  // DragOverlay clone below; the only way activeItem reads as a real
+  // T value is when activeIdx points at a still-present row.
+  const activeItem: T | null = activeIdx >= 0 ? items[activeIdx]! : null
+
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={onDragCancel}
+    >
       <SortableContext
         items={items.map((it, i) => String(getId(it, i)))}
         strategy={verticalListSortingStrategy}
@@ -108,6 +145,20 @@ export function SortableList<T>({
           ))}
         </ul>
       </SortableContext>
+      <DragOverlay dropAnimation={{ duration: 180, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }}>
+        {activeItem !== null ? (
+          <div className="cavecms-drag-preview rounded-md bg-cream-50 ring-1 ring-copper-500/60 shadow-[0_20px_60px_-15px_rgba(112,66,20,0.45)]">
+            {renderItem(activeItem, activeIdx, {
+              handleProps: {},
+              isFirst: activeIdx === 0,
+              isLast: activeIdx === items.length - 1,
+              moveUp: () => {},
+              moveDown: () => {},
+              remove: () => {},
+            })}
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   )
 }
@@ -128,9 +179,8 @@ function SortableRow({
         transform: CSS.Transform.toString(transform),
         transition,
         zIndex: isDragging ? 10 : undefined,
-        opacity: isDragging ? 0.85 : 1,
+        opacity: isDragging ? 0.25 : 1,
       }}
-      className="animate-cavecms-fade-in"
     >
       {children({ ...attributes, ...listeners })}
     </li>

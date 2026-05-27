@@ -1020,6 +1020,93 @@ export function useInsertBlock(): InsertBlockFn {
   }, [state])
   return useCallback<InsertBlockFn>(
     async (blockType, options) => {
+      // ── Auto-wrap / auto-route for parent-less widget inserts ──
+      // The WidgetPicker panel, the EmptyPage starter cards, and the
+      // legacy slash menu all POST widgets WITHOUT a parentId. The
+      // server happily accepts that (loose widgets are a back-compat
+      // path) but the UX outcome is wrong in both directions:
+      //   • Empty page  → loose widget lands at parent_id=NULL,
+      //     position=MAX+1000. Renderer's looseWidget branch DOES
+      //     paint it, but OutlinePanel reads block kinds and shows
+      //     "No sections yet" because no row has kind='section'.
+      //     Operator sees a toast + no visible section in the outline
+      //     and concludes the insert failed.
+      //   • Page with sections → loose widget lands BELOW every
+      //     existing section (position=MAX+1000 across the whole
+      //     page). The operator looking at the top of the page where
+      //     the welcome / hero sections are sees no change.
+      //
+      // Resolution: when parentId is omitted (undefined — NOT explicit
+      // null, which a future caller might use to signal "I really want
+      // this loose"), walk the current block tree:
+      //   1. If any kind='section' exists, route the widget to the
+      //      LAST column of the LAST section (append).
+      //   2. If no sections exist, atomically create a section with
+      //      one column (POST kind=section, withColumns=1), then POST
+      //      the widget with parentId = the new column id.
+      //
+      // This applies ONLY to widget kinds (the InsertableBlockType
+      // surface). Section / column inserts go through their own paths
+      // (EditableSection's +Section button, AddColumnHere widget) and
+      // never reach this function.
+      let resolvedParentId: number | null | undefined = options.parentId
+      const needsAutoParent =
+        resolvedParentId === undefined &&
+        options.afterBlockId === undefined &&
+        options.beforeBlockId === undefined
+      if (needsAutoParent) {
+        const live = stateRef.current.blocks
+        const sections = live
+          .filter((b) => b.kind === 'section')
+          .sort((a, b) => a.position - b.position)
+        if (sections.length > 0) {
+          const lastSection = sections[sections.length - 1]!
+          const lastColumns = live
+            .filter((b) => b.kind === 'column' && b.parentId === lastSection.id)
+            .sort((a, b) => a.position - b.position)
+          if (lastColumns.length > 0) {
+            resolvedParentId = lastColumns[lastColumns.length - 1]!.id
+          }
+          // If the section somehow has no columns (shouldn't happen —
+          // sections are always created with ≥1 column), fall through
+          // to loose-widget rather than crashing.
+        } else {
+          // Empty page — create the host section + column first.
+          try {
+            const wrapRes = await csrfFetch('/api/cms/blocks', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                pageId: options.pageId,
+                kind: 'section',
+                withColumns: 1,
+              }),
+            })
+            if (wrapRes.ok) {
+              const wrapJson = (await wrapRes.json().catch(() => ({}))) as {
+                columnIds?: number[]
+              }
+              const newColumnId = wrapJson.columnIds?.[0]
+              if (typeof newColumnId === 'number') {
+                resolvedParentId = newColumnId
+                // The new section + column are visible to the server
+                // immediately. The router.refresh() at the bottom of
+                // this function picks them up alongside the widget.
+              }
+            }
+            // On wrapper failure we silently fall through to loose-
+            // widget (existing behaviour). The operator still gets
+            // their toast + the widget renders via the looseWidget
+            // branch; the worst case is they end up where we were
+            // before this auto-wrap landed, not in a strictly worse
+            // place.
+          } catch {
+            // Same fall-through — let the widget POST below proceed
+            // without a parent rather than crash the insert.
+          }
+        }
+      }
+
       const body: Record<string, unknown> = {
         pageId: options.pageId,
         blockType,
@@ -1069,7 +1156,7 @@ export function useInsertBlock(): InsertBlockFn {
         !('tone' in resolvedData)
       ) {
         const sectionMeta = resolveAncestorSectionMeta(
-          options.parentId,
+          typeof resolvedParentId === 'number' ? resolvedParentId : options.parentId,
           stateRef.current.blocks,
         )
         if (isSectionSurfaceDark(sectionMeta)) {
@@ -1085,7 +1172,9 @@ export function useInsertBlock(): InsertBlockFn {
       if (typeof options.beforeBlockId === 'number') {
         body.beforeBlockId = options.beforeBlockId
       }
-      if (typeof options.parentId === 'number') {
+      if (typeof resolvedParentId === 'number') {
+        body.parentId = resolvedParentId
+      } else if (typeof options.parentId === 'number') {
         body.parentId = options.parentId
       }
       try {

@@ -524,6 +524,43 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   if (rewriteTarget) {
     const url = req.nextUrl.clone()
     url.pathname = rewriteTarget
+    // ── Same-origin rewrite override (CRITICAL behind reverse proxy) ──
+    // `req.nextUrl` carries the BOUND listener address (e.g.
+    // `https://localhost:8201`) as host, not the public hostname the
+    // request came in on (`test.derricksiawor.com`). When the rewrite
+    // URL is stringified into the `x-middleware-rewrite` header,
+    // resolve-routes.js in the router-server passes the value through
+    // `getRelativeURL(value, initUrl)`. initUrl is built from the
+    // request's actual Host header (when next.config's
+    // `experimental.trustHostHeader=true` is set — already wired in
+    // next.config.ts). If the rewrite URL's origin doesn't match
+    // initUrl's origin, getRelativeURL returns an absolute URL,
+    // `parsedUrl.protocol` ends up set, and Next's router-server
+    // triggers an INTERNAL HTTP proxy against the rewrite target — but
+    // X-Forwarded-Proto=https makes the target `https://`, while the
+    // Node listener speaks plain HTTP. Result: every CMS-slug page
+    // 500s with `EPROTO ssl3_get_record:wrong version number`.
+    //
+    // Fix: explicitly set hostname/port/protocol on the rewrite URL to
+    // match the incoming request's Host + X-Forwarded-Proto BEFORE
+    // calling NextResponse.rewrite. The resulting `x-middleware-rewrite`
+    // header carries the same origin as initUrl, getRelativeURL strips
+    // to a relative path, parsedUrl has no protocol, no proxy fires,
+    // and the page renders normally.
+    //
+    // Verified on the live test install 2026-05-27 — without this
+    // override, /dining /rooms /story /reservations all 500'd; with
+    // it, all 200.
+    const hostHeader = req.headers.get('host')
+    if (hostHeader) {
+      const [hostPart, portPart] = hostHeader.split(':')
+      url.hostname = hostPart!
+      url.port = portPart ?? ''
+    }
+    const forwardedProto = req.headers.get('x-forwarded-proto')
+    if (forwardedProto === 'http' || forwardedProto === 'https') {
+      url.protocol = `${forwardedProto}:`
+    }
     res = NextResponse.rewrite(url, { request: { headers: reqHeaders } })
   } else {
     res = NextResponse.next({ request: { headers: reqHeaders } })

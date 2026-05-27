@@ -29,6 +29,28 @@ const config: NextConfig = {
   //       and the first `npx create-cavecms` install dies at step 6
   //       with "mysql2 not found — looked in […]".
   serverExternalPackages: ['sharp', 'isomorphic-dompurify', 'jsdom', 'nodemailer', 'mysql2', 'drizzle-orm'],
+  // CaveCMS deploys behind a reverse proxy (nginx / Apache) that proxies
+  // to the Node listener on 127.0.0.1:<PORT>. Without trustHostHeader,
+  // Next.js builds the initUrl for middleware rewrites from the BOUND
+  // HOSTNAME:PORT (e.g. `https://localhost:8201`) instead of the
+  // forwarded Host header (`test.derricksiawor.com`). When middleware
+  // rewrites `/dining` → `/_page/dining`, the resulting
+  // `x-middleware-rewrite` header carries the bound origin, and Next's
+  // router-server sees the host as "external" relative to the request
+  // origin, then proxies via http-proxy with `target=https://localhost:8201`
+  // (because X-Forwarded-Proto=https). The Node listener is plain HTTP,
+  // so the SSL handshake fails with EPROTO ssl3_get_record:wrong version
+  // number — every CMS-slug page 500s. trustHostHeader makes Next build
+  // initUrl from req.headers.host, so middleware rewrites stay
+  // same-origin and Next handles them as internal rewrites.
+  // trustHostHeader is a runtime-supported experimental flag in
+  // Next 15.5 (Vercel sets it automatically via `hasNextSupport`) but
+  // the public TS types only expose a stable subset of `experimental`.
+  // The cast keeps the flag in the runtime nextConfig payload that
+  // the standalone server reads at boot.
+  experimental: {
+    trustHostHeader: true,
+  } as NextConfig['experimental'],
   // instrumentation.ts runs only on Node (`if (NEXT_RUNTIME !== 'nodejs') return`
   // at the top of register()) but webpack still tries to BUNDLE it for the
   // Edge runtime, where `await import('node:crypto')` (and the chain of
