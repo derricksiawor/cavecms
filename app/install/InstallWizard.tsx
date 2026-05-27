@@ -879,18 +879,25 @@ function TemplateStep({
               aria-checked={isSelected}
               onClick={() => setSelected(t.slug)}
               disabled={submitting}
-              className={`group relative overflow-hidden rounded-2xl border text-left transition-all focus:outline-none focus:ring-2 focus:ring-copper-500/40 disabled:opacity-50 ${
+              className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-cream-50 text-left transition-all focus:outline-none focus:ring-2 focus:ring-copper-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
                 isSelected
                   ? 'border-copper-500 ring-2 ring-copper-500/30 shadow-[0_18px_40px_-22px_rgba(176,116,56,0.55)]'
-                  : 'border-warm-stone/30 hover:border-copper-300'
+                  : 'border-warm-stone/30 shadow-[0_4px_16px_-8px_rgba(15,15,15,0.10)] hover:border-copper-300 hover:shadow-[0_8px_24px_-10px_rgba(176,116,56,0.25)]'
               }`}
             >
               {/* Visual mini-preview — palette swatch + tagline rendered IN
                   the template's own colours. Not a real screenshot, but
                   enough to communicate the vibe without dragging real
-                  assets into the wizard. */}
+                  assets into the wizard. The `border-b` is the visual
+                  break between the palette-preview top half and the
+                  description bottom half — without it, light-themed
+                  palettes (cream backgrounds) blend into the also-cream
+                  page background AND the cream-50 tile background, so
+                  the operator sees a "floating" description with no
+                  clear top-section boundary. The hairline border fixes
+                  that on every theme. */}
               <div
-                className="h-28 px-4 py-3"
+                className="h-28 border-b border-warm-stone/25 px-4 py-3"
                 style={{ background: t.themePalette.bg, color: t.themePalette.fg }}
                 aria-hidden="true"
               >
