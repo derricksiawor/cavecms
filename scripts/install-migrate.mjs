@@ -233,6 +233,96 @@ async function applyMigration(conn, entry, sql, hash) {
   )
 }
 
+// Tables the app's schema_fingerprint covers — must stay in sync with
+// scripts/update-fingerprint.ts:TRACKED_TABLES. Listed explicitly (not
+// derived from information_schema) so a stray table from another tenant
+// sharing the same DB can't tilt the fingerprint.
+const FINGERPRINT_TABLES = [
+  'ai_proposals',
+  'audit_log',
+  'content_blocks',
+  'failed_logins_by_email',
+  'failed_logins_by_ip',
+  'leads',
+  'login_attempts',
+  'media',
+  'media_references',
+  'newsletter_subscribers',
+  'notification_failures',
+  'pages',
+  'pending_emails',
+  'posts',
+  'project_sections',
+  'projects',
+  'saved_blocks',
+  'schema_fingerprint',
+  'settings',
+  'slug_redirects',
+  'user_known_ips',
+  'users',
+]
+
+/**
+ * Compute the schema fingerprint over information_schema.COLUMNS and
+ * upsert into the `schema_fingerprint` table (single row, id=1).
+ *
+ * Mirrors scripts/update-fingerprint.ts byte-for-byte:
+ *  - Same TRACKED_TABLES (kept in sync).
+ *  - Same column projection (table_name, column_name, column_type,
+ *    is_nullable, column_default, column_key, extra) in ORDER BY
+ *    (table_name, column_name) ASC.
+ *  - Same canonicalization line shape:
+ *      `<table>.<column>:<type>|null=<Y/N>|default=<D>|key=<K>|extra=<E>`
+ *  - SHA-256 over the joined string (lines separated by `\n`, no trailing
+ *    newline).
+ *  - INSERT ... ON DUPLICATE KEY UPDATE so both fresh + re-runs work.
+ *
+ * Boot-time check in instrumentation.ts reads db/schema-fingerprint.txt
+ * (baked into the release zip at build time) and compares against this
+ * row; mismatch fatals the process. By computing live from the DB the
+ * customer's box just migrated, this row reflects ACTUAL schema state —
+ * if migrations drift from schema.ts (i.e. file fingerprint ≠ live
+ * fingerprint), boot fails loud rather than masking the drift.
+ */
+async function updateSchemaFingerprint(conn) {
+  const placeholders = FINGERPRINT_TABLES.map(() => '?').join(',')
+  const [rows] = await conn.query(
+    `SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
+            COLUMN_TYPE AS column_type, IS_NULLABLE AS is_nullable,
+            COLUMN_DEFAULT AS column_default, COLUMN_KEY AS column_key,
+            EXTRA AS extra
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME IN (${placeholders})
+     ORDER BY TABLE_NAME, COLUMN_NAME`,
+    FINGERPRINT_TABLES,
+  )
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('schema_fingerprint: no tracked tables found in information_schema (did migrations apply?)')
+  }
+  // Verify every tracked table is represented — missing one means a
+  // failed migration that left the schema incomplete.
+  const found = new Set(rows.map((r) => r.table_name))
+  const missing = FINGERPRINT_TABLES.filter((t) => !found.has(t))
+  if (missing.length > 0) {
+    throw new Error(`schema_fingerprint: missing tables: ${missing.join(', ')}`)
+  }
+  const canonical = rows
+    .map(
+      (r) =>
+        `${r.table_name}.${r.column_name}:${r.column_type}|null=${r.is_nullable}|default=${r.column_default ?? '<none>'}|key=${r.column_key}|extra=${r.extra}`,
+    )
+    .join('\n')
+  const fingerprint = createHash('sha256').update(canonical).digest('hex')
+  await conn.query(
+    `INSERT INTO schema_fingerprint (id, fingerprint, applied_at)
+     VALUES (1, ?, NOW(3))
+     ON DUPLICATE KEY UPDATE fingerprint = VALUES(fingerprint), applied_at = NOW(3)`,
+    [fingerprint],
+  )
+  log(`schema_fingerprint: ${fingerprint.slice(0, 16)}…`)
+}
+
 async function main() {
   const url = requireDatabaseUrl()
   const journal = readJournal()
@@ -363,6 +453,16 @@ async function main() {
     } else {
       log(`Applied ${didApply} migration(s). Schema is up to date.`)
     }
+
+    // Populate the schema_fingerprint row. instrumentation.ts on boot
+    // requires this row to exist + match db/schema-fingerprint.txt
+    // (baked into the build); without it the standalone process
+    // refuses to serve with `schema_fingerprint row missing`. In a
+    // dev / deploy.sh flow this is done by `pnpm db:fingerprint`
+    // (scripts/update-fingerprint.ts) — install-migrate replicates
+    // that algorithm here so a CLI-installed instance boots cleanly.
+    await updateSchemaFingerprint(conn)
+
     await conn.query("SELECT RELEASE_LOCK('cavecms_install_migrate')")
   } finally {
     await conn.end()
