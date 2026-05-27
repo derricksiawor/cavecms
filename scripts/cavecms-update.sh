@@ -555,13 +555,21 @@ print((u.path or "/").lstrip("/").split("?")[0])
     version_line=$(mysql --defaults-extra-file="$cred_file" -BNe "SELECT VERSION();" 2>/dev/null || true)
     is_mariadb=$(mysql --defaults-extra-file="$cred_file" -BNe "SELECT @@version_comment;" 2>/dev/null || true)
     rm -f "$cred_file"
-    # MariaDB version strings look like "10.6.16-MariaDB-..." or
-    # "11.4.2-MariaDB". Extract major.minor.
+    # MariaDB version strings ALWAYS contain "MariaDB" in the VERSION()
+    # output (e.g. "10.6.22-MariaDB-0ubuntu0.22.04.1", "11.4.2-MariaDB",
+    # "10.11.6-MariaDB-1:10.11.6+maria~ubu2204"). Pure MySQL builds
+    # never have that suffix. `@@version_comment` is unreliable as the
+    # MariaDB-vs-MySQL signal — distro packages overwrite it with the
+    # OS string (e.g. "Ubuntu 22.04"), so a healthy MariaDB on
+    # Ubuntu would fail this gate. Check the VERSION() string instead,
+    # which the server can't customise the way distros customise the
+    # comment. Extract major.minor from the same string.
     db_major=$(echo "$version_line" | awk -F. '{print $1}')
     db_minor=$(echo "$version_line" | awk -F. '{print $2}')
-    case "$is_mariadb" in
+    case "$version_line" in
       *MariaDB*|*mariadb*) ;;  # OK — proceed to version check
       *)
+        echo "[cavecms-update] version_line=$version_line version_comment=$is_mariadb" >> "${LOG_DIR}/preflight.log" 2>/dev/null || true
         write_status "failed" 1 "Database isn't MariaDB" "CaveCMS requires MariaDB. Pure MySQL isn't supported. Ask your hosting provider to switch the database to MariaDB 10.6 or newer." ""
         exit 1
         ;;
