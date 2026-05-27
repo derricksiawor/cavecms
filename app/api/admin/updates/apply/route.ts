@@ -201,6 +201,17 @@ function buildScriptEnv(
   }
   out.CAVECMS_UPDATE_TARGET = target
   out.CAVECMS_UPDATE_FROM = fromSha
+  // The orchestrator's healthz probe defaults to 127.0.0.1:3040 (the
+  // bare-metal deploy.sh layout's port). CLI installs run on whatever
+  // port the operator chose (PORT in env.production — 8201 for the
+  // test install, customer-chosen on real installs). Without this
+  // derivation the preflight fails immediately with "Connection
+  // refused" and the modal shows "Your site isn't responding
+  // properly" at step 1. Customer never gets to step 2.
+  if (!out.CAVECMS_HEALTHZ_URL) {
+    const port = process.env.PORT ?? '3040'
+    out.CAVECMS_HEALTHZ_URL = `http://127.0.0.1:${port}/healthz`
+  }
   // Tarball coords from the static manifest — the orchestrator's step 2
   // switches to tarball mode (curl + sha256 verify + atomic extract)
   // when these are present, so CLI-installed (no-git) instances can
