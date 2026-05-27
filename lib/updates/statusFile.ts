@@ -78,8 +78,8 @@ const TERMINAL_STATES: ReadonlySet<UpdateState> = new Set<UpdateState>([
   'rolled_back',
 ])
 
-const DEFAULT_PATH = '/var/lib/cavecms/update-status.json'
-const ALLOWED_DIR_PREFIXES: readonly string[] = ['/var/lib/cavecms/']
+const SYSTEM_DEFAULT_PATH = '/var/lib/cavecms/update-status.json'
+const ALLOWED_SYSTEM_DIR_PREFIXES: readonly string[] = ['/var/lib/cavecms/']
 
 let statusPathOverride: string | null = null
 
@@ -91,6 +91,24 @@ export function __setStatusPathForTests(path: string | null): void {
   statusPathOverride = path
 }
 
+/**
+ * Per-install state directory. Set by the CLI (`create-cavecms` writes
+ * `CAVECMS_STATE_DIR=<install dir>/.cavecms-state` into env.production),
+ * provisioned at install time as the same user that owns the install.
+ * This avoids the chicken-and-egg where /var/lib/cavecms/ requires a
+ * pm2-daemon-wide restart for the supplementary `cavecmsstate` group
+ * to take effect — instead we keep the status file inside the install
+ * dir, which the running app user already owns.
+ *
+ * Returns null when the env var isn't set (legacy installs / dev) —
+ * caller falls back to the system path.
+ */
+function getInstallStateDir(): string | null {
+  const raw = process.env.CAVECMS_STATE_DIR
+  if (!raw) return null
+  return resolve(raw)
+}
+
 function ensureAllowedPath(candidate: string): string {
   const resolved = resolve(candidate)
   const isProd = process.env.NODE_ENV === 'production'
@@ -100,14 +118,20 @@ function ensureAllowedPath(candidate: string): string {
   // file as a symlink to /etc/cron.d/cavecms.cron before we open it.
   // Our atomic-rename via writeFileSync would then follow the symlink
   // and stomp the target. In production we lock the allowlist to
-  // /var/lib/cavecms/* (root:cavecmsstate 2770), which is provisioned
-  // by setup.
+  // /var/lib/cavecms/* (system path) OR <CAVECMS_STATE_DIR>/* (the
+  // per-install path the CLI provisioned).
   if (!isProd) {
     if (resolved.startsWith(resolve(tmpdir()) + '/')) return resolved
     if (resolved.startsWith('/tmp/')) return resolved
   }
-  for (const prefix of ALLOWED_DIR_PREFIXES) {
+  for (const prefix of ALLOWED_SYSTEM_DIR_PREFIXES) {
     if (resolved === prefix.replace(/\/$/, '') || resolved.startsWith(prefix)) {
+      return resolved
+    }
+  }
+  const stateDir = getInstallStateDir()
+  if (stateDir) {
+    if (resolved === stateDir || resolved.startsWith(stateDir + '/')) {
       return resolved
     }
   }
@@ -117,7 +141,16 @@ function ensureAllowedPath(candidate: string): string {
 export function getStatusPath(): string {
   if (statusPathOverride !== null) return statusPathOverride
   const fromEnv = process.env.CAVECMS_UPDATE_STATUS_PATH
-  return ensureAllowedPath(fromEnv ?? DEFAULT_PATH)
+  if (fromEnv) return ensureAllowedPath(fromEnv)
+  // No explicit status-path env. Prefer the per-install state dir
+  // (CLI-provisioned, no pm2-daemon-restart needed) over the system
+  // path (/var/lib/cavecms/) which requires the daemon to have been
+  // restarted with the cavecmsstate supplementary group.
+  const stateDir = getInstallStateDir()
+  if (stateDir) {
+    return ensureAllowedPath(`${stateDir}/update-status.json`)
+  }
+  return ensureAllowedPath(SYSTEM_DEFAULT_PATH)
 }
 
 function safeParse(raw: string): UpdateStatus | null {

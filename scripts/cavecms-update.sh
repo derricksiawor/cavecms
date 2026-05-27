@@ -76,7 +76,19 @@ if [ "${CAVECMS_UPDATE_FORCE:-0}" = "1" ]; then
 fi
 
 FROM_SHA="${CAVECMS_UPDATE_FROM:-unknown}"
-STATUS_PATH="${CAVECMS_UPDATE_STATUS_PATH:-/var/lib/cavecms/update-status.json}"
+# Status-path resolution:
+#   1. CAVECMS_UPDATE_STATUS_PATH explicit override (legacy + tests)
+#   2. CAVECMS_STATE_DIR/update-status.json — CLI-installed sites, owned
+#      by the runtime user (no pm2-daemon-restart needed for groups)
+#   3. /var/lib/cavecms/update-status.json — bare-metal deploys with
+#      the cavecmsstate-group / 2770 system dir provisioned by setup
+if [ -n "${CAVECMS_UPDATE_STATUS_PATH:-}" ]; then
+  STATUS_PATH="$CAVECMS_UPDATE_STATUS_PATH"
+elif [ -n "${CAVECMS_STATE_DIR:-}" ]; then
+  STATUS_PATH="$CAVECMS_STATE_DIR/update-status.json"
+else
+  STATUS_PATH="/var/lib/cavecms/update-status.json"
+fi
 HEALTHZ_URL="${CAVECMS_HEALTHZ_URL:-http://127.0.0.1:3040/healthz}"
 HEALTHZ_TOKEN="${HEALTHZ_TOKEN:-}"
 REPO_DIR="${CAVECMS_REPO_DIR:-$(pwd)}"
@@ -85,14 +97,21 @@ ENV_FILE="${CAVECMS_ENV_FILE:-/etc/cavecms/env.production}"
 LOCK_PATH="${STATUS_PATH}.lock"
 
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
-# operator points STATUS_PATH at /etc/cron.d/* or similar.
+# operator points STATUS_PATH at /etc/cron.d/* or similar. CAVECMS_STATE_DIR
+# (per-install runtime-state directory) is also accepted when set.
+allowed=0
 case "$STATUS_PATH" in
-  /var/lib/cavecms/*|/tmp/*|/var/folders/*) ;;
-  *)
-    echo "[cavecms-update] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
-    exit 2
-    ;;
+  /var/lib/cavecms/*|/tmp/*|/var/folders/*) allowed=1 ;;
 esac
+if [ "$allowed" = "0" ] && [ -n "${CAVECMS_STATE_DIR:-}" ]; then
+  case "$STATUS_PATH" in
+    "$CAVECMS_STATE_DIR"/*) allowed=1 ;;
+  esac
+fi
+if [ "$allowed" = "0" ]; then
+  echo "[cavecms-update] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
+  exit 2
+fi
 
 mkdir -p "$(dirname "$STATUS_PATH")"
 # LOG_DIR writability probe — `mkdir -p` returns 0 when the path

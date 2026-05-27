@@ -1138,6 +1138,24 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
       ? '/opt/cavecms/uploads'
       : join(targetDir, 'uploads')
 
+  // Per-install state dir for runtime artefacts that have to survive
+  // an atomic-swap update (the current-symlink flip moves the install
+  // dir aside, so anything we want to keep across updates lives
+  // OUTSIDE that dir on the VPS surface — see the symlink flow in
+  // scripts/deploy.sh — but for the CLI's PM2/systemd/manual surfaces
+  // the install dir IS stable across updates, so a sibling dir works
+  // fine). The in-app updater (lib/updates/statusFile.ts) reads
+  // `CAVECMS_STATE_DIR` to decide where to put the status file +
+  // cross-process lock; without this env var the updater defaults to
+  // /var/lib/cavecms/ which requires the PM2 daemon to be re-execed
+  // before its supplementary `cavecmsstate` group takes effect — a
+  // chicken-and-egg that breaks the first-install-then-update flow
+  // for every new customer.
+  const stateDir =
+    surface === 'vps'
+      ? '/opt/cavecms/state'
+      : join(targetDir, '.cavecms-state')
+
   const lines = [
     `# ----------------------------------------------------------------------`,
     `# CaveCMS sealed env.production`,
@@ -1160,6 +1178,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `LOGIN_PATH=${secrets.LOGIN_PATH}`,
     `INSTALL_BOOTSTRAP_TOKEN=${secrets.INSTALL_BOOTSTRAP_TOKEN}`,
     `UPLOADS_ROOT=${uploadsRoot}`,
+    `# Per-install runtime-state directory for the in-app updater + watchdog.`,
+    `# Owned by the runtime user → no pm2-daemon-restart needed for in-app`,
+    `# updates to work. lib/updates/statusFile.ts reads this and falls back`,
+    `# to /var/lib/cavecms/ when unset (legacy installs).`,
+    `CAVECMS_STATE_DIR=${stateDir}`,
     `# Release bookkeeping — re-stamped on every in-app update.`,
     `# CAVECMS_COMMIT is the short (12-char) git SHA the release was built`,
     `# from. The in-app updater compares this against the latest manifest's`,
@@ -1197,7 +1220,13 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   for (const sub of ['', '.tmp', 'originals', 'variants', 'brochures-private']) {
     mkdirSync(sub ? join(uploadsRoot, sub) : uploadsRoot, { recursive: true, mode: 0o750 })
   }
-  return { envPath, databaseUrl, uploadsRoot }
+  // Provision the per-install state dir. Same chown-on-surface-start
+  // mechanism as uploads — the dir gets created here, then the
+  // surface-specific startup (startPm2 / startSystemd) chown -R's the
+  // whole targetDir which includes this subtree. Mode 0o750 matches
+  // uploads — owner full, group rx, world none.
+  mkdirSync(stateDir, { recursive: true, mode: 0o750 })
+  return { envPath, databaseUrl, uploadsRoot, stateDir }
 }
 
 // ════════════════════════════════════════════════════════════════════

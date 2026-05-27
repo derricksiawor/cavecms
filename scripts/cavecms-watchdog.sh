@@ -55,8 +55,15 @@ if [ -z "$TARGET_SHA" ] || [ -z "$PREVIOUS_SHA" ]; then
   exit 2
 fi
 
-# Required paths. Same allowlist/fallback rules as the orchestrator.
-STATUS_PATH="${CAVECMS_UPDATE_STATUS_PATH:-/var/lib/cavecms/update-status.json}"
+# Required paths. Mirror cavecms-update.sh's status-path resolution so
+# the watchdog tails the same status file the orchestrator wrote.
+if [ -n "${CAVECMS_UPDATE_STATUS_PATH:-}" ]; then
+  STATUS_PATH="$CAVECMS_UPDATE_STATUS_PATH"
+elif [ -n "${CAVECMS_STATE_DIR:-}" ]; then
+  STATUS_PATH="$CAVECMS_STATE_DIR/update-status.json"
+else
+  STATUS_PATH="/var/lib/cavecms/update-status.json"
+fi
 LOCK_PATH="${STATUS_PATH}.lock"
 HEALTHZ_URL="${CAVECMS_HEALTHZ_URL:-http://127.0.0.1:3040/healthz}"
 HEALTHZ_TOKEN="${HEALTHZ_TOKEN:-}"
