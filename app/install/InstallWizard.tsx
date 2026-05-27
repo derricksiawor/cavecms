@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   CheckCircle2,
   ArrowRight,
+  ArrowLeft,
   Loader2,
   ExternalLink,
   SkipForward,
@@ -75,6 +76,13 @@ export function InstallWizard({
 }) {
   const [step, setStep] = useState<Step>('welcome')
   const [finalLoginPath, setFinalLoginPath] = useState<string | null>(null)
+  // Last template slug the operator applied (initially null). Lifted
+  // to the wizard parent so navigating Back → Template restores the
+  // previously-picked tile — TemplateStep is unmounted by
+  // AnimatePresence between transitions, so its local selection state
+  // would otherwise reset on every re-entry. Updated by the template
+  // step's onNext / onSkip callbacks.
+  const [pickedTemplateSlug, setPickedTemplateSlug] = useState<string | null>(null)
 
   // Bootstrap-token lifecycle. Three concerns:
   //
@@ -133,6 +141,25 @@ export function InstallWizard({
 
   const goTo = (s: Step) => setStep(s)
 
+  // Resolve the step immediately before `s` in the STEPS array, or
+  // null when s is the first step (Welcome). Single source of truth
+  // for back-navigation — the per-step onBack handlers all flow
+  // through this so adding/removing a step only touches the STEPS
+  // tuple and this helper stays correct.
+  const stepBefore = (s: Step): Step | null => {
+    const idx = STEPS.indexOf(s)
+    if (idx <= 0) return null
+    return STEPS[idx - 1] ?? null
+  }
+  // Curried wrapper — passes the Back callback to each step. When the
+  // previous step doesn't exist (welcome / done), returns undefined
+  // so the step renders without a Back affordance.
+  const backTo = (s: Step): (() => void) | undefined => {
+    const prev = stepBefore(s)
+    if (!prev) return undefined
+    return () => goTo(prev)
+  }
+
   return (
     <main className="min-h-screen bg-cream py-12 px-4">
       <div className="mx-auto max-w-2xl">
@@ -188,32 +215,49 @@ export function InstallWizard({
           <AnimatePresence mode="wait">
             <StepMotion key={step}>
               {step === 'welcome' && <WelcomeStep onNext={() => goTo('admin')} />}
-              {step === 'admin' && <AdminStep onNext={() => goTo('site')} />}
+              {step === 'admin' && (
+                <AdminStep onNext={() => goTo('site')} onBack={backTo('admin')} />
+              )}
               {step === 'site' && (
-                <SiteStep defaultUrl={guessedSiteUrl} onNext={() => goTo('template')} />
+                <SiteStep
+                  defaultUrl={guessedSiteUrl}
+                  onNext={() => goTo('template')}
+                  onBack={backTo('site')}
+                />
               )}
               {step === 'template' && (
                 <TemplateStep
-                  onNext={() => goTo('branding')}
-                  onSkip={() => goTo('branding')}
+                  onNext={(slug) => {
+                    setPickedTemplateSlug(slug)
+                    goTo('branding')
+                  }}
+                  onSkip={(slug) => {
+                    setPickedTemplateSlug(slug)
+                    goTo('branding')
+                  }}
+                  onBack={backTo('template')}
+                  initialSlug={pickedTemplateSlug}
                 />
               )}
               {step === 'branding' && (
                 <BrandingStep
                   onNext={() => goTo('contact')}
                   onSkip={() => goTo('contact')}
+                  onBack={backTo('branding')}
                 />
               )}
               {step === 'contact' && (
                 <ContactStep
                   onNext={() => goTo('smtp')}
                   onSkip={() => goTo('smtp')}
+                  onBack={backTo('contact')}
                 />
               )}
               {step === 'smtp' && (
                 <SmtpStep
                   onNext={() => goTo('security')}
                   onSkip={() => goTo('security')}
+                  onBack={backTo('smtp')}
                 />
               )}
               {step === 'security' && (
@@ -223,6 +267,7 @@ export function InstallWizard({
                     goTo('done')
                   }}
                   onSkip={() => goTo('done')}
+                  onBack={backTo('security')}
                 />
               )}
               {step === 'done' && <DoneStep loginPath={finalLoginPath} />}
@@ -319,9 +364,42 @@ function ErrorBanner({ children }: { children: React.ReactNode }) {
   )
 }
 
-function StepHeader({ kicker, title, lede }: { kicker: string; title: string; lede?: string }) {
+function StepHeader({
+  kicker,
+  title,
+  lede,
+  onBack,
+  backDisabled,
+}: {
+  kicker: string
+  title: string
+  lede?: string
+  /** When provided, renders a small "← Back" link above the kicker.
+   *  Welcome (no previous step) and Done (terminal) omit this prop;
+   *  every other step passes it in so the operator can revisit
+   *  earlier choices without abandoning the wizard. */
+  onBack?: () => void
+  /** Greys the Back affordance while the step has a POST in flight.
+   *  Closes the race where the operator clicks Back mid-submit — the
+   *  AnimatePresence unmount would leave the request to land on
+   *  server state the operator thinks they abandoned (especially
+   *  bad for AdminStep, whose endpoint is one-way). */
+  backDisabled?: boolean
+}) {
   return (
     <>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={backDisabled}
+          className="-ml-1 mb-4 inline-flex min-h-[28px] items-center gap-1.5 rounded px-1.5 py-1 text-[11px] font-medium text-warm-stone transition-colors hover:text-near-black focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-warm-stone"
+          aria-label="Go back to the previous step"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back
+        </button>
+      )}
       <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
         {kicker}
       </p>
@@ -378,7 +456,7 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
 
 // ─── Step 2: Admin account ────────────────────────────────────────
 
-function AdminStep({ onNext }: { onNext: () => void }) {
+function AdminStep({ onNext, onBack }: { onNext: () => void; onBack?: () => void }) {
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
@@ -428,6 +506,11 @@ function AdminStep({ onNext }: { onNext: () => void }) {
   if (alreadyInstalled) {
     return (
       <div>
+        {/* No `onBack` on this branch — the panel is terminal for
+            THIS database. Going back to Welcome → Continue would
+            just bounce the operator straight back here, which is
+            confusing. The operator's real next moves live in the
+            actionable list below (sign in, reset DB, contact ops). */}
         <StepHeader
           kicker="Already set up"
           title="This database already has an admin."
@@ -495,6 +578,8 @@ function AdminStep({ onNext }: { onNext: () => void }) {
         kicker="Step 1"
         title="Create your admin account"
         lede="This is the account you'll use to sign in to the dashboard."
+        onBack={onBack}
+        backDisabled={submitting}
       />
       <div className="mt-8 space-y-5">
         <div>
@@ -568,9 +653,11 @@ function AdminStep({ onNext }: { onNext: () => void }) {
 function SiteStep({
   defaultUrl,
   onNext,
+  onBack,
 }: {
   defaultUrl: string
   onNext: () => void
+  onBack?: () => void
 }) {
   const [siteUrl, setSiteUrl] = useState(defaultUrl.replace(/^http:/, 'https:'))
   const [siteName, setSiteName] = useState('')
@@ -605,6 +692,8 @@ function SiteStep({
         kicker="Step 2"
         title="Your site"
         lede="Used in email links, search-engine sitemaps, and brand emails."
+        onBack={onBack}
+        backDisabled={submitting}
       />
       <div className="mt-8 space-y-5">
         <div>
@@ -654,13 +743,33 @@ function SiteStep({
 
 // ─── Step 4 (NEW): Pick a template (optional) ─────────────────────
 
-function TemplateStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+function TemplateStep({
+  onNext,
+  onSkip,
+  onBack,
+  initialSlug,
+}: {
+  /** Receives the slug just applied — parent wizard stashes it so a
+   *  Back → re-enter cycle restores the same tile selection. */
+  onNext: (slug: string) => void
+  onSkip: (slug: string) => void
+  onBack?: () => void
+  /** Pre-selected tile when the operator navigates Back into this
+   *  step after a prior selection. Persists across step transitions
+   *  via the parent wizard's state — without it the AnimatePresence
+   *  unmount/remount would lose the selection. */
+  initialSlug?: string | null
+}) {
   // Default to 'default-welcome' — the no-op tile. If the operator
   // skips the step entirely or picks this tile, the install ends up
   // identical to the pre-template-chooser default (CaveCMS welcome
   // one-pager, empty nav, empty footer columns). Submitting the
   // default IS the no-regression path.
-  const [selected, setSelected] = useState<string>('default-welcome')
+  // Hydrate from `initialSlug` so revisiting this step via the Back
+  // button restores the previously-picked tile. Falls back to
+  // 'default-welcome' on first visit so the no-regression default is
+  // pre-selected.
+  const [selected, setSelected] = useState<string>(initialSlug ?? 'default-welcome')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [alreadyInstalled, setAlreadyInstalled] = useState(false)
@@ -720,7 +829,7 @@ function TemplateStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
   async function handleContinue() {
     if (submitting) return
     const ok = await applyTemplate(selected)
-    if (ok) onNext()
+    if (ok) onNext(selected)
   }
 
   async function handleSkip() {
@@ -729,7 +838,7 @@ function TemplateStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
     // well-defined state regardless of whether the operator clicked
     // Skip or picked the default tile and clicked Continue.
     const ok = await applyTemplate('default-welcome')
-    if (ok) onSkip()
+    if (ok) onSkip('default-welcome')
   }
 
   return (
@@ -738,6 +847,8 @@ function TemplateStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
         kicker="Step 3 — optional"
         title="Pick a starting template"
         lede="A template seeds your pages, navigation, and footer with a layout that fits your industry. You can edit every block afterwards, or replace pages entirely."
+        onBack={onBack}
+        backDisabled={submitting}
       />
 
       <div
@@ -844,7 +955,15 @@ function TemplateStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
 
 // ─── Step 5: Branding (optional) ──────────────────────────────────
 
-function BrandingStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+function BrandingStep({
+  onNext,
+  onSkip,
+  onBack,
+}: {
+  onNext: () => void
+  onSkip: () => void
+  onBack?: () => void
+}) {
   const [brandText, setBrandText] = useState('')
   const [theme, setTheme] = useState<'cream' | 'obsidian' | 'ivory'>('cream')
   const [submitting, setSubmitting] = useState(false)
@@ -1002,6 +1121,8 @@ function BrandingStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
         kicker="Step 4 — optional"
         title="Brand your site"
         lede="Shown in the site header. You can refine this anytime under Settings → Branding."
+        onBack={onBack}
+        backDisabled={submitting || uploading || removing}
       />
       <div className="mt-8 space-y-5">
         <div>
@@ -1124,7 +1245,15 @@ function BrandingStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
 
 // ─── Step 5: Contact (optional) ───────────────────────────────────
 
-function ContactStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+function ContactStep({
+  onNext,
+  onSkip,
+  onBack,
+}: {
+  onNext: () => void
+  onSkip: () => void
+  onBack?: () => void
+}) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -1158,6 +1287,8 @@ function ContactStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
         kicker="Step 5 — optional"
         title="Contact info"
         lede="Powers the contact form and lead notifications. You can add address + hours later."
+        onBack={onBack}
+        backDisabled={submitting}
       />
       <div className="mt-8 space-y-5">
         <div>
@@ -1205,7 +1336,15 @@ function ContactStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => voi
 
 // ─── Step 6: SMTP (optional, with test send) ──────────────────────
 
-function SmtpStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+function SmtpStep({
+  onNext,
+  onSkip,
+  onBack,
+}: {
+  onNext: () => void
+  onSkip: () => void
+  onBack?: () => void
+}) {
   const [host, setHost] = useState('')
   const [port, setPort] = useState('587')
   const [secure, setSecure] = useState(false)
@@ -1286,6 +1425,8 @@ function SmtpStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }
         kicker="Step 6 — optional"
         title="Outbound email (SMTP)"
         lede="Powers password reset, lead notifications, and update alerts. Test before saving."
+        onBack={onBack}
+        backDisabled={submitting}
       />
       <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2">
         <div className="sm:col-span-2">
@@ -1409,9 +1550,11 @@ function SmtpStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }
 function SecurityStep({
   onNext,
   onSkip,
+  onBack,
 }: {
   onNext: (loginPath: string | null) => void
   onSkip: () => void
+  onBack?: () => void
 }) {
   const [loginPath, setLoginPath] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -1450,6 +1593,8 @@ function SecurityStep({
         kicker="Step 7 — optional"
         title="Pick a memorable login URL"
         lede="The installer generated a random one — replacing it with something you'll remember is fine. Keep it secret."
+        onBack={onBack}
+        backDisabled={submitting}
       />
       <div className="mt-8 space-y-5">
         <div>
