@@ -367,6 +367,11 @@ function AdminStep({ onNext }: { onNext: () => void }) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Distinct state from `error` — when the database already has an
+  // admin, "refresh to go to login" is the wrong message (the operator
+  // was clearly trying to install, not log in). We render a richer
+  // info panel below instead of a single-line error.
+  const [alreadyInstalled, setAlreadyInstalled] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -388,7 +393,7 @@ function AdminStep({ onNext }: { onNext: () => void }) {
         body: JSON.stringify({ email, name, password }),
       })
       if (r.status === 410) {
-        setError('This install is already set up. Refresh to go to login.')
+        setAlreadyInstalled(true)
         return
       }
       if (!r.ok) {
@@ -400,6 +405,70 @@ function AdminStep({ onNext }: { onNext: () => void }) {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  if (alreadyInstalled) {
+    return (
+      <div>
+        <StepHeader
+          kicker="Already set up"
+          title="This database already has an admin."
+          lede="An admin account was created for this install earlier. CaveCMS allows one wizard-created admin per database — fresh installs need their own database."
+        />
+        <div className="mt-8 rounded-2xl border border-copper-500/20 bg-copper-500/5 p-6">
+          <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-warm-stone">
+            What you can do
+          </p>
+          <ul className="mt-4 space-y-4 text-sm leading-relaxed text-near-black">
+            <li className="flex items-start gap-3">
+              <span className="mt-1.5 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-copper-500" />
+              <span>
+                <strong className="font-semibold">If you remember the credentials,</strong>{' '}
+                sign in at the hidden admin URL. The path is the{' '}
+                <code className="rounded bg-warm-stone/10 px-1.5 py-0.5 text-xs font-mono">
+                  LOGIN_PATH
+                </code>{' '}
+                value in{' '}
+                <code className="rounded bg-warm-stone/10 px-1.5 py-0.5 text-xs font-mono">
+                  env.production
+                </code>{' '}
+                on the server — your installer printed it, or your hosting operator can read it
+                for you.
+              </span>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="mt-1.5 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-copper-500" />
+              <span>
+                <strong className="font-semibold">If you forgot the password,</strong> your
+                server admin can reset it from the host with the password-reset script bundled
+                in this install.
+              </span>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="mt-1.5 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-copper-500" />
+              <span>
+                <strong className="font-semibold">If you wanted a fresh install,</strong> this
+                database isn&rsquo;t empty &mdash; re-running the installer against the same DB
+                hits this guard. For a test environment, clear the wizard rows on the host (
+                <code className="rounded bg-warm-stone/10 px-1.5 py-0.5 text-xs font-mono">
+                  DELETE FROM users; DELETE FROM settings;
+                </code>
+                ) and re-run{' '}
+                <code className="rounded bg-warm-stone/10 px-1.5 py-0.5 text-xs font-mono">
+                  npx create-cavecms
+                </code>
+                . For a real new site, point the installer at a different database name.
+              </span>
+            </li>
+          </ul>
+        </div>
+        <p className="mt-6 text-xs text-warm-stone">
+          The wizard is intentionally one-shot per database &mdash; this guard exists so two
+          operators hitting the install URL at the same time can&rsquo;t create two competing
+          admins.
+        </p>
+      </div>
+    )
   }
 
   return (
