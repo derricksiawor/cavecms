@@ -5,6 +5,7 @@ import { getSetting } from '@/lib/cms/getSettings'
 import { resolveMedia } from '@/lib/cms/resolveMedia'
 import { isLikelyExternal, externalRel } from '@/lib/url/external'
 import { NewsletterForm } from '@/components/leads/NewsletterForm'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 
 // Public site footer. Renders the newsletter signup form with a
 // freshly-minted HMAC preCsrf nonce so a same-page POST works
@@ -203,12 +204,10 @@ export async function SiteFooter() {
                 </a>
               )}
               {contact.email && (
-                <a
-                  href={`mailto:${contact.email}`}
+                <CfSafeMailto
+                  email={contact.email}
                   className="block min-h-[44px] py-2 mt-1 hover:text-copper-300 transition-colors break-all"
-                >
-                  {contact.email}
-                </a>
+                />
               )}
               {contact.hours && (
                 <span className="block mt-3 text-xs text-cream-50/50">
