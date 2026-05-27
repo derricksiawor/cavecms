@@ -367,15 +367,34 @@ rollback_to_previous() {
 # tree. Same defence pattern as ceymail-update.sh:475-605.
 verify_tarball() {
   local tarball="$1"
-  # Reject path traversal + absolute paths
-  if tar -tzf "$tarball" 2>/dev/null | grep -qE '(^|/)\.\.(/|$)|^/' ; then
-    return 1
-  fi
-  # Reject symlinks (`l`) and hardlinks (`h`) — a symlink pointing
-  # outside the extraction dir would let the tarball write anywhere.
-  if tar -tvzf "$tarball" 2>/dev/null | grep -qE '^[lh]' ; then
-    return 2
-  fi
+  # Format-aware verification — match extract_tarball_atomic's
+  # ZIP/tar.gz branching so the safety checks run against the actual
+  # archive format. ZIP releases (CLI installs) use `unzip -l`;
+  # tar.gz releases (bare-metal deploy.sh) use `tar -tzf`.
+  local magic
+  magic=$(od -An -t x1 -N 4 "$tarball" 2>/dev/null | tr -d ' ' | head -c 8)
+  case "$magic" in
+    504b0304|504b0506|504b0708)
+      # ZIP. `unzip -l` lists the entries. Path-traversal check matches
+      # the tar pattern; symlinks in ZIP need a different probe — use
+      # `unzip -Z` (zipinfo) which reports symlinks with "l" in column 1.
+      if unzip -l "$tarball" 2>/dev/null | awk 'NR>3 && NF>=4 {for(i=4;i<=NF;i++) print $i}' | grep -qE '(^|/)\.\.(/|$)|^/'; then
+        return 1
+      fi
+      if unzip -Z "$tarball" 2>/dev/null | grep -qE '^[lL]'; then
+        return 2
+      fi
+      ;;
+    *)
+      # tar.gz. Original logic.
+      if tar -tzf "$tarball" 2>/dev/null | grep -qE '(^|/)\.\.(/|$)|^/' ; then
+        return 1
+      fi
+      if tar -tvzf "$tarball" 2>/dev/null | grep -qE '^[lh]' ; then
+        return 2
+      fi
+      ;;
+  esac
   return 0
 }
 
@@ -384,7 +403,29 @@ extract_tarball_atomic() {
   local dest="$2"   # REPO_DIR
   local extract_tmp
   extract_tmp=$(mktemp -d "${TMPDIR:-/tmp}/cavecms-extract-XXXXXX")
-  if ! tar -xzf "$tarball" --no-same-permissions --no-same-owner -C "$extract_tmp" 2>>"${LOG_DIR}/tarball-extract.log" ; then
+  # Format detection by magic bytes — release artifacts are ZIP
+  # (matching the CLI's `npx create-cavecms` install path which uses
+  # `unzip`); bare-metal deploy.sh's GitHub release tarballs are
+  # `.tar.gz`. Both shapes route through this same orchestrator step.
+  # `od -An -t x1 -N 4` is the portable 4-byte sniff.
+  local magic
+  magic=$(od -An -t x1 -N 4 "$tarball" 2>/dev/null | tr -d ' ' | head -c 8)
+  local extract_ok=0
+  case "$magic" in
+    504b0304|504b0506|504b0708)
+      # ZIP magic — use unzip (-q quiet, -o overwrite).
+      if unzip -q -o "$tarball" -d "$extract_tmp" 2>>"${LOG_DIR}/tarball-extract.log"; then
+        extract_ok=1
+      fi
+      ;;
+    *)
+      # gzip magic (1f 8b ...) or anything else — try tar+gzip.
+      if tar -xzf "$tarball" --no-same-permissions --no-same-owner -C "$extract_tmp" 2>>"${LOG_DIR}/tarball-extract.log"; then
+        extract_ok=1
+      fi
+      ;;
+  esac
+  if [ "$extract_ok" != "1" ]; then
     rm -rf "$extract_tmp"
     return 1
   fi
