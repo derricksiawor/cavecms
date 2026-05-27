@@ -396,16 +396,25 @@ extract_tarball_atomic() {
     rm -rf "$extract_tmp"
     return 2
   fi
-  # Verify essential files exist in the extracted tree.
-  if [ ! -f "$release_dir/package.json" ] || [ ! -f "$release_dir/pnpm-lock.yaml" ]; then
+  # Verify essential files exist in the extracted tree. CLI release
+  # zips ship a pre-built standalone bundle WITHOUT pnpm-lock.yaml
+  # (it's a source-tree file; the released artifact carries vendored
+  # node_modules inside .next/standalone/ instead). Only require
+  # package.json + the standalone server.js so both git-based and
+  # CLI-based release shapes pass.
+  if [ ! -f "$release_dir/package.json" ] || [ ! -f "$release_dir/.next/standalone/server.js" ]; then
     rm -rf "$extract_tmp"
     return 3
   fi
-  # Atomic swap: rename current REPO_DIR's tracked-content dirs aside
-  # (so a step-3+ failure can restore them) then copy the new content
-  # in. Keep `.git/` if it exists (operator may want it for diagnosis).
+  # The set of paths we move aside for atomic rollback. `.next` is
+  # included so a tarball-mode install replaces (not overlays) the
+  # built bundle — leaving the old `.next/standalone/` in place would
+  # mix stale build chunks with the new server.js and crash at boot.
+  # `pnpm-lock.yaml` stays on the list as a no-op for CLI installs
+  # (`-e` skips silently) and a real move for git-mode installs.
   local backup_suffix=".tarball-old.$$"
-  for d in app components lib public scripts db tests middleware.ts next.config.ts package.json pnpm-lock.yaml tsconfig.json; do
+  local move_aside_paths='app components lib public scripts db tests middleware.ts next.config.ts package.json pnpm-lock.yaml tsconfig.json .next'
+  for d in $move_aside_paths; do
     if [ -e "$dest/$d" ]; then
       mv "$dest/$d" "$dest/$d$backup_suffix" 2>/dev/null || true
     fi
@@ -413,7 +422,7 @@ extract_tarball_atomic() {
   # Copy from the extracted release root.
   if ! cp -a "$release_dir"/. "$dest"/ ; then
     # Best-effort restore on copy failure.
-    for d in app components lib public scripts db tests middleware.ts next.config.ts package.json pnpm-lock.yaml tsconfig.json; do
+    for d in $move_aside_paths; do
       if [ -e "$dest/$d$backup_suffix" ] && [ ! -e "$dest/$d" ]; then
         mv "$dest/$d$backup_suffix" "$dest/$d" 2>/dev/null || true
       fi
@@ -422,7 +431,7 @@ extract_tarball_atomic() {
     return 4
   fi
   # Success — clean up the .tarball-old.$$ backups and the extract dir.
-  for d in app components lib public scripts db tests middleware.ts next.config.ts package.json pnpm-lock.yaml tsconfig.json; do
+  for d in $move_aside_paths; do
     rm -rf "$dest/$d$backup_suffix" 2>/dev/null || true
   done
   rm -rf "$extract_tmp"
