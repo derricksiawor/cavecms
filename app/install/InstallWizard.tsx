@@ -879,7 +879,7 @@ function TemplateStep({
               aria-checked={isSelected}
               onClick={() => setSelected(t.slug)}
               disabled={submitting}
-              className={`group relative cursor-pointer overflow-hidden rounded-2xl border bg-cream-50 text-left transition-all focus:outline-none focus:ring-2 focus:ring-copper-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border bg-cream-50 text-left transition-all focus:outline-none focus:ring-2 focus:ring-copper-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
                 isSelected
                   ? 'border-copper-500 ring-2 ring-copper-500/30 shadow-[0_18px_40px_-22px_rgba(176,116,56,0.55)]'
                   : 'border-warm-stone/30 shadow-[0_4px_16px_-8px_rgba(15,15,15,0.10)] hover:border-copper-300 hover:shadow-[0_8px_24px_-10px_rgba(176,116,56,0.25)]'
@@ -924,7 +924,7 @@ function TemplateStep({
                   style={{ background: t.themePalette.accent }}
                 />
               </div>
-              <div className="bg-cream-50/90 px-4 py-3">
+              <div className="flex flex-1 flex-col bg-cream-50/90 px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black">
                   {t.name}
                 </p>
