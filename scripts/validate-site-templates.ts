@@ -1,0 +1,205 @@
+#!/usr/bin/env -S node --import tsx
+
+/**
+ * Validates every widget across every site template by running its
+ * data through the canonical CMS parse+sanitize gate. Catches
+ * schema-violation bugs in template authoring BEFORE the install API
+ * tries to seed them and 500s the wizard.
+ *
+ * Run: pnpm tsx scripts/validate-site-templates.ts
+ *
+ * Exits 0 on success, 1 on any validation failure (with a clear
+ * trace pointing at the bad widget).
+ *
+ * Also asserts:
+ *   - every template has exactly ONE isHome page
+ *   - every template's pages have unique slugs
+ *   - every template slug is unique across the registry
+ *
+ * This script does NOT touch the DB. Pure validation.
+ */
+
+if (process.env.NODE_ENV === 'production') {
+  console.error(
+    '[validate-site-templates] refusing to run with NODE_ENV=production.',
+  )
+  process.exit(1)
+}
+
+import { SITE_TEMPLATES } from '../lib/cms/siteTemplates/index'
+import { TEMPLATE_CLIENT_META } from '../lib/cms/siteTemplates/clientMeta'
+import { parseAndSanitize } from '../lib/cms/parse'
+import {
+  SectionMetaSchema,
+  ColumnMetaSchema,
+} from '../lib/cms/blockMeta'
+
+let errors = 0
+
+function fail(msg: string) {
+  errors += 1
+  console.error(`  ✗ ${msg}`)
+}
+
+// 0. Registry has at least one template (z.enum([]) is a runtime bomb).
+if (SITE_TEMPLATES.length === 0) {
+  fail('SITE_TEMPLATES is empty — at least one template must be registered.')
+}
+
+// 1. Slug uniqueness across the registry.
+{
+  const seen = new Map<string, number>()
+  for (const t of SITE_TEMPLATES) {
+    seen.set(t.slug, (seen.get(t.slug) ?? 0) + 1)
+  }
+  for (const [slug, count] of seen) {
+    if (count > 1) fail(`template slug "${slug}" appears ${count} times`)
+  }
+}
+
+// 1b. clientMeta tile list (used by the wizard picker) must mirror
+//     the server registry exactly. A contributor adding a new
+//     template to SITE_TEMPLATES without updating TEMPLATE_CLIENT_META
+//     ships a wizard that doesn't show the tile — the server accepts
+//     the slug but the operator can't reach it through the picker.
+{
+  const serverSlugs = new Set(SITE_TEMPLATES.map((t) => t.slug))
+  const clientSlugs = new Set(TEMPLATE_CLIENT_META.map((t) => t.slug))
+  for (const s of serverSlugs) {
+    if (!clientSlugs.has(s)) {
+      fail(`server registry has slug "${s}" but TEMPLATE_CLIENT_META does not — wizard tile missing.`)
+    }
+  }
+  for (const s of clientSlugs) {
+    if (!serverSlugs.has(s)) {
+      fail(`TEMPLATE_CLIENT_META has slug "${s}" but server registry does not — wizard would 400 on selection.`)
+    }
+  }
+}
+
+// 2. Per-template validations.
+for (const t of SITE_TEMPLATES) {
+  console.log(`▸ ${t.slug}  (${t.pages.length} pages)`)
+
+  // 2a. Exactly one home page per template (unless default-welcome
+  //     with no pages, which would be a different bug — checked below).
+  const homePages = t.pages.filter((p) => p.isHome)
+  if (homePages.length === 0 && t.pages.length > 0) {
+    fail(`${t.slug}: no page marked isHome`)
+  }
+  if (homePages.length > 1) {
+    fail(
+      `${t.slug}: ${homePages.length} pages marked isHome — only one allowed`,
+    )
+  }
+
+  // 2b. Page slugs unique within the template.
+  const slugSeen = new Map<string, number>()
+  for (const p of t.pages) {
+    slugSeen.set(p.slug, (slugSeen.get(p.slug) ?? 0) + 1)
+  }
+  for (const [slug, count] of slugSeen) {
+    if (count > 1) {
+      fail(`${t.slug}: page slug "${slug}" appears ${count} times`)
+    }
+  }
+
+  // 2c. Page slugs do NOT collide with preserved system pages.
+  const PRESERVED = new Set([
+    'privacy',
+    'terms',
+    'thank-you-enquiry',
+    'thank-you-tour',
+    'thank-you-brochure',
+  ])
+  for (const p of t.pages) {
+    if (PRESERVED.has(p.slug)) {
+      fail(
+        `${t.slug}: page slug "${p.slug}" collides with a preserved system page — would be wiped before template insert.`,
+      )
+    }
+  }
+
+  // 2d. Walk every widget and run it through parseAndSanitize.
+  let widgetCount = 0
+  for (const page of t.pages) {
+    for (let sIdx = 0; sIdx < page.sections.length; sIdx++) {
+      const section = page.sections[sIdx]
+      if (!section || section.kind !== 'section') {
+        fail(`${t.slug}/${page.slug}/section[${sIdx}]: kind !== 'section'`)
+        continue
+      }
+      // Validate section meta shape (same gate the install endpoint runs).
+      try {
+        SectionMetaSchema.parse(section.meta)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        fail(`${t.slug}/${page.slug}/section[${sIdx}] meta: ${msg}`)
+      }
+      for (let cIdx = 0; cIdx < section.columns.length; cIdx++) {
+        const column = section.columns[cIdx]
+        if (!column || column.kind !== 'column') {
+          fail(
+            `${t.slug}/${page.slug}/section[${sIdx}]/column[${cIdx}]: kind !== 'column'`,
+          )
+          continue
+        }
+        // Validate column meta shape too.
+        try {
+          ColumnMetaSchema.parse(column.meta ?? {})
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          fail(`${t.slug}/${page.slug}/section[${sIdx}]/column[${cIdx}] meta: ${msg}`)
+        }
+        for (let wIdx = 0; wIdx < column.widgets.length; wIdx++) {
+          const widget = column.widgets[wIdx]
+          if (!widget || widget.kind !== 'widget') {
+            fail(
+              `${t.slug}/${page.slug}/section[${sIdx}]/column[${cIdx}]/widget[${wIdx}]: kind !== 'widget'`,
+            )
+            continue
+          }
+          widgetCount += 1
+          try {
+            parseAndSanitize(widget.blockType, widget.data)
+          } catch (err) {
+            const msg =
+              err instanceof Error ? err.message : String(err)
+            fail(
+              `${t.slug}/${page.slug}/section[${sIdx}]/column[${cIdx}]/widget[${wIdx}] (${widget.blockType}): ${msg}`,
+            )
+          }
+        }
+      }
+    }
+  }
+
+  // 2e. Branding shape sanity.
+  if (t.branding.primaryNav.length > 6) {
+    fail(
+      `${t.slug}: primaryNav has ${t.branding.primaryNav.length} items — site_header schema caps at 6.`,
+    )
+  }
+  if (t.branding.footerColumns.length > 6) {
+    fail(
+      `${t.slug}: footerColumns has ${t.branding.footerColumns.length} — footer schema caps at 6.`,
+    )
+  }
+  for (const col of t.branding.footerColumns) {
+    if (col.links.length > 20) {
+      fail(
+        `${t.slug}: footer column "${col.label}" has ${col.links.length} links — schema caps at 20.`,
+      )
+    }
+  }
+
+  console.log(`  ✓ ${widgetCount} widgets validated`)
+}
+
+if (errors === 0) {
+  console.log(`\n✓ all ${SITE_TEMPLATES.length} templates valid`)
+  process.exit(0)
+} else {
+  console.error(`\n✗ ${errors} validation error(s) — fix before deploying`)
+  process.exit(1)
+}
