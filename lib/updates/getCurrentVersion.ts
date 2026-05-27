@@ -10,7 +10,19 @@
 // that should surface as "you are on dev — there's nothing to update
 // against".
 
+// Bundled at build time — the semver string `pnpm release:build` froze
+// into the release. Webpack inlines the JSON import so reading it at
+// runtime can't fail on a missing package.json in the standalone
+// bundle (Next.js does NOT copy package.json into .next/standalone
+// reliably). Single source of truth for the version the operator sees
+// in /admin and on the Updates page.
+import pkg from '../../package.json' with { type: 'json' }
+
+const BUILT_VERSION: string = typeof pkg.version === 'string' ? pkg.version : 'unknown'
+
 export interface CurrentVersion {
+  /** Semver string the operator recognises (e.g. `'0.1.18'`). */
+  version: string
   /** Short git SHA (or `'dev'` when running locally / pre-deploy). */
   sha: string
   /** ISO timestamp of the deploy. `null` when running locally. */
@@ -26,7 +38,7 @@ export function getCurrentVersion(): CurrentVersion {
   const rawTs = process.env.CAVECMS_RELEASE_TS
 
   if (!rawSha || rawSha === 'unknown') {
-    return { sha: 'dev', ts: null }
+    return { version: BUILT_VERSION, sha: 'dev', ts: null }
   }
   // Hex-shape validation. CAVECMS_COMMIT is meant to be a git short
   // SHA (7-64 hex chars) — that's what scripts/deploy.sh and the
@@ -39,9 +51,10 @@ export function getCurrentVersion(): CurrentVersion {
   // signal) so the orchestrator's apply-time check at /api/admin/
   // updates/apply refuses cleanly.
   if (!/^[0-9a-f]{7,64}$/i.test(rawSha)) {
-    return { sha: 'dev', ts: null }
+    return { version: BUILT_VERSION, sha: 'dev', ts: null }
   }
   return {
+    version: BUILT_VERSION,
     sha: rawSha,
     ts: rawTs ?? null,
   }

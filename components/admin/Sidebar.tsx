@@ -69,7 +69,7 @@ function NavRow({
 // PRODUCT brand, not the operator's site brand (mirrors the way WordPress
 // admin always reads "WordPress" regardless of the configured site name).
 // `role`-filtered NAV mirrors the rest of the admin chrome.
-export function AdminSidebar({ role }: { role: Role }) {
+export function AdminSidebar({ role, version }: { role: Role; version: string }) {
   const pathname = usePathname() ?? '/admin'
   const items = NAV.filter((i) => i.roles.includes(role))
   const tree = buildNavTree(items)
@@ -93,8 +93,14 @@ export function AdminSidebar({ role }: { role: Role }) {
         <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-400">
           Admin
         </p>
-        <div className="mt-2">
+        <div className="mt-2 flex items-baseline gap-2.5">
           <Wordmark label="CaveCMS" />
+          <span
+            className="font-mono text-[10px] font-medium tracking-wider text-cream-50/40"
+            title={`Running CaveCMS v${version}`}
+          >
+            v{version}
+          </span>
         </div>
       </div>
 

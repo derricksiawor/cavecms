@@ -46,7 +46,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <ToastProvider>
         <CommandPaletteProvider>
           <div className="relative z-10 flex min-h-screen">
-            <AdminSidebar role={ctx.role} />
+            <AdminSidebar role={ctx.role} version={getCurrentVersion().version} />
             <div className="flex min-w-0 flex-1 flex-col">
               <AdminTopbar email={ctx.email} role={ctx.role} />
               {/* Update banner — only admins can act on updates, so we
