@@ -550,15 +550,28 @@ function AdminStep({ onNext, onBack }: { onNext: () => void; onBack?: () => void
               <span>
                 <strong className="font-semibold">If you wanted a fresh install,</strong> this
                 database isn&rsquo;t empty &mdash; re-running the installer against the same DB
-                hits this guard. For a test environment, clear the wizard rows on the host (
-                <code className="rounded bg-warm-stone/10 px-1.5 py-0.5 text-xs font-mono">
-                  DELETE FROM users; DELETE FROM settings;
-                </code>
-                ) and re-run{' '}
-                <code className="rounded bg-warm-stone/10 px-1.5 py-0.5 text-xs font-mono">
-                  npx create-cavecms
-                </code>
-                . For a real new site, point the installer at a different database name.
+                hits this guard. <strong className="font-semibold">For a real new site, point
+                the installer at a different database name</strong> &mdash; that&rsquo;s the safe
+                answer.
+                <span className="mt-3 block rounded-lg border border-rose-400/30 bg-rose-500/5 p-3 text-[13px] leading-relaxed text-rose-200">
+                  <strong className="font-semibold">Only as a last resort &mdash; on a TEST
+                  database you can afford to wipe:</strong> log in to mysql and explicitly select
+                  your CaveCMS database before deleting. Names like{' '}
+                  <code className="rounded bg-warm-stone/20 px-1 py-0.5 text-[11px] font-mono">
+                    users
+                  </code>{' '}
+                  and{' '}
+                  <code className="rounded bg-warm-stone/20 px-1 py-0.5 text-[11px] font-mono">
+                    settings
+                  </code>{' '}
+                  exist in many apps &mdash; running these statements against the wrong database
+                  destroys data you can&rsquo;t recover.
+                  <span className="mt-2 block overflow-x-auto rounded bg-near-black/40 p-2 font-mono text-[11px] leading-relaxed text-cream-50/85">
+                    {`mysql --database=<your_cavecms_db_name> \\
+  -u <your_cavecms_db_user> -p \\
+  -e "DELETE FROM users; DELETE FROM settings;"`}
+                  </span>
+                </span>
               </span>
             </li>
           </ul>
