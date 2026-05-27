@@ -62,6 +62,11 @@ interface ApplyPayload {
 interface CheckResponse {
   current: CurrentVersion
   available: AvailableUpdate | null
+  // Coords for re-installing the CURRENTLY running version. Server
+  // populates this when running SHA matches the latest manifest entry
+  // so Re-run install has known-good coords even without an upgrade
+  // available.
+  currentRelease: { downloadUrl: string; sha256: string } | null
 }
 
 // Lowercase relative-date formatter for inline-after-verb usage
@@ -149,8 +154,12 @@ export function UpdatesClient({
       if (!j.available) {
         setRelease(null)
         setAvailableShaPrivate(null)
-        setAvailableDownloadUrl(null)
-        setAvailableSha256(null)
+        // When up-to-date, the server hands us coords for the running
+        // version so Re-run install can apply them without a second
+        // round-trip. Without this, Re-run after a clean update would
+        // toast "Couldn't fetch the release manifest".
+        setAvailableDownloadUrl(j.currentRelease?.downloadUrl ?? null)
+        setAvailableSha256(j.currentRelease?.sha256 ?? null)
       } else {
         setRelease(humaniseRelease(j.available))
         // SHA + tarball coords stay in private state slots — used only
@@ -216,9 +225,14 @@ export function UpdatesClient({
         const c = await csrfFetch('/api/admin/updates/check', { method: 'POST' })
         if (c.ok) {
           const j = (await c.json()) as CheckResponse
-          if (j.available) {
-            downloadUrl = j.available.downloadUrl
-            sha256 = j.available.sha256
+          // Prefer currentRelease (matches running SHA — exactly what
+          // Re-run wants), fall back to available for the rare path
+          // where the operator hits Re-run while an upgrade is also
+          // showing.
+          const coords = j.currentRelease ?? j.available
+          if (coords) {
+            downloadUrl = coords.downloadUrl
+            sha256 = coords.sha256
             setAvailableDownloadUrl(downloadUrl)
             setAvailableSha256(sha256)
           }
@@ -397,8 +411,8 @@ export function UpdatesClient({
                     You&rsquo;re up to date
                   </h2>
                   <p className="mt-1 text-sm text-warm-stone">
-                    CaveCMS will keep checking for new releases on the
-                    schedule below.
+                    CaveCMS checks for new releases each time you open
+                    this page.
                   </p>
                 </div>
               </div>

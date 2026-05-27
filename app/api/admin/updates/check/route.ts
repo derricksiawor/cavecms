@@ -37,6 +37,12 @@ interface CheckResponse {
     sha256: string
     minPreviousVersion: string | null
   } | null
+  // Coords for re-installing the CURRENTLY running version (Re-run
+  // install recovery affordance). Populated when the running SHA
+  // matches the latest manifest entry — the common up-to-date case
+  // where `available` is null but the operator still needs known-good
+  // tarball coords to recover from a broken local state.
+  currentRelease: { downloadUrl: string; sha256: string } | null
 }
 
 export const POST = withError(async (req: Request) => {
@@ -94,6 +100,9 @@ export const POST = withError(async (req: Request) => {
           sha256: latest.sha256,
           minPreviousVersion: latest.minPreviousVersion,
         },
+    currentRelease: upToDate
+      ? { downloadUrl: latest.downloadUrl, sha256: latest.sha256 }
+      : null,
   }
 
   return new Response(JSON.stringify(payload), {
