@@ -416,21 +416,17 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     pathname !== '/healthz' &&
     pathname !== '/favicon.ico'
   ) {
-    // `new URL('/install', req.url)` resolves the redirect against
-    // req.url's host — which, behind a reverse proxy, is the loopback
-    // upstream (e.g. `http://localhost:8201/...` per Next's HOSTNAME
-    // env, NOT the public hostname X-Forwarded-Host carries). That
-    // leaked `https://localhost:8201/install` into the Location
-    // header. Emit a RELATIVE Location instead — browsers resolve it
-    // against the URL the user actually typed, so the public
-    // hostname stays intact regardless of how Next is bound.
-    return new NextResponse(null, {
-      status: 307,
-      headers: {
-        location: '/install',
-        'cache-control': 'private, no-store',
-      },
-    })
+    // `new URL('/install', req.url)` resolves against req.url's
+    // host — which, behind a reverse proxy, is the loopback upstream
+    // (HOSTNAME=127.0.0.1 in start-standalone.mjs, NOT the public
+    // hostname). That leaked `https://127.0.0.1:PORT/install` into
+    // the Location header. Build the redirect from the forwarded
+    // Host header instead so the browser is sent back to the URL it
+    // actually typed.
+    const fwdHost = req.headers.get('host') ?? req.nextUrl.host
+    const fwdProto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(/:$/, '')
+    const installUrl = new URL(`${fwdProto}://${fwdHost}/install`)
+    return NextResponse.redirect(installUrl, 307)
   }
   // If already installed, /install is permanently 404 — not a
   // redirect. A 307/308 to /admin would leak the admin path to any
