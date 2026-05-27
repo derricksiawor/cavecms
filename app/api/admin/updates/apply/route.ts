@@ -129,6 +129,13 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   // resolve the status path to the same per-install location the apply
   // route is using — no daemon-restart required.
   'CAVECMS_STATE_DIR',
+  // Per-install snapshot root for the pre-destructive rsync. Defaults
+  // to /var/lib/cavecms/snapshots, which has the SAME stale-supp-group
+  // problem as STATE_DIR. The CLI writes
+  // `<install>/.cavecms-state/snapshots` into env.production; we forward
+  // it to the detached orchestrator so it doesn't fall through to the
+  // system path.
+  'CAVECMS_SNAPSHOT_ROOT',
   'CAVECMS_UPDATE_DRY_RUN',
   'CAVECMS_UPDATE_FORCE',
   'CAVECMS_UPDATE_TARBALL_URL',

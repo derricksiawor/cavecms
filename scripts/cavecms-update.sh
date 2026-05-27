@@ -310,13 +310,22 @@ rollback_to_previous() {
     fi
   fi
 
-  # Reinstall node_modules — they're excluded from the snapshot
-  # (pnpm's CAS makes copying them risky). Pinned by the snapshot's
-  # pnpm-lock.yaml so this is a fast no-op when the previous lockfile
-  # matches what pnpm already cached.
-  if ! (cd "$REPO_DIR" && pnpm install --frozen-lockfile >/dev/null 2>>"${LOG_DIR}/rollback-install.log"); then
-    write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version's files but couldn't reinstall its dependencies" "Your site may be offline — contact support immediately." ""
-    return 1
+  # Reinstall node_modules — git mode only.
+  #
+  # In git mode, node_modules is excluded from the snapshot (pnpm's CAS
+  # makes copying them risky); we re-run `pnpm install --frozen-lockfile`
+  # against the restored pnpm-lock.yaml. Fast no-op when the previous
+  # lockfile matches what pnpm already cached.
+  #
+  # In tarball / CLI mode, node_modules ships INSIDE `.next/standalone/`
+  # — which the snapshot DOES include — so the restore already gave us
+  # back the dependency tree. Most CLI install hosts don't even have
+  # pnpm on PATH; running pnpm install here would hard-fail the rollback.
+  if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
+    if ! (cd "$REPO_DIR" && pnpm install --frozen-lockfile >/dev/null 2>>"${LOG_DIR}/rollback-install.log"); then
+      write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version's files but couldn't reinstall its dependencies" "Your site may be offline — contact support immediately." ""
+      return 1
+    fi
   fi
 
   # Reload pm2. Exit code intentionally suppressed — same reasoning as
@@ -767,19 +776,44 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 3 — install + migrate (with pre-migration DB backup)
+#
+# Two flows, branched on whether we came from a tarball (CLI install)
+# or a git fetch (bare-metal deploy.sh path):
+#
+#   - CLI / tarball: the release zip ships a pre-built standalone bundle
+#     with vendored node_modules INSIDE `.next/standalone/`. No `pnpm`
+#     install needed — and on most CLI installs, no `pnpm` binary is
+#     even on the host. Migrations run via the same `install-migrate.mjs`
+#     the CLI uses at fresh-install time (mysql2-based, journal-walking,
+#     no Drizzle CLI dependency).
+#
+#   - Git fetch / bare-metal: the repo IS the source tree. `pnpm install
+#     --frozen-lockfile` rebuilds node_modules from pnpm-lock.yaml,
+#     `pnpm db:migrate` runs the Drizzle CLI.
+#
+# Detection: presence of CAVECMS_UPDATE_TARBALL_URL — the apply route
+# sets it when shipping a release zip; the git-fetch path leaves it
+# unset.
 # ---------------------------------------------------------------------------
 CURRENT_STEP=3
 write_status "updating" 3 "Preparing your data" "" ""
 
-if ! pnpm install --frozen-lockfile 2>&1 | tail -n 16 > "${LOG_DIR}/pnpm-install.log"; then
-  write_status "failed" 3 "Couldn't prepare the new version" "Something went wrong while setting up. Your previous version is being restored." ""
-  if rollback_to_previous "$PREVIOUS_SHA" 0 ""; then
-    post_audit_terminal rolled_back "pnpm_install_failed"
-  else
-    post_audit_terminal failed "rollback_refused:pnpm_install_failed"
+if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
+  # ──────── Git-fetch / bare-metal mode ────────
+  if ! pnpm install --frozen-lockfile 2>&1 | tail -n 16 > "${LOG_DIR}/pnpm-install.log"; then
+    write_status "failed" 3 "Couldn't prepare the new version" "Something went wrong while setting up. Your previous version is being restored." ""
+    if rollback_to_previous "$PREVIOUS_SHA" 0 ""; then
+      post_audit_terminal rolled_back "pnpm_install_failed"
+    else
+      post_audit_terminal failed "rollback_refused:pnpm_install_failed"
+    fi
+    exit 1
   fi
-  exit 1
 fi
+# In tarball mode there's nothing to install — node_modules came with
+# the tarball. Fall through to the shared db-backup + migrate block
+# below, which itself branches between `pnpm db:migrate` (git mode) and
+# `node scripts/install-migrate.mjs` (tarball mode).
 
 # DB backup BEFORE migration so a forward-then-rollback flow can
 # restore the previous schema cleanly. Three outcomes:
@@ -832,7 +866,24 @@ fi
 # the apply route audit-logged it, the orchestrator took a fresh
 # mysqldump in the step above. Pass CAVECMS_MIGRATE_OK=1 to clear
 # the gate.
-if ! CAVECMS_MIGRATE_OK=1 pnpm db:migrate 2>&1 | tail -n 16 > "${LOG_DIR}/db-migrate.log"; then
+# Migration command branches the same way as the install above. In
+# tarball mode (CLI install) the host has no pnpm + no Drizzle CLI;
+# we run the bundled `scripts/install-migrate.mjs` (mysql2 + journal-
+# walking, identical state-tracking to `pnpm db:migrate`). In git mode
+# we keep the legacy Drizzle CLI path. CAVECMS_MIGRATE_OK clears the
+# db-migrate-with-lock production-safety gate (operator-initiated, the
+# apply route audit-logged the click already).
+migrate_ok=1
+if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
+  if ! node --env-file="${ENV_FILE}" "${REPO_DIR}/scripts/install-migrate.mjs" 2>&1 | tail -n 32 > "${LOG_DIR}/install-migrate.log"; then
+    migrate_ok=0
+  fi
+else
+  if ! CAVECMS_MIGRATE_OK=1 pnpm db:migrate 2>&1 | tail -n 16 > "${LOG_DIR}/db-migrate.log"; then
+    migrate_ok=0
+  fi
+fi
+if [ "$migrate_ok" = "0" ]; then
   write_status "failed" 3 "Couldn't update your data" "Your previous version is being restored. No data was lost." ""
   if rollback_to_previous "$PREVIOUS_SHA" 0 "$BACKUP_DUMP"; then
     post_audit_terminal rolled_back "db_migrate_failed"
@@ -846,41 +897,54 @@ HAD_MIGRATION=1
 # ---------------------------------------------------------------------------
 # Step 4 — build
 #
-# Force mode: wipe .next/ before building. The "Re-run install" button
-# in the admin UI exists precisely so an operator can recover from a
-# corrupted build cache without bumping the version — without this
-# rm -rf, the rebuild would reuse the corrupted cache and the install
-# stays broken.
+# Two flows, branched on tarball vs git mode (same detection as step 3).
+#
+#   - Tarball / CLI mode: the release zip ALREADY contains a built
+#     `.next/standalone/` tree — we extracted it intact in step 2.
+#     There's nothing to build. Skip the pnpm build entirely; just
+#     re-link the standalone bundle's static + public symlinks (the
+#     tarball flattens these so we need to point them back at the
+#     repo-level dirs).
+#
+#   - Git fetch / bare-metal mode: run `pnpm build` to produce a fresh
+#     `.next/standalone/` from the new source. Force mode wipes `.next/`
+#     first so an operator's "Re-run install" recovers from a corrupt
+#     build cache.
 # ---------------------------------------------------------------------------
 CURRENT_STEP=4
 write_status "updating" 4 "Building your site" "" ""
 
-if [ "$FORCE" = "1" ]; then
-  rm -rf "$REPO_DIR/.next" 2>>"${LOG_DIR}/force-clean.log" || true
-fi
-
-# Three prebuild/postbuild gates need clearing for the in-app
-# update path:
-#   - dev-bootstrap.mjs port-check: CAVECMS_SKIP_PORT_CHECK=1 (pm2 IS
-#     on 3040 during the update — that's the whole point)
-#   - verify-route-collisions.ts (prebuild): CAVECMS_BUILD_OK=1
-#   - postbuild-check-slug-collisions.ts (postbuild): CAVECMS_BUILD_OK=1
-#
-# NODE_ENV stays at production. Overriding to development causes
-# Next.js's prerender step to import legacy pages-router `<Html>` and
-# the build fails on the /404 export with
-# "<Html> should not be imported outside of pages/_document".
-# CAVECMS_BUILD_OK is the same opt-in pattern as CAVECMS_MIGRATE_OK
-# for db-migrate-with-lock.
-if ! CAVECMS_SKIP_PORT_CHECK=1 CAVECMS_BUILD_OK=1 pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
-  write_status "failed" 4 "Couldn't build your site" "Your previous version is being restored." ""
-  if rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"; then
-    post_audit_terminal rolled_back "build_failed"
-  else
-    post_audit_terminal failed "rollback_refused:build_failed"
+if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
+  # ──────── Git-fetch mode: run pnpm build ────────
+  if [ "$FORCE" = "1" ]; then
+    rm -rf "$REPO_DIR/.next" 2>>"${LOG_DIR}/force-clean.log" || true
   fi
-  exit 1
+  # Three prebuild/postbuild gates need clearing for the in-app
+  # update path:
+  #   - dev-bootstrap.mjs port-check: CAVECMS_SKIP_PORT_CHECK=1 (pm2 IS
+  #     on 3040 during the update — that's the whole point)
+  #   - verify-route-collisions.ts (prebuild): CAVECMS_BUILD_OK=1
+  #   - postbuild-check-slug-collisions.ts (postbuild): CAVECMS_BUILD_OK=1
+  #
+  # NODE_ENV stays at production. Overriding to development causes
+  # Next.js's prerender step to import legacy pages-router `<Html>` and
+  # the build fails on the /404 export with
+  # "<Html> should not be imported outside of pages/_document".
+  # CAVECMS_BUILD_OK is the same opt-in pattern as CAVECMS_MIGRATE_OK
+  # for db-migrate-with-lock.
+  if ! CAVECMS_SKIP_PORT_CHECK=1 CAVECMS_BUILD_OK=1 pnpm build 2>&1 | tail -n 16 > "${LOG_DIR}/build.log"; then
+    write_status "failed" 4 "Couldn't build your site" "Your previous version is being restored." ""
+    if rollback_to_previous "$PREVIOUS_SHA" "$HAD_MIGRATION" "$BACKUP_DUMP"; then
+      post_audit_terminal rolled_back "build_failed"
+    else
+      post_audit_terminal failed "rollback_refused:build_failed"
+    fi
+    exit 1
+  fi
 fi
+# In tarball mode the .next/standalone tree is already built — fall
+# through to the standalone-static + public re-link below, which is
+# needed in both modes.
 
 # Re-link the standalone bundle's static assets. Next.js's
 # `output: 'standalone'` mode emits a minimal server.js but does NOT

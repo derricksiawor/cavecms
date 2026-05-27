@@ -1183,6 +1183,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# updates to work. lib/updates/statusFile.ts reads this and falls back`,
     `# to /var/lib/cavecms/ when unset (legacy installs).`,
     `CAVECMS_STATE_DIR=${stateDir}`,
+    `# Per-install snapshot root for the in-app updater's pre-destructive`,
+    `# rsync. Owned by the runtime user (same writability story as STATE_DIR).`,
+    `# Default would be /var/lib/cavecms/snapshots — requires the cavecmsstate`,
+    `# supplementary group which a stale PM2 daemon doesn't have.`,
+    `CAVECMS_SNAPSHOT_ROOT=${stateDir}/snapshots`,
     `# Release bookkeeping — re-stamped on every in-app update.`,
     `# CAVECMS_COMMIT is the short (12-char) git SHA the release was built`,
     `# from. The in-app updater compares this against the latest manifest's`,
@@ -1226,6 +1231,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   // whole targetDir which includes this subtree. Mode 0o750 matches
   // uploads — owner full, group rx, world none.
   mkdirSync(stateDir, { recursive: true, mode: 0o750 })
+  // Snapshot subdir for the in-app updater's pre-destructive rsync.
+  // Provisioned here so the orchestrator's snapshot_current_tree can
+  // `mkdir -p` + write into it on the very first update without
+  // requiring the runtime user to have group write on /var/lib/cavecms/.
+  mkdirSync(join(stateDir, 'snapshots'), { recursive: true, mode: 0o750 })
   return { envPath, databaseUrl, uploadsRoot, stateDir }
 }
 
