@@ -121,6 +121,14 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_UPDATE_TARGET',
   'CAVECMS_UPDATE_FROM',
   'CAVECMS_UPDATE_STATUS_PATH',
+  // Per-install runtime-state directory. Without this forwarded, the
+  // detached orchestrator + watchdog fall back to /var/lib/cavecms/
+  // (the system path) which the running app user can't write to until
+  // the PM2 daemon is re-execed with the `cavecmsstate` supplementary
+  // group. Forwarding CAVECMS_STATE_DIR lets the orchestrator + helpers
+  // resolve the status path to the same per-install location the apply
+  // route is using — no daemon-restart required.
+  'CAVECMS_STATE_DIR',
   'CAVECMS_UPDATE_DRY_RUN',
   'CAVECMS_UPDATE_FORCE',
   'CAVECMS_UPDATE_TARBALL_URL',
