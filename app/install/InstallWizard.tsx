@@ -334,10 +334,10 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
         {[
           ['Admin account', 'Required — your login to the dashboard'],
           ['Site identity', 'Required — site URL + name'],
-          ['Branding', 'Brand text + theme — skippable'],
-          ['Contact', 'Lead-notification email — skippable'],
-          ['Email (SMTP)', 'Outbound email with a live test — skippable'],
-          ['Security', 'A memorable hidden admin URL — skippable'],
+          ['Branding', 'Brand text + theme — (Optional)'],
+          ['Contact', 'Lead-notification email — (Optional)'],
+          ['Email (SMTP)', 'Outbound email with a live test — (Optional)'],
+          ['Security', 'A memorable hidden admin URL — (Optional)'],
         ].map(([label, hint]) => (
           <li key={label} className="flex items-start gap-3">
             <span className="mt-1 inline-flex h-1.5 w-1.5 rounded-full bg-copper-500" />

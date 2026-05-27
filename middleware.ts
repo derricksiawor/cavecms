@@ -416,7 +416,21 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     pathname !== '/healthz' &&
     pathname !== '/favicon.ico'
   ) {
-    return NextResponse.redirect(new URL('/install', req.url))
+    // `new URL('/install', req.url)` resolves the redirect against
+    // req.url's host — which, behind a reverse proxy, is the loopback
+    // upstream (e.g. `http://localhost:8201/...` per Next's HOSTNAME
+    // env, NOT the public hostname X-Forwarded-Host carries). That
+    // leaked `https://localhost:8201/install` into the Location
+    // header. Emit a RELATIVE Location instead — browsers resolve it
+    // against the URL the user actually typed, so the public
+    // hostname stays intact regardless of how Next is bound.
+    return new NextResponse(null, {
+      status: 307,
+      headers: {
+        location: '/install',
+        'cache-control': 'private, no-store',
+      },
+    })
   }
   // If already installed, /install is permanently 404 — not a
   // redirect. A 307/308 to /admin would leak the admin path to any

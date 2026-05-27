@@ -186,7 +186,9 @@ const siteHeader = z.object({
     .max(6),
   // Single primary call-to-action button. Either field empty → the
   // public renderer hides the button entirely.
-  primaryCta: ctaRef,
+  // Nullable so a fresh one-pager install can omit the CTA entirely.
+  // Public renderer treats `null` and empty-text-or-href as "no CTA".
+  primaryCta: ctaRef.nullable(),
 })
 
 // ───────────────────────── Security ─────────────────────────
@@ -818,30 +820,20 @@ export const registry = {
     schema: footer,
     default: {
       tagline: '',
-      // A single "Legal" column rendered in the 3rd grid slot, directly
-      // beside the "Stay informed" newsletter block. Privacy + Terms
-      // also appear in the small-print strip at the bottom (legalLinks
-      // below) — the column placement makes them visible higher in
-      // the footer for visitors who never scroll into the fine print,
-      // which is the public-trust + GDPR/DPA standard pattern.
-      columns: [
-        {
-          label: 'Legal',
-          links: [
-            { text: 'Privacy Policy', href: '/privacy' },
-            { text: 'Terms of Service', href: '/terms' },
-          ],
-        },
-      ],
+      // Empty footer columns by default — the welcome one-pager
+      // doesn't have a /privacy or /terms page populated yet, so
+      // pre-seeding the column produces dead links + dilutes the
+      // operator's first impression. Operator wires up their own
+      // columns under Settings → Footer when they're ready.
+      columns: [],
       logo: null,
       newsletterHeading: 'Stay informed',
       newsletterBody: 'Updates and announcements. One click to unsubscribe.',
       newsletterCtaLabel: 'Subscribe',
       copyright: '',
-      legalLinks: [
-        { text: 'Privacy', href: '/privacy' },
-        { text: 'Terms', href: '/terms' },
-      ],
+      // Empty legalLinks by default. Operator adds Privacy / Terms
+      // to the small-print strip when they've published those pages.
+      legalLinks: [],
     } satisfies z.infer<typeof footer>,
   },
   site_header: {
@@ -850,14 +842,17 @@ export const registry = {
       brandText: 'Your Site',
       logo: null,
       theme: 'cream',
-      navItems: [
-        { label: 'Home', href: '/' },
-        { label: 'Projects', href: '/projects' },
-        { label: 'Services', href: '/services' },
-        { label: 'About', href: '/about' },
-        { label: 'Contact', href: '/contact' },
-      ],
-      primaryCta: { text: 'Get in touch', href: '/contact' },
+      // Empty nav for the one-pager welcome template — the operator
+      // wires up their own links (or section anchors) under
+      // Settings → Branding after the install. Earlier defaults
+      // shipped `Home/Projects/Services/About/Contact` which produced
+      // RSC 500s on a fresh install because the system pages exist
+      // but the operator hadn't yet customised their content.
+      navItems: [],
+      // No primaryCta on a fresh install — the welcome one-pager
+      // doesn't need a "Get in touch" button until the operator has
+      // configured their contact flow.
+      primaryCta: null,
     } satisfies z.infer<typeof siteHeader>,
   },
   organization_json_ld: {
