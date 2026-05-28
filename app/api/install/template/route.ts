@@ -220,7 +220,6 @@ const TemplateMediaManifest = z.object({
   entries: z.record(z.string(), TemplateMediaEntry),
 })
 
-type TemplateMediaEntryT = z.infer<typeof TemplateMediaEntry>
 type TemplateMediaManifestT = z.infer<typeof TemplateMediaManifest>
 
 /** Per-key resolved media row, built inside the install TX. */
