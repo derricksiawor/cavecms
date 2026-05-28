@@ -1,9 +1,10 @@
 'use client'
 
 import {
-  Children,
   cloneElement,
+  isValidElement,
   type ReactElement,
+  type ReactNode,
   type Ref,
 } from 'react'
 import { useRevealOnScroll } from '@/lib/motion/useRevealOnScroll'
@@ -20,34 +21,68 @@ export type MotionPreset =
   | 'magnetic'
   | 'parallax'
 
-// Type-erased child shape — refs on HTML elements are regular props
-// in React 19, but cloneElement's signature wants a typed props bag.
+// React 19 + Next.js Server Components: the
+// `cloneElement(Children.only(children), { ref })` pattern is "soft
+// deprecated" per the React core team (Sebastian Markbåge: "cloneElement
+// is basically soft deprecated. It works against any ability to optimize
+// by inlining.") and BREAKS unpredictably during hydration —
+// specifically the `Children.only` validator throws "expected to receive
+// a single React element child" when the upstream React reconciler has
+// already unwrapped a server-stream fragment past Children.only's
+// inspection point. This is the same bug @radix-ui/react-slot patched
+// in v1.2.0 by falling back to createElement when children is a
+// Promise/serialized-server-shape.
+//
+// We saw this concretely: certain hotel-solenne pages (e.g. /dining,
+// /story) 500'd with "React.Children.only expected to receive a single
+// React element child" — even though every MotionTarget caller in this
+// codebase passes a single root element. The error fired in
+// SlideUpTarget after a few successful renders, depending on the
+// ordering of sibling MotionTarget instances on the page.
+//
+// Fix: inject the ref via React 19's ref-as-prop. Use `cloneElement`
+// WITHOUT the `Children.only` validator wrapper. cloneElement still
+// works fine when called directly — what was broken was *requiring*
+// children to pass `Children.only`'s tighter "is exactly one element"
+// check at hydration time. `isValidElement` is the lighter equivalent.
+
 type RefBearingChild = ReactElement<{ ref?: Ref<HTMLElement> }>
+
+function attachRef(children: ReactNode, ref: Ref<HTMLElement>): ReactNode {
+  // Refs only attach to real DOM-backed elements. If the caller passed
+  // a fragment / string / array (none of which can hold a ref), we
+  // render the children unmodified. The animation hook still runs but
+  // its scroll/intersection observer never fires — visually identical
+  // to `animation: none`. That's the safest degrade — silently dropping
+  // the animation beats crashing the whole page render.
+  if (!isValidElement(children)) return children
+  return cloneElement(children as RefBearingChild, { ref })
+}
 
 // One thin client component per preset so each MotionTarget instance
 // runs EXACTLY ONE hook. Calling all 6 hooks unconditionally would
 // install N × usePrefersReducedMotion matchMedia listeners per page;
 // dispatching to a sub-component pins it to 1 listener per widget.
 
-function FadeInTarget({ children }: { children: RefBearingChild }) {
+function FadeInTarget({ children }: { children: ReactNode }) {
   const ref = useRevealOnScroll<HTMLElement>({ y: 0 })
-  return cloneElement(Children.only(children), { ref })
+  return attachRef(children, ref)
 }
-function SlideUpTarget({ children }: { children: RefBearingChild }) {
+function SlideUpTarget({ children }: { children: ReactNode }) {
   const ref = useRevealOnScroll<HTMLElement>({ y: 24 })
-  return cloneElement(Children.only(children), { ref })
+  return attachRef(children, ref)
 }
-function LineRevealTarget({ children }: { children: RefBearingChild }) {
+function LineRevealTarget({ children }: { children: ReactNode }) {
   const ref = useLineReveal<HTMLElement>()
-  return cloneElement(Children.only(children), { ref })
+  return attachRef(children, ref)
 }
-function MagneticTarget({ children }: { children: RefBearingChild }) {
+function MagneticTarget({ children }: { children: ReactNode }) {
   const ref = useMagneticHover<HTMLElement>()
-  return cloneElement(Children.only(children), { ref })
+  return attachRef(children, ref)
 }
-function ParallaxTarget({ children }: { children: RefBearingChild }) {
+function ParallaxTarget({ children }: { children: ReactNode }) {
   const ref = useParallax<HTMLElement>()
-  return cloneElement(Children.only(children), { ref })
+  return attachRef(children, ref)
 }
 
 /**
@@ -56,10 +91,11 @@ function ParallaxTarget({ children }: { children: RefBearingChild }) {
  * each renderer growing its own client wrapper.
  *
  * Contract:
- *   - children MUST be a single HTML element (heading / button / img
+ *   - children SHOULD be a single HTML element (heading / button / img
  *     / div / etc.). Refs forward natively through HTML elements;
  *     wrapping a custom component requires that component to forward
- *     refs explicitly.
+ *     refs explicitly. When children is a fragment / string / array,
+ *     the wrapper degrades to "no animation" rather than crashing.
  *   - Inline-edit mode in the parent renderer should SKIP wrapping
  *     in MotionTarget — contenteditable + SplitText conflict, and
  *     operators want to edit without animations firing under them.
@@ -72,7 +108,7 @@ export function MotionTarget({
   children,
 }: {
   preset: MotionPreset
-  children: RefBearingChild
+  children: ReactNode
 }) {
   switch (preset) {
     case 'fade-in':
