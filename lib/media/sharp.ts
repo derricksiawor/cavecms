@@ -17,7 +17,21 @@ sharp.concurrency(1)
 const WIDTHS = { thumb: 320, md: 768, lg: 2400 } as const
 // Reject anything denser than 24 MP at decode time. Defends against
 // bomb images that decode to multi-GB pixel buffers.
+//
+// Two regimes:
+//   LIMIT_INPUT_PIXELS — upload path. 24 MP cap defends against
+//     adversarial PNG / WebP bombs from an operator-controlled
+//     surface (logo upload, media library).
+//   LIMIT_INPUT_PIXELS_RELEASE — release-build path. Operates on
+//     curated trusted Unsplash photos pre-vetted by the publisher.
+//     Some landscape orientations at the bumped w=4000 query land
+//     above 24 MP (e.g. 4000 × 6000 = 24 MP, 4000 × 7000 = 28 MP).
+//     Bumped to 50 MP so a curated tall photo doesn't brick the
+//     release build. The libvips pipeline is still capped by
+//     PIPELINE_TIMEOUT_RELEASE_MS so a pathological frame can't
+//     burn unbounded CPU.
 const LIMIT_INPUT_PIXELS = 24_000_000
+const LIMIT_INPUT_PIXELS_RELEASE = 50_000_000
 // Per-pipeline timeout (sharp ≥ 0.32). Defends against legitimate-
 // format heavy-pixel-work attacks — deeply tiled AVIF/HEIF, animated
 // payloads with hundreds of frames, etc. The upload-route's 30s
@@ -77,8 +91,9 @@ async function decodeAndPrepare(
   buf: Buffer,
   sniffedMime: string,
   timeoutMs: number,
+  limitInputPixels: number = LIMIT_INPUT_PIXELS,
 ): Promise<{ base: sharp.Sharp; width: number; height: number }> {
-  const meta = await sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
+  const meta = await sharp(buf, { limitInputPixels })
     .timeout({ seconds: Math.ceil(timeoutMs / 1000) })
     .rotate()
     .metadata()
@@ -95,7 +110,7 @@ async function decodeAndPrepare(
   // PRESERVE everything (or write what we pass) — that's the opposite
   // of what we want for EXIF strip. .keepIccProfile() is the sharp 0.33
   // primitive for "preserve color, drop sensitive metadata".
-  const base = sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
+  const base = sharp(buf, { limitInputPixels })
     .timeout({ seconds: Math.ceil(timeoutMs / 1000) })
     .rotate()
     .keepIccProfile()
@@ -207,11 +222,14 @@ export async function processToVariants(
 ): Promise<ProcessedVariants> {
   // Release-time pipeline gets the longer timeout — publisher boxes
   // are higher-variance than production servers, and one slow image
-  // shouldn't brick a release build.
+  // shouldn't brick a release build. Also gets the relaxed input-
+  // pixel limit because templates source curated Unsplash photos via
+  // `w=4000` which lands above 24 MP on tall landscape crops.
   const { base, width, height } = await decodeAndPrepare(
     buf,
     sniffedMime,
     PIPELINE_TIMEOUT_RELEASE_MS,
+    LIMIT_INPUT_PIXELS_RELEASE,
   )
 
   const paths = {
