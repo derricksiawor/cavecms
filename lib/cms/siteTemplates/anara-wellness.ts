@@ -3,8 +3,11 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
+  figure,
   hero,
+  imagePair,
   oneCol,
   threeColCards,
 } from './_shared'
@@ -66,6 +69,21 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'A small wellness centre. Seven practitioners, twenty-two treatments, an unhurried hour and a half from arrival to leaving.',
       sections: [
+        // Cover image: a soft-light still life of oils and serums —
+        // sets the spa tone before the copy.
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-still-life',
+            alt: 'Anara Wellness — oils and serums arranged on a book, soft-light still life.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'champagne',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Anara Wellness',
@@ -102,6 +120,23 @@ export const anaraWellnessTemplate: SiteTemplate = {
           ],
         }),
 
+        // Editorial pair: the carriage-house exterior beside the
+        // sunlit courtyard — physical context for the centre.
+        oneCol(
+          'cream',
+          'lg',
+          imagePair({
+            leftImageKey: 'villa-exterior',
+            leftAlt: 'The Anara Wellness building — a white architectural retreat amongst green trees.',
+            rightImageKey: 'courtyard',
+            rightAlt: 'The Anara courtyard — sunlit, plant-filled, open-air calm.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'champagne',
           text: '"I have been three times. I have not yet seen the second floor. There is no rush to."',
@@ -125,6 +160,20 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Twenty-two treatments. Massage, bodywork, facials, acupuncture, cupping. Booked online or by phone.',
       sections: [
+        // Cover image: a quiet, freshly-prepared treatment room.
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'treatment-room',
+            alt: 'An Anara treatment room — a freshly prepared massage table in a calm interior.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'champagne',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Treatments',
@@ -194,6 +243,23 @@ export const anaraWellnessTemplate: SiteTemplate = {
           ],
         }),
 
+        // Editorial pair between facials and acupuncture sections:
+        // the steam suite + the moment of a ritual.
+        oneCol(
+          'cream',
+          'lg',
+          imagePair({
+            leftImageKey: 'treatment-sauna',
+            leftAlt: 'The Anara dry sauna — wood-lined with sauna stones beside a small window.',
+            rightImageKey: 'ritual-hands',
+            rightAlt: 'A therapist pouring warm oil onto a guest’s hand during a ritual.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         ...threeColCards({
           background: 'ivory',
           sectionTitle: 'Acupuncture & TCM',
@@ -239,6 +305,20 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Seven practitioners. Each one’s training, focus, and what they take seriously is written down here.',
       sections: [
+        // Figure: a practitioner at quiet practice — sets the tone
+        // for the bio cards below. Editorial, not corporate.
+        oneCol(
+          'cream',
+          'sm',
+          figure({
+            imageKey: 'practitioner',
+            alt: 'A practitioner at quiet practice — a woman in a meditative yoga pose on a rug.',
+            ratio: '21:9',
+            corners: 'sharp',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'The practitioners',
@@ -246,6 +326,20 @@ export const anaraWellnessTemplate: SiteTemplate = {
           body: 'Each practitioner at Anara is full-time and at one centre only — ours. Training, focus, and the kind of client they are best with is written on each card.',
           tone: 'obsidian',
         }),
+
+        // Editorial figure: the apothecary — gestures at the TCM
+        // and herbal arm of the practice before the bios.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'apothecary',
+            alt: 'The Anara apothecary — an antique wooden cabinet lined with jars of herbs and tinctures.',
+            ratio: '16:9',
+            caption: 'The apothecary — used by Dr. Wen and the TCM practice.',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -298,6 +392,21 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Short essays from the Anara practitioners. About once a fortnight.',
       sections: [
+        // Cover image: sunlight on a quiet white wall — establishes
+        // the contemplative tone of the essays.
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'meditation-room',
+            alt: 'Sunlight streaming onto a quiet white wall — the contemplative quality the journal essays carry.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'champagne',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Journal',
@@ -305,6 +414,19 @@ export const anaraWellnessTemplate: SiteTemplate = {
           body: 'Notes from the practitioners on what they see most often — chronic tension, screen-time pain, why sleep is upstream of most of it. No supplements to sell.',
           tone: 'obsidian',
         }),
+
+        // Editorial figure: a botanical close-up — gives the page
+        // a tactile visual break between the intro and the essay cards.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'botanical-eucalyptus',
+            alt: 'Dried eucalyptus seed pods arranged beside a wooden spool — a botanical close-up.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -358,6 +480,20 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Book a treatment online, by phone, or by email. We reply within one business day.',
       sections: [
+        // Cover image: zen stones on water — the calm we offer.
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'zen-stones-water',
+            alt: 'Smooth grey stones arranged on a calm water surface — a minimalist zen composition.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'champagne',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Booking',
@@ -365,6 +501,20 @@ export const anaraWellnessTemplate: SiteTemplate = {
           body: 'Booking online is the fastest path. The intake takes about three minutes. If you would prefer to talk to a person, Felix at the front desk takes calls weekdays nine to six.',
           tone: 'obsidian',
         }),
+
+        // Editorial figure: a natural stone wall — material quality
+        // the centre is built from. Sits between the hero and the
+        // contact channels.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'stone-wall-texture',
+            alt: 'Close-up of a natural stone wall — earthy grey individual rocks pressed together.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         contactChannels({
           background: 'cream',

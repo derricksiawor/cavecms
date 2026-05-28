@@ -26,6 +26,13 @@ export interface ProcessedImage {
   variants: { thumb: string; md: string; lg: string; og: string }
 }
 
+export interface ProcessedVariants {
+  width: number
+  height: number
+  /** Absolute filesystem paths the variants were written to. */
+  paths: { thumb: string; md: string; lg: string; og: string }
+}
+
 // Map sniffed MIME → sharp's `meta.format` string. Mismatch rejects the
 // upload (defense against polyglot files: valid PNG header followed by
 // HTML/zip/exe payload — file-type accepts the prefix, sharp decodes the
@@ -42,6 +49,65 @@ export class MimeFormatMismatchError extends Error {
     super('mime_format_mismatch')
     this.name = 'MimeFormatMismatchError'
   }
+}
+
+/**
+ * Decode the buffer, EXIF-rotate, mime/format cross-check, and return
+ * the post-rotate base sharp instance + dimensions ready for resize.
+ * Shared by processImage() (upload path) + processToVariants() (release
+ * bundler) so the validation + decode pipeline cannot diverge.
+ */
+async function decodeAndPrepare(
+  buf: Buffer,
+  sniffedMime: string,
+): Promise<{ base: sharp.Sharp; width: number; height: number }> {
+  const meta = await sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
+    .timeout({ seconds: Math.ceil(PIPELINE_TIMEOUT_MS / 1000) })
+    .rotate()
+    .metadata()
+  if (!meta.width || !meta.height) throw new Error('bad_image')
+
+  const expectedFormat = MIME_TO_FORMAT[sniffedMime]
+  if (!expectedFormat || meta.format !== expectedFormat) {
+    throw new MimeFormatMismatchError(expectedFormat ?? sniffedMime, meta.format ?? 'unknown')
+  }
+
+  // sharp 0.33+: by default ALL metadata is stripped (EXIF, XMP, IPTC).
+  // We explicitly keep ONLY the ICC color profile so rendered output
+  // matches the editor's upload. Calling `.withMetadata(...)` would
+  // PRESERVE everything (or write what we pass) — that's the opposite
+  // of what we want for EXIF strip. .keepIccProfile() is the sharp 0.33
+  // primitive for "preserve color, drop sensitive metadata".
+  const base = sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
+    .timeout({ seconds: Math.ceil(PIPELINE_TIMEOUT_MS / 1000) })
+    .rotate()
+    .keepIccProfile()
+
+  return { base, width: meta.width, height: meta.height }
+}
+
+/**
+ * Internal: write the four variants (thumb/md/lg.webp + og.jpg) to
+ * an arbitrary set of destination paths. Both processImage() and
+ * processToVariants() route through here so the encoder settings stay
+ * unified.
+ */
+async function emitVariants(
+  base: sharp.Sharp,
+  outPaths: { thumb: string; md: string; lg: string; og: string },
+): Promise<void> {
+  for (const [name, w] of Object.entries(WIDTHS) as Array<[keyof typeof WIDTHS, number]>) {
+    await base
+      .clone()
+      .resize({ width: w, withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toFile(outPaths[name])
+  }
+  await base
+    .clone()
+    .resize({ width: 1200, height: 630, fit: 'cover' })
+    .jpeg({ quality: 86 })
+    .toFile(outPaths.og)
 }
 
 /**
@@ -66,49 +132,18 @@ export async function processImage(
   uuid: string,
   sniffedMime: string,
 ): Promise<ProcessedImage> {
-  const meta = await sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
-    .timeout({ seconds: Math.ceil(PIPELINE_TIMEOUT_MS / 1000) })
-    .rotate()
-    .metadata()
-  if (!meta.width || !meta.height) throw new Error('bad_image')
+  const { base, width, height } = await decodeAndPrepare(buf, sniffedMime)
 
-  // Cross-check sharp's decoded format against the buffer-prefix sniff.
-  // Mismatch = polyglot (file-type approved by prefix, sharp decoded by
-  // a different codec). Reject before any file is written.
-  const expectedFormat = MIME_TO_FORMAT[sniffedMime]
-  if (!expectedFormat || meta.format !== expectedFormat) {
-    throw new MimeFormatMismatchError(expectedFormat ?? sniffedMime, meta.format ?? 'unknown')
-  }
-
-  // sharp 0.33+: by default ALL metadata is stripped (EXIF, XMP, IPTC).
-  // We explicitly keep ONLY the ICC color profile so rendered output
-  // matches the editor's upload. Calling `.withMetadata(...)` would
-  // PRESERVE everything (or write what we pass) — that's the opposite
-  // of what we want for EXIF strip. .keepIccProfile() is the sharp 0.33
-  // primitive for "preserve color, drop sensitive metadata".
-  const base = sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
-    .timeout({ seconds: Math.ceil(PIPELINE_TIMEOUT_MS / 1000) })
-    .rotate()
-    .keepIccProfile()
-
-  const outPath = (kind: string) => `${tmpDir}/${kind}.webp`
-  for (const [name, w] of Object.entries(WIDTHS)) {
-    await base
-      .clone()
-      .resize({ width: w, withoutEnlargement: true })
-      .webp({ quality: 82 })
-      .toFile(outPath(name))
-  }
-  const ogPath = `${tmpDir}/og.jpg`
-  await base
-    .clone()
-    .resize({ width: 1200, height: 630, fit: 'cover' })
-    .jpeg({ quality: 86 })
-    .toFile(ogPath)
+  await emitVariants(base, {
+    thumb: `${tmpDir}/thumb.webp`,
+    md: `${tmpDir}/md.webp`,
+    lg: `${tmpDir}/lg.webp`,
+    og: `${tmpDir}/og.jpg`,
+  })
 
   return {
-    width: meta.width,
-    height: meta.height,
+    width,
+    height,
     variants: {
       thumb: `/uploads/variants/${uuid}-thumb.webp`,
       md: `/uploads/variants/${uuid}-md.webp`,
@@ -116,4 +151,42 @@ export async function processImage(
       og: `/uploads/variants/${uuid}-og.jpg`,
     },
   }
+}
+
+/**
+ * Release-bundler variant of processImage. Used by
+ * scripts/release/build-template-media.mjs to pre-process bundled
+ * stock imagery at release-build time. Writes directly to the final
+ * named files (no tmp+rename — the release dist tree is the final
+ * artifact). Identical decode + validate + encode pipeline so customer
+ * installs receive variants byte-identical to what they'd get from a
+ * direct upload to their Media Library.
+ *
+ *   processToVariants(buf, '/dist/template-media/hotel-solenne/variants/',
+ *                     'hero-exterior', 'image/jpeg')
+ *   → writes:
+ *       hero-exterior-thumb.webp
+ *       hero-exterior-md.webp
+ *       hero-exterior-lg.webp
+ *       hero-exterior-og.jpg
+ *
+ * outDir must already exist (caller's responsibility — release scripts
+ * provision the dist tree).
+ */
+export async function processToVariants(
+  buf: Buffer,
+  outDir: string,
+  baseFilename: string,
+  sniffedMime: string,
+): Promise<ProcessedVariants> {
+  const { base, width, height } = await decodeAndPrepare(buf, sniffedMime)
+
+  const paths = {
+    thumb: `${outDir}/${baseFilename}-thumb.webp`,
+    md: `${outDir}/${baseFilename}-md.webp`,
+    lg: `${outDir}/${baseFilename}-lg.webp`,
+    og: `${outDir}/${baseFilename}-og.jpg`,
+  }
+  await emitVariants(base, paths)
+  return { width, height, paths }
 }

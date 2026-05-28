@@ -1,0 +1,98 @@
+[
+  {
+    "key": "home-hero-facade",
+    "sourceUrl": "https://images.unsplash.com/photo-1778517320816-30ebb0777ef6?w=2400&q=85",
+    "alt": "Ornate boutique hotel facade illuminated at dusk, classical European architecture.",
+    "photographer": "Timur Seyfelmlyukov",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "home-lobby",
+    "sourceUrl": "https://images.unsplash.com/photo-1646991761123-d83ce47c30c9?w=2400&q=85",
+    "alt": "Boutique hotel lobby with deep couches, armchairs, and a low-hanging chandelier.",
+    "photographer": "Lazar Gugleta",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "rooms-hero",
+    "sourceUrl": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=2400&q=85",
+    "alt": "White bed linen on a single bed in a quiet, minimalist hotel room.",
+    "photographer": "Point3D Commercial Imaging Ltd.",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "rooms-deluxe-bath",
+    "sourceUrl": "https://images.unsplash.com/photo-1759223607861-f0ef3e617739?w=2400&q=85",
+    "alt": "A marble bathroom with a freestanding bathtub and vanity in a deluxe suite.",
+    "photographer": "Toa Heftiba",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "rooms-suite-solenne",
+    "sourceUrl": "https://images.unsplash.com/photo-1702411200201-3061d0eea802?w=2400&q=85",
+    "alt": "A suite bedroom with a spiral staircase in the corner, atmospheric lighting.",
+    "photographer": "KKY",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "rooms-grenier",
+    "sourceUrl": "https://images.unsplash.com/photo-1774280898104-d329acaae7b7?w=2400&q=85",
+    "alt": "A private rooftop terrace at sunset, looking out over the city skyline.",
+    "photographer": "Marc Wieland",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "dining-restaurant",
+    "sourceUrl": "https://images.unsplash.com/photo-1709548145082-04d0cde481d4?w=2400&q=85",
+    "alt": "A dimly lit, intimate restaurant interior with set tables and chairs.",
+    "photographer": "Oliver Guhr",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "dining-bar",
+    "sourceUrl": "https://images.unsplash.com/photo-1640902106532-47dd3a2e833e?w=2400&q=85",
+    "alt": "A small, dimly lit hotel bar with bottle-lined shelves and stool seating.",
+    "photographer": "Andrea De Santis",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "dining-dish-trout",
+    "sourceUrl": "https://images.unsplash.com/photo-1676471926534-d5c9771909fa?w=2400&q=85",
+    "alt": "A white plate with cured trout, vegetables, and a restrained chef's plating.",
+    "photographer": "Nima Naseri",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "dining-dish-dessert",
+    "sourceUrl": "https://images.unsplash.com/photo-1567020244917-f416ed88bdd7?w=2400&q=85",
+    "alt": "An elegant dessert pastry plated on a white dish.",
+    "photographer": "Jackie Lamas",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "story-townhouse",
+    "sourceUrl": "https://images.unsplash.com/photo-1776409237758-d09d72824994?w=2400&q=85",
+    "alt": "19th-century brick townhouse facades with white trim and a French tricolour.",
+    "photographer": "Tanya Barrow",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "story-hallway-tile",
+    "sourceUrl": "https://images.unsplash.com/photo-1763226903034-e2f60d2a5164?w=2400&q=85",
+    "alt": "An empty hallway with tiled walls and a hexagonal patterned floor — period architectural detail.",
+    "photographer": "Peter Herrmann",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  }
+]

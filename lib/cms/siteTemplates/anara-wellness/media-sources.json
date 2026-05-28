@@ -1,0 +1,98 @@
+[
+  {
+    "key": "home-hero-still-life",
+    "sourceUrl": "https://images.unsplash.com/photo-1760895535234-2c39c57cf187?w=2400&q=85",
+    "alt": "Bottles of oils and serums arranged on a book — soft-light spa still life.",
+    "photographer": "Ela De Pure",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "treatment-room",
+    "sourceUrl": "https://images.unsplash.com/photo-1745327883290-1e9c6447b938?w=2400&q=85",
+    "alt": "A serene spa treatment room with a freshly prepared massage table, ready for a session.",
+    "photographer": "Jakub Klucký",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "treatment-sauna",
+    "sourceUrl": "https://images.unsplash.com/photo-1712659606957-b7395ba9ebb2?w=2400&q=85",
+    "alt": "A wooden sauna interior with a small window and a stack of sauna stones.",
+    "photographer": "HUUM",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "meditation-room",
+    "sourceUrl": "https://images.unsplash.com/photo-1766040322305-a1fb5a9af9db?w=2400&q=85",
+    "alt": "Sunlight streaming through a small window onto a quiet white wall — meditation room.",
+    "photographer": "雙 film",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "ritual-hands",
+    "sourceUrl": "https://images.unsplash.com/photo-1583262429823-f0cb615900a6?w=2400&q=85",
+    "alt": "A therapist pouring warm oil onto a guest's hand during a spa ritual.",
+    "photographer": "Felipe Bustillo",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "apothecary",
+    "sourceUrl": "https://images.unsplash.com/photo-1760307837671-63ee641f9f1c?w=2400&q=85",
+    "alt": "An antique wooden apothecary cabinet lined with glass jars of herbs and tinctures.",
+    "photographer": "camera obscura",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "courtyard",
+    "sourceUrl": "https://images.unsplash.com/photo-1763914766799-e90cd89d9764?w=2400&q=85",
+    "alt": "Lush green plants in a sunlit retreat courtyard — open-air calm.",
+    "photographer": "Kirke Põldsamm",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "practitioner",
+    "sourceUrl": "https://images.unsplash.com/photo-1767605785194-dfc2c64635cb?w=2400&q=85",
+    "alt": "A woman seated in a meditative yoga pose on a rug — a practitioner at quiet practice.",
+    "photographer": "Margaret Young",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "villa-exterior",
+    "sourceUrl": "https://images.unsplash.com/photo-1598737652403-6e0ee5bf5cf2?w=2400&q=85",
+    "alt": "A white architectural retreat villa surrounded by green trees under a blue sky.",
+    "photographer": "Arno Senoner",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "botanical-eucalyptus",
+    "sourceUrl": "https://images.unsplash.com/photo-1762541539540-51495afbb955?w=2400&q=85",
+    "alt": "Dried eucalyptus seed pods arranged beside a wooden spool — a botanical close-up.",
+    "photographer": "Anya Chernykh",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "zen-stones-water",
+    "sourceUrl": "https://images.unsplash.com/photo-1618158809203-a5864c0b3b25?w=2400&q=85",
+    "alt": "Smooth grey stones arranged on a calm water surface — minimalist zen composition.",
+    "photographer": "Rick J. Brown",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "stone-wall-texture",
+    "sourceUrl": "https://images.unsplash.com/photo-1697497710118-0d5cb5a7094a?w=2400&q=85",
+    "alt": "Close-up of a natural stone wall — earthy greys, individual rocks pressed together.",
+    "photographer": "Joe Halinar",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  }
+]

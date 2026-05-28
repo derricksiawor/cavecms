@@ -4,10 +4,13 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
   eyebrow,
+  figure,
   heading,
   hero,
+  imagePair,
   oneCol,
   statRow,
   text,
@@ -81,6 +84,20 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'A grand-yet-quiet boutique hotel. Forty rooms, one restaurant, a bar that closes when the last guest is ready to leave.',
       sections: [
+        // Full-bleed cover image opens the page — facade at dusk.
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-facade',
+            alt: 'Hôtel Solenne — ornate facade illuminated at dusk.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Hôtel Solenne',
@@ -117,6 +134,20 @@ export const hotelSolenneTemplate: SiteTemplate = {
             },
           ],
         }),
+
+        // Editorial photo: the lobby — establishes the indoor
+        // atmosphere between the cards and the stat row.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'home-lobby',
+            alt: 'The lobby at Hôtel Solenne — deep couches, armchairs, and a low chandelier.',
+            ratio: '16:9',
+            corners: 'sharp',
+            animation: 'fade-in',
+          }),
+        ),
 
         // By the numbers — a quiet restraint
         statRow({
@@ -166,6 +197,21 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'Forty rooms across eight shapes. Standards, deluxes, junior suites, and a top-floor garret. All face the garden or the quiet lane.',
       sections: [
+        // Cover image: a quiet, made-up room — sets the tone before
+        // any descriptions.
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'rooms-hero',
+            alt: 'A quiet boutique hotel room — white bed linen on a single bed, restrained palette.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'The rooms',
@@ -208,6 +254,36 @@ export const hotelSolenneTemplate: SiteTemplate = {
             },
           ],
         }),
+
+        // Editorial pair: marble bath beside the signature suite —
+        // the visual case for choosing the upper tiers.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'rooms-deluxe-bath',
+            leftAlt: 'The marble bath in a Deluxe room.',
+            rightImageKey: 'rooms-suite-solenne',
+            rightAlt: 'The Suite Solenne — bedroom with a spiral staircase to the dressing room.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Le Grenier — the rooftop garret. Single figure, generous space.
+        oneCol(
+          'cream',
+          'lg',
+          figure({
+            imageKey: 'rooms-grenier',
+            alt: 'Le Grenier — the private rooftop terrace at sunset, looking out over the city.',
+            ratio: '21:9',
+            caption: 'Le Grenier — the top-floor garret, with a private rooftop terrace.',
+            animation: 'fade-in',
+          }),
+        ),
 
         // What is in every room
         oneCol(
@@ -279,6 +355,20 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'Two services a day, six to ten and six to ten. A short menu, a longer wine list, a bar that closes when the last guest is ready to leave.',
       sections: [
+        // Cover image: dimly-lit restaurant interior, set tables.
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'dining-restaurant',
+            alt: 'The Hôtel Solenne dining room — set tables, low light, intimate.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'The kitchen',
@@ -347,7 +437,24 @@ export const hotelSolenneTemplate: SiteTemplate = {
           ],
         }),
 
-        // The bar
+        // The bar — image pair: the bar itself + two signature dishes
+        // (trout starter and the apple tart). The pair sits naturally
+        // between the menu cards and the closing CTA.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'dining-dish-trout',
+            leftAlt: 'Cured trout with fennel and lemon oil — the opening course.',
+            rightImageKey: 'dining-dish-dessert',
+            rightAlt: 'Tarte fine aux pommes — the kitchen’s closing course.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         oneCol(
           'near-black',
           'md',
@@ -362,6 +469,20 @@ export const hotelSolenneTemplate: SiteTemplate = {
             'A small bar off the lobby. A dozen seats. A cellar of three hundred bottles, half of them from one hour from the hotel. Tea served until eleven, drinks until everyone is ready to leave.',
             { tone: 'ivory', maxWidth: 'medium', marginTop: 'md' },
           ),
+        ),
+
+        // Figure: the bar itself, illustrating the dimly-lit
+        // shelves + stool seating described in the copy above.
+        oneCol(
+          'near-black',
+          'md',
+          figure({
+            imageKey: 'dining-bar',
+            alt: 'The Hôtel Solenne bar — dimly lit, bottle-lined shelves, a dozen stools.',
+            ratio: '16:9',
+            caption: 'The bar off the lobby — twelve seats, three hundred bottles.',
+            animation: 'fade-in',
+          }),
         ),
 
         ctaBanner({
@@ -381,6 +502,21 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'An 1882 townhouse, run for sixty years by one family and the next twenty by another. The seventh chapter is now ours.',
       sections: [
+        // Cover image: 19th-century brick townhouses — visually
+        // anchors the "Since 1882" history.
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'story-townhouse',
+            alt: 'A row of 19th-century brick townhouses with white trim — the era the hotel was built in.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Since 1882',
@@ -404,6 +540,21 @@ export const hotelSolenneTemplate: SiteTemplate = {
             '<p>Built in 1882 by a notary for his family of seven. The original tiles in the lobby are his. The gas lamps in the courtyard are also his — converted to mains gas in 1934, kept lit ever since.</p><p>Sold in 1907 to a textile merchant, then in 1923 to the family that would run it as a hotel for the next sixty years.</p>',
             { tone: 'obsidian', marginTop: 'md' },
           ),
+        ),
+
+        // Editorial figure: the original tiled hallway — visually
+        // ties the copy above ("original tiles in the lobby") to a
+        // real photograph of period architectural detail.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'story-hallway-tile',
+            alt: 'A period hallway with tiled walls and a hexagonal patterned floor — the kind of architectural detail kept through the restoration.',
+            ratio: '16:9',
+            caption: 'The original tiled floors, kept during the 2019–2023 restoration.',
+            animation: 'fade-in',
+          }),
         ),
 
         oneCol(

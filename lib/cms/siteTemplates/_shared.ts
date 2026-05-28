@@ -620,3 +620,330 @@ export function contactChannels(opts: {
     columns: cards.map((c) => col(c)),
   }
 }
+
+// ─── Image-bearing helpers ─────────────────────────────────────────
+//
+// Templates declare image SLOTS by stable string keys. Each helper
+// produces a WidgetSpec whose `data` field holds every non-image
+// schema value (ratio, overlay, etc.) and whose `_imageKeys` +
+// `_imageAlts` siblings carry the unresolved keys.
+//
+// The install-time resolver (app/api/install/template/route.ts) reads
+// `<INSTALL_ROOT>/template-media/<slug>/manifest.json`, copies bundled
+// variants to UPLOADS_ROOT/variants/<fresh-uuid>-*, INSERTs the media
+// row, and INJECTs the resulting MediaRef ({media_id, alt}) into the
+// data field named by the _imageKeys map. Then _imageKeys and
+// _imageAlts are stripped before parseAndSanitize fires.
+//
+// Authors write:
+//   coverImage({ imageKey: 'hero-exterior', alt: 'Hotel facade at dusk' })
+// and never see media_ids — those don't exist until install time.
+
+function withImageKeys(
+  widget: WidgetSpec,
+  refs: Record<string, { imageKey: string; alt: string }>,
+): WidgetSpec {
+  const _imageKeys: Record<string, string> = {}
+  const _imageAlts: Record<string, string> = {}
+  for (const [field, ref] of Object.entries(refs)) {
+    _imageKeys[field] = ref.imageKey
+    _imageAlts[field] = ref.alt
+  }
+  return { ...widget, _imageKeys, _imageAlts }
+}
+
+/**
+ * Full-bleed cover image (lx_cover_image). The image slot is named
+ * 'image' in the schema. Use for editorial hero strips, marquee
+ * page-toppers, and full-viewport-height immersive covers.
+ */
+export function coverImage(opts: {
+  imageKey: string
+  alt: string
+  ratio?: '21:9' | '16:9' | '4:3' | '3:2' | '4:5' | 'auto'
+  minHeight?: 'none' | 'sm' | 'md' | 'lg' | 'xl' | 'screen'
+  overlay?: 'none' | 'darken' | 'darken-strong' | 'gradient-bottom' | 'champagne'
+  animation?: 'none' | 'fade-in' | 'parallax'
+}): WidgetSpec {
+  return withImageKeys(
+    {
+      kind: 'widget',
+      blockType: 'lx_cover_image',
+      data: {
+        ratio: opts.ratio ?? '21:9',
+        minHeight: opts.minHeight ?? 'lg',
+        overlay: opts.overlay ?? 'none',
+        animation: opts.animation ?? 'fade-in',
+      },
+    },
+    { image: { imageKey: opts.imageKey, alt: opts.alt } },
+  )
+}
+
+/**
+ * Editorial figure (lx_figure). Single photo with optional caption,
+ * editorial aspect-ratio set, sharp corners. Use for inline body
+ * imagery (story-page chapter photos, gallery-style detail shots).
+ */
+export function figure(opts: {
+  imageKey: string
+  alt: string
+  ratio?: '21:9' | '16:9' | '4:5' | '1:1'
+  fit?: 'cover' | 'contain'
+  caption?: string
+  goldOverlay?: boolean
+  corners?: 'sharp' | 'soft'
+  animation?: 'none' | 'fade-in' | 'slide-up' | 'parallax'
+}): WidgetSpec {
+  const data: Record<string, unknown> = {
+    ratio: opts.ratio ?? '16:9',
+    fit: opts.fit ?? 'cover',
+    goldOverlay: opts.goldOverlay ?? false,
+    corners: opts.corners ?? 'sharp',
+    animation: opts.animation ?? 'fade-in',
+  }
+  if (opts.caption) data.caption = opts.caption
+  return withImageKeys(
+    { kind: 'widget', blockType: 'lx_figure', data },
+    { image: { imageKey: opts.imageKey, alt: opts.alt } },
+  )
+}
+
+/**
+ * Staggered image pair (lx_image_pair). Two photos in the signature
+ * "lifted" composition — one lifts above the column baseline, the
+ * other tucks underneath with horizontal overlap. Both images
+ * required (the schema has no half-empty state).
+ */
+export function imagePair(opts: {
+  leftImageKey: string
+  leftAlt: string
+  rightImageKey: string
+  rightAlt: string
+  layout?: 'lift-left' | 'lift-right'
+  overlap?: 'sm' | 'md' | 'lg'
+  ratio?: '3:4' | '4:5' | '1:1'
+  animation?: 'none' | 'fade-in' | 'slide-up'
+}): WidgetSpec {
+  return withImageKeys(
+    {
+      kind: 'widget',
+      blockType: 'lx_image_pair',
+      data: {
+        layout: opts.layout ?? 'lift-left',
+        overlap: opts.overlap ?? 'md',
+        ratio: opts.ratio ?? '4:5',
+        animation: opts.animation ?? 'fade-in',
+      },
+    },
+    {
+      leftImage: { imageKey: opts.leftImageKey, alt: opts.leftAlt },
+      rightImage: { imageKey: opts.rightImageKey, alt: opts.rightAlt },
+    },
+  )
+}
+
+/**
+ * Composite: hero with a full-bleed background photo + eyebrow,
+ * heading, body, and optional CTAs in a text section immediately
+ * below. Returns TWO sections — caller spreads them via `...`:
+ *
+ *   ...heroWithImage({ imageKey: 'hero', alt: '...', title: '...' }),
+ *
+ * The image and text are intentionally separate sections (vs. a
+ * single overlaid block) so the operator can edit the photo and the
+ * copy independently through the admin UI, and so the cover image
+ * block stays a single-responsibility primitive.
+ */
+export function heroWithImage(opts: {
+  imageKey: string
+  alt: string
+  ratio?: '21:9' | '16:9' | '4:3' | '3:2' | '4:5'
+  minHeight?: 'sm' | 'md' | 'lg' | 'xl' | 'screen'
+  overlay?: 'none' | 'darken' | 'darken-strong' | 'gradient-bottom' | 'champagne'
+  background?: SectionBackground
+  eyebrow?: string
+  title: string
+  body?: string
+  cta?: { label: string; href: string }
+  secondaryCta?: { label: string; href: string }
+  tone?: Tone
+}): SectionSpec[] {
+  const bg = opts.background ?? 'obsidian'
+  const tone = opts.tone ?? (bg === 'obsidian' || bg === 'near-black' || bg === 'charcoal' ? 'ivory' : 'obsidian')
+
+  const imageSection = oneCol(
+    bg,
+    'sm',
+    coverImage({
+      imageKey: opts.imageKey,
+      alt: opts.alt,
+      ratio: opts.ratio ?? '21:9',
+      minHeight: opts.minHeight ?? 'lg',
+      overlay: opts.overlay ?? 'none',
+      animation: 'fade-in',
+    }),
+  )
+
+  const textWidgets: WidgetSpec[] = []
+  if (opts.eyebrow) textWidgets.push(eyebrow(opts.eyebrow, { tone: 'champagne' }))
+  textWidgets.push(
+    heading(opts.title, {
+      level: 'h1',
+      size: 'display-2xl',
+      tone,
+      animation: 'slide-up',
+      marginTop: opts.eyebrow ? 'sm' : undefined,
+    }),
+  )
+  if (opts.body) {
+    textWidgets.push(text(opts.body, { size: 'body-lg', tone, marginTop: 'md' }))
+  }
+  if (opts.cta) {
+    textWidgets.push(
+      action(opts.cta.label, opts.cta.href, {
+        size: 'lg',
+        variant: 'primary-gold',
+        marginTop: 'md',
+      }),
+    )
+    if (opts.secondaryCta) {
+      textWidgets.push(
+        action(opts.secondaryCta.label, opts.secondaryCta.href, {
+          size: 'lg',
+          variant: 'ghost',
+          marginTop: 'sm',
+        }),
+      )
+    }
+  }
+  const textSection = oneCol(bg, 'md', ...textWidgets)
+  return [imageSection, textSection]
+}
+
+/**
+ * Image + text two-column section. One column holds an editorial
+ * lx_figure, the other a column of standard text widgets. Caller
+ * supplies the text-side widgets array directly — keeps the helper
+ * agnostic to whether the text side carries eyebrow + heading,
+ * just text, a quote, etc.
+ *
+ *   imageWithText({
+ *     imageKey: 'spa-treatment-room',
+ *     alt: '...',
+ *     side: 'left',
+ *     text: [eyebrow('...'), heading('...'), text('...')],
+ *   })
+ */
+export function imageWithText(opts: {
+  imageKey: string
+  alt: string
+  side?: 'left' | 'right'
+  background?: SectionBackground
+  padding?: SectionPadding
+  ratio?: '21:9' | '16:9' | '4:5' | '1:1'
+  text: WidgetSpec[]
+}): SectionSpec {
+  const bg = opts.background ?? 'ivory'
+  const padding = opts.padding ?? 'lg'
+  const fig = figure({
+    imageKey: opts.imageKey,
+    alt: opts.alt,
+    ratio: opts.ratio ?? '4:5',
+    animation: 'fade-in',
+  })
+  return opts.side === 'right'
+    ? twoCols(bg, padding, opts.text, [fig])
+    : twoCols(bg, padding, [fig], opts.text)
+}
+
+/**
+ * Three-column row of image cards. Each card = a figure above a small
+ * heading + body. For room categories, project tiles, service
+ * thumbnails, agent grids, sample-dish thumbnails. The image+text
+ * combo lives inside a single column; the section meta is columns=3.
+ *
+ * Cards beyond 3 are split across multiple rows. Each row is a
+ * separate section so the operator can re-arrange rows in the admin.
+ */
+export function imageCardsRow(opts: {
+  background?: SectionBackground
+  ratio?: '4:5' | '1:1' | '16:9' | '21:9'
+  sectionTitle?: string
+  sectionBody?: string
+  sectionTone?: Tone
+  cards: Array<{
+    imageKey: string
+    alt: string
+    kicker?: string
+    title: string
+    body?: string
+    cta?: { label: string; href: string }
+  }>
+}): SectionSpec[] {
+  const bg = opts.background ?? 'ivory'
+  const tone: Tone = bg === 'obsidian' || bg === 'near-black' || bg === 'charcoal'
+    ? 'ivory'
+    : 'obsidian'
+  const ratio = opts.ratio ?? '4:5'
+  const sections: SectionSpec[] = []
+  if (opts.sectionTitle || opts.sectionBody) {
+    const intro: WidgetSpec[] = []
+    if (opts.sectionTitle) {
+      intro.push(
+        heading(opts.sectionTitle, {
+          level: 'h2',
+          size: 'display-md',
+          tone: opts.sectionTone ?? tone,
+        }),
+      )
+    }
+    if (opts.sectionBody) {
+      intro.push(
+        text(opts.sectionBody, {
+          tone: opts.sectionTone ?? tone,
+          marginTop: 'sm',
+        }),
+      )
+    }
+    sections.push(oneCol(bg, 'md', ...intro))
+  }
+  const cards = opts.cards
+  for (let i = 0; i < cards.length; i += 3) {
+    const slice = cards.slice(i, i + 3)
+    const cols: ColumnSpec[] = slice.map((c) => {
+      const widgets: WidgetSpec[] = [
+        figure({ imageKey: c.imageKey, alt: c.alt, ratio, animation: 'fade-in' }),
+      ]
+      if (c.kicker) widgets.push(eyebrow(c.kicker, { tone: 'champagne' }))
+      widgets.push(
+        heading(c.title, {
+          level: 'h3',
+          size: 'display-sm',
+          tone,
+          marginTop: c.kicker ? 'xs' : 'sm',
+        }),
+      )
+      if (c.body) {
+        widgets.push(text(c.body, { tone, maxWidth: 'wide', marginTop: 'xs' }))
+      }
+      if (c.cta) {
+        widgets.push(
+          action(c.cta.label, c.cta.href, {
+            variant: 'link-arrow',
+            marginTop: 'sm',
+          }),
+        )
+      }
+      return col(...widgets)
+    })
+    // Pad to a multiple of 3 so the grid stays even.
+    while (cols.length < 3) cols.push(col(spacer('section-xs')))
+    sections.push({
+      kind: 'section',
+      meta: { columns: 3, background: bg, padding: 'md' },
+      columns: cols,
+    })
+  }
+  return sections
+}

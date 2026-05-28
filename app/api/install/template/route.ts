@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import { copyFile, mkdir, readFile, access, unlink } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -19,9 +22,16 @@ import {
   getTemplate,
   TEMPLATE_SLUGS,
 } from '@/lib/cms/siteTemplates'
-import type { PageSpec, SectionSpec, SiteTemplate } from '@/lib/cms/siteTemplates'
+import type {
+  PageSpec,
+  SectionSpec,
+  SiteTemplate,
+  WidgetSpec,
+} from '@/lib/cms/siteTemplates'
+import { collectImageKeys } from '@/lib/cms/siteTemplates/extractImageKeys'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { SectionMetaSchema, ColumnMetaSchema } from '@/lib/cms/blockMeta'
+import { PATHS } from '@/lib/media/storage'
 
 // POST /api/install/template — wizard template chooser.
 //
@@ -156,6 +166,295 @@ async function wipeNonLegalPagesAndBlocks(tx: Tx): Promise<void> {
   `)
 }
 
+// ─── Template-bundled stock imagery ──────────────────────────────────
+//
+// Templates that ship designer-curated stock photos declare them in
+// lib/cms/siteTemplates/<slug>/media-sources.json. At release time,
+// scripts/release/build-template-media.ts downloads + processes each
+// to <dist>/template-media/<slug>/{variants,manifest.json,credits.json},
+// and build-zip.mjs copies that tree into the release zip at
+// .next/standalone/template-media/<slug>/.
+//
+// At install time, this endpoint:
+//   1. Pre-flight (BEFORE the wipe TX): extract every imageKey the
+//      template references, read the bundled manifest, fail 422
+//      `template_media_key_missing` if any key is unresolved. A bad
+//      template never wipes a live install.
+//   2. Inside the TX (BEFORE the page-insert loop): for each
+//      manifest entry referenced by the template, generate a fresh
+//      UUID, COPY (not rename — bundled originals must survive
+//      re-picks) the variant files from <install>/.next/standalone/
+//      template-media/<slug>/variants/<key>-* → UPLOADS_ROOT/variants/
+//      <uuid>-*, INSERT the media row with variants JSON pointing at
+//      /uploads/variants/<uuid>-*. Build a keyToMedia map keyed on
+//      the bundled key → { mediaId, alt }.
+//   3. In insertSections: for every widget with `_imageKeys`, INJECT
+//      the resolved MediaRef ({ media_id, alt }) into widget.data at
+//      the named field BEFORE parseAndSanitize fires. Strip
+//      _imageKeys / _imageAlts so they never reach the DB.
+//   4. After each widget INSERT: write a media_references row per
+//      resolved field so DELETE /api/cms/media/[id] refuses to drop
+//      the row while it's pinned by a page.
+
+const TemplateMediaEntry = z.object({
+  key: z.string().min(1),
+  alt: z.string().min(1),
+  mime: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  byteSize: z.number().int().nonnegative(),
+  variants: z.object({
+    thumb: z.string().min(1),
+    md: z.string().min(1),
+    lg: z.string().min(1),
+    og: z.string().min(1),
+  }),
+  sourceUrl: z.string().min(1),
+  photographer: z.string(),
+  license: z.string().min(1),
+})
+
+const TemplateMediaManifest = z.object({
+  templateSlug: z.string().min(1),
+  generatedAt: z.string().min(1),
+  entries: z.record(z.string(), TemplateMediaEntry),
+})
+
+type TemplateMediaEntryT = z.infer<typeof TemplateMediaEntry>
+type TemplateMediaManifestT = z.infer<typeof TemplateMediaManifest>
+
+/** Per-key resolved media row, built inside the install TX. */
+interface ResolvedMedia {
+  mediaId: number
+  alt: string
+}
+
+/**
+ * Resolve the absolute filesystem path of a template's bundled-media
+ * tree at runtime. PM2 launches the standalone with
+ * `cwd: <install>/.next/standalone/` (see ecosystem.config.cjs +
+ * start-standalone.mjs), and build-zip.mjs copies dist/template-media/
+ * into the same standalone tree at template-media/. So
+ * <cwd>/template-media/<slug>/ is the canonical lookup.
+ */
+function templateMediaDir(slug: string): string {
+  return path.join(process.cwd(), 'template-media', slug)
+}
+
+/**
+ * Pre-TX manifest fetch + cross-check. Returns null when the template
+ * declares no imageKeys (text-only template — nothing to provision).
+ * Returns the parsed manifest when every key is covered. Returns a
+ * Response on validation failure — caller bails before any DB writes.
+ *
+ * Errors are NEVER thrown from here: callers want to short-circuit a
+ * 422 response without rolling back a transaction.
+ */
+async function loadTemplateMediaManifest(
+  template: SiteTemplate,
+): Promise<
+  | { kind: 'no-media' }
+  | { kind: 'ok'; manifest: TemplateMediaManifestT; usedKeys: Set<string> }
+  | { kind: 'error'; response: Response }
+> {
+  const usedKeys = collectImageKeys(template)
+  if (usedKeys.size === 0) return { kind: 'no-media' }
+
+  const dir = templateMediaDir(template.slug)
+  const manifestPath = path.join(dir, 'manifest.json')
+  try {
+    await access(manifestPath)
+  } catch {
+    // Template uses image keys but no bundled media tree exists on
+    // disk. Either the release zip didn't include it (build script
+    // regression) or this install was made from a pre-imagery release.
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'install_template_media_manifest_missing',
+        templateSlug: template.slug,
+        manifestPath,
+      }),
+    )
+    return {
+      kind: 'error',
+      response: errJson(500, 'template_media_manifest_missing'),
+    }
+  }
+
+  let raw: unknown
+  try {
+    raw = JSON.parse(await readFile(manifestPath, 'utf8'))
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'install_template_media_manifest_parse_failed',
+        templateSlug: template.slug,
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    )
+    return {
+      kind: 'error',
+      response: errJson(500, 'template_media_manifest_parse_failed'),
+    }
+  }
+
+  const parsed = TemplateMediaManifest.safeParse(raw)
+  if (!parsed.success) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'install_template_media_manifest_invalid',
+        templateSlug: template.slug,
+        issues: parsed.error.issues.slice(0, 3),
+      }),
+    )
+    return {
+      kind: 'error',
+      response: errJson(500, 'template_media_manifest_invalid'),
+    }
+  }
+
+  const manifest = parsed.data
+  const missing: string[] = []
+  for (const key of usedKeys) {
+    if (!manifest.entries[key]) missing.push(key)
+  }
+  if (missing.length > 0) {
+    return {
+      kind: 'error',
+      response: errJson(422, 'template_media_key_missing', {
+        keys: missing.slice(0, 10),
+      }),
+    }
+  }
+  return { kind: 'ok', manifest, usedKeys }
+}
+
+/**
+ * Inside the TX: for each used key, copy the bundled variant files
+ * with fresh UUIDs into UPLOADS_ROOT/variants/, INSERT a media row,
+ * and return the key → resolved-media map. Per-install UUIDs so a
+ * customer who reinstalls or re-picks the template doesn't share
+ * variant files across attempts — each install owns its own copies
+ * and can edit/delete freely.
+ *
+ * Variants directory is created if missing (it normally is, per
+ * setup.sh / CLI provisioning, but defence-in-depth against an
+ * operator-stripped layout).
+ */
+async function provisionTemplateMedia(
+  tx: Tx,
+  templateSlug: string,
+  manifest: TemplateMediaManifestT,
+  usedKeys: Set<string>,
+  writtenPaths: string[],
+): Promise<Map<string, ResolvedMedia>> {
+  const srcDir = path.join(templateMediaDir(templateSlug), 'variants')
+  // mkdir is idempotent with recursive=true. Mode 0o750 matches
+  // setup.sh's provisioning so a brand-new variants dir lands with
+  // the right perms for nginx to serve from.
+  await mkdir(PATHS.variants, { recursive: true, mode: 0o750 })
+
+  const out = new Map<string, ResolvedMedia>()
+  for (const key of usedKeys) {
+    const entry = manifest.entries[key]
+    if (!entry) {
+      // Pre-flight already ruled this out, but a paranoid re-check
+      // here keeps a future refactor that bypasses pre-flight safe.
+      throw new Error(`template_media_key_missing_in_tx:${key}`)
+    }
+    const uuid = randomUUID()
+
+    // Copy each variant file with the fresh UUID prefix. Use
+    // copyFile (not rename) so the bundled tree stays intact for
+    // future re-picks of the same template. Append each destination
+    // to writtenPaths SYNCHRONOUSLY with the copy — caller unlinks
+    // these on TX rollback to avoid leaking 4 files per used key.
+    const copyPlan: Array<{ src: string; dst: string }> = [
+      { src: path.join(srcDir, entry.variants.thumb), dst: path.join(PATHS.variants, `${uuid}-thumb.webp`) },
+      { src: path.join(srcDir, entry.variants.md),    dst: path.join(PATHS.variants, `${uuid}-md.webp`) },
+      { src: path.join(srcDir, entry.variants.lg),    dst: path.join(PATHS.variants, `${uuid}-lg.webp`) },
+      { src: path.join(srcDir, entry.variants.og),    dst: path.join(PATHS.variants, `${uuid}-og.jpg`) },
+    ]
+    for (const { src, dst } of copyPlan) {
+      await copyFile(src, dst)
+      writtenPaths.push(dst)
+    }
+
+    // Variants JSON shape mirrors what the upload route writes — same
+    // /uploads/variants/<uuid>-X.webp URL pattern the renderer
+    // expects via resolveMedia().
+    const variantsJson = {
+      thumb: `/uploads/variants/${uuid}-thumb.webp`,
+      md: `/uploads/variants/${uuid}-md.webp`,
+      lg: `/uploads/variants/${uuid}-lg.webp`,
+      og: `/uploads/variants/${uuid}-og.jpg`,
+    }
+
+    const originalName = `template/${templateSlug}/${key}`
+    const [insertRes] = (await tx.execute(sql`
+      INSERT INTO media
+        (filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, variants, uploaded_by, created_at)
+      VALUES
+        (${uuid}, ${originalName}, ${entry.mime}, ${entry.alt},
+         ${entry.width}, ${entry.height}, ${entry.byteSize},
+         ${JSON.stringify(variantsJson)}, ${null}, NOW(3))
+    `)) as unknown as [InsertResult]
+    const mediaId = Number(insertRes.insertId)
+    out.set(key, { mediaId, alt: entry.alt })
+  }
+  return out
+}
+
+/**
+ * Walks a widget's `_imageKeys` map and INJECTS resolved MediaRef
+ * objects into widget.data at the named fields. Then strips both
+ * `_imageKeys` and `_imageAlts` from the widget so they never reach
+ * parseAndSanitize (which would reject unknown top-level fields) or
+ * the DB (content_blocks.meta only — never the widget root).
+ *
+ * Returns the per-field media_id list so the caller can write
+ * media_references rows after the widget INSERT.
+ *
+ * MUTATES the widget. Template specs in this code path are produced
+ * once per request from the (frozen) site-templates registry; we
+ * don't share references across requests, so in-place mutation is
+ * safe.
+ */
+function injectMediaRefs(
+  widget: WidgetSpec,
+  keyToMedia: Map<string, ResolvedMedia>,
+): Array<{ field: string; mediaId: number }> {
+  if (!widget._imageKeys) return []
+  const refs: Array<{ field: string; mediaId: number }> = []
+  const alts = widget._imageAlts ?? {}
+  for (const [field, key] of Object.entries(widget._imageKeys)) {
+    const resolved = keyToMedia.get(key)
+    if (!resolved) {
+      // Pre-flight + provisionTemplateMedia already guard this; throw
+      // loudly if we get here so a future regression is impossible
+      // to ignore.
+      throw new Error(`template_media_unresolved_in_inject:${key}`)
+    }
+    widget.data[field] = {
+      media_id: resolved.mediaId,
+      // Prefer the template-author-provided alt (more contextual than
+      // the manifest alt — same image used in two places may want
+      // different alt copy).
+      alt: alts[field] ?? resolved.alt,
+    }
+    refs.push({ field, mediaId: resolved.mediaId })
+  }
+  // Strip the transport fields so the rest of insertSections never
+  // sees them and they don't accidentally end up in JSON.stringify of
+  // widget.meta.
+  delete widget._imageKeys
+  delete widget._imageAlts
+  return refs
+}
+
 async function insertPage(tx: Tx, spec: PageSpec): Promise<number> {
   const seoTitle = spec.seoTitle ?? spec.title
   const seoDescription = spec.seoDescription ?? null
@@ -174,6 +473,7 @@ async function insertSections(
   tx: Tx,
   pageId: number,
   sections: SectionSpec[],
+  keyToMedia: Map<string, ResolvedMedia>,
 ): Promise<void> {
   let secPos = POS_STEP
   for (const sec of sections) {
@@ -202,19 +502,44 @@ async function insertSections(
       const columnId = Number(colRes.insertId)
       let widPos = POS_STEP
       for (const w of colSpec.widgets) {
+        // Inject bundled-template MediaRefs into widget.data BEFORE
+        // parseAndSanitize fires. parseAndSanitize would reject
+        // widget.data with missing required MediaRef fields, and
+        // would strip the _imageKeys / _imageAlts top-level fields
+        // we use as transport. Mutating widget in place is safe —
+        // it's a per-request value cloned from the template registry.
+        const mediaRefs = injectMediaRefs(w, keyToMedia)
+
         // Run the widget data through the canonical CMS sanitize+parse
         // gate so any field-level schema violation in a template file
         // surfaces here (transaction rolls back the whole reseed)
         // instead of at next page-render.
         const cleaned = parseAndSanitize(w.blockType, w.data) as Record<string, unknown>
         const widgetMetaJson = w.meta ? JSON.stringify(w.meta) : null
-        await tx.execute(sql`
+        const [widRes] = (await tx.execute(sql`
           INSERT INTO content_blocks
             (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
           VALUES
             (${pageId}, ${columnId}, 'widget', NULL, ${w.blockType}, ${widPos},
              ${JSON.stringify(cleaned)}, ${widgetMetaJson}, 0)
-        `)
+        `)) as unknown as [InsertResult]
+        const widgetId = Number(widRes.insertId)
+
+        // Reverse-index this widget's bundled media so DELETE
+        // /api/cms/media/[id] refuses to drop a row while a template
+        // page still references it. Without this, an operator who
+        // "deletes" a hero photo from the Media Library would orphan
+        // the page's image to a 404. Composite PK guarantees
+        // (media_id, content_block, widget_id, field) is unique, so
+        // a re-run of the seed (idempotent) self-heals.
+        for (const ref of mediaRefs) {
+          await tx.execute(sql`
+            INSERT INTO media_references (media_id, referent_type, referent_id, field)
+            VALUES (${ref.mediaId}, 'content_block', ${widgetId}, ${ref.field})
+            ON DUPLICATE KEY UPDATE media_id = media_id
+          `)
+        }
+
         widPos += POS_STEP
       }
       colPos += POS_STEP
@@ -404,6 +729,21 @@ export const POST = withError(async (req: Request) => {
     const shapeError = validateTemplateShape(template)
     if (shapeError) return shapeError
 
+    // Pre-flight: read the bundled-media manifest and confirm every
+    // imageKey the template references is covered. Runs BEFORE the
+    // wipe TX — a template that references an unbundled key never
+    // gets a chance to delete a live install's pages.
+    const mediaPreflight = await loadTemplateMediaManifest(template)
+    if (mediaPreflight.kind === 'error') return mediaPreflight.response
+
+    // Track every variant file written to UPLOADS_ROOT/variants during
+    // provisionTemplateMedia so we can unlink them on TX rollback.
+    // copyFile + DB INSERT are NOT jointly transactional — without
+    // this list, a failed TX would leak 4 files per used key as orphans.
+    // Cleared on TX success so the success path doesn't unlink the
+    // files we just committed media rows for.
+    const writtenMediaPaths: string[] = []
+
     try {
       const result = await db.transaction(async (tx) => {
         // TOCTOU guard: re-read install_state INSIDE the transaction
@@ -432,19 +772,65 @@ export const POST = withError(async (req: Request) => {
         // 1. Wipe non-legal pages + their content blocks.
         await wipeNonLegalPagesAndBlocks(tx)
 
-        // 2. Insert template pages.
+        // 2. Provision bundled-template stock imagery (no-op for
+        //    text-only templates). For each key the template uses,
+        //    copy the bundled variant files into UPLOADS_ROOT/variants/
+        //    with fresh UUIDs, INSERT a media row, and build a map
+        //    that insertSections uses to inject MediaRefs into widget
+        //    data.
+        const keyToMedia: Map<string, ResolvedMedia> =
+          mediaPreflight.kind === 'ok'
+            ? await provisionTemplateMedia(
+                tx,
+                template.slug,
+                mediaPreflight.manifest,
+                mediaPreflight.usedKeys,
+                writtenMediaPaths,
+              )
+            : new Map()
+
+        // 3. Insert template pages.
         for (const page of template.pages) {
           const pageId = await insertPage(tx, page)
-          await insertSections(tx, pageId, page.sections)
+          await insertSections(tx, pageId, page.sections, keyToMedia)
         }
 
-        // 3. Seed branding from the template.
+        // 4. Seed branding from the template.
         await seedTemplateBranding(tx, operatorSiteName, template.branding)
 
-        return { pagesSeeded: template.pages.length }
+        return {
+          pagesSeeded: template.pages.length,
+          mediaSeeded: keyToMedia.size,
+        }
       })
+      // TX committed — the variant files we copied are now backed by
+      // real media rows. Clear the rollback tracker so the finally
+      // block doesn't unlink them.
+      writtenMediaPaths.length = 0
       return okJson({ ok: true, templateSlug: template.slug, ...result })
     } catch (err) {
+      // TX failed (or any post-TX throw): unlink every variant file
+      // we copied. mediaRows the TX rolled back are gone; without
+      // this cleanup the files would orphan in UPLOADS_ROOT/variants/
+      // and only the nightly purge would notice.
+      if (writtenMediaPaths.length > 0) {
+        await Promise.all(
+          writtenMediaPaths.map((p) =>
+            unlink(p).catch((cleanupErr: unknown) => {
+              // Best-effort — log so the orphan is observable but
+              // don't mask the original TX error.
+              console.warn(
+                JSON.stringify({
+                  level: 'warn',
+                  msg: 'install_template_orphan_variant_unlink_failed',
+                  path: p,
+                  err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+                }),
+              )
+            }),
+          ),
+        )
+      }
       if (err instanceof AlreadyInstalledError) {
         return new Response(
           JSON.stringify({ error: 'already_installed' }),

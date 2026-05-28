@@ -13,6 +13,24 @@ export interface WidgetSpec {
   blockType: string
   data: Record<string, unknown>
   meta?: Record<string, unknown>
+  /**
+   * Image-key transport for template-bundled stock imagery. Maps a
+   * Zod schema field (e.g. 'image', 'leftImage', 'rightImage') to a
+   * stable key declared in <slug>/media-sources.json.
+   *
+   * The install route walks this map BEFORE parseAndSanitize fires,
+   * resolves each key to a real `media_id` (inserted from the bundled
+   * variant files), and INJECTS `{ media_id, alt }` into the
+   * corresponding `data[field]` slot. Then both `_imageKeys` and
+   * `_imageAlts` are stripped before the row hits the DB.
+   *
+   * NEVER persisted: this is a build-time-only transport, not part of
+   * the on-disk widget shape. Adding it here (vs `meta`) keeps it out
+   * of the content_blocks.meta column and out of the render path.
+   */
+  _imageKeys?: Record<string, string>
+  /** Sibling map: same keys as _imageKeys → human-readable alt text. */
+  _imageAlts?: Record<string, string>
 }
 
 export interface ColumnSpec {

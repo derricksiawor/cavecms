@@ -26,13 +26,49 @@ if (process.env.NODE_ENV === 'production') {
   process.exit(1)
 }
 
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { SITE_TEMPLATES } from '../lib/cms/siteTemplates/index'
 import { TEMPLATE_CLIENT_META } from '../lib/cms/siteTemplates/clientMeta'
+import {
+  collectImageKeys,
+  extractImageKeys,
+} from '../lib/cms/siteTemplates/extractImageKeys'
 import { parseAndSanitize } from '../lib/cms/parse'
 import {
   SectionMetaSchema,
   ColumnMetaSchema,
 } from '../lib/cms/blockMeta'
+import type { WidgetSpec } from '../lib/cms/siteTemplates/types'
+
+const __filename = fileURLToPath(import.meta.url)
+const REPO_ROOT = resolve(dirname(__filename), '..')
+const TEMPLATES_DIR = join(REPO_ROOT, 'lib', 'cms', 'siteTemplates')
+
+/**
+ * Templates that use image helpers emit widget.data WITHOUT the
+ * required MediaRef fields — those get injected at install time
+ * from the bundled-media manifest. To run parseAndSanitize at
+ * validation time (before any install has happened) we inject a
+ * placeholder MediaRef matching the schema's MediaRef shape
+ * (positive media_id + non-empty alt). Mutates a CLONED widget so
+ * the registry shape stays pristine for the actual install path.
+ */
+function widgetWithStubbedImages(widget: WidgetSpec): WidgetSpec {
+  if (!widget._imageKeys) return widget
+  // Shallow clone data — replacement is at top-level fields only.
+  const stubbedData: Record<string, unknown> = { ...widget.data }
+  const alts = widget._imageAlts ?? {}
+  for (const field of Object.keys(widget._imageKeys)) {
+    stubbedData[field] = {
+      media_id: 1,
+      alt: alts[field] && alts[field].length > 0 ? alts[field] : 'placeholder',
+    }
+  }
+  return { ...widget, data: stubbedData }
+}
 
 let errors = 0
 
@@ -161,7 +197,13 @@ for (const t of SITE_TEMPLATES) {
           }
           widgetCount += 1
           try {
-            parseAndSanitize(widget.blockType, widget.data)
+            // Widgets carrying _imageKeys have unresolved image
+            // slots at validation time — inject placeholder
+            // MediaRefs matching the schema so parseAndSanitize
+            // exercises every other field. The install-route
+            // injects real refs from the bundled manifest.
+            const stubbed = widgetWithStubbedImages(widget)
+            parseAndSanitize(stubbed.blockType, stubbed.data)
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : String(err)
@@ -169,6 +211,65 @@ for (const t of SITE_TEMPLATES) {
               `${t.slug}/${page.slug}/section[${sIdx}]/column[${cIdx}]/widget[${wIdx}] (${widget.blockType}): ${msg}`,
             )
           }
+        }
+      }
+    }
+  }
+
+  // 2d.5 Image-key coverage: every imageKey the template references
+  //      must exist in <slug>/media-sources.json. Templates that
+  //      don't use any image helpers skip this entirely.
+  const usedKeys = collectImageKeys(t)
+  if (usedKeys.size > 0) {
+    const sourcesPath = join(TEMPLATES_DIR, t.slug, 'media-sources.json')
+    if (!existsSync(sourcesPath)) {
+      fail(
+        `${t.slug}: references ${usedKeys.size} imageKey(s) but no media-sources.json exists at lib/cms/siteTemplates/${t.slug}/media-sources.json`,
+      )
+    } else {
+      let raw: unknown
+      try {
+        raw = JSON.parse(readFileSync(sourcesPath, 'utf8'))
+      } catch (err) {
+        fail(`${t.slug}: media-sources.json is not valid JSON — ${err instanceof Error ? err.message : String(err)}`)
+        raw = []
+      }
+      if (!Array.isArray(raw)) {
+        fail(`${t.slug}: media-sources.json must be a JSON array of {key, sourceUrl, alt, photographer, license}`)
+        raw = []
+      }
+      const declaredKeys = new Set<string>()
+      for (const entry of raw as Array<Record<string, unknown>>) {
+        if (entry && typeof entry === 'object' && typeof entry.key === 'string') {
+          declaredKeys.add(entry.key)
+        }
+      }
+      // Missing: template references a key the sources file doesn't declare.
+      const missing: string[] = []
+      for (const key of usedKeys) {
+        if (!declaredKeys.has(key)) missing.push(key)
+      }
+      if (missing.length > 0) {
+        // Surface where each missing key is actually used so the
+        // contributor can find + fix immediately.
+        const refs = extractImageKeys(t).filter((r) => missing.includes(r.key))
+        for (const r of refs.slice(0, 10)) {
+          fail(
+            `${t.slug}: imageKey "${r.key}" used at /${r.page} section[${r.sectionIdx}] col[${r.columnIdx}] widget[${r.widgetIdx}] (${r.blockType}.${r.field}) but missing from media-sources.json`,
+          )
+        }
+        if (refs.length > 10) {
+          fail(`${t.slug}: …and ${refs.length - 10} more imageKey references missing from media-sources.json`)
+        }
+      }
+      // Orphaned: sources file declares a key the template doesn't use.
+      // Warn (don't fail) — author may be staging an image for a
+      // future template change.
+      for (const k of declaredKeys) {
+        if (!usedKeys.has(k)) {
+          console.warn(
+            `  ⚠ ${t.slug}: media-sources.json declares "${k}" but no widget references it (orphan — fine for staging, otherwise unused).`,
+          )
         }
       }
     }
