@@ -7,7 +7,6 @@ import {
   eyebrow,
   figure,
   heading,
-  hero,
   heroCover,
   imagePair,
   oneCol,

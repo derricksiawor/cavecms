@@ -4,7 +4,6 @@ import {
   contactForm,
   ctaBanner,
   figure,
-  hero,
   heroCover,
   imagePair,
   oneCol,
