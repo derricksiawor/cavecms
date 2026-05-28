@@ -342,31 +342,42 @@ p{
 
 const SINGLE_SEGMENT_RE = /^\/([^/]+)$/
 
-// Internal render-route prefix. Previously `/_page/...` — the
-// underscore-prefixed path triggered Next.js 15's private-folder
-// runtime filter on the standalone build (issue vercel/next.js#82043
-// + adjacent behaviour): the dynamic-route matcher silently refuses
-// any URL whose first segment starts with `_`, even when the routes
-// manifest registers it. Middleware rewrites to /_page/<slug> would
-// be ignored, every CMS slug 404'd with an empty body, and Safari
-// content-sniffed the bodyless response as a binary attachment
-// (downloading the URL instead of rendering 404 HTML). Renamed to
-// `/cms-render/...` — non-underscore-prefixed, won't collide with any
-// realistic operator slug (kebab + the literal segment 'cms-render'
-// is in RESERVED), and dispatches to `app/cms-render/[slug]/page.tsx`.
+// Internal render-route prefix. A visitor hits `/agents`; middleware
+// rewrites to `/cms-render/agents` which dispatches to
+// `app/cms-render/[slug]/page.tsx`. The bare slug stays in the URL bar
+// — the rewrite target is internal.
 const CMS_RENDER_PREFIX = '/cms-render'
 
-function refuseInternalPageRoute(pathname: string): NextResponse | null {
+// Marker request-header set on our OWN internal rewrite. See the long
+// note on refuseInternalPageRoute for why this exists.
+const CMS_RENDER_MARKER = 'x-cavecms-render'
+
+// Refuse DIRECT external hits to `/cms-render/*` so the internal
+// render route can't be probed at a non-canonical URL. CRITICAL
+// subtlety (cost us a multi-release chase): in Next.js 15.5 standalone,
+// `NextResponse.rewrite()` to a path that the middleware matcher also
+// matches causes middleware to RE-EXECUTE on the rewritten path. So
+// when `/agents` rewrites to `/cms-render/agents`, this guard runs a
+// SECOND time against `/cms-render/agents` — and a naive
+// `startsWith('/cms-render/')` refuse would 404 the app's own internal
+// rewrite, producing an empty-body 404 for every CMS page (Safari then
+// content-sniffs the bodyless 404 as a binary download). The fix:
+// distinguish the internal re-entry from a genuine external hit via a
+// marker header that ONLY our rewrite sets. External clients that spoof
+// the header reach the same PUBLIC content they'd get at the canonical
+// slug, so there's no escalation — the guard's job is hiding the
+// internal prefix from honest probing, which it still does.
+function refuseInternalPageRoute(req: NextRequest): NextResponse | null {
+  const pathname = req.nextUrl.pathname
   let decoded: string
   try {
     decoded = decodeURIComponent(pathname).toLowerCase()
   } catch {
     return new NextResponse(null, { status: 400 })
   }
-  if (
-    decoded === CMS_RENDER_PREFIX ||
-    decoded.startsWith(`${CMS_RENDER_PREFIX}/`)
-  ) {
+  const isInternalPrefix =
+    decoded === CMS_RENDER_PREFIX || decoded.startsWith(`${CMS_RENDER_PREFIX}/`)
+  if (isInternalPrefix && req.headers.get(CMS_RENDER_MARKER) !== '1') {
     return new NextResponse(null, { status: 404 })
   }
   return null
@@ -523,8 +534,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return maintenanceResponse(cfg.maintenance.message)
   }
 
-  // 6. Block 1: refuse direct /_page requests.
-  const internalDenied = refuseInternalPageRoute(pathname)
+  // 6. Block 1: refuse direct external hits to the internal
+  //    /cms-render/* prefix (the guard allows our own rewrite re-entry
+  //    via the marker header — see refuseInternalPageRoute).
+  const internalDenied = refuseInternalPageRoute(req)
   if (internalDenied) return internalDenied
 
   // Resolve LOGIN_PATH — DB-backed value via cfg, else env bootstrap.
@@ -536,6 +549,9 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const reqHeaders = new Headers(req.headers)
   reqHeaders.set('x-csp-nonce', nonce)
   reqHeaders.set('x-pathname', pathname)
+  // Strip any client-supplied marker so an external request can't
+  // pre-set it; only the rewrite below is allowed to add it.
+  reqHeaders.delete(CMS_RENDER_MARKER)
 
   // 7. Block 2: single-segment rewrite to /_page/{slug}, unless the
   //    segment matches the resolved LOGIN_PATH (then let the dynamic
@@ -582,6 +598,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     if (forwardedProto === 'http' || forwardedProto === 'https') {
       url.protocol = `${forwardedProto}:`
     }
+    // Mark the forwarded request so refuseInternalPageRoute allows the
+    // re-entry. Next 15.5 standalone re-runs middleware on the rewritten
+    // /cms-render/* path (which the matcher matches); without this
+    // marker the guard would 404 our own rewrite — the empty-body 404
+    // that broke every CMS page.
+    reqHeaders.set(CMS_RENDER_MARKER, '1')
     res = NextResponse.rewrite(url, { request: { headers: reqHeaders } })
   } else {
     res = NextResponse.next({ request: { headers: reqHeaders } })

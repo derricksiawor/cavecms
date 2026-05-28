@@ -32,6 +32,7 @@ import type {
   WidgetSpec,
 } from '@/lib/cms/siteTemplates'
 import { collectImageKeys } from '@/lib/cms/siteTemplates/extractImageKeys'
+import { PRIVACY_SECTIONS, TERMS_SECTIONS } from '@/lib/cms/siteTemplates/legalContent'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { SectionMetaSchema, ColumnMetaSchema, WidgetMetaSchema } from '@/lib/cms/blockMeta'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
@@ -717,6 +718,39 @@ async function insertSections(
   }
 }
 
+// Populate the preserved legal pages (privacy, terms) with the shared
+// generic content when they carry no content blocks. Runs inside the
+// reseed TX, after the wipe (which preserves the legal page rows) and
+// after the template pages are inserted. Idempotent + non-destructive:
+// a page that already has blocks (operator edited it, or a prior
+// install seeded it) is left untouched, so a template re-pick never
+// overwrites edited legal copy.
+const LEGAL_PAGE_CONTENT: ReadonlyArray<{ slug: string; sections: SectionSpec[] }> = [
+  { slug: 'privacy', sections: PRIVACY_SECTIONS },
+  { slug: 'terms', sections: TERMS_SECTIONS },
+]
+
+async function seedEmptyLegalPages(tx: Tx): Promise<void> {
+  for (const { slug, sections } of LEGAL_PAGE_CONTENT) {
+    const [rows] = (await tx.execute(sql`
+      SELECT p.id AS id, COUNT(b.id) AS blocks
+      FROM pages p
+      LEFT JOIN content_blocks b ON b.page_id = p.id
+      WHERE p.slug = ${slug} AND p.deleted_at IS NULL
+      GROUP BY p.id
+      LIMIT 1
+    `)) as unknown as [Array<{ id: number; blocks: number | string }>]
+    const row = rows[0]
+    // No legal page row at all → migrations created privacy/terms as
+    // preserved system pages, so this shouldn't happen; skip silently
+    // rather than throw (the wipe guard already enforces their
+    // existence). Non-empty → operator content present, leave it.
+    if (!row) continue
+    if (Number(row.blocks) > 0) continue
+    await insertSections(tx, Number(row.id), sections, new Map())
+  }
+}
+
 async function seedTemplateBranding(
   tx: Tx,
   brandText: string,
@@ -1003,6 +1037,16 @@ export const POST = withError(async (req: Request) => {
 
         // 4. Seed branding from the template.
         await seedTemplateBranding(tx, operatorSiteName, template.branding)
+
+        // 5. Fill the preserved legal pages (privacy, terms) with
+        //    generic content if they're empty. The migration creates
+        //    the legal page ROWS but ships no content blocks; the
+        //    contributor `db:seed` path populates them, but a customer
+        //    CLI install never runs that seed — so without this every
+        //    install shipped two blank legal pages a footer link could
+        //    expose. Seed only when empty so we never clobber an
+        //    operator's edited legal copy on a template re-pick.
+        await seedEmptyLegalPages(tx)
 
         return {
           pagesSeeded: template.pages.length,
