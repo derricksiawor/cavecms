@@ -14,6 +14,7 @@ import {
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
 import { StatusBadge, type StatusTone } from '@/components/admin/StatusBadge'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 import type { Role } from '@/lib/auth/requireRole'
 
 // Defence: validate the email shape before composing a mailto: URI.
@@ -521,12 +522,10 @@ export function NewsletterTable({
                 <dd className="mt-1 inline-flex items-center gap-2 text-near-black">
                   <Mail size={13} strokeWidth={2} className="text-warm-stone" />
                   {MAILTO_SAFE.test(active.email) ? (
-                    <a
+                    <CfSafeMailto
+                      email={active.email}
                       className="underline break-all"
-                      href={`mailto:${active.email}`}
-                    >
-                      {active.email}
-                    </a>
+                    />
                   ) : (
                     <span className="break-all">{active.email}</span>
                   )}

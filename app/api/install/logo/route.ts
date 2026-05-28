@@ -21,6 +21,8 @@ import {
   writeFinal,
 } from '@/lib/media/storage'
 import { processImage, MimeFormatMismatchError } from '@/lib/media/sharp'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 
 // POST /api/install/logo — wizard branding step (OPTIONAL).
 //
@@ -272,6 +274,10 @@ export const POST = withError(async (req: Request) => {
             VALUES (${mediaId}, 'settings', 0, 'site_header.logo')
           `)
         })
+        // Bust getSetting('site_header') so the very next read
+        // (Logo Preview, SiteHeader render, /admin/settings page) sees
+        // the freshly-uploaded logo instead of the prior cached value.
+        safeRevalidate([tag.settings]).catch(() => undefined)
 
         return okJson({ ok: true, mediaId, uuid, variants })
       } catch (renameErr) {
@@ -370,6 +376,8 @@ export const DELETE = withError(async (req: Request) => {
           version = version + 1
       `)
     })
+    // Bust getSetting('site_header') — DELETE path mirrors POST.
+    safeRevalidate([tag.settings]).catch(() => undefined)
 
     return okJson({ ok: true })
   } finally {

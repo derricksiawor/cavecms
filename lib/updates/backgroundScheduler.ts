@@ -2,6 +2,8 @@ import 'server-only'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { getSetting } from '@/lib/cms/getSettings'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 import { getCurrentVersion } from './getCurrentVersion'
 import { checkLatestRelease } from './checkLatestRelease'
 import { notifyUpdateAvailable } from './notifyUpdateAvailable'
@@ -71,6 +73,10 @@ export async function runUpdateCheck(args: RunArgs = {}): Promise<{
       value = VALUES(value),
       version = version + 1
   `)
+  // Without this the admin updates dashboard sees a stale
+  // lastCheckedAt after every cron tick (visible "I just clicked
+  // Check Now and the timestamp didn't update").
+  safeRevalidate([tag.settings]).catch(() => undefined)
 
   // Up to date — no email.
   if (latest.sha.startsWith(current.sha)) {

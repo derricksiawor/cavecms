@@ -19,6 +19,7 @@
 
 # Local safe-delete workspace — `mv` targets instead of `rm -rf`.
 .trash-*/
+.trash-*
 
 # Playwright MCP debug artifacts (console logs, page snapshots, screenshots).
 .playwright-mcp/

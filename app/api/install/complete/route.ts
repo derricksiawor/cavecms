@@ -2,6 +2,8 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
 import { __resetInstallStateCache } from '@/lib/install/installState'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 import {
   ipFromRequest,
   requireInstallToken,
@@ -68,5 +70,30 @@ export const POST = withError(async (req: Request) => {
   `)
 
   __resetInstallStateCache()
-  return okJson({ ok: true, completedAt })
+  // Defense in depth — `isInstalled()` reads install_state via its own
+  // in-process cache, but future refactors that route install_state
+  // reads through `getSetting()` would otherwise see a stale snapshot
+  // for up to 60 s after the wizard completes.
+  safeRevalidate([tag.settings]).catch(() => undefined)
+
+  // The middleware caches its security-config snapshot for ~3s in a
+  // globalThis Map that the Node-runtime routes cannot reach. Without
+  // an explicit signal, the very next request after this 200 returns
+  // (when the operator clicks "Visit your site") still sees the cached
+  // `installed: false` and redirects them right back to /install —
+  // making it look as if the wizard didn't complete.
+  //
+  // Set a short-lived, NON-httpOnly cookie that the middleware reads
+  // and acts on: if present, it force-busts the security-config cache
+  // and clears the cookie on the response. 60 seconds covers any
+  // realistic "user-clicks-the-button" delay; longer would risk a
+  // genuinely-uninstalled side-channel slipping through if the cookie
+  // were somehow set by another origin (it can't — cookies are scoped
+  // to host — but defence in depth).
+  const res = okJson({ ok: true, completedAt })
+  res.headers.append(
+    'set-cookie',
+    'cavecms_just_installed=1; Path=/; Max-Age=60; SameSite=Lax',
+  )
+  return res
 })

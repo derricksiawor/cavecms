@@ -7,6 +7,7 @@ import { escapeHtml } from '@/lib/security/escapeHtml'
 import { cidrListMatch, clientIpFromRequest } from '@/lib/security/ipMatch'
 import { classifySuspicious } from '@/lib/security/suspiciousRequest'
 import { buildCsp, type IntegrationsCspFlags } from '@/lib/security/buildCsp'
+import { isUnroutableForHsts } from '@/lib/security/hostKind'
 
 // Middleware runs on the default Edge runtime. All imports above are
 // Edge-compatible:
@@ -118,9 +119,9 @@ function bootstrapSecurityConfig(): SecurityConfig {
   }
 }
 
-async function getSecurityConfig(_req: NextRequest): Promise<SecurityConfig | null> {
+async function getSecurityConfig(_req: NextRequest, forceFresh = false): Promise<SecurityConfig | null> {
   const cached = globalThis.__cavecmsSecurityCfg
-  if (cached && Date.now() - cached.ts < SECURITY_CACHE_TTL_MS) return cached.data
+  if (!forceFresh && cached && Date.now() - cached.ts < SECURITY_CACHE_TTL_MS) return cached.data
   const secret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
   // Empty secret would always 401 — short-circuit so we don't burn a
   // round-trip on every middleware call before the operator finishes
@@ -382,7 +383,15 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // suspicious / blocklist / allowlist / maintenance gates all
   // short-circuit as "no enforcement" — fail-open so a transient DB
   // hiccup doesn't shutter the site.
-  const cfg = await getSecurityConfig(req)
+  //
+  // The `cavecms_just_installed=1` cookie is set by
+  // /api/install/complete (Node runtime, can't reach this Edge
+  // globalThis Map). When we see it, force a fresh security-config
+  // fetch so the operator's first "Visit your site" click after the
+  // wizard sees `installed: true` + the freshly-saved custom
+  // LOGIN_PATH, instead of the pre-wizard cached snapshot.
+  const justInstalled = req.cookies.get('cavecms_just_installed')?.value === '1'
+  const cfg = await getSecurityConfig(req, justInstalled)
 
   // ─── First-boot install gate (WordPress-style) ────────────────
   //
@@ -561,7 +570,37 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     res = NextResponse.next({ request: { headers: reqHeaders } })
   }
 
-  res.headers.set('Content-Security-Policy', buildCsp(nonce, isProd, cfg?.integrations))
+  // Skip HSTS + upgrade-insecure-requests on loopback / LAN hosts even
+  // in production — laptop / cpanel / private-network installs run with
+  // NODE_ENV=production but serve over plain HTTP. Safari uniquely
+  // honours both directives on such hosts (cf. ~/.claude/CLAUDE.md
+  // #0.19): upgrade-insecure-requests rewrites every asset to https://
+  // mid-flight, and HSTS pins the host to HTTPS for two years.
+  // Either one renders the page unstyled and unusable. The host check
+  // is per-request so a single binary can serve both public-domain
+  // installs (HSTS on, upgrade on) and laptop installs (both off)
+  // without operator configuration.
+  const unroutable = isUnroutableForHsts(req.headers.get('host'))
+  res.headers.set(
+    'Content-Security-Policy',
+    buildCsp(nonce, isProd, cfg?.integrations, unroutable),
+  )
+  if (isProd && !unroutable) {
+    res.headers.set(
+      'Strict-Transport-Security',
+      'max-age=63072000; includeSubDomains; preload',
+    )
+  }
+
+  // Single-shot cache-bust cookie from /api/install/complete — once
+  // we've consumed it for the force-fresh fetch above, expire it so
+  // subsequent requests use the normal cached path.
+  if (justInstalled) {
+    res.headers.append(
+      'set-cookie',
+      'cavecms_just_installed=; Path=/; Max-Age=0; SameSite=Lax',
+    )
+  }
 
   if (pathname.startsWith('/newsletter/confirm/') || pathname === '/unsubscribe') {
     res.headers.set('X-Robots-Tag', 'noindex, nofollow')

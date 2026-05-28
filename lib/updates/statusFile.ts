@@ -100,13 +100,30 @@ export function __setStatusPathForTests(path: string | null): void {
  * to take effect — instead we keep the status file inside the install
  * dir, which the running app user already owns.
  *
- * Returns null when the env var isn't set (legacy installs / dev) —
- * caller falls back to the system path.
+ * Legacy installs (upgraded in place from pre-0.1.27 releases) won't
+ * have CAVECMS_STATE_DIR stamped. For those we derive a sibling
+ * `.cavecms-state` next to the standalone `process.cwd()` — that
+ * directory is by-definition owned by the runtime user (otherwise the
+ * Node listener couldn't have booted there), so writes will never
+ * EACCES. The derived path is added to the runtime-allowlist below.
+ *
+ * Returns null only in dev/test contexts where neither env var nor a
+ * usable cwd is available — callers then fall back to the system path.
  */
 function getInstallStateDir(): string | null {
   const raw = process.env.CAVECMS_STATE_DIR
-  if (!raw) return null
-  return resolve(raw)
+  if (raw) return resolve(raw)
+  // Legacy-install fallback. process.cwd() in a Next.js standalone
+  // build is `<install>/.next/standalone`; the runtime user owns it.
+  // We stash state in `<cwd>/.cavecms-state/` so the on-demand mkdir
+  // below never EACCES on the system path.
+  try {
+    const cwd = process.cwd()
+    if (cwd && cwd !== '/') return resolve(`${cwd}/.cavecms-state`)
+  } catch {
+    /* very-restricted runtimes (some test harnesses) — null fallback */
+  }
+  return null
 }
 
 function ensureAllowedPath(candidate: string): string {

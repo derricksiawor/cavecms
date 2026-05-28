@@ -8,6 +8,8 @@ import { HttpError } from '@/lib/auth/requireRole'
 import { hashPassword } from '@/lib/auth/scrypt'
 import { hasAnyActiveAdmin } from '@/lib/install/installState'
 import { requireInstallToken } from '@/lib/install/installEndpointHelpers'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 
@@ -146,6 +148,12 @@ export const POST = withError(async (req: Request) => {
       passwordHash,
     })
   })
+  // Defense in depth: install_state was written via raw SQL inside the
+  // TX, bypassing upsertSetting()'s tag-bust contract. Today
+  // isInstalled() reads its own in-process cache so this is latent,
+  // but any future caller that routes install_state through
+  // getSetting() would otherwise see the pre-wizard registry default.
+  safeRevalidate([tag.settings]).catch(() => undefined)
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,

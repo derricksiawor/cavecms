@@ -108,6 +108,21 @@ if [ "$allowed" = "0" ] && [ -n "${CAVECMS_STATE_DIR:-}" ]; then
     "$CAVECMS_STATE_DIR"/*) allowed=1 ;;
   esac
 fi
+# Legacy-install fallback. When env.production was written by a
+# pre-0.1.27 CLI it has neither CAVECMS_UPDATE_STATUS_PATH nor
+# CAVECMS_STATE_DIR. The Node-side apply route (lib/updates/statusFile.ts
+# getInstallStateDir) derives `<cwd>/.cavecms-state/update-status.json`
+# from the install's own filesystem (owned by the runtime user by
+# construction) and forwards the resolved path to us via
+# CAVECMS_UPDATE_STATUS_PATH. Accept anything ending in
+# `/.cavecms-state/...` so the script's allowlist matches the Node
+# side's fallback. The path-traversal vector is still closed: the
+# `.cavecms-state` literal anchors the match.
+if [ "$allowed" = "0" ]; then
+  case "$STATUS_PATH" in
+    */.cavecms-state/*) allowed=1 ;;
+  esac
+fi
 if [ "$allowed" = "0" ]; then
   echo "[cavecms-update] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
   exit 2

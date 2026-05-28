@@ -8,6 +8,8 @@ import { isInstalled } from '@/lib/install/installState'
 import { requireInstallToken } from '@/lib/install/installEndpointHelpers'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 
 // POST /api/install/site-init — wizard step 3.
 // Writes settings.site_general (siteUrl + siteName) ONLY. Completion
@@ -98,6 +100,11 @@ export const POST = withError(async (req: Request) => {
       value = VALUES(value),
       version = version + 1
   `)
+  // Bust the tag-cached getSetting() snapshot so the very next wizard
+  // step (template / branding) reads the operator's freshly-saved
+  // site_general values, not the registry default. Without this,
+  // template seeding can render with "Your Site" for up to 60 s.
+  safeRevalidate([tag.settings]).catch(() => undefined)
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,

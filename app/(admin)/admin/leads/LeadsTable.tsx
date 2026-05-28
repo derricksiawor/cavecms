@@ -9,6 +9,7 @@ import { useToast } from '@/components/inline-edit/Toast'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
 import { RowActionsMenu } from '@/components/admin/RowActionsMenu'
 import { PillButton } from '@/components/admin/PillButton'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 import {
   AdminTable,
   type AdminTableColumn,
@@ -560,9 +561,7 @@ export function LeadsTable({
                   </dt>
                   <dd className="mt-1 inline-flex items-center gap-2 text-near-black">
                     <Mail size={13} strokeWidth={2} className="text-warm-stone" />
-                    <a className="underline" href={`mailto:${active.email}`}>
-                      {active.email}
-                    </a>
+                    <CfSafeMailto email={active.email} className="underline" />
                   </dd>
                 </div>
               )}

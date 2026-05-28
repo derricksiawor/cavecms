@@ -4,6 +4,8 @@ import path from 'node:path'
 import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 import { db } from '@/db/client'
 import type { Tx } from '@/db/client'
 import { withError } from '@/lib/api/withError'
@@ -1018,6 +1020,13 @@ export const POST = withError(async (req: Request) => {
       // resolved /<slug>) which is exactly what a template wipe-and-
       // reseed needs.
       revalidatePath('/', 'layout')
+      // upsertSettingInTx() above wrote site_header + footer directly
+      // through the TX, bypassing the upsertSetting() helper that owns
+      // the tag-bust contract. Without this, the first paint of the
+      // public site after template pick renders with registry-default
+      // placeholders ("Your Site" + bare wordmark) until the 60 s
+      // getSetting() TTL expires.
+      safeRevalidate([tag.settings]).catch(() => undefined)
       // Post-commit: unlink the previous template's orphaned variant
       // files. The media rows are already gone; this just frees disk.
       // Best-effort — log on failure (operator's Media Library is

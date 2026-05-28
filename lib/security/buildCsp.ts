@@ -22,7 +22,18 @@ export interface IntegrationsCspFlags {
   hubspotTracking: boolean
 }
 
-export function buildCsp(nonce: string, isProd: boolean, integrations?: IntegrationsCspFlags): string {
+export function buildCsp(
+  nonce: string,
+  isProd: boolean,
+  integrations?: IntegrationsCspFlags,
+  // Suppress `upgrade-insecure-requests` for loopback / LAN hosts even
+  // in production. Safari uniquely upgrades every http://<host>:<port>
+  // asset to https on localhost when it sees this directive, leaving
+  // every page unstyled because the dev / install server has no TLS
+  // (cf. ~/.claude/CLAUDE.md #0.19). Production-domain installs leave
+  // this flag false → directive stays on, exactly as before.
+  skipUpgradeInsecure: boolean = false,
+): string {
   const scriptSrc = isProd
     ? [`'nonce-${nonce}'`, "'strict-dynamic'"]
     : [`'nonce-${nonce}'`, "'strict-dynamic'", "'unsafe-eval'"]
@@ -132,7 +143,7 @@ export function buildCsp(nonce: string, isProd: boolean, integrations?: Integrat
     "base-uri 'self'",
     "form-action 'self'",
   ]
-  if (isProd) directives.push('upgrade-insecure-requests')
+  if (isProd && !skipUpgradeInsecure) directives.push('upgrade-insecure-requests')
   return directives.join('; ')
 }
 

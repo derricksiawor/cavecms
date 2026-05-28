@@ -22,7 +22,16 @@ export function cookieFlags(maxAge: number) {
   return {
     httpOnly: true,
     secure: PROD,
-    sameSite: 'strict' as const,
+    // 'lax' (not 'strict') per ~/.claude/CLAUDE.md Security Standards:
+    // strict-sameSite blocks the cookie on cross-site top-level GET
+    // navigations, which silently breaks OAuth callbacks (Slack /
+    // Google / GitHub / Stripe Connect — anything that redirects
+    // back to our origin from the provider's authorize URL). CSRF
+    // protection comes from the dedicated CSRF middleware's
+    // double-submit token, not from SameSite. Lax keeps us safe
+    // against cross-site form-POST / fetch / iframe-load while
+    // permitting the OAuth top-level GET to carry our session.
+    sameSite: 'lax' as const,
     path: '/',
     maxAge,
   }
@@ -32,7 +41,16 @@ export function csrfCookieFlags(maxAge: number) {
   return {
     httpOnly: false, // CSRF cookie must be readable by JS for double-submit
     secure: PROD,
-    sameSite: 'strict' as const,
+    // 'lax' (not 'strict') per ~/.claude/CLAUDE.md Security Standards:
+    // strict-sameSite blocks the cookie on cross-site top-level GET
+    // navigations, which silently breaks OAuth callbacks (Slack /
+    // Google / GitHub / Stripe Connect — anything that redirects
+    // back to our origin from the provider's authorize URL). CSRF
+    // protection comes from the dedicated CSRF middleware's
+    // double-submit token, not from SameSite. Lax keeps us safe
+    // against cross-site form-POST / fetch / iframe-load while
+    // permitting the OAuth top-level GET to carry our session.
+    sameSite: 'lax' as const,
     path: '/',
     maxAge,
   }
@@ -49,7 +67,16 @@ export function jtiCookieFlags(maxAge: number) {
   return {
     httpOnly: false,
     secure: PROD,
-    sameSite: 'strict' as const,
+    // 'lax' (not 'strict') per ~/.claude/CLAUDE.md Security Standards:
+    // strict-sameSite blocks the cookie on cross-site top-level GET
+    // navigations, which silently breaks OAuth callbacks (Slack /
+    // Google / GitHub / Stripe Connect — anything that redirects
+    // back to our origin from the provider's authorize URL). CSRF
+    // protection comes from the dedicated CSRF middleware's
+    // double-submit token, not from SameSite. Lax keeps us safe
+    // against cross-site form-POST / fetch / iframe-load while
+    // permitting the OAuth top-level GET to carry our session.
+    sameSite: 'lax' as const,
     path: '/',
     maxAge,
   }

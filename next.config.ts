@@ -143,14 +143,12 @@ const config: NextConfig = {
   // Next 15.5's config validator on every startup. Switching middleware to
   // Web Crypto removed the need; the flag is dropped, the warning is gone.
   async headers() {
-    const isProd = process.env.NODE_ENV === 'production'
-    // HSTS is HTTPS-only. Sending it on the dev server (HTTP localhost) makes
-    // Safari pin localhost to HTTPS for `max-age` seconds — once cached, every
-    // subsequent dev session in Safari upgrades http://localhost:3040 to
-    // https://, the dev server has no TLS, every asset 404s, the page renders
-    // unstyled. Chrome ignores HSTS on localhost; Safari does not. Skip in dev.
-    // (project standards "Security Standards" — HSTS mandated in production; the
-    // skip is dev-only and does not affect the live site.)
+    // HSTS is intentionally NOT set here. It is host-gated in middleware
+    // so laptop / cpanel / LAN installs (NODE_ENV=production but served
+    // over plain HTTP on localhost / 127.0.0.1 / private IP) don't pin
+    // Safari to HTTPS and render every page unstyled. See
+    // middleware.ts (search "Strict-Transport-Security") and
+    // ~/.claude/CLAUDE.md #0.19 for the full mechanism.
     const securityHeaders = [
       { key: 'X-Content-Type-Options', value: 'nosniff' },
       { key: 'X-Frame-Options', value: 'DENY' },
@@ -159,12 +157,6 @@ const config: NextConfig = {
       { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
       { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
     ]
-    if (isProd) {
-      securityHeaders.push({
-        key: 'Strict-Transport-Security',
-        value: 'max-age=63072000; includeSubDomains; preload',
-      })
-    }
     return [{ source: '/(.*)', headers: securityHeaders }]
   },
 }

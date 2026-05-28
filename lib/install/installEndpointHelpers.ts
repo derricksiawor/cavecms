@@ -5,6 +5,8 @@ import { isInstalled } from '@/lib/install/installState'
 import { HttpError } from '@/lib/auth/requireRole'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 
 // Shared scaffolding for the install-wizard route handlers
 // (/api/install/{branding,contact,smtp,security-baseline,complete}).
@@ -131,6 +133,19 @@ export async function upsertSetting(key: string, value: unknown): Promise<void> 
       value = VALUES(value),
       version = version + 1
   `)
+  // getSetting() is tag-cached with `revalidate: 60`. Without this
+  // bust, /api/install/security-baseline writes the operator's
+  // custom LOGIN_PATH to the DB but every reader — including the
+  // loopback security-config endpoint that feeds middleware — keeps
+  // serving the pre-wizard env-default value for up to 60 seconds.
+  // The visible failure: the operator types their freshly-saved
+  // custom URL, middleware's stale loginPath doesn't match, so
+  // single-segment routing rewrites the URL to `/_page/<custom>`
+  // and returns 404. The wizard's "your hidden admin URL" copy is
+  // already on screen; trust evaporates on the first sign-in.
+  // Best-effort: catch unhandled rejections so the API still returns
+  // 200 even if the revalidation backend has a transient hiccup.
+  safeRevalidate([tag.settings]).catch(() => undefined)
 }
 
 export function okJson(body: Record<string, unknown> = { ok: true }): Response {

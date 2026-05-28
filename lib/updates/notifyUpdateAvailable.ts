@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { getSetting } from '@/lib/cms/getSettings'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 import {
   getTransporter,
   getFromHeader,
@@ -151,6 +153,7 @@ export async function notifyUpdateAvailable(latest: Raw): Promise<{
       value = VALUES(value),
       version = version + 1
   `)
+  safeRevalidate([tag.settings]).catch(() => undefined)
 
   try {
     await transporter.sendMail({

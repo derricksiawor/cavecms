@@ -28,6 +28,7 @@ import {
   acquireUpdateLock,
   releaseUpdateLock,
   lockIsStale,
+  getStatusPath,
 } from '@/lib/updates/statusFile'
 import {
   detectDetachMechanism,
@@ -446,10 +447,23 @@ export const POST = withError(async (req: Request) => {
   try {
     lockFd = acquireUpdateLock()
   } catch (err) {
-    // Distinguish "lock held" (EEXIST) from misconfiguration
-    // (path-allowlist throw). The former is operator-actionable; the
-    // latter is an env-config bug we should report distinctly.
+    // Three distinct failure shapes have to be told apart so the
+    // operator sees actionable copy:
+    //   - EEXIST  → another orchestrator already holds the lock;
+    //               drop through to the staleness check below.
+    //   - EACCES / EPERM → the runtime user can't write to the
+    //               resolved state directory (legacy install whose
+    //               /var/lib/cavecms isn't owned by www-data, or a
+    //               broken CAVECMS_STATE_DIR override). Surface as
+    //               `state_dir_not_writable` so the operator knows
+    //               where to look.
+    //   - anything else (most commonly the path-allowlist throw from
+    //               statusFile.ensureAllowedPath) → keep the historic
+    //               `status_path_invalid` shape for env misconfig.
     const code = (err as NodeJS.ErrnoException).code
+    if (code === 'EACCES' || code === 'EPERM') {
+      throw new HttpError(500, 'state_dir_not_writable')
+    }
     if (code !== 'EEXIST') {
       throw new HttpError(500, 'status_path_invalid')
     }
@@ -566,6 +580,16 @@ export const POST = withError(async (req: Request) => {
     //     the same one (no per-process re-probing).
     const detachMechanism = detectDetachMechanism()
     scriptEnv.CAVECMS_DETACH_MECHANISM = detachMechanism
+    // Force the child orchestrator to use the SAME status path the
+    // apply route just acquired the lock against. Without this, a
+    // legacy install whose env.production lacks both CAVECMS_STATE_DIR
+    // and CAVECMS_UPDATE_STATUS_PATH would have the Node side resolve
+    // the path via the install-root fallback (statusFile.ts) while the
+    // shell script falls through to /var/lib/cavecms/ — two writers,
+    // two paths, one orphaned lock that never clears.
+    if (!scriptEnv.CAVECMS_UPDATE_STATUS_PATH) {
+      scriptEnv.CAVECMS_UPDATE_STATUS_PATH = getStatusPath()
+    }
     const logFd = openSpawnLog()
 
     // Build the detach command for the chosen mechanism. The detail
