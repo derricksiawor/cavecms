@@ -1,8 +1,8 @@
 import 'server-only'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { HttpError } from './requireRole'
 import { REAUTH_COOKIE_NAME } from './cookie-names'
-import { cookieFlags } from './cookies'
+import { cookieFlags, isSecureFromHeaders } from './cookies'
 
 // Step-up reauth lifetime. 5 minutes is enough for an operator to
 // chain a small batch of sensitive ops (create user → set role →
@@ -37,8 +37,12 @@ const MAX_REAUTH_COOKIE_LEN = 128
 // would silently relax invariants on this cookie if a future change
 // updated `cookieFlags()` (e.g. priority: 'high') without remembering
 // to update this one. The reauth cookie's TTL is its only override.
-function reauthCookieFlags(): ReturnType<typeof cookieFlags> {
-  return cookieFlags(REAUTH_TTL_SEC)
+async function reauthCookieFlags(): Promise<ReturnType<typeof cookieFlags>> {
+  // Secure tracks the request protocol (see isSecureRequest) so the
+  // step-up cookie stores on http://localhost installs. headers() is
+  // request-scoped — both callers run in a route handler / server action.
+  const secure = isSecureFromHeaders(await headers())
+  return cookieFlags(REAUTH_TTL_SEC, secure)
 }
 
 // Sets the reauth cookie tying the freshness window to the current
@@ -47,7 +51,7 @@ function reauthCookieFlags(): ReturnType<typeof cookieFlags> {
 export async function setFreshReauth(jti: string): Promise<void> {
   const c = await cookies()
   const value = `${jti}.${Math.floor(Date.now() / 1000)}`
-  c.set(REAUTH_COOKIE_NAME, value, reauthCookieFlags())
+  c.set(REAUTH_COOKIE_NAME, value, await reauthCookieFlags())
 }
 
 // Explicitly clears the reauth cookie. Used by the logout flow so a
@@ -55,7 +59,7 @@ export async function setFreshReauth(jti: string): Promise<void> {
 // reauth window minted for a different user.
 export async function clearReauthCookie(): Promise<void> {
   const c = await cookies()
-  c.set(REAUTH_COOKIE_NAME, '', { ...reauthCookieFlags(), maxAge: 0 })
+  c.set(REAUTH_COOKIE_NAME, '', { ...(await reauthCookieFlags()), maxAge: 0 })
 }
 
 // Throws HttpError(401, 'reauth_required') unless the user has

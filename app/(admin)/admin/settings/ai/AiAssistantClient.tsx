@@ -37,11 +37,11 @@ interface AiConfigDraft {
 }
 
 const MODEL_LABELS: Record<(typeof AI_MODEL_IDS)[number], string> = {
-  'gemini-2.5-flash': 'Gemini 2.5 Flash — fast, GA',
-  'gemini-2.5-pro': 'Gemini 2.5 Pro — capable, GA',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash — fast',
+  'gemini-2.5-pro': 'Gemini 2.5 Pro — capable',
   'gemini-3-flash-preview': 'Gemini 3 Flash — preview',
   'gemini-3.1-pro-preview': 'Gemini 3 Pro — preview',
-  'gemini-3.5-flash': 'Gemini 3.5 Flash — newest, GA',
+  'gemini-3.5-flash': 'Gemini 3.5 Flash — newest',
 }
 
 const VOICE_LABELS: Record<AiConfigDraft['voicePreset'], string> = {

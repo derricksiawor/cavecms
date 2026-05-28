@@ -3,7 +3,7 @@ import { withError } from '@/lib/api/withError'
 import { requireAuth } from '@/lib/auth/requireRole'
 import { issueCsrf } from '@/lib/auth/csrf'
 import { rateLimit } from '@/lib/auth/rateLimit'
-import { CSRF_COOKIE, csrfCookieFlags } from '@/lib/auth/cookies'
+import { CSRF_COOKIE, csrfCookieFlags, isSecureFromHeaders } from '@/lib/auth/cookies'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { getSetting } from '@/lib/cms/getSettings'
 
@@ -26,7 +26,7 @@ export const GET = withError(async () => {
   const csrf = await issueCsrf({ jti: ctx.jti, sub: String(ctx.userId) })
   const c = await cookies()
   const sessCfg = await getSetting('session_config')
-  c.set(CSRF_COOKIE, csrf, csrfCookieFlags(sessCfg.csrfTtlSec))
+  c.set(CSRF_COOKIE, csrf, csrfCookieFlags(sessCfg.csrfTtlSec, isSecureFromHeaders(h)))
   return new Response(JSON.stringify({ csrf }), {
     status: 200,
     headers: { 'cache-control': 'private, no-store' },

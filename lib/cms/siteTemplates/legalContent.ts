@@ -91,8 +91,8 @@ export const PRIVACY_SECTIONS: SectionSpec[] = [
     kind: 'section',
     meta: { columns: 1, background: 'ivory', padding: 'md' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Legal', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Privacy Policy', level: 'h1', size: 'display-xl', alignment: 'left', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Legal', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Privacy Policy', level: 'h1', size: 'display-xl', alignment: 'center', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
       { kind: 'widget', blockType: 'lx_text', data: { body_richtext: PRIVACY_BODY, size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
     ] }],
   },
@@ -103,8 +103,8 @@ export const TERMS_SECTIONS: SectionSpec[] = [
     kind: 'section',
     meta: { columns: 1, background: 'ivory', padding: 'md' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Legal', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Terms of Service', level: 'h1', size: 'display-xl', alignment: 'left', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Legal', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Terms of Service', level: 'h1', size: 'display-xl', alignment: 'center', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
       { kind: 'widget', blockType: 'lx_text', data: { body_richtext: TERMS_BODY, size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
     ] }],
   },

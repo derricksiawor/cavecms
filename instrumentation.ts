@@ -122,33 +122,16 @@ export async function register(): Promise<void> {
     process.exit(1)
   }
 
-  // __Host- cookie prefix assertion. The `__Host-` prefix is the
-  // strongest browser-side defence against subdomain / domain-scope
-  // cookie shadowing — a misconfigured prod box that drops the prefix
-  // (NODE_ENV ≠ 'production') would mint plain `cavecms_session` cookies
-  // with no prefix, leaving a Cookie-Tossing attack open. Refuse to
-  // boot rather than silently serving in the weaker shape.
-  if (env.NODE_ENV === 'production') {
-    const { SESSION_COOKIE_NAME, CSRF_COOKIE_NAME } = await import(
-      '@/lib/auth/cookie-names'
-    )
-    if (
-      !SESSION_COOKIE_NAME.startsWith('__Host-') ||
-      !CSRF_COOKIE_NAME.startsWith('__Host-')
-    ) {
-      console.error(
-        JSON.stringify({
-          level: 'fatal',
-          msg: 'cookie_prefix_missing',
-          session: SESSION_COOKIE_NAME,
-          csrf: CSRF_COOKIE_NAME,
-          reason:
-            'Production session / CSRF cookies must carry the __Host- prefix. Check lib/auth/cookie-names.ts IS_PROD flag.',
-        }),
-      )
-      process.exit(1)
-    }
-  }
+  // (Removed) __Host- cookie-prefix boot assertion. CaveCMS now uses
+  // plain cookie names with the `Secure` attribute gated on the request
+  // protocol (see lib/auth/cookie-names.ts + cookies.ts isSecureRequest).
+  // The `__Host-` prefix forced `Secure`, which browsers refuse to store
+  // over plain HTTP — breaking login on every http://localhost / LAN
+  // install (which run NODE_ENV=production). The prefix's only unique
+  // protection (rejecting a Domain-scoped same-named cookie) is relevant
+  // solely to a related-domain attacker controlling a sibling subdomain;
+  // every other guarantee (httpOnly, Secure-on-HTTPS, SameSite=lax,
+  // host-only, signed+revocable JWT) is retained.
 
   const { readFile } = await import('node:fs/promises')
   const path = await import('node:path')

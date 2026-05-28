@@ -32,9 +32,12 @@ import {
 // optimisation for the route-handler path that emits the 401 response.
 function tryClearRevocationCookies(c: Awaited<ReturnType<typeof cookies>>): void {
   try {
-    c.set(SESSION_COOKIE, '', cookieFlags(0))
-    c.set(JTI_COOKIE, '', jtiCookieFlags(0))
-    c.set(CSRF_COOKIE, '', csrfCookieFlags(0))
+    // Cookies are plain-named (no `__Host-`), so deletion matches on
+    // name+path+domain regardless of the Secure attribute — passing
+    // secure=false here clears them on both HTTP and HTTPS installs.
+    c.set(SESSION_COOKIE, '', cookieFlags(0, false))
+    c.set(JTI_COOKIE, '', jtiCookieFlags(0, false))
+    c.set(CSRF_COOKIE, '', csrfCookieFlags(0, false))
   } catch {
     // RSC contexts can't mutate cookies — swallow silently. Cookies
     // expire naturally on their Max-Age; the next route-handler call

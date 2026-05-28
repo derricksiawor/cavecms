@@ -1,27 +1,51 @@
 import 'server-only'
 import {
-  IS_PROD as PROD,
   SESSION_COOKIE_NAME,
   CSRF_COOKIE_NAME,
   EDIT_MODE_COOKIE_NAME,
   JTI_COOKIE_NAME,
 } from './cookie-names'
 
-// __Host- cookies require Secure=true; browsers reject them otherwise.
-// In production we use the prefix for defence-in-depth; in dev we drop
-// it so http://localhost works without TLS. PROD reads through the
-// shared `IS_PROD` flag in cookie-names.ts so the prefix decision and
-// the secure-flag decision can't drift.
+// Cookie names are plain (no `__Host-` prefix) — see cookie-names.ts.
+// The `Secure` attribute is set per-request based on the actual
+// protocol: HTTPS requests (production behind nginx/Cloudflare) get
+// Secure cookies; HTTP requests (localhost / LAN / dev) get non-Secure
+// cookies the browser will actually store. Callers resolve the flag via
+// isSecureRequest / isSecureFromHeaders and pass it in. NODE_ENV is
+// deliberately NOT used — an http://localhost install runs
+// NODE_ENV=production but must use non-Secure cookies.
 
 export const SESSION_COOKIE = SESSION_COOKIE_NAME
 export const CSRF_COOKIE = CSRF_COOKIE_NAME
 export const EDIT_MODE_COOKIE = EDIT_MODE_COOKIE_NAME
 export const JTI_COOKIE = JTI_COOKIE_NAME
 
-export function cookieFlags(maxAge: number) {
+// Is this request served over HTTPS? Behind a reverse proxy the edge
+// terminates TLS and forwards `X-Forwarded-Proto: https`; a direct
+// http://localhost install sends no such header and its URL is http.
+export function isSecureRequest(req: { headers: Headers; url?: string }): boolean {
+  const xfp = req.headers.get('x-forwarded-proto')
+  if (xfp) return xfp.split(',')[0]!.trim().toLowerCase() === 'https'
+  if (req.url) {
+    try {
+      return new URL(req.url).protocol === 'https:'
+    } catch {
+      /* malformed URL — fall through */
+    }
+  }
+  return false
+}
+
+// Same determination from a bare Headers bag (next/headers contexts).
+export function isSecureFromHeaders(h: Headers): boolean {
+  const xfp = h.get('x-forwarded-proto')
+  return xfp ? xfp.split(',')[0]!.trim().toLowerCase() === 'https' : false
+}
+
+export function cookieFlags(maxAge: number, secure: boolean) {
   return {
     httpOnly: true,
-    secure: PROD,
+    secure,
     // 'lax' (not 'strict') per ~/.claude/CLAUDE.md Security Standards:
     // strict-sameSite blocks the cookie on cross-site top-level GET
     // navigations, which silently breaks OAuth callbacks (Slack /
@@ -37,10 +61,10 @@ export function cookieFlags(maxAge: number) {
   }
 }
 
-export function csrfCookieFlags(maxAge: number) {
+export function csrfCookieFlags(maxAge: number, secure: boolean) {
   return {
     httpOnly: false, // CSRF cookie must be readable by JS for double-submit
-    secure: PROD,
+    secure,
     // 'lax' (not 'strict') per ~/.claude/CLAUDE.md Security Standards:
     // strict-sameSite blocks the cookie on cross-site top-level GET
     // navigations, which silently breaks OAuth callbacks (Slack /
@@ -63,10 +87,10 @@ export function csrfCookieFlags(maxAge: number) {
 // served same-origin). Max-Age must come from the JWT's actual
 // `exp - iat` (see signSessionJwt return shape) rather than a bare
 // JWT_TTL_SECONDS — see spec §3.5 cookie-Max-Age-fix.
-export function jtiCookieFlags(maxAge: number) {
+export function jtiCookieFlags(maxAge: number, secure: boolean) {
   return {
     httpOnly: false,
-    secure: PROD,
+    secure,
     // 'lax' (not 'strict') per ~/.claude/CLAUDE.md Security Standards:
     // strict-sameSite blocks the cookie on cross-site top-level GET
     // navigations, which silently breaks OAuth callbacks (Slack /

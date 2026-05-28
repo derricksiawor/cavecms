@@ -16,7 +16,7 @@ import {
 } from '@/lib/security/recaptcha'
 import { getSetting } from '@/lib/cms/getSettings'
 import { withError } from '@/lib/api/withError'
-import { SESSION_COOKIE, CSRF_COOKIE, JTI_COOKIE, cookieFlags, csrfCookieFlags, jtiCookieFlags } from '@/lib/auth/cookies'
+import { SESSION_COOKIE, CSRF_COOKIE, JTI_COOKIE, cookieFlags, csrfCookieFlags, jtiCookieFlags, isSecureRequest } from '@/lib/auth/cookies'
 import { env } from '@/lib/env'
 
 const MAX_PASSWORD_LEN = 256
@@ -248,12 +248,15 @@ export const POST = withError(async (req: Request) => {
   // session-cookie-outlives-JWT footgun for any caller that reuses
   // `signSessionJwt` for a renewal (none exist today; defence in
   // depth). Spec §3.5 cookie-Max-Age-fix.
-  c.set(SESSION_COOKIE, token, cookieFlags(exp - iat))
+  // Secure flag tracks the request protocol so http://localhost installs
+  // store the cookie (Safari refuses Secure cookies over HTTP).
+  const secure = isSecureRequest(req)
+  c.set(SESSION_COOKIE, token, cookieFlags(exp - iat, secure))
   // CSRF cookie Max-Age comes from DB-stored session_config.
   const { getSetting: getSettingForCookies } = await import('@/lib/cms/getSettings')
   const csrfCookieTtl = (await getSettingForCookies('session_config')).csrfTtlSec
-  c.set(CSRF_COOKIE, csrfToken, csrfCookieFlags(csrfCookieTtl))
-  c.set(JTI_COOKIE, jti, jtiCookieFlags(exp - iat))
+  c.set(CSRF_COOKIE, csrfToken, csrfCookieFlags(csrfCookieTtl, secure))
+  c.set(JTI_COOKIE, jti, jtiCookieFlags(exp - iat, secure))
 
   // Fire-and-forget update check for admins. Warms the 5-minute
   // in-memory release cache so the dashboard's next-page-load is

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { withError } from '@/lib/api/withError'
 import { requireRole } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { EDIT_MODE_COOKIE, cookieFlags } from '@/lib/auth/cookies'
+import { EDIT_MODE_COOKIE, cookieFlags, isSecureRequest } from '@/lib/auth/cookies'
 
 const Body = z.object({ on: z.boolean() })
 
@@ -20,8 +20,9 @@ export const POST = withError(async (req: Request) => {
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   const { on } = Body.parse(await req.json())
   const c = await cookies()
+  const secure = isSecureRequest(req)
   if (on) {
-    c.set(EDIT_MODE_COOKIE, '1', cookieFlags(EDIT_MODE_TTL_SECONDS))
+    c.set(EDIT_MODE_COOKIE, '1', cookieFlags(EDIT_MODE_TTL_SECONDS, secure))
   } else {
     // `cookies().delete(name)` emits a bare deletion cookie without
     // Secure/Path/SameSite. The production cookie is `__Host-cavecms_edit_mode`
@@ -30,7 +31,7 @@ export const POST = withError(async (req: Request) => {
     // rejects the deletion. Result: cookie persists, page stays editable.
     // Setting an empty value with maxAge=0 and the same flag set as the
     // original cookie guarantees the browser recognises the deletion.
-    c.set(EDIT_MODE_COOKIE, '', cookieFlags(0))
+    c.set(EDIT_MODE_COOKIE, '', cookieFlags(0, secure))
   }
   return new Response(JSON.stringify({ on }), {
     status: 200,

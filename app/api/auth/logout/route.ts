@@ -6,7 +6,7 @@ import { withError } from '@/lib/api/withError'
 import { requireAuth } from '@/lib/auth/requireRole'
 import { verifyCsrf } from '@/lib/auth/csrf'
 import { invalidateUser } from '@/lib/auth/userCache'
-import { SESSION_COOKIE, CSRF_COOKIE, JTI_COOKIE, cookieFlags, csrfCookieFlags, jtiCookieFlags } from '@/lib/auth/cookies'
+import { SESSION_COOKIE, CSRF_COOKIE, JTI_COOKIE, cookieFlags, csrfCookieFlags, jtiCookieFlags, isSecureRequest } from '@/lib/auth/cookies'
 import { clearReauthCookie } from '@/lib/auth/reauth'
 
 const csrfInvalid = (): Response =>
@@ -45,14 +45,15 @@ export const POST = withError(async (req: Request) => {
   // Clear cookies with the SAME attributes used at set-time. __Host- cookies
   // require the deletion Set-Cookie to also carry Path=/ and Secure;
   // otherwise the browser ignores the deletion.
-  c.set(SESSION_COOKIE, '', cookieFlags(0))
-  c.set(CSRF_COOKIE, '', csrfCookieFlags(0))
+  const secure = isSecureRequest(req)
+  c.set(SESSION_COOKIE, '', cookieFlags(0, secure))
+  c.set(CSRF_COOKIE, '', csrfCookieFlags(0, secure))
   // Clear the pages-CMS jti companion cookie alongside the session. Without
   // this, a follow-up login on the same browser would briefly inherit the
   // prior session's jti (the cookie persists until natural expiry), and the
   // FE's HKDF derivation would key off a stale value before the next page
   // navigation refreshes the cookie. Belt + braces — see spec §3.5.
-  c.set(JTI_COOKIE, '', jtiCookieFlags(0))
+  c.set(JTI_COOKIE, '', jtiCookieFlags(0, secure))
   // Clear the step-up reauth cookie alongside session + csrf.
   // Without this, a follow-up login on the same browser inherits an
   // unexpired reauth window minted for the previous user — step-up
