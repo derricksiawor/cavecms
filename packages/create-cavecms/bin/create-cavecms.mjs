@@ -336,6 +336,15 @@ async function ask(rl, prompt, opts = {}) {
 async function askSecret(rl, prompt, opts = {}) {
   // Hide input via stdin manipulation. Falls back to plain readline
   // when stdin isn't a TTY (CI / piped input).
+  //
+  // CRITICAL: do NOT call process.stdin.pause() when this resolves.
+  // The shared readline `rl` keeps prompting for DB name, site URL,
+  // etc. after the password — pausing stdin yanks the TTY listener
+  // readline depends on, the next rl.question() never sees input, the
+  // event loop empties, and Node exits silently mid-install (looks
+  // like "install just exited" to the operator). Restoring raw mode
+  // off + detaching our own listener is enough; readline picks up
+  // where it left off.
   if (!process.stdin.isTTY) {
     return ask(rl, prompt, opts)
   }
@@ -351,13 +360,11 @@ async function askSecret(rl, prompt, opts = {}) {
           // operator's shell doesn't end up with raw mode + no echo.
           process.stdin.setRawMode(false)
           process.stdin.removeListener('data', onData)
-          process.stdin.pause()
           process.stdout.write('\n')
           process.exit(130)
         } else if (c0 === '\r' || c0 === '\n') {
           process.stdin.setRawMode(false)
           process.stdin.removeListener('data', onData)
-          process.stdin.pause()
           process.stdout.write('\n')
           resolveP(answer)
           return
@@ -748,9 +755,14 @@ async function fetchToFile(url, destPath) {
   // Native fetch (Node 20+) for the manifest. For the zip we use curl
   // — fetch streams ArrayBuffer into memory, which would be 70+ MiB
   // residents for the zip. curl with `-o` writes to disk directly.
+  //
+  // 60-second cap covers slow international links to the manifest
+  // (a few KiB) without hanging forever if DNS / TLS stalls. Node's
+  // fetch has no default timeout otherwise.
   const r = await fetch(url, {
     redirect: 'follow',
     headers: { 'User-Agent': 'create-cavecms' },
+    signal: AbortSignal.timeout(60_000),
   })
   if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText} fetching ${url}`)
   const buf = Buffer.from(await r.arrayBuffer())
@@ -760,11 +772,23 @@ async function fetchToFile(url, destPath) {
 
 function fetchToFileViaCurl(url, destPath) {
   // -fsSL: fail-on-error, silent, show-errors, follow-redirects.
-  // --max-time 600: 10-minute cap so a slow link doesn't hang the
-  // installer indefinitely.
+  // --max-time 1800: 30-minute cap so a slow international link can
+  //   still finish a ~70 MiB zip (10-minute cap required ≥117 KB/s,
+  //   which broke for some operators).
+  // --retry 2 + --retry-delay 5: cover transient HTTP/2 GOAWAY +
+  //   network blips without bothering the operator.
+  // --connect-timeout 30: don't hang forever on DNS / SYN failures.
   const res = spawnSync(
     'curl',
-    ['-fsSL', '--max-time', '600', '--output', destPath, url],
+    [
+      '-fsSL',
+      '--connect-timeout', '30',
+      '--max-time', '1800',
+      '--retry', '2',
+      '--retry-delay', '5',
+      '--output', destPath,
+      url,
+    ],
     { stdio: ['ignore', 'inherit', 'inherit'] },
   )
   if (res.status !== 0) {
