@@ -342,6 +342,20 @@ p{
 
 const SINGLE_SEGMENT_RE = /^\/([^/]+)$/
 
+// Internal render-route prefix. Previously `/_page/...` — the
+// underscore-prefixed path triggered Next.js 15's private-folder
+// runtime filter on the standalone build (issue vercel/next.js#82043
+// + adjacent behaviour): the dynamic-route matcher silently refuses
+// any URL whose first segment starts with `_`, even when the routes
+// manifest registers it. Middleware rewrites to /_page/<slug> would
+// be ignored, every CMS slug 404'd with an empty body, and Safari
+// content-sniffed the bodyless response as a binary attachment
+// (downloading the URL instead of rendering 404 HTML). Renamed to
+// `/cms-render/...` — non-underscore-prefixed, won't collide with any
+// realistic operator slug (kebab + the literal segment 'cms-render'
+// is in RESERVED), and dispatches to `app/cms-render/[slug]/page.tsx`.
+const CMS_RENDER_PREFIX = '/cms-render'
+
 function refuseInternalPageRoute(pathname: string): NextResponse | null {
   let decoded: string
   try {
@@ -349,7 +363,10 @@ function refuseInternalPageRoute(pathname: string): NextResponse | null {
   } catch {
     return new NextResponse(null, { status: 400 })
   }
-  if (decoded === '/_page' || decoded.startsWith('/_page/')) {
+  if (
+    decoded === CMS_RENDER_PREFIX ||
+    decoded.startsWith(`${CMS_RENDER_PREFIX}/`)
+  ) {
     return new NextResponse(null, { status: 404 })
   }
   return null
@@ -365,7 +382,7 @@ function maybeRewriteToPageRoute(pathname: string, loginPathLower: string): stri
   if (RESERVED.has(lowered)) return null
   if (loginPathLower && lowered === loginPathLower) return null
   if (!SLUG_RE.test(captured)) return null
-  return `/_page/${captured}`
+  return `${CMS_RENDER_PREFIX}/${captured}`
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {

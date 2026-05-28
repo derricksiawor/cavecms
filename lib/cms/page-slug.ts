@@ -32,6 +32,7 @@ export const RESERVED: ReadonlySet<string> = new Set([
   '_next',
   '_vercel',
   '_page',
+  'cms-render',
   '_shared',
   'static',
   'public',
