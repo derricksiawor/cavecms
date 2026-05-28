@@ -3,10 +3,10 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
-  coverImage,
   ctaBanner,
   figure,
   hero,
+  heroCover,
   imagePair,
   oneCol,
   threeColCards,
@@ -69,26 +69,14 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'A six-person design studio. Brand systems, websites, packaging. Eleven years, ninety-four clients.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'home-hero-workspace',
-            alt: 'A sun-streaked Studio Verde workspace with design tools, sketches, and references spread across a wooden worktable.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'home-hero-workspace',
+          alt: 'A sun-streaked Studio Verde workspace with design tools, sketches, and references spread across a wooden worktable.',
           eyebrow: 'Studio Verde',
           title: 'Brands that move people.',
           body: 'A six-person studio working in three rooms above a bookshop. We build brand systems, websites, and packaging — usually all three for the same client. Eleven years, ninety-four projects.',
           cta: { label: 'See our work', href: '/work' },
-          secondaryCta: { label: 'How we work', href: '/process' },
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -191,24 +179,13 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'Selected work from Studio Verde — brand systems, websites, packaging.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'work-case-1',
-            alt: 'A branding identity system spread on a worktable — stationery mockups, colour cards, and printed collateral.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'work-case-1',
+          alt: 'A branding identity system spread on a worktable — stationery mockups, colour cards, and printed collateral.',
           eyebrow: 'Selected work',
           title: 'A small portfolio, carefully kept.',
           body: 'Twelve projects, of the ninety-four we have done. Picked because they show what we do at the studio’s best.',
+          minHeight: 'xl',
         }),
 
         // Pair: packaging + editorial — two case-study textures.
@@ -396,25 +373,13 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'Six people, three rooms above a bookshop, eleven years.',
       sections: [
-        oneCol(
-          'cream',
-          'sm',
-          coverImage({
-            imageKey: 'team-founder',
-            alt: 'A warm, considered portrait of a Studio Verde founder in soft natural light.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'none',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        heroCover({
+          imageKey: 'team-founder',
+          alt: 'A warm, considered portrait of a Studio Verde founder in soft natural light.',
           eyebrow: 'About the studio',
           title: 'Six people. Three rooms. Eleven years.',
           body: 'Studio Verde was founded in 2014 by Esther Loomis and Tobias Greene. It has stayed deliberately small — there are six of us now, the same as in 2018. We work above a bookshop, and we keep one client meeting room with no screens.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         // Studio detail figure — the considered objects in the room.
@@ -482,24 +447,13 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'Send us a note about your project. We take on one new project per month.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'contact-window',
-            alt: 'Soft morning light streaming through a tall studio window with a city view in the distance.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'contact-window',
+          alt: 'Soft morning light streaming through a tall studio window with a city view in the distance.',
           eyebrow: 'Start a project',
           title: 'Tell us what you’re building.',
           body: 'We take on one new project per month. A note of two paragraphs is plenty — what the company does, what the project is, when you want to start, the budget if you have one. We answer every enquiry within one business day.',
+          minHeight: 'xl',
         }),
 
         contactChannels({

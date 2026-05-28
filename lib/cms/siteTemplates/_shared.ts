@@ -27,7 +27,7 @@ export type SectionBackground =
   | 'bone'
   | 'charcoal'
 
-export type SectionPadding = 'sm' | 'md' | 'lg' | 'xl' | '2xl'
+export type SectionPadding = 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
 
 export type Tone = 'obsidian' | 'ivory' | 'champagne' | 'warm-stone' | 'bone'
 
@@ -664,18 +664,40 @@ export function coverImage(opts: {
   minHeight?: 'none' | 'sm' | 'md' | 'lg' | 'xl' | 'screen'
   overlay?: 'none' | 'darken' | 'darken-strong' | 'gradient-bottom' | 'champagne'
   animation?: 'none' | 'fade-in' | 'parallax'
+  /** Optional editorial overlay text — turns a pure-image cover into
+   *  a hero with eyebrow + title + body + CTA painted over the
+   *  photo. Pair with `overlay: 'darken'` or `'gradient-bottom'` for
+   *  legibility on bright photos. */
+  eyebrow?: string
+  title?: string
+  body?: string
+  cta?: { label: string; href: string }
+  overlayAlignment?:
+    | 'top-left'
+    | 'top-center'
+    | 'top-right'
+    | 'center-left'
+    | 'center'
+    | 'center-right'
+    | 'bottom-left'
+    | 'bottom-center'
+    | 'bottom-right'
+  overlayTone?: 'ivory' | 'obsidian'
 }): WidgetSpec {
+  const data: Record<string, unknown> = {
+    ratio: opts.ratio ?? '21:9',
+    minHeight: opts.minHeight ?? 'lg',
+    overlay: opts.overlay ?? 'none',
+    animation: opts.animation ?? 'fade-in',
+    eyebrow: opts.eyebrow ?? '',
+    title: opts.title ?? '',
+    body: opts.body ?? '',
+    cta: opts.cta ?? null,
+    overlayAlignment: opts.overlayAlignment ?? 'bottom-left',
+    overlayTone: opts.overlayTone ?? 'ivory',
+  }
   return withImageKeys(
-    {
-      kind: 'widget',
-      blockType: 'lx_cover_image',
-      data: {
-        ratio: opts.ratio ?? '21:9',
-        minHeight: opts.minHeight ?? 'lg',
-        overlay: opts.overlay ?? 'none',
-        animation: opts.animation ?? 'fade-in',
-      },
-    },
+    { kind: 'widget', blockType: 'lx_cover_image', data },
     { image: { imageKey: opts.imageKey, alt: opts.alt } },
   )
 }
@@ -755,6 +777,65 @@ export function imagePair(opts: {
  * copy independently through the admin UI, and so the cover image
  * block stays a single-responsibility primitive.
  */
+/**
+ * Cover-image hero in a single flush section. Combines a full-bleed
+ * photo + editorial text overlay (eyebrow / title / body / CTA) in
+ * one widget, anchored to the section's TOP with zero vertical
+ * padding so the photo sits flush against the site header.
+ *
+ * Replaces the older `coverImage(...) + hero(...)` two-section pattern
+ * the templates shipped through 0.1.42 — that pair painted a 32–40px
+ * dead band of section background between the header and the photo,
+ * and left the photo without any text overlay. Templates from 0.1.43
+ * onward use this helper for their first-impression cover.
+ */
+export function heroCover(opts: {
+  imageKey: string
+  alt: string
+  background?: SectionBackground
+  ratio?: '21:9' | '16:9' | '4:3' | '3:2' | '4:5' | 'auto'
+  minHeight?: 'none' | 'sm' | 'md' | 'lg' | 'xl' | 'screen'
+  overlay?: 'none' | 'darken' | 'darken-strong' | 'gradient-bottom' | 'champagne'
+  animation?: 'none' | 'fade-in' | 'parallax'
+  eyebrow?: string
+  title?: string
+  body?: string
+  cta?: { label: string; href: string }
+  overlayAlignment?:
+    | 'top-left'
+    | 'top-center'
+    | 'top-right'
+    | 'center-left'
+    | 'center'
+    | 'center-right'
+    | 'bottom-left'
+    | 'bottom-center'
+    | 'bottom-right'
+  overlayTone?: 'ivory' | 'obsidian'
+}): SectionSpec {
+  return oneCol(
+    opts.background ?? 'obsidian',
+    'none',
+    coverImage({
+      imageKey: opts.imageKey,
+      alt: opts.alt,
+      ratio: opts.ratio ?? '21:9',
+      minHeight: opts.minHeight ?? 'lg',
+      // Default to gradient-bottom — gives the bottom-left overlay
+      // block enough contrast on any photo without darkening the
+      // whole image flat.
+      overlay: opts.overlay ?? 'gradient-bottom',
+      animation: opts.animation ?? 'fade-in',
+      eyebrow: opts.eyebrow,
+      title: opts.title,
+      body: opts.body,
+      cta: opts.cta,
+      overlayAlignment: opts.overlayAlignment ?? 'bottom-left',
+      overlayTone: opts.overlayTone ?? 'ivory',
+    }),
+  )
+}
+
 export function heroWithImage(opts: {
   imageKey: string
   alt: string

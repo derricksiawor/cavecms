@@ -3,10 +3,10 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
-  coverImage,
   ctaBanner,
   figure,
   hero,
+  heroCover,
   imagePair,
   oneCol,
   statRow,
@@ -70,26 +70,15 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'A modern engineering operations platform. Plan, ship, measure. Built for teams that want fewer meetings.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'home-hero-abstract',
-            alt: 'An abstract dark blue circuit board macro with glowing nodes and fibre-optic light trails.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken-strong',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'home-hero-abstract',
+          alt: 'An abstract dark blue circuit board macro with glowing nodes and fibre-optic light trails.',
           eyebrow: 'Engineering operations',
           title: 'Faster than yesterday.',
           body: 'Plan, ship, and measure work in one tool. Fifty-eight integrations, a real CLI, an API that returns within ninety milliseconds. Built for teams that want fewer meetings and more deploys.',
           cta: { label: 'Start free', href: '/pricing' },
-          secondaryCta: { label: 'Read the docs', href: '/docs' },
+          minHeight: 'xl',
+          overlay: 'darken-strong',
         }),
 
         ...threeColCards({
@@ -295,24 +284,13 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'Three plans — Free, Team, and Enterprise. Most teams stay on Team for the first three years.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'pricing-office',
-            alt: 'A modern minimalist office workspace with wooden furniture and soft daylight — the kind of team Velocity is built for.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'pricing-office',
+          alt: 'A modern minimalist office workspace with wooden furniture and soft daylight — the kind of team Velocity is built for.',
           eyebrow: 'Pricing',
           title: 'Three plans, no surprises.',
           body: 'Pricing is per seat, per month, billed annually. We do not charge for storage, integrations, or API calls. There is no "contact us for pricing" tier — Enterprise is listed at $48 a seat and we will tell you what is in it before you ask.',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -390,24 +368,13 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'Every change to Velocity, ordered by date. Written by the engineers who shipped them.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'changelog-kanban',
-            alt: 'A whiteboard covered in coloured sticky notes arranged into columns — kanban-style task tracking.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'changelog-kanban',
+          alt: 'A whiteboard covered in coloured sticky notes arranged into columns — kanban-style task tracking.',
           eyebrow: 'Changelog',
           title: 'Every ship, in plain words.',
           body: 'A weekly post, written by the engineers who shipped the work. Major versions get their own page; the highlights live here.',
+          minHeight: 'xl',
         }),
 
         // Trust-security figure — between the changelog cards and the
@@ -470,25 +437,14 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'How to get started with Velocity. Onboarding, integrations, API reference, CLI reference, migration guides.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'docs-code',
-            alt: 'Close-up of a code editor screen with syntax-highlighted source code on a dark background.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'docs-code',
+          alt: 'Close-up of a code editor screen with syntax-highlighted source code on a dark background.',
           eyebrow: 'Documentation',
           title: 'How to use Velocity.',
           body: 'Six guides for new teams, fifty-eight integration recipes, the full API reference, and a CLI reference. Everything you need to bring a team in within a week.',
           cta: { label: 'Get the CLI', href: '/docs#cli' },
+          minHeight: 'xl',
         }),
 
         ...threeColCards({

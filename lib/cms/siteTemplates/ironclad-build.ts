@@ -3,10 +3,10 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
-  coverImage,
   ctaBanner,
   figure,
   hero,
+  heroCover,
   imagePair,
   oneCol,
   statRow,
@@ -69,26 +69,14 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'A boutique general contractor. Whole-home renovations, additions, ground-up builds. Two crews, twenty-eight years.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'home-hero-site',
-            alt: 'Construction crew silhouettes against a warm dusk sky with steel scaffolding framing the worksite.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'home-hero-site',
+          alt: 'Construction crew silhouettes against a warm dusk sky with steel scaffolding framing the worksite.',
           eyebrow: 'Ironclad Build',
           title: 'Done. Properly.',
           body: 'A boutique general contractor of two crews and a project manager who answers his phone. Whole-home renovations, additions, ground-up builds. Twenty-eight years in business, every job on the schedule we promised.',
           cta: { label: 'Request a quote', href: '/quote' },
-          secondaryCta: { label: 'See past projects', href: '/projects' },
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -165,24 +153,13 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Whole-home renovations, additions, ground-up builds, kitchen and bath, and the small specialty work that holds the rest together.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'services-commercial',
-            alt: 'A completed modern commercial building exterior at dusk — clean lines of steel, glass, and concrete catching the last warm light.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'services-commercial',
+          alt: 'A completed modern commercial building exterior at dusk — clean lines of steel, glass, and concrete catching the last warm light.',
           eyebrow: 'Services',
           title: 'What the crews do.',
           body: 'Two crews, one of them led by Mateo Vega (twenty-two years with the firm), the other by Lara Bishop (eleven). Both are general contractors with the full insurance and bonds. Same shape of work, same standards.',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -256,24 +233,13 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Selected projects from twenty-eight years of building. Whole-home renovations, additions, new builds.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'projects-progress',
-            alt: 'A work-in-progress build with exposed wood framing, partial roof structure and a crane silhouette in the background.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'projects-progress',
+          alt: 'A work-in-progress build with exposed wood framing, partial roof structure and a crane silhouette in the background.',
           eyebrow: 'Selected projects',
           title: 'A few we are proud of.',
           body: 'Twenty-eight years of work, two hundred and forty projects. Six we keep coming back to.',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -414,24 +380,13 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Tell us about the project. We will visit within ten business days and send you a written brief.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'contact-blueprint',
-            alt: 'Architectural blueprints unrolled on a drafting table beside drafting tools.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'contact-blueprint',
+          alt: 'Architectural blueprints unrolled on a drafting table beside drafting tools.',
           eyebrow: 'Quote request',
           title: 'Tell us about the project.',
           body: 'Shape of the work, address, what you know about the budget, and any deadline. We will visit within ten business days, walk the site with you, and send a written brief within five days of the visit.',
+          minHeight: 'xl',
         }),
 
         // Certifications inspection figure — the quality-control moment.

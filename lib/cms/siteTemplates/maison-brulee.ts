@@ -3,12 +3,12 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
-  coverImage,
   ctaBanner,
   eyebrow,
   figure,
   heading,
   hero,
+  heroCover,
   imagePair,
   oneCol,
   statRow,
@@ -72,26 +72,14 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'A neighborhood restaurant. Thirty-six seats, one wood-fired oven, dinner Tuesday to Saturday.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'home-hero-room',
-            alt: 'The Maison Brûlée dining room — warmly lit at evening service, set tables, intimate seating.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'home-hero-room',
+          alt: 'The Maison Brûlée dining room — warmly lit at evening service, set tables, intimate seating.',
           eyebrow: 'Since 2017',
           title: 'A table worth keeping.',
           body: 'A small dining room — thirty-six seats around a single open kitchen with a wood-fired oven at the heart of it. Dinner only, Tuesday to Saturday, six until late. The menu changes weekly, the wine list every season.',
           cta: { label: 'Book a table', href: '/reservations' },
-          secondaryCta: { label: 'See the menu', href: '/menu' },
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -162,24 +150,13 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'This week’s menu. Six starters, eight mains, three desserts. Changes every Tuesday.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'menu-wine',
-            alt: 'A hand pouring red wine into a glass at a candlelit table — the kind of moment the menu builds toward.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'menu-wine',
+          alt: 'A hand pouring red wine into a glass at a candlelit table — the kind of moment the menu builds toward.',
           eyebrow: 'This week’s menu',
           title: 'Six, eight, three.',
           body: 'Six starters, eight mains, three desserts. The menu refreshes every Tuesday — whatever the suppliers brought on Monday is what we cook. About half of every dish touches the fire.',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -326,25 +303,13 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'Esme Lacroix opened Maison Brûlée in 2017 with the wood oven she had cooked on since culinary school.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'story-facade',
-            alt: 'The Maison Brûlée exterior at twilight, warm yellow window glow spilling onto the street.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        heroCover({
+          imageKey: 'story-facade',
+          alt: 'The Maison Brûlée exterior at twilight, warm yellow window glow spilling onto the street.',
           eyebrow: 'Since 2017',
           title: 'One chef, one fire.',
           body: 'Maison Brûlée opened in May 2017. The wood oven was the first thing installed in the empty room — Esme had cooked on the same model in Lyon and brought one over before the floor was tiled.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         oneCol(
@@ -433,24 +398,13 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'Reservations open six weeks ahead. Dinner only, Tuesday to Saturday, from 6 PM.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'reservations-table',
-            alt: 'An intimate table for two set with linen, lit candle, water glasses — the seat that waits for you.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'reservations-table',
+          alt: 'An intimate table for two set with linen, lit candle, water glasses — the seat that waits for you.',
           eyebrow: 'Reservations',
           title: 'Six weeks ahead.',
           body: 'Reservations open six weeks before the date. Dinner only, Tuesday to Saturday. Last seating is at 9:30 PM; the bar takes walk-ins until 11.',
+          minHeight: 'xl',
         }),
 
         contactChannels({
@@ -499,25 +453,13 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'Selected press, reviews, and awards for Maison Brûlée since 2017.',
       sections: [
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'press-night',
-            alt: 'The Maison Brûlée exterior glowing warmly at night with a quiet street view.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        heroCover({
+          imageKey: 'press-night',
+          alt: 'The Maison Brûlée exterior glowing warmly at night with a quiet street view.',
           eyebrow: 'Press',
           title: 'What people have written.',
           body: 'Selected pieces from the past seven years. For press enquiries, please write to press@maisonbrulee.example.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({

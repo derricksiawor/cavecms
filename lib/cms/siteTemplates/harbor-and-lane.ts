@@ -3,9 +3,9 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
-  coverImage,
   ctaBanner,
   hero,
+  heroCover,
   imagePair,
   oneCol,
   statRow,
@@ -71,27 +71,14 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'A modern boutique brokerage. Twelve agents, four neighborhoods, a hundred and forty closings a year.',
       sections: [
-        oneCol(
-          'ivory',
-          'sm',
-          coverImage({
-            imageKey: 'home-hero-house',
-            alt: 'A modern home with warm interior light glowing through floor-to-ceiling windows at golden hour.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'none',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'ivory',
+        heroCover({
+          imageKey: 'home-hero-house',
+          alt: 'A modern home with warm interior light glowing through floor-to-ceiling windows at golden hour.',
           eyebrow: 'Harbor & Lane',
           title: 'Homes that hold a life.',
           body: 'A boutique brokerage of twelve agents working four neighborhoods. We close about a hundred and forty homes a year, and we know each one of them by name.',
           cta: { label: 'See listings', href: '/listings' },
-          secondaryCta: { label: 'Meet our agents', href: '/agents' },
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -189,25 +176,13 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Our active listings across Harbor Hill, the Lane, the Marina, and the Old Town.',
       sections: [
-        oneCol(
-          'ivory',
-          'sm',
-          coverImage({
-            imageKey: 'listings-hero',
-            alt: 'A contemporary two-story home with clean lines and large glass panels — the kind we list at Harbor Hill.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'none',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'ivory',
+        heroCover({
+          imageKey: 'listings-hero',
+          alt: 'A contemporary two-story home with clean lines and large glass panels — the kind we list at Harbor Hill.',
           eyebrow: 'Active listings',
           title: 'On the market now.',
           body: 'A short list, refreshed every Monday. Open houses on Saturdays from one until three unless otherwise noted.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -280,25 +255,13 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Twelve agents, full-time, working four neighborhoods. Each one writes their own listings.',
       sections: [
-        oneCol(
-          'cream',
-          'sm',
-          coverImage({
-            imageKey: 'agents-office',
-            alt: 'The Harbor & Lane office — a warm boutique interior with wooden desks and tall plants in afternoon light.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'none',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        heroCover({
+          imageKey: 'agents-office',
+          alt: 'The Harbor & Lane office — a warm boutique interior with wooden desks and tall plants in afternoon light.',
           eyebrow: 'The agents',
           title: 'Twelve people, full-time.',
           body: 'Every agent at Harbor & Lane is full-time, by license, working out of one of our four neighborhood offices. No leads are sold off, no listings handed to junior staff.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         // Pair: two agent portraits — establishes the team's presence
@@ -452,25 +415,13 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Talk with an agent. We answer every enquiry within one business day.',
       sections: [
-        oneCol(
-          'ivory',
-          'sm',
-          coverImage({
-            imageKey: 'contact-reception',
-            alt: 'The Harbor & Lane reception desk — marble and warm wood, soft overhead lighting.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'none',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'ivory',
+        heroCover({
+          imageKey: 'contact-reception',
+          alt: 'The Harbor & Lane reception desk — marble and warm wood, soft overhead lighting.',
           eyebrow: 'Talk with an agent',
           title: 'Tell us what you are looking for.',
           body: 'Buying, selling, or somewhere in between. We will route you to the right agent the same day, by name, by neighborhood, by the shape of what you want.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         contactChannels({

@@ -4,12 +4,12 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
-  coverImage,
   ctaBanner,
   eyebrow,
   figure,
   heading,
   hero,
+  heroCover,
   imagePair,
   oneCol,
   statRow,
@@ -84,27 +84,17 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'A grand-yet-quiet boutique hotel. Forty rooms, one restaurant, a bar that closes when the last guest is ready to leave.',
       sections: [
-        // Full-bleed cover image opens the page — facade at dusk.
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'home-hero-facade',
-            alt: 'Hôtel Solenne — ornate facade illuminated at dusk.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        // Full-bleed hero cover — facade at dusk, edge-to-edge flush
+        // against the site header, with overlay copy + reservation CTA
+        // painted over the photo's bottom-left for editorial weight.
+        heroCover({
+          imageKey: 'home-hero-facade',
+          alt: 'Hôtel Solenne — ornate facade illuminated at dusk.',
           eyebrow: 'Hôtel Solenne',
           title: 'A quieter way to stay.',
-          body: 'Forty rooms above a small garden courtyard. Linen sheets, low lamps, and a kitchen that opens for breakfast at six and supper at six again. Built for the kind of trip that does not need announcing.',
+          body: 'Forty rooms above a small garden courtyard. Linen sheets, low lamps, and a kitchen that opens for breakfast at six and supper at six again.',
           cta: { label: 'Reserve a room', href: '/reservations' },
-          secondaryCta: { label: 'See the rooms', href: '/rooms' },
+          minHeight: 'xl',
         }),
 
         // The hotel, briefly — 3 cards
@@ -197,26 +187,15 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'Forty rooms across eight shapes. Standards, deluxes, junior suites, and a top-floor garret. All face the garden or the quiet lane.',
       sections: [
-        // Cover image: a quiet, made-up room — sets the tone before
-        // any descriptions.
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'rooms-hero',
-            alt: 'A quiet boutique hotel room — white bed linen on a single bed, restrained palette.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        // Hero cover — quiet made-up room, edge-to-edge, with the
+        // page's title + body painted over the bottom-left.
+        heroCover({
+          imageKey: 'rooms-hero',
+          alt: 'A quiet boutique hotel room — white bed linen on a single bed, restrained palette.',
           eyebrow: 'The rooms',
           title: 'Eight quiet shapes.',
           body: 'Every room faces either the courtyard garden or the lane behind it. Linen sheets, blackout curtains, a deep bath in the suites, a writing desk by every window.',
+          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -355,25 +334,15 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'Two services a day, six to ten and six to ten. A short menu, a longer wine list, a bar that closes when the last guest is ready to leave.',
       sections: [
-        // Cover image: dimly-lit restaurant interior, set tables.
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'dining-restaurant',
-            alt: 'The Hôtel Solenne dining room — set tables, low light, intimate.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        // Hero cover — dim restaurant interior with the kitchen's
+        // service times painted over the photo.
+        heroCover({
+          imageKey: 'dining-restaurant',
+          alt: 'The Hôtel Solenne dining room — set tables, low light, intimate.',
           eyebrow: 'The kitchen',
           title: 'Two services a day.',
           body: 'Breakfast from six until ten. Supper from six until ten. The bar between is open for tea, for an early drink, and for the kind of conversation that the dining room is too bright for.',
+          minHeight: 'xl',
         }),
 
         // The restaurant
@@ -502,27 +471,15 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'An 1882 townhouse, run for sixty years by one family and the next twenty by another. The seventh chapter is now ours.',
       sections: [
-        // Cover image: 19th-century brick townhouses — visually
-        // anchors the "Since 1882" history.
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'story-townhouse',
-            alt: 'A row of 19th-century brick townhouses with white trim — the era the hotel was built in.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        // Hero cover — 19th-century brick townhouses anchoring the
+        // "Since 1882" history, with the page title painted over.
+        heroCover({
+          imageKey: 'story-townhouse',
+          alt: 'A row of 19th-century brick townhouses with white trim — the era the hotel was built in.',
           eyebrow: 'Since 1882',
           title: 'Seven chapters, one house.',
           body: 'The building was a townhouse first, then a boarding house, then a hotel from 1924. Six families have owned it. We are the seventh, and we restored it slowly between 2019 and 2023.',
-          tone: 'obsidian',
+          minHeight: 'xl',
         }),
 
         // Story sections
@@ -605,27 +562,15 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'Reservations open twelve months ahead. Forty rooms across eight shapes. We answer every enquiry within one business day.',
       sections: [
-        // Cover image: the brass service bell on the front desk —
-        // the page operator-conversion lands on; visual completeness
-        // matters most here.
-        oneCol(
-          'obsidian',
-          'sm',
-          coverImage({
-            imageKey: 'reservations-hero',
-            alt: 'The Hôtel Solenne front desk — a vintage brass service bell on a wooden counter.',
-            ratio: '21:9',
-            minHeight: 'lg',
-            overlay: 'darken',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'obsidian',
+        // Hero cover — front-desk brass bell with the reservations
+        // headline painted over.
+        heroCover({
+          imageKey: 'reservations-hero',
+          alt: 'The Hôtel Solenne front desk — a vintage brass service bell on a wooden counter.',
           eyebrow: 'Reservations',
           title: 'When would you like to stay?',
           body: 'Reservations open twelve months ahead. Tell us your dates, the kind of room you would like, and any small thing we should know — a quiet floor, a late arrival, a cake at the table.',
+          minHeight: 'xl',
         }),
 
         contactChannels({

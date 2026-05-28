@@ -868,6 +868,26 @@ export const blockSchemas = {
     animation: z
       .enum(['none', 'fade-in', 'parallax'])
       .default('fade-in'),
+    // Optional text overlay — turns a pure-image cover into a hero
+    // with title + eyebrow + body + CTA on top of the photo. All four
+    // are optional; renderer skips the overlay layer entirely when
+    // every text field is empty AND no cta is set. Alignment controls
+    // where the overlay block sits (corner anchoring matches the
+    // editorial hero variants on luxury hotel + restaurant sites).
+    eyebrow: safeText(TEXT_MAX.caption).default(''),
+    title: safeText(TEXT_MAX.title).default(''),
+    body: safeText(TEXT_MAX.body).default(''),
+    cta: z
+      .object({
+        label: safeRequiredText(1, TEXT_MAX.ctaText),
+        href: safeCtaHref(TEXT_MAX.url),
+      })
+      .nullable()
+      .default(null),
+    overlayAlignment: z
+      .enum(['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'])
+      .default('bottom-left'),
+    overlayTone: z.enum(['ivory', 'obsidian']).default('ivory'),
   }),
 
   // Luxury image pair — two photos in a staggered overlap composition.

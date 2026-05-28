@@ -19,10 +19,13 @@ import type { RenderContext } from '..'
 // CMS-first contract intact — operator drops in lx_cover_image, it
 // renders edge-to-edge, no section-meta dance required.
 //
-// Object-fit: cover ensures the photo fills the frame even when the
-// aspect ratio of the image differs from the requested ratio. The
-// MotionTarget wrapper handles entrance animation; parallax is a
-// scroll-linked transform that scales the image across the viewport.
+// Optional text overlay — when any of eyebrow / title / body / cta is
+// set, an absolutely-positioned text block sits over the image at
+// `overlayAlignment` (9-point compass: top/center/bottom × left/center/
+// right). Tone selects ivory text (default, for dark photos) or
+// obsidian (for light photos). This turns the pure-image cover into a
+// hero in one widget — replaces the separate cover + hero pair the
+// templates used to ship.
 
 const RATIO_CLASS: Record<BlockData<'lx_cover_image'>['ratio'], string> = {
   '21:9': 'aspect-[21/9]',
@@ -64,6 +67,47 @@ const OVERLAY_CLASS: Record<
     'bg-gradient-to-t from-obsidian/80 via-obsidian/30 to-transparent',
   champagne:
     'bg-gradient-to-t from-champagne/35 via-obsidian/15 to-transparent',
+}
+
+// 9-point compass for the overlay block's anchor inside the cover
+// image frame. The vertical + horizontal classes combine — top-left
+// sits the block flush to the top-left edge with editorial padding;
+// center is exact-centred both axes. Each anchor adds matching text
+// alignment so a `bottom-right` block reads with right-aligned text.
+const OVERLAY_ANCHOR_CLASS: Record<
+  BlockData<'lx_cover_image'>['overlayAlignment'],
+  string
+> = {
+  'top-left': 'top-0 left-0 items-start text-left',
+  'top-center': 'top-0 left-1/2 -translate-x-1/2 items-center text-center',
+  'top-right': 'top-0 right-0 items-end text-right',
+  'center-left': 'top-1/2 -translate-y-1/2 left-0 items-start text-left',
+  center:
+    'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 items-center text-center',
+  'center-right':
+    'top-1/2 -translate-y-1/2 right-0 items-end text-right',
+  'bottom-left': 'bottom-0 left-0 items-start text-left',
+  'bottom-center':
+    'bottom-0 left-1/2 -translate-x-1/2 items-center text-center',
+  'bottom-right': 'bottom-0 right-0 items-end text-right',
+}
+
+const OVERLAY_TONE_CLASS: Record<
+  BlockData<'lx_cover_image'>['overlayTone'],
+  { eyebrow: string; title: string; body: string; cta: string }
+> = {
+  ivory: {
+    eyebrow: 'text-champagne',
+    title: 'text-ivory',
+    body: 'text-ivory/85',
+    cta: 'bg-champagne text-obsidian hover:bg-antique-gold hover:text-ivory',
+  },
+  obsidian: {
+    eyebrow: 'text-copper-700',
+    title: 'text-obsidian',
+    body: 'text-obsidian/85',
+    cta: 'bg-obsidian text-ivory hover:bg-near-black',
+  },
 }
 
 export function LxCoverImage({
@@ -110,6 +154,64 @@ export function LxCoverImage({
     />
   )
 
+  const hasOverlay =
+    Boolean(data.eyebrow) ||
+    Boolean(data.title) ||
+    Boolean(data.body) ||
+    Boolean(data.cta)
+  const toneClass = OVERLAY_TONE_CLASS[data.overlayTone]
+
+  const overlayText = hasOverlay ? (
+    <div
+      className={clsx(
+        'pointer-events-none absolute z-10 flex w-full max-w-3xl flex-col gap-4 p-8 sm:p-12 lg:p-16',
+        OVERLAY_ANCHOR_CLASS[data.overlayAlignment],
+      )}
+    >
+      {data.eyebrow && (
+        <p
+          className={clsx(
+            'font-sans text-[11px] font-semibold uppercase tracking-[0.32em]',
+            toneClass.eyebrow,
+          )}
+        >
+          {data.eyebrow}
+        </p>
+      )}
+      {data.title && (
+        <h1
+          className={clsx(
+            'font-serif text-4xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl',
+            toneClass.title,
+          )}
+        >
+          {data.title}
+        </h1>
+      )}
+      {data.body && (
+        <p
+          className={clsx(
+            'max-w-2xl text-base leading-relaxed sm:text-lg',
+            toneClass.body,
+          )}
+        >
+          {data.body}
+        </p>
+      )}
+      {data.cta && (
+        <a
+          href={data.cta.href}
+          className={clsx(
+            'pointer-events-auto mt-2 inline-flex w-fit items-center justify-center rounded-full px-8 py-3 font-sans text-[13px] font-semibold uppercase tracking-[0.22em] shadow-lg transition-colors',
+            toneClass.cta,
+          )}
+        >
+          {data.cta.label}
+        </a>
+      )}
+    </div>
+  ) : null
+
   // Break out of the parent's content column to span the full viewport.
   // `w-screen relative left-1/2 -translate-x-1/2` is the canonical
   // centred-container breakout — the absolute width is the viewport,
@@ -131,6 +233,7 @@ export function LxCoverImage({
           className={clsx('pointer-events-none absolute inset-0', OVERLAY_CLASS[data.overlay])}
         />
       )}
+      {overlayText}
       {inlineEdit && (
         <AltTextOverlay
           blockId={inlineEdit.blockId}

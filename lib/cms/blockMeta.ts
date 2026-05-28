@@ -48,7 +48,7 @@ export type SectionBackground =
 // using the editorial spacing scale (--spacing-section-xl / -2xl in
 // globals.css). Editorial sections breathe — the luxury default for
 // new sections is 'lg' or 'xl'; cinematic hero treatments use '2xl'.
-export type SectionPadding = 'sm' | 'md' | 'lg' | 'xl' | '2xl'
+export type SectionPadding = 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
 export type SectionColumnsCount = 1 | 2 | 3 | 4
 
 // Single source of truth for the section column-count cap. Used by
@@ -295,6 +295,7 @@ const VALID_BACKGROUNDS: ReadonlySet<SectionBackground> = new Set([
   'charcoal',
 ])
 const VALID_PADDINGS: ReadonlySet<SectionPadding> = new Set([
+  'none',
   'sm',
   'md',
   'lg',
@@ -635,6 +636,11 @@ export const SECTION_BACKGROUND_CLASS: Record<SectionBackground, string> = {
 }
 
 export const SECTION_PADDING_CLASS: Record<SectionPadding, string> = {
+  // Zero vertical padding — for hero/cover sections that need to sit
+  // flush against the header (no visible gap above the photo). The
+  // cover-image widget itself uses w-screen to break out horizontally;
+  // 'none' completes the bleed by removing the vertical inset too.
+  none: 'py-0',
   // Legacy tiers — Tailwind base scale (kept stable for unmigrated
   // pages). Luxury tiers use the new --spacing-section-* tokens
   // emitted by the luxury @theme block in globals.css.
@@ -671,6 +677,7 @@ export const SECTION_BACKGROUND_LABEL: Record<SectionBackground, string> = {
 }
 
 export const SECTION_PADDING_LABEL: Record<SectionPadding, string> = {
+  none: 'Flush',
   sm: 'Compact',
   md: 'Standard',
   lg: 'Spacious',
@@ -855,7 +862,7 @@ export const SectionMetaSchema = z
       'bone',
       'charcoal',
     ]),
-    padding: z.enum(['sm', 'md', 'lg', 'xl', '2xl']),
+    padding: z.enum(['none', 'sm', 'md', 'lg', 'xl', '2xl']),
     // Optional cover-image background. media_id is the row in `media`,
     // alt is the screen-reader description (empty string allowed for
     // purely decorative backgrounds). The renderer paints this image
