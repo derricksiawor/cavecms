@@ -605,6 +605,22 @@ export const hotelSolenneTemplate: SiteTemplate = {
       seoDescription:
         'Reservations open twelve months ahead. Forty rooms across eight shapes. We answer every enquiry within one business day.',
       sections: [
+        // Cover image: the brass service bell on the front desk —
+        // the page operator-conversion lands on; visual completeness
+        // matters most here.
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'reservations-hero',
+            alt: 'The Hôtel Solenne front desk — a vintage brass service bell on a wooden counter.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Reservations',

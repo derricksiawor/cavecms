@@ -17,8 +17,18 @@ const LIMIT_INPUT_PIXELS = 24_000_000
 // payloads with hundreds of frames, etc. The upload-route's 30s
 // watchdog releases the busyToken; sharp's own timeout aborts the
 // libvips pipeline so its worker doesn't keep churning past the
-// release. 10s is generous for a 24MP single-frame resize.
+// release.
+//
+// Two regimes:
+//   PIPELINE_TIMEOUT_MS — upload-route default. User is waiting; a
+//     legit user complaining is better than a 1-minute hang. 10s is
+//     generous for a 24MP single-frame resize on production hardware.
+//   PIPELINE_TIMEOUT_RELEASE_MS — release builder. Publisher box may
+//     be a laptop under battery, cold libvips cache, network hiccups.
+//     30s prevents one slow image from bricking a release build for
+//     the wrong reason.
 const PIPELINE_TIMEOUT_MS = 10_000
+const PIPELINE_TIMEOUT_RELEASE_MS = 30_000
 
 export interface ProcessedImage {
   width: number
@@ -60,9 +70,10 @@ export class MimeFormatMismatchError extends Error {
 async function decodeAndPrepare(
   buf: Buffer,
   sniffedMime: string,
+  timeoutMs: number,
 ): Promise<{ base: sharp.Sharp; width: number; height: number }> {
   const meta = await sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
-    .timeout({ seconds: Math.ceil(PIPELINE_TIMEOUT_MS / 1000) })
+    .timeout({ seconds: Math.ceil(timeoutMs / 1000) })
     .rotate()
     .metadata()
   if (!meta.width || !meta.height) throw new Error('bad_image')
@@ -79,7 +90,7 @@ async function decodeAndPrepare(
   // of what we want for EXIF strip. .keepIccProfile() is the sharp 0.33
   // primitive for "preserve color, drop sensitive metadata".
   const base = sharp(buf, { limitInputPixels: LIMIT_INPUT_PIXELS })
-    .timeout({ seconds: Math.ceil(PIPELINE_TIMEOUT_MS / 1000) })
+    .timeout({ seconds: Math.ceil(timeoutMs / 1000) })
     .rotate()
     .keepIccProfile()
 
@@ -132,7 +143,11 @@ export async function processImage(
   uuid: string,
   sniffedMime: string,
 ): Promise<ProcessedImage> {
-  const { base, width, height } = await decodeAndPrepare(buf, sniffedMime)
+  const { base, width, height } = await decodeAndPrepare(
+    buf,
+    sniffedMime,
+    PIPELINE_TIMEOUT_MS,
+  )
 
   await emitVariants(base, {
     thumb: `${tmpDir}/thumb.webp`,
@@ -179,7 +194,14 @@ export async function processToVariants(
   baseFilename: string,
   sniffedMime: string,
 ): Promise<ProcessedVariants> {
-  const { base, width, height } = await decodeAndPrepare(buf, sniffedMime)
+  // Release-time pipeline gets the longer timeout — publisher boxes
+  // are higher-variance than production servers, and one slow image
+  // shouldn't brick a release build.
+  const { base, width, height } = await decodeAndPrepare(
+    buf,
+    sniffedMime,
+    PIPELINE_TIMEOUT_RELEASE_MS,
+  )
 
   const paths = {
     thumb: `${outDir}/${baseFilename}-thumb.webp`,

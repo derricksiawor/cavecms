@@ -823,6 +823,20 @@ function TemplateStep({
           setError("We couldn't find that template — pick another and try again.")
         } else if (code === 'template_has_no_home_page' || code === 'template_has_multiple_home_pages' || code === 'template_has_no_pages' || code === 'template_page_slug_duplicate' || code === 'template_page_slug_collides_with_preserved') {
           setError("This template is mis-configured — try a different one.")
+        } else if (code && code.startsWith('template_media_')) {
+          // template_media_manifest_missing / parse_failed / invalid /
+          // key_missing / unresolved → the bundled stock imagery for
+          // this template isn't installable on your release. Pick a
+          // different template, or Skip to install with no template.
+          setError("This template's images couldn't load on your install — pick a different template, or Skip to install with no template.")
+          console.warn('[install/template] server error:', code)
+        } else if (code === 'preserved_legal_pages_missing') {
+          // Schema-level recovery state — the install's legal pages
+          // (privacy/terms/thank-you-*) got soft-deleted out of band.
+          // Operator can't recover from the wizard; needs the CLI
+          // installer to re-run migrations.
+          setError("Your install is missing required pages. Re-run the installer to repair, then come back here.")
+          console.warn('[install/template] server error:', code)
         } else {
           // Don't render raw server error tokens to the operator.
           setError("Couldn't seed the template. Skip or try again.")

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readFile, access, unlink } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, access, unlink, chmod } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { sql } from 'drizzle-orm'
+import { revalidatePath } from 'next/cache'
 import { db } from '@/db/client'
 import type { Tx } from '@/db/client'
 import { withError } from '@/lib/api/withError'
@@ -30,7 +31,8 @@ import type {
 } from '@/lib/cms/siteTemplates'
 import { collectImageKeys } from '@/lib/cms/siteTemplates/extractImageKeys'
 import { parseAndSanitize } from '@/lib/cms/parse'
-import { SectionMetaSchema, ColumnMetaSchema } from '@/lib/cms/blockMeta'
+import { SectionMetaSchema, ColumnMetaSchema, WidgetMetaSchema } from '@/lib/cms/blockMeta'
+import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { PATHS } from '@/lib/media/storage'
 
 // POST /api/install/template — wizard template chooser.
@@ -92,13 +94,18 @@ const Body = z
 const installLimit = makeInstallLimit('template')
 const POS_STEP = 1000
 
-// In-process semaphore. Two operator tabs both clicking Continue on
-// the Template step would otherwise interleave a wipe with another
-// tab's reseed. The DB transaction below holds row-locks against
-// concurrent /complete, but ANOTHER /template call from the same
-// install would also block on those locks — slower than necessary
-// when we can cheaply reject the second caller. Same shape as
-// `app/api/cms/media/route.ts` (`busyToken`).
+// In-process semaphore. Two operator tabs in the SAME Node process
+// both clicking Continue on the Template step would otherwise
+// interleave a wipe with another tab's reseed. CaveCMS's default
+// PM2 config runs a single instance — this gate catches the common
+// double-click + React-strict-mode double-fire cases cheaply.
+//
+// CROSS-PROCESS (clustered PM2, instances > 1): this gate does NOT
+// catch concurrent installs originating in different workers. The
+// install_state row-lock in the TX below DOES serialize them
+// correctly, so correctness is preserved — the loser just waits
+// through the winner's full wipe + reseed rather than getting a
+// fast 429. Acceptable given single-instance is the default.
 let busyToken: symbol | null = null
 
 interface InsertResult {
@@ -196,28 +203,52 @@ async function wipeNonLegalPagesAndBlocks(tx: Tx): Promise<void> {
 //      resolved field so DELETE /api/cms/media/[id] refuses to drop
 //      the row while it's pinned by a page.
 
+// Defense-in-depth bounds at the parse boundary. The signed release
+// zip is the real guarantee that this manifest came from the
+// publisher — but the project's standing rule (Security Standards →
+// "input validation BEFORE queries reach the database") says we
+// still narrow the shape at the Zod gate. Each constraint maps to a
+// realistic upper bound + closes a path-traversal / int-overflow
+// vector if the upstream contract ever drifts.
+
+// Kebab-case stable key (matches the build-template-media validator).
+const KEY_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
+
+// Variant filename: `<key>-<kind>.<ext>` exactly. Rejects any "../"
+// or absolute-path smuggling that would let copyFile read from an
+// arbitrary location.
+const VARIANT_FILENAME_RE = /^[a-z0-9][a-z0-9-]*-(thumb|md|lg|og)\.(webp|jpg)$/
+
+// Width/height: 24 MP cap mirrors lib/media/sharp.ts LIMIT_INPUT_PIXELS.
+// byteSize: 50 MiB is generous — Unsplash originals are 1-3 MB, the
+//   variants sum is < 1 MB; the cap matches signed-int(32) headroom.
+const MAX_DIMENSION = 24_000
+const MAX_BYTE_SIZE = 50 * 1024 * 1024
+// alt-text upper bound matches the media.alt_text column (320 chars).
+const MAX_ALT = 320
+
 const TemplateMediaEntry = z.object({
-  key: z.string().min(1),
-  alt: z.string().min(1),
-  mime: z.string().min(1),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
-  byteSize: z.number().int().nonnegative(),
+  key: z.string().regex(KEY_RE, 'invalid_key_format'),
+  alt: z.string().min(1).max(MAX_ALT),
+  mime: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/avif']),
+  width: z.number().int().positive().max(MAX_DIMENSION),
+  height: z.number().int().positive().max(MAX_DIMENSION),
+  byteSize: z.number().int().nonnegative().max(MAX_BYTE_SIZE),
   variants: z.object({
-    thumb: z.string().min(1),
-    md: z.string().min(1),
-    lg: z.string().min(1),
-    og: z.string().min(1),
+    thumb: z.string().regex(VARIANT_FILENAME_RE, 'invalid_variant_filename'),
+    md: z.string().regex(VARIANT_FILENAME_RE, 'invalid_variant_filename'),
+    lg: z.string().regex(VARIANT_FILENAME_RE, 'invalid_variant_filename'),
+    og: z.string().regex(VARIANT_FILENAME_RE, 'invalid_variant_filename'),
   }),
-  sourceUrl: z.string().min(1),
-  photographer: z.string(),
-  license: z.string().min(1),
+  sourceUrl: z.string().url(),
+  photographer: z.string().max(120),
+  license: z.string().min(1).max(40),
 })
 
 const TemplateMediaManifest = z.object({
-  templateSlug: z.string().min(1),
+  templateSlug: z.string().regex(KEY_RE, 'invalid_slug_format'),
   generatedAt: z.string().min(1),
-  entries: z.record(z.string(), TemplateMediaEntry),
+  entries: z.record(z.string().regex(KEY_RE), TemplateMediaEntry),
 })
 
 type TemplateMediaManifestT = z.infer<typeof TemplateMediaManifest>
@@ -316,6 +347,23 @@ async function loadTemplateMediaManifest(
   }
 
   const manifest = parsed.data
+  // Slug-mismatch defense: a misplaced / swapped manifest would
+  // silently install template A's imagery under template B's pages.
+  // Refuse loudly.
+  if (manifest.templateSlug !== template.slug) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'install_template_media_manifest_slug_mismatch',
+        expected: template.slug,
+        actual: manifest.templateSlug,
+      }),
+    )
+    return {
+      kind: 'error',
+      response: errJson(500, 'template_media_manifest_slug_mismatch'),
+    }
+  }
   const missing: string[] = []
   for (const key of usedKeys) {
     if (!manifest.entries[key]) missing.push(key)
@@ -343,6 +391,81 @@ async function loadTemplateMediaManifest(
  * setup.sh / CLI provisioning, but defence-in-depth against an
  * operator-stripped layout).
  */
+/**
+ * Hard-delete every previous template's bundled-media rows + their
+ * media_references (cascade). Returns the absolute filesystem paths
+ * of the variant files that should be unlinked AFTER the TX commits.
+ *
+ * Re-pick scenario: operator picks hotel-solenne → 12 media rows
+ * land + their variants on disk + `original_name = 'template/hotel-
+ * solenne/<key>'`. Operator clicks Back, picks anara-wellness → if we
+ * DON'T clean up the old rows, the Media Library now carries 12 dead
+ * "Hôtel Solenne" photos that media_references for now-wiped widgets
+ * pin as undeletable, plus 12 variant files leaked on disk per pick.
+ * verify-media-refs cron eventually reaps the orphans (7-day window)
+ * but operator sees a broken Library immediately. Same applies if the
+ * operator re-picks the SAME template — fresh UUIDs land, previous
+ * UUIDs orphan.
+ *
+ * Hard-delete (vs soft-delete + nightly purge) chosen because bundled
+ * media has no audit-trail value — the operator never owned it; the
+ * "undo" path is to pick the template again, which re-bundles fresh
+ * UUIDs from the manifest.
+ *
+ * Path-extraction defence-in-depth: only unlink paths that resolve
+ * INSIDE PATHS.variants. A malformed media.variants JSON cell (post-
+ * write tampering / schema drift) must not let us delete arbitrary
+ * files from disk.
+ */
+async function reapPreviousTemplateMedia(tx: Tx): Promise<string[]> {
+  const [rows] = (await tx.execute(sql`
+    SELECT id, variants FROM media WHERE original_name LIKE 'template/%'
+  `)) as unknown as [Array<{ id: number; variants: unknown }>]
+  if (rows.length === 0) return []
+
+  const pathsToUnlink: string[] = []
+  const idsToDelete: number[] = []
+  const variantsRootResolved = path.resolve(PATHS.variants) + path.sep
+
+  for (const row of rows) {
+    idsToDelete.push(Number(row.id))
+    // mysql2 returns JSON columns as string OR pre-parsed object
+    // depending on driver mode. Handle both; ignore malformed cells.
+    let parsed: unknown = row.variants
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed)
+      } catch {
+        continue
+      }
+    }
+    if (!parsed || typeof parsed !== 'object') continue
+    const variants = parsed as Record<string, unknown>
+    for (const v of Object.values(variants)) {
+      if (typeof v !== 'string') continue
+      // variants are stored as `/uploads/variants/<uuid>-<kind>.<ext>`
+      const PREFIX = '/uploads/variants/'
+      if (!v.startsWith(PREFIX)) continue
+      const filename = v.slice(PREFIX.length)
+      // Reject any path-traversal attempt smuggled into the filename.
+      if (filename.includes('/') || filename.includes('..')) continue
+      const abs = path.resolve(path.join(PATHS.variants, filename))
+      if (!abs.startsWith(variantsRootResolved)) continue
+      pathsToUnlink.push(abs)
+    }
+  }
+
+  // Cascade: media_references.media_id has ON DELETE CASCADE per
+  // db/schema/media.ts:53 — DELETE FROM media drops the rows in one
+  // shot. Use the IDs we built above (avoids re-running the LIKE).
+  const idList = sql.join(
+    idsToDelete.map((id) => sql`${id}`),
+    sql`, `,
+  )
+  await tx.execute(sql`DELETE FROM media WHERE id IN (${idList})`)
+  return pathsToUnlink
+}
+
 async function provisionTemplateMedia(
   tx: Tx,
   templateSlug: string,
@@ -371,6 +494,14 @@ async function provisionTemplateMedia(
     // future re-picks of the same template. Append each destination
     // to writtenPaths SYNCHRONOUSLY with the copy — caller unlinks
     // these on TX rollback to avoid leaking 4 files per used key.
+    //
+    // Defense in depth: the VARIANT_FILENAME_RE Zod constraint
+    // already rejects any traversal-flavoured filename, but we ALSO
+    // assert the resolved source path stays inside srcDir before
+    // every copyFile call. Two independent gates means a future
+    // regression in the Zod schema can't open a file-disclosure
+    // hole on its own.
+    const srcRoot = path.resolve(srcDir) + path.sep
     const copyPlan: Array<{ src: string; dst: string }> = [
       { src: path.join(srcDir, entry.variants.thumb), dst: path.join(PATHS.variants, `${uuid}-thumb.webp`) },
       { src: path.join(srcDir, entry.variants.md),    dst: path.join(PATHS.variants, `${uuid}-md.webp`) },
@@ -378,7 +509,19 @@ async function provisionTemplateMedia(
       { src: path.join(srcDir, entry.variants.og),    dst: path.join(PATHS.variants, `${uuid}-og.jpg`) },
     ]
     for (const { src, dst } of copyPlan) {
+      const resolvedSrc = path.resolve(src)
+      if (!resolvedSrc.startsWith(srcRoot)) {
+        throw new Error(`template_media_path_traversal_blocked:${key}`)
+      }
       await copyFile(src, dst)
+      // Explicit chmod so the file mode doesn't depend on the
+      // process umask. setup.sh provisions PATHS.variants as 0750
+      // (cavecms:cavecms); nginx runs as www-data and needs group-
+      // read. 0o640 = owner rw, group r, world none. Matches the
+      // upload route's intent. Without this, a customer install
+      // whose cavecms-user umask is hardened (e.g. 077 in some
+      // distros) would land files at 0600 and nginx would 403.
+      await chmod(dst, 0o640)
       writtenPaths.push(dst)
     }
 
@@ -392,7 +535,16 @@ async function provisionTemplateMedia(
       og: `/uploads/variants/${uuid}-og.jpg`,
     }
 
-    const originalName = `template/${templateSlug}/${key}`
+    // Filename: just `<key>.<ext>` so the Media Library's display /
+    // search / sort behaves naturally. The template slug is recorded
+    // in `media.source` (future column) — for now reapPreviousTemplateMedia
+    // identifies bundled rows via the legacy LIKE-pattern below.
+    // KEEP the `template/` prefix on filename_uuid lookup until the
+    // source-column migration ships, otherwise re-pick cleanup
+    // can't find these rows. Compromise: keep the path-shaped name
+    // but use the kebab key as the human-readable last segment.
+    const ext = entry.mime === 'image/png' ? 'png' : entry.mime === 'image/webp' ? 'webp' : 'jpg'
+    const originalName = `template/${templateSlug}/${key}.${ext}`
     const [insertRes] = (await tx.execute(sql`
       INSERT INTO media
         (filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, variants, uploaded_by, created_at)
@@ -414,28 +566,29 @@ async function provisionTemplateMedia(
  * parseAndSanitize (which would reject unknown top-level fields) or
  * the DB (content_blocks.meta only — never the widget root).
  *
- * Returns the per-field media_id list so the caller can write
- * media_references rows after the widget INSERT.
+ * MUTATES the widget. The widget here is a structuredClone of the
+ * registry singleton (per the top-of-POST clone) so cross-request
+ * mutation is impossible.
  *
- * MUTATES the widget. Template specs in this code path are produced
- * once per request from the (frozen) site-templates registry; we
- * don't share references across requests, so in-place mutation is
- * safe.
+ * media_references rows are NO LONGER derived from this function's
+ * return value — the install route calls `collectMediaPaths(cleaned)`
+ * on the post-parse widget data, which is the canonical extractor
+ * used by saveBlock + hydratePage. That keeps the install route's
+ * reverse-index identical to every other write path in the system.
  */
 function injectMediaRefs(
   widget: WidgetSpec,
   keyToMedia: Map<string, ResolvedMedia>,
-): Array<{ field: string; mediaId: number }> {
-  if (!widget._imageKeys) return []
-  const refs: Array<{ field: string; mediaId: number }> = []
+): void {
+  if (!widget._imageKeys) return
   const alts = widget._imageAlts ?? {}
   for (const [field, key] of Object.entries(widget._imageKeys)) {
     const resolved = keyToMedia.get(key)
     if (!resolved) {
       // Pre-flight + provisionTemplateMedia already guard this; throw
-      // loudly if we get here so a future regression is impossible
-      // to ignore.
-      throw new Error(`template_media_unresolved_in_inject:${key}`)
+      // loudly with structured context if we get here so a future
+      // regression is impossible to ignore.
+      throw new TemplateMediaUnresolvedError(key, widget.blockType, field)
     }
     widget.data[field] = {
       media_id: resolved.mediaId,
@@ -444,14 +597,23 @@ function injectMediaRefs(
       // different alt copy).
       alt: alts[field] ?? resolved.alt,
     }
-    refs.push({ field, mediaId: resolved.mediaId })
   }
   // Strip the transport fields so the rest of insertSections never
   // sees them and they don't accidentally end up in JSON.stringify of
   // widget.meta.
   delete widget._imageKeys
   delete widget._imageAlts
-  return refs
+}
+
+class TemplateMediaUnresolvedError extends Error {
+  constructor(
+    public readonly key: string,
+    public readonly blockType: string,
+    public readonly field: string,
+  ) {
+    super(`template_media_unresolved:${key}`)
+    this.name = 'TemplateMediaUnresolvedError'
+  }
 }
 
 async function insertPage(tx: Tx, spec: PageSpec): Promise<number> {
@@ -505,16 +667,22 @@ async function insertSections(
         // parseAndSanitize fires. parseAndSanitize would reject
         // widget.data with missing required MediaRef fields, and
         // would strip the _imageKeys / _imageAlts top-level fields
-        // we use as transport. Mutating widget in place is safe —
-        // it's a per-request value cloned from the template registry.
-        const mediaRefs = injectMediaRefs(w, keyToMedia)
+        // we use as transport. The widget here is a structuredClone
+        // of the registry singleton (per the top-of-POST clone) so
+        // mutating it cannot poison cross-request state.
+        injectMediaRefs(w, keyToMedia)
 
         // Run the widget data through the canonical CMS sanitize+parse
         // gate so any field-level schema violation in a template file
         // surfaces here (transaction rolls back the whole reseed)
         // instead of at next page-render.
         const cleaned = parseAndSanitize(w.blockType, w.data) as Record<string, unknown>
-        const widgetMetaJson = w.meta ? JSON.stringify(w.meta) : null
+        // Validate widget.meta the same way as data — a typo in a
+        // template's `meta: { marginTop: 'smm' }` would land in DB
+        // and crash the renderer. SectionMeta + ColumnMeta are
+        // already validated above; WidgetMeta closes the symmetry.
+        const cleanedMeta = w.meta ? WidgetMetaSchema.parse(w.meta) : null
+        const widgetMetaJson = cleanedMeta ? JSON.stringify(cleanedMeta) : null
         const [widRes] = (await tx.execute(sql`
           INSERT INTO content_blocks
             (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
@@ -524,18 +692,18 @@ async function insertSections(
         `)) as unknown as [InsertResult]
         const widgetId = Number(widRes.insertId)
 
-        // Reverse-index this widget's bundled media so DELETE
-        // /api/cms/media/[id] refuses to drop a row while a template
-        // page still references it. Without this, an operator who
-        // "deletes" a hero photo from the Media Library would orphan
-        // the page's image to a 404. Composite PK guarantees
-        // (media_id, content_block, widget_id, field) is unique, so
-        // a re-run of the seed (idempotent) self-heals.
-        for (const ref of mediaRefs) {
+        // Derive media_references from the PARSED data via the
+        // canonical walker — same code path as saveBlock + hydrate.
+        // This eliminates contract drift between the install route's
+        // hand-written ref list and the rest of the system's media-
+        // reference shape (e.g. future nested MediaRefs like
+        // `gallery[3].image`). INSERT IGNORE matches the blocks
+        // route's pattern.
+        const refs = collectMediaPaths(cleaned)
+        for (const ref of refs) {
           await tx.execute(sql`
-            INSERT INTO media_references (media_id, referent_type, referent_id, field)
+            INSERT IGNORE INTO media_references (media_id, referent_type, referent_id, field)
             VALUES (${ref.mediaId}, 'content_block', ${widgetId}, ${ref.field})
-            ON DUPLICATE KEY UPDATE media_id = media_id
           `)
         }
 
@@ -572,9 +740,21 @@ async function seedTemplateBranding(
   // null-check (`!deleted_at`) rather than `=== null` so a future
   // mysql2 driver upgrade that surfaces NULL DATETIME(3)s as another
   // falsy shape (e.g. empty string) still resolves correctly.
-  let preservedLogo: Record<string, unknown> | null = null
-  const headerLogo = existingHeader.logo as { media_id?: number; alt?: string } | null | undefined
-  if (headerLogo && typeof headerLogo.media_id === 'number') {
+  //
+  // Validate the cell shape via Zod before we trust + re-persist it.
+  // A hand-edited DB cell that's `{ media_id: "7" }` (string) or just
+  // `"some-string"` would otherwise pass through `upsertSettingInTx`
+  // verbatim and corrupt the next render. Parse-failure falls back to
+  // "no preserved logo" (the wordmark renders) — safer than re-
+  // persisting a malformed shape.
+  let preservedLogo: { media_id: number; alt?: string } | null = null
+  const LogoShape = z.object({
+    media_id: z.number().int().positive(),
+    alt: z.string().max(MAX_ALT).optional(),
+  }).strict()
+  const logoParse = LogoShape.safeParse(existingHeader.logo)
+  const headerLogo = logoParse.success ? logoParse.data : null
+  if (headerLogo) {
     const [mediaRows] = (await tx.execute(sql`
       SELECT deleted_at FROM media WHERE id = ${headerLogo.media_id} LIMIT 1
     `)) as unknown as [Array<{ deleted_at: unknown }>]
@@ -719,10 +899,19 @@ export const POST = withError(async (req: Request) => {
   try {
     checkRate(installLimit, ip)
     const body = Body.parse(await readJsonBody(req))
-    const template = getTemplate(body.templateSlug)
-    if (!template) {
+    const templateRaw = getTemplate(body.templateSlug)
+    if (!templateRaw) {
       return errJson(400, 'unknown_template')
     }
+    // CRITICAL: deep-clone the registry singleton before any walk.
+    // injectMediaRefs() below mutates widget.data + deletes the
+    // _imageKeys / _imageAlts transport fields IN PLACE. Without the
+    // clone, the in-memory SITE_TEMPLATES singleton would be poisoned
+    // for every subsequent install in the same Node process — a
+    // second pick of the same (or a different) template would see
+    // already-stripped widgets, skip the manifest pre-flight, and
+    // insert content_blocks rows pointing at stale media_ids.
+    const template: SiteTemplate = structuredClone(templateRaw)
 
     // Validate template SHAPE before any destructive operation runs.
     const shapeError = validateTemplateShape(template)
@@ -742,6 +931,14 @@ export const POST = withError(async (req: Request) => {
     // Cleared on TX success so the success path doesn't unlink the
     // files we just committed media rows for.
     const writtenMediaPaths: string[] = []
+
+    // Mirror, opposite semantics: variant files belonging to the
+    // PREVIOUS template that we hard-delete from the media table.
+    // Populated inside the TX by reapPreviousTemplateMedia; unlinked
+    // ONLY after the TX commits successfully. On TX rollback the
+    // DELETE FROM media rolls back too — leave the files alone so the
+    // operator's Media Library stays consistent with disk.
+    let orphanedPathsToUnlink: string[] = []
 
     try {
       const result = await db.transaction(async (tx) => {
@@ -767,6 +964,14 @@ export const POST = withError(async (req: Request) => {
           typeof siteGeneral.siteName === 'string' && siteGeneral.siteName.trim()
             ? (siteGeneral.siteName as string).trim()
             : ''
+
+        // 0. Reap any previous template's bundled-media rows so they
+        //    don't orphan in the Media Library after a re-pick. Hard-
+        //    deletes via the media.id cascade (drops media_references
+        //    too). Variant file unlinks are deferred until AFTER the
+        //    TX commits — if anything below throws, the DELETE rolls
+        //    back and the files stay live.
+        orphanedPathsToUnlink = await reapPreviousTemplateMedia(tx)
 
         // 1. Wipe non-legal pages + their content blocks.
         await wipeNonLegalPagesAndBlocks(tx)
@@ -806,22 +1011,25 @@ export const POST = withError(async (req: Request) => {
       // real media rows. Clear the rollback tracker so the finally
       // block doesn't unlink them.
       writtenMediaPaths.length = 0
-      return okJson({ ok: true, templateSlug: template.slug, ...result })
-    } catch (err) {
-      // TX failed (or any post-TX throw): unlink every variant file
-      // we copied. mediaRows the TX rolled back are gone; without
-      // this cleanup the files would orphan in UPLOADS_ROOT/variants/
-      // and only the nightly purge would notice.
-      if (writtenMediaPaths.length > 0) {
+      // Bust the Next.js router cache. Without this, RSC prefetches +
+      // soft-nav lookups for the seeded pages can land on stale 404s
+      // / stale splash output until a hard reload. 'layout' scope
+      // invalidates the full route tree (home + every dynamically-
+      // resolved /<slug>) which is exactly what a template wipe-and-
+      // reseed needs.
+      revalidatePath('/', 'layout')
+      // Post-commit: unlink the previous template's orphaned variant
+      // files. The media rows are already gone; this just frees disk.
+      // Best-effort — log on failure (operator's Media Library is
+      // already correct since the DB is the source of truth).
+      if (orphanedPathsToUnlink.length > 0) {
         await Promise.all(
-          writtenMediaPaths.map((p) =>
+          orphanedPathsToUnlink.map((p) =>
             unlink(p).catch((cleanupErr: unknown) => {
-              // Best-effort — log so the orphan is observable but
-              // don't mask the original TX error.
               console.warn(
                 JSON.stringify({
                   level: 'warn',
-                  msg: 'install_template_orphan_variant_unlink_failed',
+                  msg: 'install_template_orphan_reap_unlink_failed',
                   path: p,
                   err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
                 }),
@@ -829,6 +1037,62 @@ export const POST = withError(async (req: Request) => {
             }),
           ),
         )
+      }
+      return okJson({ ok: true, templateSlug: template.slug, ...result })
+    } catch (err) {
+      // TX failed (or any post-TX throw): unlink every variant file
+      // we copied. mediaRows the TX rolled back are gone; without
+      // this cleanup the files would orphan in UPLOADS_ROOT/variants/
+      // and only the nightly purge would notice. The whole cleanup
+      // block is itself wrapped in try/catch so a synchronous throw
+      // (e.g. unlink throwing from a path-resolution edge case) can't
+      // escape into the outer catch and MASK the original TX error
+      // — the operator needs to see why the install failed, not why
+      // the cleanup failed.
+      if (writtenMediaPaths.length > 0) {
+        try {
+          await Promise.all(
+            writtenMediaPaths.map((p) =>
+              unlink(p).catch((cleanupErr: unknown) => {
+                // Best-effort — log so the orphan is observable but
+                // don't mask the original TX error.
+                console.warn(
+                  JSON.stringify({
+                    level: 'warn',
+                    msg: 'install_template_orphan_variant_unlink_failed',
+                    path: p,
+                    err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+                  }),
+                )
+              }),
+            ),
+          )
+        } catch (cleanupOuter) {
+          console.error(
+            JSON.stringify({
+              level: 'error',
+              msg: 'install_template_cleanup_threw',
+              err: cleanupOuter instanceof Error ? cleanupOuter.message : String(cleanupOuter),
+            }),
+          )
+        }
+      }
+      if (err instanceof TemplateMediaUnresolvedError) {
+        // Pre-flight should have caught this; if we're here, the
+        // manifest and the template have drifted at runtime. Loud
+        // structured log + targeted 500 with the missing key so the
+        // publisher can fix in the next release.
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'install_template_media_unresolved',
+            templateSlug: body.templateSlug,
+            key: err.key,
+            blockType: err.blockType,
+            field: err.field,
+          }),
+        )
+        return errJson(500, 'template_media_unresolved', { key: err.key })
       }
       if (err instanceof AlreadyInstalledError) {
         return new Response(

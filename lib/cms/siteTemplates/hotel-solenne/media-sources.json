@@ -94,5 +94,13 @@
     "photographer": "Peter Herrmann",
     "license": "unsplash",
     "mime": "image/jpeg"
+  },
+  {
+    "key": "reservations-hero",
+    "sourceUrl": "https://images.unsplash.com/photo-1758708536313-e7055ddba277?w=2400&q=85",
+    "alt": "A vintage brass service bell on a wooden reception desk — the front desk at Hôtel Solenne.",
+    "photographer": "Jonathan Cosens Photography",
+    "license": "unsplash",
+    "mime": "image/jpeg"
   }
 ]

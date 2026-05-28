@@ -53,6 +53,25 @@ if (SITE_TEMPLATES.length === 0) {
   )
 }
 
+// Deep-freeze every template at module load. The install route's
+// `injectMediaRefs` USED to mutate widget.data and strip _imageKeys
+// in place, which silently poisoned the registry singleton across
+// requests in a long-lived Node process. The fix in the install route
+// is to `structuredClone` the template before mutating; the freeze
+// here is defence-in-depth so a future contributor who forgets the
+// clone gets a loud TypeError at the mutation site instead of a
+// quiet 0.1.38-era data-corruption bug. Object.freeze is shallow —
+// we walk every nested object so frozen-ness reaches every widget.
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') return obj
+  Object.freeze(obj)
+  for (const key of Object.keys(obj)) {
+    deepFreeze((obj as Record<string, unknown>)[key])
+  }
+  return obj
+}
+for (const t of SITE_TEMPLATES) deepFreeze(t)
+
 export const TEMPLATE_SLUGS = SITE_TEMPLATES.map((t) => t.slug)
 
 export function getTemplate(slug: string): SiteTemplate | null {
