@@ -255,8 +255,7 @@ function buildScriptEnv(
   // Forward the bundled public key so the orchestrator can verify
   // signatures using the value the apply route, not the release host,
   // controls. lib/updates/releasePubkey.ts is the single source of
-  // truth — imported at module-load below.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // truth.
   out.CAVECMS_RELEASE_PUBKEY_PEM = RELEASE_PUBKEY_PEM
   if (opts.force) {
     out.CAVECMS_UPDATE_FORCE = '1'

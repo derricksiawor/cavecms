@@ -1,7 +1,8 @@
 import 'server-only'
 import { z } from 'zod'
 import { TEXT_MAX } from './limits'
-import { parseVideoEmbedUrl } from './videoHostAllowlist'
+// parseVideoEmbedUrl is unused after the legacy purge — the lx_video
+// schema uses its own isValidVideoUrl gate. Kept removed (no import).
 import { parseStrictHttpsUrl } from './url-guard'
 import { HEX_COLOR_RE } from './designTokens'
 import { BLOCK_TONE_ENUMS } from './blockTones'
@@ -177,13 +178,8 @@ const safeCtaHrefOptional = (max: number) =>
 
 // SocialIcons URL gate. Stricter than CTA_HREF_RE because social
 // profile URLs are always external HTTPS - they're never relative
-// paths, never mailto:, never tel:. Delegates the full safe-https
-// gate (backslash/control/whitespace/userinfo/port/hash + parse) to
-// `parseStrictHttpsUrl` in url-guard.ts - the same primitive
-// videoHostAllowlist uses. NEVER throws.
-function isValidSocialUrl(s: string): boolean {
-  return parseStrictHttpsUrl(s) !== null
-}
+// isValidSocialUrl was the legacy social_icons URL gate — removed
+// after the legacy purge. lx_social_icons uses safeCtaHref directly.
 
 // Google Maps embed URL gate. Operators paste from Google Maps
 // "Share → Embed a map" (canonical: https://www.google.com/maps/embed?pb=...)
@@ -253,11 +249,10 @@ function isValidMapEmbedUrl(s: string): boolean {
   }
   return false
 }
-const Cta = z.object({
-  text: z.string().min(1).max(TEXT_MAX.ctaText),
-  href: safeCtaHref(TEXT_MAX.url),
-  openInNew: z.boolean().default(false),
-})
+// The legacy Cta inline schema was used by legacy `hero`/`cta`
+// block_types — both deleted in the legacy purge. lx_action and
+// lx_cta_banner build their own CTA objects inline now.
+
 
 // Block-type registry. Adding a new block:
 //  1. add a schema here
