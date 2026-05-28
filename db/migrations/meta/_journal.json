@@ -148,6 +148,13 @@
       "when": 1779732073087,
       "tag": "0022_ai_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1779932080044,
+      "tag": "0023_fix_deleted_at_defaults",
+      "breakpoints": true
     }
   ]
 }
