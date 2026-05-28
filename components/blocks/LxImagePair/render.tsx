@@ -76,6 +76,12 @@ interface ImageFrameProps {
   shadowClass: string
   media: RenderContext['media']
   inlineEdit?: InlineEditContext
+  /** Full lx_image_pair `data` object — threaded through so the
+   *  AltTextOverlay's PATCH body reconstructs the BOTH-image-refs
+   *  shape. Passing `{}` here causes the new data to be `{leftImage:
+   *  {alt: 'new'}}` only, which fails Zod (rightImage MediaRef
+   *  missing) and the save silently 422s. */
+  blockData: Record<string, unknown>
 }
 
 function ImageFrame({
@@ -89,6 +95,7 @@ function ImageFrame({
   shadowClass,
   media,
   inlineEdit,
+  blockData,
 }: ImageFrameProps) {
   const entry = media.get(mediaId)
   const missing = !entry || !entry.variants
@@ -143,11 +150,12 @@ function ImageFrame({
           blockVersion={inlineEdit.blockVersion}
           pageId={inlineEdit.pageId}
           pageVersion={inlineEdit.pageVersion}
-          // The overlay edits a specific media-ref field — pass the
-          // full data blob plus the dotted field path. Each side of
-          // the pair gets its own overlay so the operator can update
-          // alts independently without opening the drawer.
-          initialData={{} as Record<string, unknown>}
+          // Threading the full block data — the overlay's PATCH body
+          // reconstructs the lx_image_pair shape with BOTH MediaRefs
+          // intact via setFieldValue. Passing `{}` here caused the
+          // save to silently 422 because Zod rejected the resulting
+          // {leftImage:{alt:...}} (no rightImage required field).
+          initialData={blockData}
           field={variant === 'left' ? 'leftImage.alt' : 'rightImage.alt'}
           initialValue={alt}
         />
@@ -201,6 +209,7 @@ export function LxImagePair({
         }
         media={media}
         inlineEdit={inlineEdit}
+        blockData={data as unknown as Record<string, unknown>}
       />
       <ImageFrame
         mediaId={data.rightImage.media_id}
@@ -217,6 +226,7 @@ export function LxImagePair({
         }
         media={media}
         inlineEdit={inlineEdit}
+        blockData={data as unknown as Record<string, unknown>}
       />
     </div>
   )

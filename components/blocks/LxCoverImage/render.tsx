@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { MediaImg } from '../MediaImg'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import { AltTextOverlay } from '@/components/inline-edit/AltTextOverlay'
+import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { RenderContext } from '..'
@@ -158,45 +159,89 @@ export function LxCoverImage({
     Boolean(data.eyebrow) ||
     Boolean(data.title) ||
     Boolean(data.body) ||
-    Boolean(data.cta)
+    Boolean(data.cta) ||
+    // Always render the overlay block in edit mode so operators can
+    // type a title onto a previously-imageless cover. Without this,
+    // a fresh lx_cover_image (no eyebrow/title/body/cta yet) has no
+    // overlay to click into.
+    Boolean(inlineEdit)
   const toneClass = OVERLAY_TONE_CLASS[data.overlayTone]
+
+  const eyebrowClass = clsx(
+    'font-sans text-[11px] font-semibold uppercase tracking-[0.32em]',
+    toneClass.eyebrow,
+  )
+  const titleClass = clsx(
+    'font-serif text-4xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl',
+    toneClass.title,
+  )
+  const bodyClass = clsx(
+    'max-w-2xl text-base leading-relaxed sm:text-lg',
+    toneClass.body,
+  )
 
   const overlayText = hasOverlay ? (
     <div
       className={clsx(
-        'pointer-events-none absolute z-10 flex w-full max-w-3xl flex-col gap-4 p-8 sm:p-12 lg:p-16',
+        'absolute z-10 flex w-full max-w-3xl flex-col gap-4 p-8 sm:p-12 lg:p-16',
+        // pointer-events-none on the static overlay so clicks pass to
+        // the image below; the editable wrappers + cta opt back in
+        // with pointer-events-auto so operators can interact with
+        // their controls.
+        inlineEdit ? '' : 'pointer-events-none',
         OVERLAY_ANCHOR_CLASS[data.overlayAlignment],
       )}
     >
-      {data.eyebrow && (
-        <p
-          className={clsx(
-            'font-sans text-[11px] font-semibold uppercase tracking-[0.32em]',
-            toneClass.eyebrow,
-          )}
-        >
-          {data.eyebrow}
-        </p>
+      {inlineEdit ? (
+        <InlineEditable
+          blockId={inlineEdit.blockId}
+          blockVersion={inlineEdit.blockVersion}
+          pageId={inlineEdit.pageId}
+          pageVersion={inlineEdit.pageVersion}
+          initialData={data}
+          field="eyebrow"
+          kind="text"
+          initialValue={data.eyebrow ?? ''}
+          as="p"
+          className={eyebrowClass}
+          placeholder="Eyebrow (optional)"
+        />
+      ) : (
+        data.eyebrow && <p className={eyebrowClass}>{data.eyebrow}</p>
       )}
-      {data.title && (
-        <h1
-          className={clsx(
-            'font-serif text-4xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl',
-            toneClass.title,
-          )}
-        >
-          {data.title}
-        </h1>
+      {inlineEdit ? (
+        <InlineEditable
+          blockId={inlineEdit.blockId}
+          blockVersion={inlineEdit.blockVersion}
+          pageId={inlineEdit.pageId}
+          pageVersion={inlineEdit.pageVersion}
+          initialData={data}
+          field="title"
+          kind="text"
+          initialValue={data.title ?? ''}
+          as="h1"
+          className={titleClass}
+          placeholder="Title (optional)"
+        />
+      ) : (
+        data.title && <h1 className={titleClass}>{data.title}</h1>
       )}
-      {data.body && (
-        <p
-          className={clsx(
-            'max-w-2xl text-base leading-relaxed sm:text-lg',
-            toneClass.body,
-          )}
-        >
-          {data.body}
-        </p>
+      {inlineEdit ? (
+        <InlineEditable
+          blockId={inlineEdit.blockId}
+          blockVersion={inlineEdit.blockVersion}
+          pageId={inlineEdit.pageId}
+          pageVersion={inlineEdit.pageVersion}
+          initialData={data}
+          field="body"
+          kind="text"
+          initialValue={data.body ?? ''}
+          as="p"
+          className={bodyClass}
+          placeholder="Body (optional)"
+        />
+      ) : (
+        data.body && <p className={bodyClass}>{data.body}</p>
       )}
       {data.cta && (
         <a

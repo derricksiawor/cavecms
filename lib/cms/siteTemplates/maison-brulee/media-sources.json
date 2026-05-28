@@ -1,96 +1,104 @@
 [
   {
     "key": "home-hero-room",
-    "sourceUrl": "https://images.unsplash.com/photo-1559329007-40df8a9345d8?w=2400&q=85",
-    "alt": "Warmly lit restaurant dining room at evening service with set tables, soft tungsten glow and intimate seating.",
+    "sourceUrl": "https://images.unsplash.com/photo-1559329007-40df8a9345d8?w=4000&q=92",
+    "alt": "A candlelit dining room at evening service — bare wood tables, set linen, a soft tungsten glow on the far wall.",
     "photographer": "Jason Briscoe",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "home-bar",
-    "sourceUrl": "https://images.unsplash.com/photo-1470337458703-46ad1756a187?w=2400&q=85",
-    "alt": "Atmospheric wine bar with backlit shelves of bottles and glassware in warm amber light.",
+    "sourceUrl": "https://images.unsplash.com/photo-1470337458703-46ad1756a187?w=4000&q=92",
+    "alt": "The bar at Maison Brûlée — backlit shelves of wine in warm amber, glassware catching the light.",
     "photographer": "Patrick Tomasso",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "menu-starter",
-    "sourceUrl": "https://images.unsplash.com/photo-1532980400857-e8d9d275d858?w=2400&q=85",
-    "alt": "Delicate crudo starter plated on a cream-rimmed ceramic dish with herbs and citrus.",
+    "sourceUrl": "https://images.unsplash.com/photo-1532980400857-e8d9d275d858?w=4000&q=92",
+    "alt": "A crudo starter dressed with herbs and citrus on a cream-rimmed plate — quiet, restrained, plated by hand.",
     "photographer": "Jay Wennington",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "menu-main",
-    "sourceUrl": "https://images.unsplash.com/photo-1473093226795-af9932fe5856?w=2400&q=85",
-    "alt": "Handmade pasta main course twirled on a rustic plate with grated cheese and herbs.",
+    "sourceUrl": "https://images.unsplash.com/photo-1473093226795-af9932fe5856?w=4000&q=92",
+    "alt": "A hand-rolled pasta main twirled on a rustic plate, dressed with grated cheese and torn herbs.",
     "photographer": "Eaters Collective",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "menu-dessert",
-    "sourceUrl": "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=2400&q=85",
-    "alt": "Warm rustic tart with poached fruit and cream, photographed in soft natural light.",
+    "sourceUrl": "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=4000&q=92",
+    "alt": "A rustic warm tart with poached fruit and cream, photographed in soft daylight on a marble bench.",
     "photographer": "Joyful",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "menu-wine",
-    "sourceUrl": "https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=2400&q=85",
-    "alt": "Hand pouring red wine into a glass at a candlelit table, dark moody background.",
+    "sourceUrl": "https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=4000&q=92",
+    "alt": "A hand pouring red wine into a glass at a candlelit table — the slow moment that opens dinner.",
     "photographer": "Kelsey Knight",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "chef-portrait",
-    "sourceUrl": "https://images.unsplash.com/photo-1577106263724-2c8e03bfe9cf?w=2400&q=85",
-    "alt": "Candid portrait of a chef in white jacket standing in a professional kitchen with warm overhead light.",
+    "sourceUrl": "https://images.unsplash.com/photo-1577106263724-2c8e03bfe9cf?w=4000&q=92",
+    "alt": "A candid portrait of a chef in a white jacket in the kitchen, half-lit by overhead service light.",
     "photographer": "Louis Hansel",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "chef-kitchen",
-    "sourceUrl": "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=2400&q=85",
-    "alt": "Line cook's hands plating a dish at the kitchen pass with steam rising under warm service lights.",
+    "sourceUrl": "https://images.unsplash.com/photo-1556910103-1c02745aae4d?w=4000&q=92",
+    "alt": "A line cook's hands plating at the pass under warm service lights — steam rising, a tweezer, a thumbprint of sauce.",
     "photographer": "Louis Hansel",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "story-facade",
-    "sourceUrl": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=2400&q=85",
-    "alt": "Restaurant exterior at twilight with warm yellow window glow spilling onto the street.",
+    "sourceUrl": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=4000&q=92",
+    "alt": "The street facade of Maison Brûlée at twilight — warm yellow window glow spilling onto wet pavement.",
     "photographer": "Adrien Olichon",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
+    "key": "story-oven",
+    "sourceUrl": "https://images.unsplash.com/photo-1646656352194-7db15ee021bf?w=4000&q=92",
+    "alt": "The wood-fired oven at the heart of the kitchen — flames inside the brick arch, embers banked to one side.",
+    "photographer": "Unsplash",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
     "key": "story-ingredients",
-    "sourceUrl": "https://images.unsplash.com/photo-1466637574441-749b8f19452f?w=2400&q=85",
-    "alt": "Close-up of fresh market herbs and produce on a wooden surface in soft daylight.",
+    "sourceUrl": "https://images.unsplash.com/photo-1466637574441-749b8f19452f?w=4000&q=92",
+    "alt": "Fresh market herbs and produce arranged on a wooden butcher block in soft afternoon daylight.",
     "photographer": "Brooke Lark",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "reservations-table",
-    "sourceUrl": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=2400&q=85",
-    "alt": "Intimate table for two set with linen, lit candle, water glasses and quiet evening ambience.",
+    "sourceUrl": "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=4000&q=92",
+    "alt": "A two-top set for the evening — linen, a lit candle, two water glasses, a single bud in a small bottle.",
     "photographer": "Jay Wennington",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "press-night",
-    "sourceUrl": "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=2400&q=85",
-    "alt": "Restaurant exterior glowing warmly at night with a quiet street view and ambient lighting.",
+    "sourceUrl": "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=4000&q=92",
+    "alt": "The Maison Brûlée block at night — the restaurant window glowing warm against a quiet, unlit street.",
     "photographer": "Lily Banse",
     "license": "unsplash",
     "mime": "image/jpeg"

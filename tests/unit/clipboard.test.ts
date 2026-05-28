@@ -26,7 +26,7 @@ const columnSlot: ClipboardSlot = {
 const widgetSlot: ClipboardSlot = {
   version: CLIPBOARD_SCHEMA_VERSION,
   kind: 'widget',
-  blockType: 'heading',
+  blockType: 'lx_heading',
   data: { text: 'A', level: 'h2' },
   meta: {},
   copiedAt: 0,

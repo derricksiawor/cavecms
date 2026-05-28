@@ -16,6 +16,24 @@ import {
 // 5 pages: Home, Sermons, Service Times, Ministries, Giving.
 // Voice: warm, plain, no church-marketing clichés. Real names, real
 // places, real times.
+//
+// Visual rhythm. Each hero is intentional, none repeat:
+//   Home          — screen-height marquee, centered overlay, sanctuary
+//                   at sunrise. The first impression: come in.
+//   Sermons       — lg, bottom-left overlay over a dark-wood pulpit.
+//                   Editorial, contemplative.
+//   Service times — lg, center-left overlay over the bright fellowship
+//                   hall. Daylight + champagne wash, obsidian text.
+//   Ministries    — lg, bottom-right overlay over sheet music on
+//                   piano. Quiet, off-axis composition.
+//   Giving        — md (the shortest), top-left overlay over the white
+//                   clapboard chapel. Daylight, obsidian text on
+//                   champagne wash. A church-on-a-hill postcard.
+//
+// Background palette: cream / ivory / bone dominate. Obsidian appears
+// twice as a closing CTA accent (home, sermons) and once on the giving
+// channel strip. Champagne carries the stat row + the service-times
+// closer. Warm, hopeful, human — not luxe-hotel + cross.
 
 export const graceHillTemplate: SiteTemplate = {
   slug: 'grace-hill',
@@ -61,6 +79,12 @@ export const graceHillTemplate: SiteTemplate = {
   },
   pages: [
     // ─── HOME ─────────────────────────────────────────────────────
+    //
+    // Marquee. Screen-height, centered overlay, gradient-bottom for
+    // legibility on the bright sanctuary photo. This is the only hero
+    // in the template that fills the viewport — the visitor has to
+    // decide to scroll. Centered overlay reads as an open invitation
+    // rather than a one-sided pitch.
     {
       slug: 'home',
       title: 'Grace Hill',
@@ -72,11 +96,15 @@ export const graceHillTemplate: SiteTemplate = {
         heroCover({
           imageKey: 'home-hero-sanctuary',
           alt: 'Grace Hill sanctuary — empty wooden pews with soft daylight through the tall windows.',
-          eyebrow: 'Welcome',
+          eyebrow: 'Sunday at nine and eleven',
           title: 'Come as you are.',
-          body: 'Grace Hill is a small church on a hill above the river. We meet on Sunday mornings at nine and eleven. We sing, we read, we pray together, and afterwards there is coffee for whoever wants to stay.',
+          body: 'Grace Hill is a small church on a hill above the river. We sing, we read, we pray together, and afterwards there is coffee for whoever wants to stay.',
           cta: { label: 'Plan a visit', href: '/service-times' },
-          minHeight: 'xl',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          minHeight: 'screen',
+          ratio: '21:9',
         }),
 
         ...threeColCards({
@@ -112,6 +140,8 @@ export const graceHillTemplate: SiteTemplate = {
         }),
 
         // Pair: the congregation from inside, the church from outside.
+        // Lifted-left composition, generous overlap. Both photos
+        // bright cream-tone — sits well on the cream background.
         oneCol(
           'cream',
           'lg',
@@ -128,7 +158,7 @@ export const graceHillTemplate: SiteTemplate = {
         ),
 
         oneCol(
-          'cream',
+          'ivory',
           'lg',
           quote(
             '"I came on a Sunday because a friend invited me. I stayed because nobody pretended I was already a Christian."',
@@ -147,6 +177,11 @@ export const graceHillTemplate: SiteTemplate = {
     },
 
     // ─── SERMONS ──────────────────────────────────────────────────
+    //
+    // Editorial sub-page. lg minHeight, bottom-left overlay on a
+    // contemplative dark-wood pulpit photo. Ivory text on the dark
+    // wood with a gradient-bottom assist. Shorter than home, reads
+    // as a reading-room.
     {
       slug: 'sermons',
       title: 'Sermons',
@@ -159,8 +194,12 @@ export const graceHillTemplate: SiteTemplate = {
           alt: 'An open Bible resting on a simple wooden pulpit, warm light.',
           eyebrow: 'Recent sermons',
           title: 'Twenty-five minutes, give or take.',
-          body: 'Our pastor records each Sunday morning and the audio is posted by the evening. The current series is on the Sermon on the Mount; the next series, beginning in autumn, will be on the book of Ruth.',
-          minHeight: 'xl',
+          body: 'Our pastor records each Sunday morning and the audio is posted by the evening. The current series is on the Sermon on the Mount; next, beginning in autumn, the book of Ruth.',
+          overlayAlignment: 'bottom-left',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          minHeight: 'lg',
+          ratio: '16:9',
         }),
 
         // Pastor intro figure — grounds the sermons in a real person.
@@ -218,14 +257,15 @@ export const graceHillTemplate: SiteTemplate = {
           ],
         }),
 
-        // Quiet figure between the sermons grid and the closing CTA.
+        // Quiet figure between the sermons grid and the closing CTA —
+        // 21:9 for a strip that reads as the page exhaling.
         oneCol(
           'cream',
           'md',
           figure({
             imageKey: 'sermons-listening',
             alt: 'A hymnal at rest on an empty wooden church pew.',
-            ratio: '16:9',
+            ratio: '21:9',
             animation: 'fade-in',
           }),
         ),
@@ -240,6 +280,11 @@ export const graceHillTemplate: SiteTemplate = {
     },
 
     // ─── SERVICE TIMES ────────────────────────────────────────────
+    //
+    // Light, daylight-flooded fellowship-hall photo. center-left
+    // overlay with obsidian-tone text + champagne overlay wash —
+    // warmer than gradient-bottom, and reads as the page that
+    // says "we are open."
     {
       slug: 'service-times',
       title: 'Service times',
@@ -252,8 +297,12 @@ export const graceHillTemplate: SiteTemplate = {
           alt: 'The Grace Hill fellowship hall — rows of tables and chairs set for a community gathering.',
           eyebrow: 'When we meet',
           title: 'Sundays at nine and eleven.',
-          body: 'Two services every Sunday, identical in content. The nine o’clock is smaller and quieter; the eleven o’clock has the full children’s programme and a longer coffee time afterwards.',
-          minHeight: 'xl',
+          body: 'Two services every Sunday, identical in content. The nine o’clock is smaller and quieter; the eleven has the full children’s programme and a longer coffee time afterwards.',
+          overlayAlignment: 'center-left',
+          overlayTone: 'obsidian',
+          overlay: 'champagne',
+          minHeight: 'lg',
+          ratio: '16:9',
         }),
 
         ...threeColCards({
@@ -303,6 +352,11 @@ export const graceHillTemplate: SiteTemplate = {
     },
 
     // ─── MINISTRIES ───────────────────────────────────────────────
+    //
+    // Sheet music on a brown upright piano. bottom-right overlay for
+    // the third spatial variation (after centered, bottom-left,
+    // center-left). lg minHeight. Ivory text on gradient-bottom — the
+    // piano photo is mid-tone wood, the gradient anchors the type.
     {
       slug: 'ministries',
       title: 'Ministries',
@@ -315,12 +369,17 @@ export const graceHillTemplate: SiteTemplate = {
           alt: 'Sheet music resting on a warm brown upright piano in the church hall.',
           eyebrow: 'Through the week',
           title: 'Twelve quiet rhythms.',
-          body: 'Ministries at Grace Hill are small — most have between eight and twenty people, and most meet weekly. Each one has a name and a phone number on this page; ring them, do not just turn up cold.',
-          minHeight: 'xl',
+          body: 'Ministries at Grace Hill are small — most have between eight and twenty people, and most meet weekly. Each one has a name and a phone number; ring them, do not just turn up cold.',
+          overlayAlignment: 'bottom-right',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          minHeight: 'lg',
+          ratio: '16:9',
         }),
 
         // Pair: children's craft table beside the foodbank — two of the
-        // ministries' visual moods, side by side.
+        // ministries' visual moods, side by side. Lifted-right to
+        // counter-balance the home page's lifted-left pair.
         oneCol(
           'cream',
           'lg',
@@ -390,6 +449,11 @@ export const graceHillTemplate: SiteTemplate = {
     },
 
     // ─── GIVING ───────────────────────────────────────────────────
+    //
+    // The shortest hero in the template. md minHeight, 3:2 ratio,
+    // top-left overlay over the white-clapboard chapel under a wide
+    // sky. obsidian text on a champagne wash — warm and forthright.
+    // Reads as a chapel postcard, not a donation page.
     {
       slug: 'giving',
       title: 'Giving',
@@ -402,8 +466,12 @@ export const graceHillTemplate: SiteTemplate = {
           alt: 'A small historic white clapboard church with a slim steeple — the kind of building Grace Hill is.',
           eyebrow: 'Giving & prayer',
           title: 'Two ways to be part of the work.',
-          body: 'Grace Hill is supported by the people who come — there is no national headquarters, no central denomination, no other income. We also receive prayer requests through the same office, and both are read by a real person.',
-          minHeight: 'xl',
+          body: 'Grace Hill is supported by the people who come — no headquarters, no denomination, no other income. Prayer requests go to the same office, and both are read by a real person.',
+          overlayAlignment: 'top-left',
+          overlayTone: 'obsidian',
+          overlay: 'champagne',
+          minHeight: 'md',
+          ratio: '3:2',
         }),
 
         ...threeColCards({
@@ -427,14 +495,16 @@ export const graceHillTemplate: SiteTemplate = {
           ],
         }),
 
-        // Quiet figure between the giving cards and the contact details.
+        // Quiet figure between the giving cards and the contact
+        // details. 21:9 strip — a slim band of pew detail, the page
+        // pausing before the practical bit.
         oneCol(
           'cream',
           'md',
           figure({
             imageKey: 'give-stewardship',
             alt: 'A quiet detail of a brown wooden church pew — contemplative and still.',
-            ratio: '16:9',
+            ratio: '21:9',
             animation: 'fade-in',
           }),
         ),
@@ -474,4 +544,3 @@ export const graceHillTemplate: SiteTemplate = {
     },
   ],
 }
-

@@ -13,9 +13,12 @@ import {
   threeColCards,
 } from './_shared'
 
-// Velocity — modern SaaS landing.
+// Velocity — modern engineering-operations SaaS.
 // 5 pages: Home, Features, Pricing, Changelog, Docs.
 // Voice: confident, technical, builder-to-builder. Avoids buzzwords.
+// Visual language: obsidian + near-black dominant, copper/champagne
+// accent through the eyebrows + primary CTAs. Heroes vary in
+// alignment, ratio, and overlay so no two pages feel the same.
 
 export const velocityTemplate: SiteTemplate = {
   slug: 'velocity',
@@ -23,7 +26,7 @@ export const velocityTemplate: SiteTemplate = {
   kind: 'Software',
   tagline: 'Faster than yesterday.',
   description:
-    'A modern SaaS landing template. Hero, feature matrix, pricing, changelog, docs. Built for software teams that want a website that does not look like every other software site.',
+    'A modern engineering-operations SaaS template. Plan, ship, measure. Built for software teams who want a site that reads like a real tool, not a 2018 startup landing page.',
   vibe: 'software',
   themePalette: {
     bg: '#06080d',
@@ -62,23 +65,30 @@ export const velocityTemplate: SiteTemplate = {
   },
   pages: [
     // ─── HOME ─────────────────────────────────────────────────────
+    // Centered hero, screen-tall, on a near-black PCB macro. The
+    // CTA sits dead-center so the very first impression reads as a
+    // confident tool, not a brochure. Overlay is 'darken' (not
+    // 'gradient-bottom') so the circuit texture stays legible
+    // behind the type.
     {
       slug: 'home',
       title: 'Velocity',
       isHome: true,
       seoTitle: 'Velocity — Faster than yesterday',
       seoDescription:
-        'A modern engineering operations platform. Plan, ship, measure. Built for teams that want fewer meetings.',
+        'A modern engineering-operations platform. Plan, ship, measure. Built for teams that want fewer meetings.',
       sections: [
         heroCover({
           imageKey: 'home-hero-abstract',
-          alt: 'An abstract dark blue circuit board macro with glowing nodes and fibre-optic light trails.',
+          alt: 'Macro photograph of a printed circuit board lit from behind, with green conductive pathways glowing against deep black negative space.',
           eyebrow: 'Engineering operations',
           title: 'Faster than yesterday.',
           body: 'Plan, ship, and measure work in one tool. Fifty-eight integrations, a real CLI, an API that returns within ninety milliseconds. Built for teams that want fewer meetings and more deploys.',
           cta: { label: 'Start free', href: '/pricing' },
-          minHeight: 'xl',
-          overlay: 'darken-strong',
+          overlayAlignment: 'center',
+          overlay: 'darken',
+          minHeight: 'screen',
+          ratio: '16:9',
         }),
 
         ...threeColCards({
@@ -116,38 +126,27 @@ export const velocityTemplate: SiteTemplate = {
           ],
         }),
 
-        // Product surface — laptop with a blurred dashboard.
+        // Product surface — a real code editor close-up. Lands the
+        // dev-tool DNA between the stat row and the customer quote.
         oneCol(
           'near-black',
-          'md',
+          'lg',
           figure({
-            imageKey: 'home-product-laptop',
-            alt: 'An open laptop on a dark desk displaying a blurred abstract dashboard interface.',
+            imageKey: 'home-product-code',
+            alt: 'Tight close-up of a dark code editor screen running a JavaScript file, syntax highlighted in the Dracula colour palette.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
         ),
 
-        // Founder portrait — grounds the customer quote below.
-        oneCol(
-          'cream',
-          'md',
-          figure({
-            imageKey: 'team-founder',
-            alt: 'A considered editorial portrait of one of the Velocity founders in soft natural light.',
-            ratio: '4:5',
-            animation: 'fade-in',
-          }),
-        ),
-
         closingQuote({
-          background: 'cream',
+          background: 'obsidian',
           text: '"Standups dropped from forty minutes to four. Velocity told us what would have been in the standup anyway."',
           attribution: 'A. Chen, Director of Engineering, Sequoia Logistics',
         }),
 
         ctaBanner({
-          background: 'obsidian',
+          background: 'near-black',
           title: 'Free for the first ten people.',
           body: 'No credit card. Full feature set. Upgrade only when you need more seats or SSO.',
           cta: { label: 'Start free', href: '/pricing' },
@@ -156,6 +155,9 @@ export const velocityTemplate: SiteTemplate = {
     },
 
     // ─── FEATURES ─────────────────────────────────────────────────
+    // Flat editorial hero (no cover photo). The page itself carries
+    // the visuals: a collaboration pair, then a black-and-white data
+    // chart, then three feature matrices. Restraint = signal.
     {
       slug: 'features',
       title: 'Features',
@@ -170,15 +172,18 @@ export const velocityTemplate: SiteTemplate = {
           body: 'Four product surfaces — Plan, Ship, Measure, Integrate — and a CLI that uses every one of them.',
         }),
 
-        // Pair: engineers reviewing code + a mobile UI close-up.
+        // Pair: engineers reviewing code + a mobile dark-mode UI in
+        // the hand. Shifts the page from copy to product proof.
         oneCol(
           'near-black',
           'lg',
           imagePair({
             leftImageKey: 'features-collaboration',
-            leftAlt: 'Over-the-shoulder view of two engineers reviewing code together on a laptop.',
+            leftAlt:
+              'Over-the-shoulder view of two engineers reviewing code together on a laptop in a quiet workspace.',
             rightImageKey: 'features-mobile',
-            rightAlt: 'Close-up of a smartphone showing a minimal dark-mode app interface.',
+            rightAlt:
+              'First-person shot of a smartphone held in hand showing a dark-mode iOS interface.',
             layout: 'lift-left',
             overlap: 'md',
             ratio: '4:5',
@@ -186,13 +191,14 @@ export const velocityTemplate: SiteTemplate = {
           }),
         ),
 
-        // Data viz — the Measure surface, visually.
+        // The Measure surface, visually — a black-and-white time
+        // series. Restraint + density: the brand promise made literal.
         oneCol(
           'obsidian',
           'md',
           figure({
             imageKey: 'features-data-viz',
-            alt: 'An abstract data visualization of glowing connected nodes and lines on a deep blue background.',
+            alt: 'Black and white macro of a laptop screen rendering a tightly gridded time-series chart — pure data, no chrome.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
@@ -277,6 +283,10 @@ export const velocityTemplate: SiteTemplate = {
     },
 
     // ─── PRICING ──────────────────────────────────────────────────
+    // Shorter, business-focused hero. Daylight minimalist office —
+    // calm, considered, no surprises. Overlay flipped to 'obsidian'
+    // tone so the dark text reads against the bright photo. Anchored
+    // top-left for a tight, paper-quality editorial header.
     {
       slug: 'pricing',
       title: 'Pricing',
@@ -286,11 +296,15 @@ export const velocityTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'pricing-office',
-          alt: 'A modern minimalist office workspace with wooden furniture and soft daylight — the kind of team Velocity is built for.',
+          alt: 'Modern minimalist interior with restrained wooden benches and soft daylight — calm, considered, unhurried.',
           eyebrow: 'Pricing',
           title: 'Three plans, no surprises.',
-          body: 'Pricing is per seat, per month, billed annually. We do not charge for storage, integrations, or API calls. There is no "contact us for pricing" tier — Enterprise is listed at $48 a seat and we will tell you what is in it before you ask.',
-          minHeight: 'xl',
+          body: 'Per seat, per month, billed annually. No charge for storage, integrations, or API calls. No "contact us for pricing" tier — Enterprise is $48 a seat and we will tell you what is in it before you ask.',
+          overlayAlignment: 'top-left',
+          overlayTone: 'obsidian',
+          overlay: 'none',
+          minHeight: 'lg',
+          ratio: '21:9',
         }),
 
         ...threeColCards({
@@ -318,16 +332,19 @@ export const velocityTemplate: SiteTemplate = {
           ],
         }),
 
-        // Pair: customers' meeting + office interior — what Enterprise
-        // looks like in practice.
+        // Pair: a real engineer on infra, alongside a considered
+        // workspace. Together they're "what Enterprise looks like in
+        // practice" — production systems + the calm to think clearly.
         oneCol(
           'near-black',
           'lg',
           imagePair({
-            leftImageKey: 'customers-meeting',
-            leftAlt: 'A wide shot of a boardroom meeting with silhouetted figures backlit by window light.',
-            rightImageKey: 'team-office',
-            rightAlt: 'An industrial-loft office interior at dusk with exposed brick and warm pendant lighting.',
+            leftImageKey: 'customers-engineer',
+            leftAlt:
+              'An engineer with a tablet in a server-room corridor, blue rack lights reflecting on the glass partition behind her.',
+            rightImageKey: 'team-workspace',
+            rightAlt:
+              'A considered home-office workspace — leather chair, low-profile mechanical keyboard, soft daylight through closed blinds.',
             layout: 'lift-right',
             overlap: 'md',
             ratio: '4:5',
@@ -361,6 +378,10 @@ export const velocityTemplate: SiteTemplate = {
     },
 
     // ─── CHANGELOG ────────────────────────────────────────────────
+    // Zine-style. Kanban whiteboard, anchored bottom-left, with a
+    // moderate 'darken' overlay so the sticky-note grid still reads
+    // through. Shorter than home so the page can lead straight into
+    // the entry list.
     {
       slug: 'changelog',
       title: 'Changelog',
@@ -370,25 +391,15 @@ export const velocityTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'changelog-kanban',
-          alt: 'A whiteboard covered in coloured sticky notes arranged into columns — kanban-style task tracking.',
+          alt: 'A whiteboard covered in orange and blue sticky notes arranged into kanban columns — workflow-as-zine.',
           eyebrow: 'Changelog',
           title: 'Every ship, in plain words.',
           body: 'A weekly post, written by the engineers who shipped the work. Major versions get their own page; the highlights live here.',
-          minHeight: 'xl',
+          overlayAlignment: 'bottom-left',
+          overlay: 'darken',
+          minHeight: 'lg',
+          ratio: '21:9',
         }),
-
-        // Trust-security figure — between the changelog cards and the
-        // end of page. Hints at the security-conscious posture.
-        oneCol(
-          'near-black',
-          'md',
-          figure({
-            imageKey: 'trust-security',
-            alt: 'An abstract security visualization with a glowing padlock motif over a dark grid of binary code.',
-            ratio: '16:9',
-            animation: 'fade-in',
-          }),
-        ),
 
         ...threeColCards({
           background: 'near-black',
@@ -426,10 +437,28 @@ export const velocityTemplate: SiteTemplate = {
             },
           ],
         }),
+
+        // A real infrastructure shot to close the page — patch panels
+        // and fibre. Quietly underscores that the platform itself is
+        // an engineered thing, not a marketing surface.
+        oneCol(
+          'near-black',
+          'md',
+          figure({
+            imageKey: 'trust-infrastructure',
+            alt: 'A network rack viewed head-on — patch panels, neatly bundled fibre, indicator LEDs glowing amber and green in the dark.',
+            ratio: '21:9',
+            animation: 'fade-in',
+          }),
+        ),
       ],
     },
 
     // ─── DOCS ─────────────────────────────────────────────────────
+    // The most editorial-flat hero of the set. Wide 21:9, full-width,
+    // editorial-text anchored bottom-left over a dark VSCode shot. No
+    // primary CTA in the overlay — the page IS the CTA. A secondary
+    // "Get the CLI" lives inline in the body.
     {
       slug: 'docs',
       title: 'Docs',
@@ -439,12 +468,15 @@ export const velocityTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'docs-code',
-          alt: 'Close-up of a code editor screen with syntax-highlighted source code on a dark background.',
+          alt: 'Close-up of an SVG source file in a dark code editor, syntax highlighted in blue and magenta.',
           eyebrow: 'Documentation',
           title: 'How to use Velocity.',
           body: 'Six guides for new teams, fifty-eight integration recipes, the full API reference, and a CLI reference. Everything you need to bring a team in within a week.',
           cta: { label: 'Get the CLI', href: '/docs#cli' },
-          minHeight: 'xl',
+          overlayAlignment: 'bottom-left',
+          overlay: 'darken',
+          minHeight: 'lg',
+          ratio: '21:9',
         }),
 
         ...threeColCards({

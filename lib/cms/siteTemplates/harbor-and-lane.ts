@@ -4,7 +4,6 @@ import {
   contactChannels,
   contactForm,
   ctaBanner,
-  hero,
   heroCover,
   imagePair,
   oneCol,
@@ -71,14 +70,23 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'A modern boutique brokerage. Twelve agents, four neighborhoods, a hundred and forty closings a year.',
       sections: [
+        // Home — full-bleed, screen-height, centered overlay. The first
+        // impression: a single quiet home at dusk, copy floating dead-
+        // centre over a softly darkened photo. No CTA jostling for
+        // position, no eyebrow rule pulling the eye sideways. Just the
+        // brand, the line, and "see listings".
         heroCover({
           imageKey: 'home-hero-house',
-          alt: 'A modern home with warm interior light glowing through floor-to-ceiling windows at golden hour.',
+          alt: 'A modern two-story home with warm interior light glowing through tall windows at twilight, framed by mature trees.',
           eyebrow: 'Harbor & Lane',
           title: 'Homes that hold a life.',
           body: 'A boutique brokerage of twelve agents working four neighborhoods. We close about a hundred and forty homes a year, and we know each one of them by name.',
           cta: { label: 'See listings', href: '/listings' },
-          minHeight: 'xl',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
+          overlay: 'darken',
+          minHeight: 'screen',
+          ratio: '21:9',
         }),
 
         ...threeColCards({
@@ -176,13 +184,22 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Our active listings across Harbor Hill, the Lane, the Marina, and the Old Town.',
       sections: [
+        // Listings — screen-height, the photo is the room. The bottom-
+        // left overlay keeps copy out of the architectural detail above
+        // while letting the dusk-lit home carry the visual weight.
+        // Gradient-bottom darkens just enough for the ivory text to
+        // read against the warm interior glow.
         heroCover({
           imageKey: 'listings-hero',
-          alt: 'A contemporary two-story home with clean lines and large glass panels — the kind we list at Harbor Hill.',
+          alt: 'A contemporary dark-clad home with clean lines and large glass panels at dusk, warm interior light spilling into the garden.',
           eyebrow: 'Active listings',
           title: 'On the market now.',
           body: 'A short list, refreshed every Monday. Open houses on Saturdays from one until three unless otherwise noted.',
-          minHeight: 'xl',
+          overlayAlignment: 'bottom-left',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          minHeight: 'screen',
+          ratio: '21:9',
         }),
 
         ...threeColCards({
@@ -255,13 +272,21 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Twelve agents, full-time, working four neighborhoods. Each one writes their own listings.',
       sections: [
+        // Agents — editorial 21:9 strip, not screen-height. The team
+        // page reads like a magazine spread; a tighter hero leaves room
+        // for portraits + bio cards below to do the heavy lifting.
+        // Bottom-centered copy sits over the warm wooden office floor.
         heroCover({
           imageKey: 'agents-office',
-          alt: 'The Harbor & Lane office — a warm boutique interior with wooden desks and tall plants in afternoon light.',
+          alt: 'The Harbor & Lane office — a warm boutique interior with wooden desks, tall plants, and afternoon light through tall windows.',
           eyebrow: 'The agents',
           title: 'Twelve people, full-time.',
           body: 'Every agent at Harbor & Lane is full-time, by license, working out of one of our four neighborhood offices. No leads are sold off, no listings handed to junior staff.',
-          minHeight: 'xl',
+          overlayAlignment: 'bottom-center',
+          overlayTone: 'ivory',
+          overlay: 'darken',
+          minHeight: 'lg',
+          ratio: '21:9',
         }),
 
         // Pair: two agent portraits — establishes the team's presence
@@ -334,12 +359,22 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Harbor Hill, the Lane, the Marina, the Old Town. Four small guides to the four places we work.',
       sections: [
-        hero({
-          background: 'ivory',
+        // Neighborhoods — screen-height cover anchored to the
+        // residential street photo, copy right-of-center so the
+        // architecture of the block on the left stays readable as
+        // composition. The neighborhoods are the subject; the photo
+        // is them.
+        heroCover({
+          imageKey: 'home-neighborhood',
+          alt: 'A low-rise residential block at the end of the day, balconies catching the last warmth of the sunset — one of the four neighborhoods Harbor & Lane works.',
           eyebrow: 'Where we work',
           title: 'Four small places.',
           body: 'We work in four neighborhoods only. Each guide is written by the agent who lives there.',
-          tone: 'obsidian',
+          overlayAlignment: 'center-right',
+          overlayTone: 'ivory',
+          overlay: 'darken',
+          minHeight: 'screen',
+          ratio: '21:9',
         }),
 
         ...threeColCards({
@@ -415,13 +450,22 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Talk with an agent. We answer every enquiry within one business day.',
       sections: [
+        // Contact — a quieter cover. The marble lobby photo is light
+        // and airy, so we anchor the copy top-left with obsidian text
+        // over a champagne wash. Shorter min-height keeps the reception
+        // imagery as an invitation, not a marquee — the channels and
+        // brief form below are where the actual conversation starts.
         heroCover({
           imageKey: 'contact-reception',
-          alt: 'The Harbor & Lane reception desk — marble and warm wood, soft overhead lighting.',
+          alt: 'The Harbor & Lane reception — a marble entrance hall with a curved staircase, brass railing, and morning sun catching the pendant lights.',
           eyebrow: 'Talk with an agent',
           title: 'Tell us what you are looking for.',
           body: 'Buying, selling, or somewhere in between. We will route you to the right agent the same day, by name, by neighborhood, by the shape of what you want.',
-          minHeight: 'xl',
+          overlayAlignment: 'top-left',
+          overlayTone: 'obsidian',
+          overlay: 'champagne',
+          minHeight: 'lg',
+          ratio: '16:9',
         }),
 
         contactChannels({

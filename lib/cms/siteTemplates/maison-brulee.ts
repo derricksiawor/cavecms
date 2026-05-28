@@ -15,9 +15,17 @@ import {
   threeColCards,
 } from './_shared'
 
-// Maison Brûlée — neighborhood restaurant.
+// Maison Brûlée — neighborhood fine-dining restaurant.
 // 5 pages: Home, Menu, Story, Reservations, Press.
-// Voice: confident, lived-in. Food without florid adjectives.
+// Voice: quiet, lived-in, restrained. No florid food-adjectives. Lyon
+// bistro tempered by a Tokyo neighborhood izakaya's restraint.
+//
+// Identity contrast with Hôtel Solenne (the hotel template) — Solenne
+// runs champagne + obsidian. Maison Brûlée leans WARMER: terracotta /
+// copper / wood-ember accents (copper-tint background, warm-stone tone),
+// near-black for evening service, then breaks to cream + bone for the
+// daylight craft + ingredient editorial. Heroes rotate their overlay
+// anchor across pages so no two openings feel alike.
 
 export const maisonBruleeTemplate: SiteTemplate = {
   slug: 'maison-brulee',
@@ -63,6 +71,11 @@ export const maisonBruleeTemplate: SiteTemplate = {
   },
   pages: [
     // ─── HOME ─────────────────────────────────────────────────────
+    // Centered overlay on a candlelit dining-room photo. The reserve-
+    // a-table CTA is the focal point of the first impression — the
+    // whole page exists to land that one click. `overlay: 'darken'`
+    // (not gradient-bottom) keeps candlelight and tabletop details
+    // legible behind the centered copy.
     {
       slug: 'home',
       title: 'Maison Brûlée',
@@ -73,12 +86,17 @@ export const maisonBruleeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'home-hero-room',
-          alt: 'The Maison Brûlée dining room — warmly lit at evening service, set tables, intimate seating.',
+          alt: 'The Maison Brûlée dining room at evening service — bare wood tables set with candles, an intimate near-empty room waiting for the first sitting.',
+          background: 'obsidian',
+          ratio: '16:9',
+          minHeight: 'xl',
+          overlay: 'darken',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
           eyebrow: 'Since 2017',
           title: 'A table worth keeping.',
-          body: 'A small dining room — thirty-six seats around a single open kitchen with a wood-fired oven at the heart of it. Dinner only, Tuesday to Saturday, six until late. The menu changes weekly, the wine list every season.',
+          body: 'Thirty-six seats around a single open kitchen. One wood-fired oven, lit at four. Dinner only, Tuesday to Saturday.',
           cta: { label: 'Book a table', href: '/reservations' },
-          minHeight: 'xl',
         }),
 
         ...threeColCards({
@@ -113,7 +131,8 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ],
         }),
 
-        // The bar — wine list lives behind it.
+        // The bar — wine list lives behind it. A breath of obsidian
+        // between the cream cards and the warm copper closing quote.
         oneCol(
           'near-black',
           'md',
@@ -126,8 +145,11 @@ export const maisonBruleeTemplate: SiteTemplate = {
           }),
         ),
 
+        // copper-tint — warmer than champagne, distinct from Solenne.
+        // The closing quote sits in the warmer half of the palette
+        // before the obsidian CTA banner closes the page.
         closingQuote({
-          background: 'cream',
+          background: 'copper-tint',
           text: '"The trout came on a plate so hot the salt sizzled. The waiter said her name and the name of the river. We have come back fourteen times since."',
           attribution: 'M. & J. Iversen, regulars since 2018',
         }),
@@ -142,6 +164,9 @@ export const maisonBruleeTemplate: SiteTemplate = {
     },
 
     // ─── MENU ─────────────────────────────────────────────────────
+    // Cinematic 21:9 hero anchored bottom-center over the wine-pour
+    // photo. The wine glass is the gravity well; copy sits beneath
+    // it so the eye lands on the pour first, then reads the text.
     {
       slug: 'menu',
       title: 'Menu',
@@ -151,11 +176,16 @@ export const maisonBruleeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'menu-wine',
-          alt: 'A hand pouring red wine into a glass at a candlelit table — the kind of moment the menu builds toward.',
-          eyebrow: 'This week’s menu',
+          alt: 'A hand pouring red wine into a glass at a candlelit table — the slow moment that opens dinner.',
+          background: 'near-black',
+          ratio: '21:9',
+          minHeight: 'lg',
+          overlay: 'darken',
+          overlayAlignment: 'bottom-center',
+          overlayTone: 'ivory',
+          eyebrow: 'This week',
           title: 'Six, eight, three.',
-          body: 'Six starters, eight mains, three desserts. The menu refreshes every Tuesday — whatever the suppliers brought on Monday is what we cook. About half of every dish touches the fire.',
-          minHeight: 'xl',
+          body: 'Six starters, eight mains, three desserts. The menu refreshes every Tuesday — whatever the suppliers brought on Monday is what we cook.',
         }),
 
         ...threeColCards({
@@ -196,8 +226,28 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ],
         }),
 
+        // Pair: a starter and a dessert at the seam between courses.
+        // Lift-right so the dessert visually drops onto the page like
+        // a final plate set down.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'menu-starter',
+            leftAlt: 'A crudo starter on a cream-rimmed plate with herbs and citrus — restrained, hand-finished.',
+            rightImageKey: 'menu-dessert',
+            rightAlt: 'A warm rustic tart with poached fruit and cream, photographed in soft natural light.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Mains break to bone so the white-on-white starter > mains
+        // rhythm doesn't feel one-note.
         ...threeColCards({
-          background: 'ivory',
+          background: 'bone',
           sectionTitle: 'A main',
           sectionTone: 'obsidian',
           cards: [
@@ -234,36 +284,24 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ],
         }),
 
-        // The "main" hero figure — handmade pasta or a roast.
+        // A single mains figure — handmade pasta — sits in bone so
+        // the photo carries the section's warmth without a hard
+        // background break.
         oneCol(
-          'ivory',
+          'bone',
           'md',
           figure({
             imageKey: 'menu-main',
-            alt: 'A handmade pasta main course twirled on a rustic plate with grated cheese and herbs.',
+            alt: 'A hand-rolled pasta main twirled on a rustic plate with grated cheese and torn herbs.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
         ),
 
-        // Pair: a starter and a dessert from the current week.
-        oneCol(
-          'ivory',
-          'lg',
-          imagePair({
-            leftImageKey: 'menu-starter',
-            leftAlt: 'A delicate crudo starter plated on a cream-rimmed ceramic dish with herbs and citrus.',
-            rightImageKey: 'menu-dessert',
-            rightAlt: 'A warm rustic tart with poached fruit and cream, photographed in soft natural light.',
-            layout: 'lift-right',
-            overlap: 'md',
-            ratio: '4:5',
-            animation: 'fade-in',
-          }),
-        ),
-
+        // Desserts on copper-tint — the warmest section of the menu,
+        // reserved for the warmest course.
         ...threeColCards({
-          background: 'champagne',
+          background: 'copper-tint',
           sectionTitle: 'To finish',
           sectionTone: 'obsidian',
           cards: [
@@ -295,6 +333,10 @@ export const maisonBruleeTemplate: SiteTemplate = {
     },
 
     // ─── STORY ────────────────────────────────────────────────────
+    // Editorial short hero — a 21:9 strip with `minHeight: md` and
+    // copy lifted into the top-left corner so it reads like a
+    // magazine column header sitting above the facade photo, not a
+    // marketing banner. Long-form text follows.
     {
       slug: 'story',
       title: 'Story',
@@ -304,16 +346,23 @@ export const maisonBruleeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'story-facade',
-          alt: 'The Maison Brûlée exterior at twilight, warm yellow window glow spilling onto the street.',
+          alt: 'The Maison Brûlée facade at twilight — warm yellow window glow spilling onto wet pavement, a quiet street.',
+          background: 'near-black',
+          ratio: '21:9',
+          minHeight: 'md',
+          overlay: 'darken-strong',
+          overlayAlignment: 'top-left',
+          overlayTone: 'ivory',
           eyebrow: 'Since 2017',
           title: 'One chef, one fire.',
-          body: 'Maison Brûlée opened in May 2017. The wood oven was the first thing installed in the empty room — Esme had cooked on the same model in Lyon and brought one over before the floor was tiled.',
-          minHeight: 'xl',
+          body: 'Opened in May 2017. The wood oven was the first thing installed in the empty room.',
         }),
 
+        // Long-form text section — the editorial body that the short
+        // hero introduces. Generous vertical space, narrow column.
         oneCol(
           'ivory',
-          'lg',
+          'xl',
           eyebrow('Esme', { tone: 'champagne' }),
           heading(
             'Trained in Lyon, cooked in Copenhagen, came home to open this',
@@ -326,6 +375,10 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ),
           text(
             'Esme Lacroix grew up half a mile from the restaurant. She trained at the Institut Paul Bocuse, cooked at three Michelin-starred kitchens in Copenhagen for six years, and came back at thirty-one to open her own room. Maison Brûlée is named for the burnt-edge cooking she does on the wood oven — and for the small kitchen fire she had on the morning of opening, which the staff still talk about.',
+            { tone: 'obsidian', marginTop: 'md', size: 'body-lg' },
+          ),
+          text(
+            'The room sat empty for fourteen months before she signed the lease. She walked past it every week from a flat two blocks over, looking in through the brown paper on the windows, sketching the kitchen on napkins. The lease was signed on a Tuesday in March. The oven arrived from Italy six weeks later.',
             { tone: 'obsidian', marginTop: 'md' },
           ),
         ),
@@ -346,20 +399,38 @@ export const maisonBruleeTemplate: SiteTemplate = {
           }),
         ),
 
-        // Ingredients close-up — the produce, the kitchen garden.
+        // The wood oven — the centerpiece of the restaurant gets its
+        // own full-width frame on near-black so the flame carries the
+        // whole section.
+        oneCol(
+          'near-black',
+          'lg',
+          figure({
+            imageKey: 'story-oven',
+            alt: 'The wood-fired oven at the heart of the kitchen — flames inside the brick arch, embers banked to one side.',
+            ratio: '21:9',
+            caption: 'A Mugnaini, imported from Italy in spring 2017. Apple wood. Lit at four.',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Daylight break — fresh produce on butcher block, the craft
+        // half of the editorial.
         oneCol(
           'cream',
           'md',
           figure({
             imageKey: 'story-ingredients',
-            alt: 'Close-up of fresh market herbs and produce on a wooden surface in soft daylight.',
+            alt: 'Fresh market herbs and produce arranged on a wooden butcher block in soft afternoon daylight.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
         ),
 
+        // Honest details — keep on bone so it sits between the cream
+        // ingredient strip and the warm copper closing quote.
         ...threeColCards({
-          background: 'champagne',
+          background: 'bone',
           sectionTitle: 'A few honest details',
           sectionTone: 'obsidian',
           cards: [
@@ -382,7 +453,7 @@ export const maisonBruleeTemplate: SiteTemplate = {
         }),
 
         closingQuote({
-          background: 'ivory',
+          background: 'copper-tint',
           text: '"There is one fire, and one Esme. That is the secret. There is no other secret."',
           attribution: 'A. Verma, food writer, in a 2023 review',
         }),
@@ -390,6 +461,11 @@ export const maisonBruleeTemplate: SiteTemplate = {
     },
 
     // ─── RESERVATIONS ─────────────────────────────────────────────
+    // 4:3 mid-height hero with copy anchored center-right over the
+    // intimate two-top table. The right-side overlay reads almost
+    // like a place card on the empty seat at the table — the seat
+    // that's waiting for you. gradient-bottom keeps the candle and
+    // linen detail readable.
     {
       slug: 'reservations',
       title: 'Reservations',
@@ -399,11 +475,16 @@ export const maisonBruleeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'reservations-table',
-          alt: 'An intimate table for two set with linen, lit candle, water glasses — the seat that waits for you.',
+          alt: 'An intimate two-top set for the evening — linen, a lit candle, two water glasses, a single bud in a small bottle.',
+          background: 'obsidian',
+          ratio: '4:3',
+          minHeight: 'lg',
+          overlay: 'gradient-bottom',
+          overlayAlignment: 'center-right',
+          overlayTone: 'ivory',
           eyebrow: 'Reservations',
           title: 'Six weeks ahead.',
-          body: 'Reservations open six weeks before the date. Dinner only, Tuesday to Saturday. Last seating is at 9:30 PM; the bar takes walk-ins until 11.',
-          minHeight: 'xl',
+          body: 'Dinner only, Tuesday to Saturday. Last seating 9:30 PM; the bar takes walk-ins until 11.',
         }),
 
         contactChannels({
@@ -428,9 +509,12 @@ export const maisonBruleeTemplate: SiteTemplate = {
           },
         }),
 
+        // Form breaks to near-black so it sits visually distinct
+        // from the channel cards above and doesn't read as one
+        // long obsidian wall.
         oneCol(
-          'obsidian',
-          'md',
+          'near-black',
+          'lg',
           contactForm({
             heading: 'Request a table',
             intro:
@@ -445,6 +529,9 @@ export const maisonBruleeTemplate: SiteTemplate = {
     },
 
     // ─── PRESS ────────────────────────────────────────────────────
+    // Short editorial masthead — sm minHeight, 21:9, bottom-left
+    // copy. Classic press-section banner, modest in height so the
+    // list of pieces gets the page's real estate.
     {
       slug: 'press',
       title: 'Press',
@@ -454,11 +541,16 @@ export const maisonBruleeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'press-night',
-          alt: 'The Maison Brûlée exterior glowing warmly at night with a quiet street view.',
+          alt: 'The Maison Brûlée block at night — the restaurant window glowing warm against a quiet, unlit street.',
+          background: 'obsidian',
+          ratio: '21:9',
+          minHeight: 'sm',
+          overlay: 'gradient-bottom',
+          overlayAlignment: 'bottom-left',
+          overlayTone: 'ivory',
           eyebrow: 'Press',
           title: 'What people have written.',
-          body: 'Selected pieces from the past seven years. For press enquiries, please write to press@maisonbrulee.example.',
-          minHeight: 'xl',
+          body: 'Selected pieces from the past seven years. For press enquiries, press@maisonbrulee.example.',
         }),
 
         ...threeColCards({
@@ -499,8 +591,11 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ],
         }),
 
+        // CTA on near-black, not obsidian — keeps the page closing
+        // tone consistent with the warm rooms above and prevents a
+        // hard hero/CTA bookend.
         ctaBanner({
-          background: 'obsidian',
+          background: 'near-black',
           title: 'Press enquiries',
           body: 'For interviews, photography, or a copy of the press kit, write to press@maisonbrulee.example. We reply within one business day.',
           cta: { label: 'Press contact', href: 'mailto:press@maisonbrulee.example' },

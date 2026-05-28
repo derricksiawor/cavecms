@@ -149,6 +149,16 @@
     RequestHeader unset X-Forwarded-Host
     RequestHeader set X-Forwarded-Proto "https"
     RequestHeader set X-Forwarded-Host "%{HTTP_HOST}e"
+    # X-Real-IP MUST be cleared and re-set from the actual remote
+    # socket — otherwise an attacker rotates `X-Real-IP: <random>` per
+    # request and bypasses every per-IP rate limit, lockout escalation,
+    # IP allow/blocklist gate, and maintenance bypass gate. The Node
+    # app reads x-real-ip when the socket peer is loopback (always
+    # true behind Apache's ProxyPass), so the header is the IP-of-
+    # record. The nginx template at scripts/nginx/snippets/cavecms-
+    # proxy.conf already does the equivalent.
+    RequestHeader unset X-Real-IP
+    RequestHeader set X-Real-IP "%{REMOTE_ADDR}s"
 
     # Static + uploads + maintenance.html were aliased / excluded above
     # so they exit before reaching ProxyPass. Everything else goes to

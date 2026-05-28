@@ -77,7 +77,11 @@ export function LxStat({
   const labelStyle = resolved ? { color: resolved, opacity: 0.7 } : undefined
 
   const family = data.family
-  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-sans'
+  // Default to display (serif) for the count-up number — the editorial
+  // intent is the same as LxHeading's display tier (the giant numeral
+  // is read as a heading). The surrounding eyebrow/label already use
+  // the sans tracking-eyebrow treatment.
+  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-serif'
   const overrideWeight = data.weight
   const weightClass = overrideWeight
     ? fontWeightClass(overrideWeight)

@@ -175,10 +175,27 @@ function safeParse(raw: string): UpdateStatus | null {
 }
 
 export function readStatus(): UpdateStatus | null {
+  // We distinguish "file does not exist" (ENOENT — no update has been
+  // run, clean dashboard state) from "file exists but unreadable"
+  // (EACCES / permission error — operator state-dir mode bug; would
+  // otherwise surface as stale "Up to date" forever). On ENOENT we
+  // return null silently; on every other error we log a structured
+  // warning so the operator sees a forensic trail.
   let raw: string
   try {
     raw = readFileSync(getStatusPath(), 'utf8')
-  } catch {
+  } catch (err) {
+    const errno = (err as NodeJS.ErrnoException).code
+    if (errno !== 'ENOENT') {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: 'updates_read_status_failed',
+          code: errno ?? 'UNKNOWN',
+          err: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
     return null
   }
   return safeParse(raw)

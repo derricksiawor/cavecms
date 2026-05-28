@@ -82,88 +82,7 @@ export interface InlineEditableField {
 export const INLINE_EDITABLE_FIELDS: Readonly<
   Record<string, readonly InlineEditableField[]>
 > = Object.freeze({
-  // ─── Legacy text-bearing widgets ────────────────────────────────
-  text: [{ path: 'body_richtext', type: 'richtext', placeholder: 'Write something…' }],
-  quote: [
-    { path: 'quote', type: 'text', placeholder: 'Quote' },
-    { path: 'attribution', type: 'text', placeholder: 'Attribution' },
-    { path: 'attribution_title', type: 'text', placeholder: 'Role / title' },
-  ],
-  cta: [
-    { path: 'title', type: 'text', placeholder: 'Headline' },
-    { path: 'body', type: 'text', placeholder: 'Supporting copy' },
-    { path: 'cta.text', type: 'text', placeholder: 'Button label' },
-    { path: 'cta.href', type: 'url', placeholder: '/contact' },
-  ],
-  heading: [{ path: 'text', type: 'text', placeholder: 'Heading' }],
-  button: [
-    { path: 'text', type: 'text', placeholder: 'Button label' },
-    { path: 'href', type: 'url', placeholder: '/contact' },
-  ],
-  icon_box: [
-    { path: 'headline', type: 'text', placeholder: 'Headline' },
-    { path: 'body', type: 'text', placeholder: 'Supporting copy' },
-    { path: 'link.href', type: 'url', placeholder: '/services' },
-  ],
-  // Accordion + Tabs items — array-indexed. Title is plain text, body
-  // is rich text. The body_richtext for each item flows through the
-  // RICHTEXT_FIELDS sanitizer in parse.ts.
-  accordion: [
-    { path: 'items[].title', type: 'text', placeholder: 'Item title' },
-    { path: 'items[].body_richtext', type: 'richtext', placeholder: 'Item body' },
-  ],
-  tabs: [
-    { path: 'items[].label', type: 'text', placeholder: 'Tab label' },
-    { path: 'items[].body_richtext', type: 'richtext', placeholder: 'Tab body' },
-  ],
-  // IconList items — only the label is inline-editable; the icon
-  // picker lives in the drawer (operators don't type icon kebab-names
-  // into the canvas).
-  icon_list: [{ path: 'items[].label', type: 'text', placeholder: 'List item' }],
-  // ─── Chunk G — Elementor-parity rich widgets ────────────────────
-  testimonial: [
-    { path: 'quote', type: 'text', placeholder: 'Testimonial' },
-    { path: 'attribution', type: 'text', placeholder: 'Attribution' },
-    { path: 'role', type: 'text', placeholder: 'Role / title' },
-  ],
-  alert: [
-    { path: 'title', type: 'text', placeholder: 'Alert title' },
-    { path: 'body_richtext', type: 'richtext', placeholder: 'Alert body' },
-  ],
-  // Counter / Stats Row items — value is numeric (drawer), but every
-  // text-bearing field on each tile edits inline.
-  stats_row: [
-    { path: 'items[].label', type: 'text', placeholder: 'Label' },
-    { path: 'items[].prefix', type: 'text', placeholder: 'Prefix' },
-    { path: 'items[].suffix', type: 'text', placeholder: 'Suffix' },
-    { path: 'items[].helper_text', type: 'text', placeholder: 'Helper text' },
-  ],
-  star_rating: [{ path: 'label', type: 'text', placeholder: 'Rating label' }],
-  video_embed: [{ path: 'caption', type: 'text', placeholder: 'Caption' }],
-  contact_form: [
-    { path: 'heading', type: 'text', placeholder: 'Form heading' },
-    { path: 'intro', type: 'text', placeholder: 'Intro' },
-    { path: 'submit_label', type: 'text', placeholder: 'Send' },
-    { path: 'success_headline', type: 'text', placeholder: 'Thanks!' },
-    { path: 'success_body', type: 'text', placeholder: 'Confirmation copy' },
-  ],
-  eyebrow: [{ path: 'text', type: 'text', placeholder: 'Kicker' }],
-  channel_card: [
-    { path: 'label', type: 'text', placeholder: 'Label' },
-    { path: 'body', type: 'text', placeholder: 'Body' },
-    { path: 'action.text', type: 'text', placeholder: 'Action label' },
-    { path: 'action.href', type: 'url', placeholder: '/contact' },
-  ],
-  // ─── Image / Gallery — alt text + captions inline ───────────────
-  image: [
-    { path: 'image.alt', type: 'alt', placeholder: 'Describe this image' },
-    { path: 'caption', type: 'text', placeholder: 'Caption' },
-  ],
-  gallery: [
-    { path: 'images[].alt', type: 'alt', placeholder: 'Describe this image' },
-    { path: 'images[].caption', type: 'text', placeholder: 'Caption' },
-  ],
-  // ─── Luxury redesign — lx_* widget primitives ───────────────────
+  // ─── Luxury primitives ──────────────────────────────────────────
   lx_heading: [{ path: 'text', type: 'text', placeholder: 'Heading' }],
   lx_text: [
     { path: 'body_richtext', type: 'richtext', placeholder: 'Write something…' },
@@ -183,8 +102,12 @@ export const INLINE_EDITABLE_FIELDS: Readonly<
   ],
   lx_cover_image: [
     { path: 'image.alt', type: 'alt', placeholder: 'Describe this cover image' },
+    { path: 'eyebrow', type: 'text', placeholder: 'Eyebrow' },
+    { path: 'title', type: 'text', placeholder: 'Title' },
+    { path: 'body', type: 'text', placeholder: 'Body' },
   ],
   lx_map: [{ path: 'caption', type: 'text', placeholder: 'Caption' }],
+
   // ─── Luxury composites ──────────────────────────────────────────
   lx_channel_card: [
     { path: 'label', type: 'text', placeholder: 'Label' },
@@ -200,6 +123,63 @@ export const INLINE_EDITABLE_FIELDS: Readonly<
   lx_quote: [
     { path: 'quote', type: 'text', placeholder: 'Quote' },
     { path: 'attribution', type: 'text', placeholder: 'Attribution' },
+  ],
+  lx_testimonial: [
+    { path: 'quote', type: 'text', placeholder: 'Testimonial' },
+    { path: 'attribution', type: 'text', placeholder: 'Attribution' },
+    { path: 'attribution_title', type: 'text', placeholder: 'Role / title' },
+    { path: 'portrait.alt', type: 'alt', placeholder: 'Describe the portrait' },
+  ],
+  lx_video: [{ path: 'caption', type: 'text', placeholder: 'Caption' }],
+  // Accordion + Tabs items — array-indexed. Title is plain text,
+  // body is rich text (DOMPurify-sanitized through parse.ts).
+  lx_accordion: [
+    { path: 'items[].title', type: 'text', placeholder: 'Item title' },
+    { path: 'items[].body_richtext', type: 'richtext', placeholder: 'Item body' },
+  ],
+  lx_tabs: [
+    { path: 'tabs[].label', type: 'text', placeholder: 'Tab label' },
+    { path: 'tabs[].body_richtext', type: 'richtext', placeholder: 'Tab body' },
+  ],
+  // Icon-list items — only the label is inline-editable; the icon
+  // picker lives in the drawer (operators don't type icon kebab-
+  // names into the canvas).
+  lx_icon_list: [
+    { path: 'items[].headline', type: 'text', placeholder: 'Headline' },
+    { path: 'items[].body', type: 'text', placeholder: 'Body' },
+  ],
+  lx_icon_box: [
+    { path: 'headline', type: 'text', placeholder: 'Headline' },
+    { path: 'body', type: 'text', placeholder: 'Body' },
+    { path: 'link.href', type: 'url', placeholder: '/services' },
+  ],
+  lx_cta_banner: [
+    { path: 'eyebrow', type: 'text', placeholder: 'Eyebrow' },
+    { path: 'title', type: 'text', placeholder: 'Headline' },
+    { path: 'body', type: 'text', placeholder: 'Supporting copy' },
+    { path: 'primaryCta.label', type: 'text', placeholder: 'Primary button' },
+    { path: 'primaryCta.href', type: 'url', placeholder: '/contact' },
+    { path: 'secondaryCta.label', type: 'text', placeholder: 'Secondary button' },
+    { path: 'secondaryCta.href', type: 'url', placeholder: '/about' },
+  ],
+  lx_gallery: [
+    { path: 'images[].alt', type: 'alt', placeholder: 'Describe this image' },
+    { path: 'images[].caption', type: 'text', placeholder: 'Caption' },
+  ],
+  // Divider + Social icons have no text-bearing fields the operator
+  // would type into the canvas — both live entirely in the drawer.
+
+  // ─── Fixed-slot widget (not in the palette) ─────────────────────
+  // NOTE: `success_headline` and `success_body` are intentionally NOT
+  // surfaced as inline-editable. The current ContactFormClient
+  // redirects to /thank-you-* after submit instead of rendering an
+  // in-place success panel — exposing those fields in the editor
+  // would let operators edit copy that never renders. When the
+  // in-place success panel ships, re-add the two paths here.
+  contact_form: [
+    { path: 'heading', type: 'text', placeholder: 'Form heading' },
+    { path: 'intro', type: 'text', placeholder: 'Intro' },
+    { path: 'submit_label', type: 'text', placeholder: 'Send' },
   ],
 })
 

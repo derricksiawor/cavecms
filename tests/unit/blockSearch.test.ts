@@ -230,16 +230,18 @@ describe('searchBlocks — negative cases (no match)', () => {
   it('"calendar" → no hits (no widget for calendar)', () => {
     expect(searchBlocks('calendar')).toEqual([])
   })
-  // Legacy widget names are intentionally still matchable via aliases
-  // ('divider' → Rule, 'spacer' → Space, 'button' → Action) so
-  // operators with muscle memory from the legacy palette still find
-  // the right widget. Genuinely-removed concepts like Tabs / Accordion
-  // / Counter have no alias bridge — search misses by design.
-  it('"tabs" → no hits (legacy Tabs widget gone, no luxury equivalent)', () => {
-    expect(searchBlocks('tabs')).toEqual([])
+  // Luxury 2.0: Tabs + Accordion now have first-class lx_ widgets so
+  // these queries DO hit (vs. the prior legacy-purge era where they
+  // were dead ends).
+  it('"tabs" → matches the lx_tabs widget', () => {
+    const hits = searchBlocks('tabs')
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits[0]!.item.label).toBe('Tabs')
   })
-  it('"accordion" → no hits (legacy Accordion widget gone)', () => {
-    expect(searchBlocks('accordion')).toEqual([])
+  it('"accordion" → matches the lx_accordion widget', () => {
+    const hits = searchBlocks('accordion')
+    expect(hits.length).toBeGreaterThan(0)
+    expect(hits[0]!.item.label).toBe('Accordion')
   })
 })
 

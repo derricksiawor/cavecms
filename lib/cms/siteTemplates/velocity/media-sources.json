@@ -1,97 +1,89 @@
 [
   {
     "key": "home-hero-abstract",
-    "sourceUrl": "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=2400&q=85",
-    "alt": "Abstract dark blue circuit board macro with glowing nodes and fibre-optic light trails, cinematic low-key lighting.",
-    "photographer": "Shubham Dhage",
+    "sourceUrl": "https://images.unsplash.com/photo-1631375937044-6dd5beac01d2?w=4000&q=92",
+    "alt": "Macro photograph of a printed circuit board lit from behind, with green conductive pathways glowing against deep black negative space.",
+    "photographer": "Vishnu Mohanan",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
-    "key": "home-product-laptop",
-    "sourceUrl": "https://images.unsplash.com/photo-1551434678-e076c223a692?w=2400&q=85",
-    "alt": "Open laptop on a dark desk displaying a blurred abstract dashboard interface in low ambient light.",
-    "photographer": "Austin Distel",
+    "key": "home-product-code",
+    "sourceUrl": "https://images.unsplash.com/photo-1592609931095-54a2168ae893?w=4000&q=92",
+    "alt": "Tight close-up of a dark code editor screen running a JavaScript file, syntax highlighted in the Dracula colour palette.",
+    "photographer": "Joan Gamell",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "features-collaboration",
-    "sourceUrl": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=2400&q=85",
-    "alt": "Over-the-shoulder view of two engineers reviewing code together on a laptop in a dimly lit workspace.",
+    "sourceUrl": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=4000&q=92",
+    "alt": "Over-the-shoulder view of two engineers reviewing code together on a laptop in a quiet workspace.",
     "photographer": "Annie Spratt",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "features-data-viz",
-    "sourceUrl": "https://images.unsplash.com/photo-1518186285589-2f7649de83e0?w=2400&q=85",
-    "alt": "Abstract data visualization of glowing connected nodes and lines on a deep blue background.",
+    "sourceUrl": "https://images.unsplash.com/photo-1518186285589-2f7649de83e0?w=4000&q=92",
+    "alt": "Black and white macro of a laptop screen rendering a tightly gridded time-series chart — pure data, no chrome.",
     "photographer": "Joshua Sortino",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "features-mobile",
-    "sourceUrl": "https://images.unsplash.com/photo-1556656793-08538906a9f8?w=2400&q=85",
-    "alt": "Close-up of a smartphone held in hand showing a minimal dark-mode app interface.",
-    "photographer": "Daniel Romero",
+    "sourceUrl": "https://images.unsplash.com/photo-1569144157590-5d41c725e9bd?w=4000&q=92",
+    "alt": "First-person shot of a smartphone held in hand showing a dark-mode iOS interface against a softly blurred desk.",
+    "photographer": "Szabo Viktor",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "pricing-office",
-    "sourceUrl": "https://images.unsplash.com/photo-1772751541531-e084e8f56630?w=2400&q=85",
-    "alt": "Modern minimalist office workspace with wooden furniture, soft daylight, restrained styling.",
+    "sourceUrl": "https://images.unsplash.com/photo-1772751541531-e084e8f56630?w=4000&q=92",
+    "alt": "Modern minimalist interior with restrained wooden benches and soft daylight — calm, considered, unhurried.",
     "photographer": "lim woojung",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "docs-code",
-    "sourceUrl": "https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=2400&q=85",
-    "alt": "Close-up of a code editor screen with syntax-highlighted source code on a dark background.",
+    "sourceUrl": "https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=4000&q=92",
+    "alt": "Close-up of an SVG source file in a dark code editor, syntax highlighted in blue and magenta.",
     "photographer": "James Harrison",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
-    "key": "team-founder",
-    "sourceUrl": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=2400&q=85",
-    "alt": "Considered editorial portrait of a founder facing the camera with soft natural light against a neutral backdrop.",
-    "photographer": "Christina @ wocintechchat.com",
+    "key": "team-workspace",
+    "sourceUrl": "https://images.unsplash.com/photo-1563253746-350a0a877afa?w=4000&q=92",
+    "alt": "A considered home-office workspace — leather chair, low-profile mechanical keyboard, soft daylight through closed blinds.",
+    "photographer": "Michael Soledad",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
-    "key": "team-office",
-    "sourceUrl": "https://images.unsplash.com/photo-1604328698692-f76ea9498e76?w=2400&q=85",
-    "alt": "Industrial-loft office interior at dusk with exposed brick, warm pendant lighting, and long communal desks.",
-    "photographer": "Copernico",
+    "key": "customers-engineer",
+    "sourceUrl": "https://images.unsplash.com/photo-1573164713988-8665fc963095?w=4000&q=92",
+    "alt": "An engineer with a tablet in a server-room corridor, blue rack lights reflecting on the glass partition behind her.",
+    "photographer": "Christina @ wocintechchat.com",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "changelog-kanban",
-    "sourceUrl": "https://images.unsplash.com/photo-1677506048148-0c914dd8197b?w=2400&q=85",
-    "alt": "A whiteboard covered in coloured sticky notes arranged into columns — kanban-style task tracking.",
+    "sourceUrl": "https://images.unsplash.com/photo-1677506048148-0c914dd8197b?w=4000&q=92",
+    "alt": "A whiteboard covered in orange and blue sticky notes arranged into kanban columns — workflow-as-zine.",
     "photographer": "Paymo",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
-    "key": "customers-meeting",
-    "sourceUrl": "https://images.unsplash.com/photo-1573164713988-8665fc963095?w=2400&q=85",
-    "alt": "Wide shot of a boardroom meeting with silhouetted figures around a long table backlit by window light.",
-    "photographer": "Christina @ wocintechchat.com",
-    "license": "unsplash",
-    "mime": "image/jpeg"
-  },
-  {
-    "key": "trust-security",
-    "sourceUrl": "https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=2400&q=85",
-    "alt": "Abstract security visualization with a glowing padlock motif over a dark grid of binary code.",
-    "photographer": "FLY:D",
+    "key": "trust-infrastructure",
+    "sourceUrl": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=4000&q=92",
+    "alt": "A network rack viewed head-on — patch panels, neatly bundled fibre, indicator LEDs glowing amber and green in the dark.",
+    "photographer": "Taylor Vick",
     "license": "unsplash",
     "mime": "image/jpeg"
   }

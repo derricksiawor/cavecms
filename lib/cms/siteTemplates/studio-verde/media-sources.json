@@ -1,96 +1,112 @@
 [
   {
     "key": "home-hero-workspace",
-    "sourceUrl": "https://images.unsplash.com/photo-1499951360447-b19be8fe80f5?w=2400&q=85",
-    "alt": "Sun-streaked creative studio workspace with design tools, sketches, and reference materials spread across a wooden worktable.",
+    "sourceUrl": "https://images.unsplash.com/photo-1499951360447-b19be8fe80f5?w=4000&q=92",
+    "alt": "Sun-streaked studio worktable with notebooks, sketches, and design tools laid out in considered, type-forward composition.",
     "photographer": "Alvaro Reyes",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "home-team-working",
-    "sourceUrl": "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=2400&q=85",
-    "alt": "Over-the-shoulder view of designers working at their desks in a warm, naturally lit studio.",
-    "photographer": "Austin Distel",
+    "sourceUrl": "https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=4000&q=92",
+    "alt": "Designer at a wooden studio desk, hands working over an open sketchbook with type specimens and printed references nearby.",
+    "photographer": "Brooke Cagle",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "work-case-1",
-    "sourceUrl": "https://images.unsplash.com/photo-1626785774573-4b799315345d?w=2400&q=85",
-    "alt": "Branding identity system spread on a worktable with stationery mockups, colour cards, and printed collateral.",
+    "sourceUrl": "https://images.unsplash.com/photo-1626785774573-4b799315345d?w=4000&q=92",
+    "alt": "A full brand-identity system laid out on a worktable — stationery, colour swatches, printed business cards, and the wordmark in print.",
     "photographer": "Kelly Sikkema",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "work-case-2",
-    "sourceUrl": "https://images.unsplash.com/photo-1607344645866-009c320b63e0?w=2400&q=85",
-    "alt": "Minimalist packaging design in soft earth tones photographed on a neutral textured surface.",
+    "sourceUrl": "https://images.unsplash.com/photo-1607344645866-009c320b63e0?w=4000&q=92",
+    "alt": "Minimalist consumer packaging in soft earth tones, photographed on a neutral textured surface with considered light.",
     "photographer": "Kelly Sikkema",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "work-case-3",
-    "sourceUrl": "https://images.unsplash.com/photo-1519682337058-a94d519337bc?w=2400&q=85",
-    "alt": "Open editorial magazine spread showing considered typography and generous white space on a wooden desk.",
+    "sourceUrl": "https://images.unsplash.com/photo-1519682337058-a94d519337bc?w=4000&q=92",
+    "alt": "An open editorial magazine spread showing considered typography and generous white space on a wooden desk.",
     "photographer": "Brandi Redd",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "work-case-4",
-    "sourceUrl": "https://images.unsplash.com/photo-1559028012-481c04fa702d?w=2400&q=85",
-    "alt": "Digital interface mockup displayed on a screen with clean layouts and a muted colour palette.",
+    "sourceUrl": "https://images.unsplash.com/photo-1559028012-481c04fa702d?w=4000&q=92",
+    "alt": "A digital interface design in progress on a large display — clean layouts, a muted palette, and a confident type system.",
     "photographer": "Balazs Ketyi",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
+    "key": "work-typography-specimen",
+    "sourceUrl": "https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=4000&q=92",
+    "alt": "Close-up of a printed typography specimen — large lowercase letterforms in deep black ink on cream stock.",
+    "photographer": "Amador Loureiro",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
     "key": "process-sketching",
-    "sourceUrl": "https://images.unsplash.com/photo-1483546363825-7ebf25fb7513?w=2400&q=85",
-    "alt": "Close-up of hands sketching layout ideas on paper with markers and pencils scattered nearby.",
+    "sourceUrl": "https://images.unsplash.com/photo-1483546363825-7ebf25fb7513?w=4000&q=92",
+    "alt": "Close-up of hands sketching layout ideas on paper with markers, pencils, and a notebook scattered nearby.",
     "photographer": "Kelly Sikkema",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "process-collaboration",
-    "sourceUrl": "https://images.unsplash.com/photo-1517048676732-d65bc937f952?w=2400&q=85",
-    "alt": "Wide view of a team collaboration session with whiteboard sketches, sticky notes, and printed work pinned to the wall.",
-    "photographer": "Mapbox",
+    "sourceUrl": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=4000&q=92",
+    "alt": "A designer's reference table — open notebook, pen, coffee, and printed pages held down by a brass weight.",
+    "photographer": "Kari Shea",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "team-founder",
-    "sourceUrl": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=2400&q=85",
-    "alt": "Warm, considered portrait of a studio founder in soft natural light against a muted interior backdrop.",
-    "photographer": "Christina @ wocintechchat.com",
+    "sourceUrl": "https://images.unsplash.com/photo-1581291518857-4e27b48ff24e?w=4000&q=92",
+    "alt": "A warm, soft-light portrait of a Studio Verde designer at the studio worktable, mid-conversation about a project.",
+    "photographer": "ThisIsEngineering",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "team-office-detail",
-    "sourceUrl": "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=2400&q=85",
-    "alt": "Moody studio interior detail with a leafy plant, framed prints, and a neat stack of design books.",
+    "sourceUrl": "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=4000&q=92",
+    "alt": "A quiet studio interior detail — a leafy plant, framed prints, and a neat stack of design and architecture books.",
     "photographer": "Patrick Perkins",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "journal-detail",
-    "sourceUrl": "https://images.unsplash.com/photo-1471107340929-a87cd0f5b5f3?w=2400&q=85",
-    "alt": "Close-up of an open art and design book showing tactile printed pages and considered typography.",
+    "sourceUrl": "https://images.unsplash.com/photo-1471107340929-a87cd0f5b5f3?w=4000&q=92",
+    "alt": "Close-up of an open art and design monograph — tactile printed pages, considered typography, and a leather bookmark.",
     "photographer": "Daria Nepriakhina",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
+    "key": "studio-press-check",
+    "sourceUrl": "https://images.unsplash.com/photo-1517842645767-c639042777db?w=4000&q=92",
+    "alt": "An overhead view of a press-check worktable — printed swatches, a loupe, and ink-marked proofs in considered arrangement.",
+    "photographer": "Daniel Korpai",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
     "key": "contact-window",
-    "sourceUrl": "https://images.unsplash.com/photo-1674055441615-4a7689fd8e51?w=2400&q=85",
-    "alt": "Soft morning light streaming through a tall studio window with a city view in the distance.",
+    "sourceUrl": "https://images.unsplash.com/photo-1674055441615-4a7689fd8e51?w=4000&q=92",
+    "alt": "Soft morning light streaming through a tall studio window, the city softly out of focus in the distance.",
     "photographer": "Eugene Chystiakov",
     "license": "unsplash",
     "mime": "image/jpeg"

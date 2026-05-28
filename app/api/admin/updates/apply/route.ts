@@ -14,6 +14,7 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
+import { RELEASE_PUBKEY_PEM } from '@/lib/updates/releasePubkey'
 import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
@@ -93,6 +94,20 @@ const Body = z
     sha256: z
       .string()
       .regex(/^[a-f0-9]{64}$/i, 'sha256 must be 64 hex chars'),
+    // Ed25519 base64 signature over the downloaded zip's bytes.
+    // REQUIRED in the apply flow — sha256 alone defends against a
+    // truncated/corrupted download, not against a manifest origin
+    // compromise (the attacker controls both downloadUrl AND sha256
+    // in that case). The orchestrator verifies the signature with
+    // lib/updates/releasePubkey.ts AFTER sha256 verify + BEFORE
+    // tarball extract. Signature is base64-encoded Ed25519 — exactly
+    // 88 chars (64 bytes + base64 padding). Cap at 256 so a manifest
+    // that returns a malformed signature can't blow the body schema.
+    signature: z
+      .string()
+      .min(40)
+      .max(256)
+      .regex(/^[A-Za-z0-9+/=]+$/, 'signature must be base64'),
     // Force re-running install on the SAME SHA — exposed in the UI as
     // "Re-run install" (visible when current === available). Used to
     // recover from a corrupted .next/ cache or a previously-interrupted
@@ -140,6 +155,17 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_UPDATE_FORCE',
   'CAVECMS_UPDATE_TARBALL_URL',
   'CAVECMS_UPDATE_TARBALL_SHA256',
+  // Ed25519 signature over the tarball bytes. The orchestrator
+  // verifies this against the bundled public key after sha256 verify
+  // and BEFORE extract — prevents a compromised release-host CDN
+  // from shipping arbitrary code matched only by a host-supplied
+  // sha256.
+  'CAVECMS_UPDATE_TARBALL_SIGNATURE',
+  // Bundled Ed25519 public key (PEM). Forwarded so the orchestrator
+  // can verify the signature with a key the apply route, not the
+  // attacker-controlled host, chose. lib/updates/releasePubkey.ts is
+  // the single source of truth.
+  'CAVECMS_RELEASE_PUBKEY_PEM',
   'CAVECMS_REPO_DIR',
   'CAVECMS_HEALTHZ_URL',
   'CAVECMS_RELEASE_PROBE_URL',
@@ -199,7 +225,7 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
 function buildScriptEnv(
   target: string,
   fromSha: string,
-  opts: { force: boolean; downloadUrl: string; sha256: string },
+  opts: { force: boolean; downloadUrl: string; sha256: string; signature: string },
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const k of SCRIPT_ENV_ALLOWLIST) {
@@ -225,6 +251,13 @@ function buildScriptEnv(
   // update without a .git directory.
   out.CAVECMS_UPDATE_TARBALL_URL = opts.downloadUrl
   out.CAVECMS_UPDATE_TARBALL_SHA256 = opts.sha256
+  out.CAVECMS_UPDATE_TARBALL_SIGNATURE = opts.signature
+  // Forward the bundled public key so the orchestrator can verify
+  // signatures using the value the apply route, not the release host,
+  // controls. lib/updates/releasePubkey.ts is the single source of
+  // truth — imported at module-load below.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  out.CAVECMS_RELEASE_PUBKEY_PEM = RELEASE_PUBKEY_PEM
   if (opts.force) {
     out.CAVECMS_UPDATE_FORCE = '1'
   }
@@ -361,6 +394,7 @@ export const POST = withError(async (req: Request) => {
   const force = body.force === true
   const downloadUrl = body.downloadUrl
   const sha256 = body.sha256.toLowerCase()
+  const signature = body.signature
   const current = getCurrentVersion()
 
   // Refuse to "update" from dev — regardless of NODE_ENV. A
@@ -524,6 +558,7 @@ export const POST = withError(async (req: Request) => {
       force,
       downloadUrl,
       sha256,
+      signature,
     })
     // (4) Choose the strongest detach mechanism the host supports.
     //     systemd-run-user (cgroup escape) → setsid-nohup (session

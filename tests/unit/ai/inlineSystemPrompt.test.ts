@@ -82,16 +82,16 @@ describe('buildInlineSystemPrompt', () => {
   it('emits the block-type + field paths in section 4', () => {
     const p = buildInlineSystemPrompt({
       voicePreset: 'default',
-      blockType: 'hero',
+      blockType: 'lx_cta_banner',
       fields: [
         { path: 'title', kind: 'plain', maxLength: 220, primary: true, value: 'A' },
-        { path: 'cta.text', kind: 'plain', maxLength: 80, primary: false, value: 'Go' },
+        { path: 'primaryCta.label', kind: 'plain', maxLength: 80, primary: false, value: 'Go' },
       ],
       neighbours: [],
     })
-    expect(p).toContain('Block type: hero')
+    expect(p).toContain('Block type: lx_cta_banner')
     expect(p).toContain('title')
-    expect(p).toContain('cta.text')
+    expect(p).toContain('primaryCta.label')
   })
 
   it('marks empty field values explicitly', () => {

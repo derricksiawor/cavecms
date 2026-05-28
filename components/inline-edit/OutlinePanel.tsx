@@ -1637,7 +1637,7 @@ function TreeRow({
             </>
           )}
           {/* Column-only verb — add a widget into this column.
-              Defaults to a 'text' widget (the most common starting
+              Defaults to an lx_text widget (the most common starting
               shape). Operator can then use the slash palette / drawer
               to switch type if they want a different starter. */}
           {node.block.kind === 'column' && !isFixed && !node.orphan && (
@@ -1649,7 +1649,7 @@ function TreeRow({
                 void addChildBlock({
                   kind: 'widget',
                   parentId: node.block.id,
-                  blockType: 'text',
+                  blockType: 'lx_text',
                 })
               }
             />

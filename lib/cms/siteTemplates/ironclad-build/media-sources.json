@@ -1,7 +1,7 @@
 [
   {
     "key": "home-hero-site",
-    "sourceUrl": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=4000&q=92",
     "alt": "Construction crew silhouettes against a warm dusk sky, with steel scaffolding framing the worksite.",
     "photographer": "Josue Isai Ramos Figueroa",
     "license": "unsplash",
@@ -9,7 +9,7 @@
   },
   {
     "key": "home-craftsmanship",
-    "sourceUrl": "https://images.unsplash.com/photo-1504148455328-c376907d081c?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1504148455328-c376907d081c?w=4000&q=92",
     "alt": "Close-up of a carpenter's weathered hands planing a piece of timber on a workbench, wood shavings curling away.",
     "photographer": "Jeff Hardi",
     "license": "unsplash",
@@ -17,7 +17,7 @@
   },
   {
     "key": "services-commercial",
-    "sourceUrl": "https://images.unsplash.com/photo-1486325212027-8081e485255e?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1486325212027-8081e485255e?w=4000&q=92",
     "alt": "A completed modern commercial building exterior at dusk, clean lines of steel, glass, and concrete catching the last warm light.",
     "photographer": "Patrick Tomasso",
     "license": "unsplash",
@@ -25,7 +25,7 @@
   },
   {
     "key": "services-residential",
-    "sourceUrl": "https://images.unsplash.com/photo-1503387837-b154d5074bd2?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1503387837-b154d5074bd2?w=4000&q=92",
     "alt": "Interior of a residential renovation — a newly finished hardwood staircase beside a freshly framed window catching afternoon light.",
     "photographer": "Spacejoy",
     "license": "unsplash",
@@ -33,7 +33,7 @@
   },
   {
     "key": "services-restoration",
-    "sourceUrl": "https://images.unsplash.com/photo-1572883454114-1cf0031ede2a?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1572883454114-1cf0031ede2a?w=4000&q=92",
     "alt": "Detail of a refinished heritage timber beam meeting carefully repointed brick — hand-restored mouldings visible alongside.",
     "photographer": "Annie Spratt",
     "license": "unsplash",
@@ -41,15 +41,31 @@
   },
   {
     "key": "projects-progress",
-    "sourceUrl": "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=4000&q=92",
     "alt": "A work-in-progress build with exposed wood framing, partial roof structure and a crane silhouette in the background.",
     "photographer": "Avel Chuklanov",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
+    "key": "projects-residence-dusk",
+    "sourceUrl": "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=4000&q=92",
+    "alt": "A completed modern residence at golden hour, warm light catching the timber soffit and dark steel window frames.",
+    "photographer": "Webaliser",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "projects-kitchen",
+    "sourceUrl": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=4000&q=92",
+    "alt": "A completed residential kitchen with warm walnut cabinetry, honed stone counters and aged brass fixtures, soft afternoon light from a single tall window.",
+    "photographer": "R Architecture",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
     "key": "team-foreman",
-    "sourceUrl": "https://images.unsplash.com/photo-1581092334651-ddf26d9a09d0?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1581092334651-ddf26d9a09d0?w=4000&q=92",
     "alt": "Documentary-style portrait of a weathered foreman in work jacket and hard hat, on site.",
     "photographer": "ThisisEngineering",
     "license": "unsplash",
@@ -57,7 +73,7 @@
   },
   {
     "key": "team-tools",
-    "sourceUrl": "https://images.unsplash.com/photo-1530124566582-a618bc2615dc?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1530124566582-a618bc2615dc?w=4000&q=92",
     "alt": "An organised craftsman's tool wall above a heavy workbench — hammers, chisels and hand planes arranged in neat rows.",
     "photographer": "Barn Images",
     "license": "unsplash",
@@ -65,7 +81,7 @@
   },
   {
     "key": "about-fleet",
-    "sourceUrl": "https://images.unsplash.com/photo-1605152276897-4f618f831968?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1605152276897-4f618f831968?w=4000&q=92",
     "alt": "A close-up of a clean work truck parked at a worksite at first light, ladders and material racks loaded on the back.",
     "photographer": "Zachary Keimig",
     "license": "unsplash",
@@ -73,7 +89,7 @@
   },
   {
     "key": "about-materials",
-    "sourceUrl": "https://images.unsplash.com/photo-1416879595882-3373a0480b5b?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1416879595882-3373a0480b5b?w=4000&q=92",
     "alt": "A stack of fresh-cut dimensional lumber in a materials yard, end grain visible, soft morning light across the boards.",
     "photographer": "Etienne Girardet",
     "license": "unsplash",
@@ -81,7 +97,7 @@
   },
   {
     "key": "certifications-inspection",
-    "sourceUrl": "https://images.unsplash.com/photo-1503594384566-461fe158e797?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1503594384566-461fe158e797?w=4000&q=92",
     "alt": "A spirit level and measuring tape laid across a freshly installed structural beam during a quality inspection.",
     "photographer": "Sven Mieke",
     "license": "unsplash",
@@ -89,7 +105,7 @@
   },
   {
     "key": "contact-blueprint",
-    "sourceUrl": "https://images.unsplash.com/photo-1731702981680-a38f38529d76?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1731702981680-a38f38529d76?w=4000&q=92",
     "alt": "Architectural blueprints unrolled on a drafting table beside drafting tools.",
     "photographer": "Gallen-Kallelan Museon",
     "license": "unsplash",

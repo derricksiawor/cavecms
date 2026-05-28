@@ -1,7 +1,8 @@
 import type { SectionTemplate } from './index'
 
-// 3-up quote wall: three Testimonial widgets side by side. Useful for
-// "what our clients say" sections where a single quote feels lonely.
+// 3-up quote wall: three lx_testimonial widgets side by side. Useful
+// for "what our clients say" sections where a single quote feels
+// lonely on the page.
 
 export const TEMPLATE_QUOTE_WALL: SectionTemplate = {
   id: 'quote-wall',
@@ -18,8 +19,16 @@ export const TEMPLATE_QUOTE_WALL: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'heading',
-              data: { text: 'What clients are saying' },
+              blockType: 'lx_heading',
+              data: {
+                text: 'What clients are saying',
+                level: 'h2',
+                size: 'display-lg',
+                alignment: 'center',
+                tone: 'obsidian',
+                italic: false,
+                animation: 'slide-up',
+              },
             },
           ],
         },
@@ -34,8 +43,14 @@ export const TEMPLATE_QUOTE_WALL: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'testimonial',
-              data: { quote: 'Better than the brief, on schedule, on budget.' },
+              blockType: 'lx_testimonial',
+              data: {
+                quote: 'Better than the brief, on schedule, on budget.',
+                attribution: 'M. Reyes',
+                alignment: 'left',
+                tone: 'obsidian',
+                animation: 'fade-in',
+              },
             },
           ],
         },
@@ -44,8 +59,14 @@ export const TEMPLATE_QUOTE_WALL: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'testimonial',
-              data: { quote: 'They listened first, then designed. It shows.' },
+              blockType: 'lx_testimonial',
+              data: {
+                quote: 'They listened first, then designed. It shows.',
+                attribution: 'A. Chen',
+                alignment: 'left',
+                tone: 'obsidian',
+                animation: 'fade-in',
+              },
             },
           ],
         },
@@ -54,8 +75,14 @@ export const TEMPLATE_QUOTE_WALL: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'testimonial',
-              data: { quote: 'A genuine collaboration from start to finish.' },
+              blockType: 'lx_testimonial',
+              data: {
+                quote: 'A genuine collaboration from start to finish.',
+                attribution: 'J. Bauer',
+                alignment: 'left',
+                tone: 'obsidian',
+                animation: 'fade-in',
+              },
             },
           ],
         },

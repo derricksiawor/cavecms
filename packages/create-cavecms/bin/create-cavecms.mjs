@@ -1110,6 +1110,12 @@ function generateSecrets() {
     // window where an attacker who knows the dist host could race
     // the operator to /api/install/admin-create.
     INSTALL_BOOTSTRAP_TOKEN: genUrlToken(32),
+    // Bearer token the in-app updater's healthz verification step + the
+    // watchdog use to call the verbose /healthz endpoint after a pm2
+    // reload. Without this, step 6 of scripts/cavecms-update.sh can't
+    // verify the new commit is live and rollback won't trigger on a
+    // failed reload. 32 bytes hex matches the canonical setup.sh seed.
+    HEALTHZ_TOKEN: randomBytes(32).toString('hex'),
   }
 }
 
@@ -1201,6 +1207,7 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `SECRETS_ENCRYPTION_KEY=${secrets.SECRETS_ENCRYPTION_KEY}`,
     `LOGIN_PATH=${secrets.LOGIN_PATH}`,
     `INSTALL_BOOTSTRAP_TOKEN=${secrets.INSTALL_BOOTSTRAP_TOKEN}`,
+    `HEALTHZ_TOKEN=${secrets.HEALTHZ_TOKEN}`,
     `UPLOADS_ROOT=${uploadsRoot}`,
     `# Per-install runtime-state directory for the in-app updater + watchdog.`,
     `# Owned by the runtime user → no pm2-daemon-restart needed for in-app`,

@@ -5,7 +5,6 @@ import {
   contactForm,
   ctaBanner,
   figure,
-  hero,
   heroCover,
   imagePair,
   oneCol,
@@ -16,6 +15,13 @@ import {
 // 5 pages: Home, Treatments, Practitioners, Journal, Booking.
 // Voice: quiet, careful, restorative. Avoids wellness clichés
 // ("self-care journey", "wellness experience"). Specifics, not adjectives.
+//
+// Visual rhythm: home hero is the only "screen" hero — centred,
+// arresting. Every sub-page hero is shorter (md/lg) and uses a
+// different overlay alignment so the pages feel sequenced, not
+// duplicated. Overlay tone is chosen per-photo: dark text on the
+// cream still life and historic exterior; ivory text on the moody
+// water and the sunlit practitioner room.
 
 export const anaraWellnessTemplate: SiteTemplate = {
   slug: 'anara-wellness',
@@ -69,17 +75,25 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'A small wellness centre. Seven practitioners, twenty-two treatments, an unhurried hour and a half from arrival to leaving.',
       sections: [
-        // Hero cover — soft-light still life with the wellness pitch
-        // painted over.
+        // Splash hero — centred title on a soft amber-on-linen still
+        // life. The photo is bright cream, so the overlay reads in
+        // obsidian and a gentle 'darken' keeps body copy legible
+        // without flattening the light. Only the home page uses
+        // 'screen' minHeight — sub-pages are shorter so the rhythm
+        // builds toward the splash, not away from it.
         heroCover({
           imageKey: 'home-hero-still-life',
-          alt: 'Anara Wellness — oils and serums arranged on a book, soft-light still life.',
+          alt: 'Anara Wellness — a single amber dropper bottle resting on raw linen, soft morning light.',
           eyebrow: 'Anara Wellness',
           title: 'Quiet, restored.',
-          body: 'A small wellness centre in a converted nineteenth-century carriage house. Seven practitioners, twenty-two treatments, one entrance, no piped music. The average visit is ninety minutes, of which seventy are spent on the table.',
+          body: 'A small wellness centre in a converted nineteenth-century carriage house. Seven practitioners, twenty-two treatments, one entrance, no piped music.',
           cta: { label: 'Book a treatment', href: '/booking' },
-          minHeight: 'xl',
-          overlay: 'champagne',
+          minHeight: 'screen',
+          ratio: '4:3',
+          overlay: 'darken',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
+          animation: 'parallax',
         }),
 
         ...threeColCards({
@@ -108,14 +122,14 @@ export const anaraWellnessTemplate: SiteTemplate = {
           ],
         }),
 
-        // Editorial pair: the carriage-house exterior beside the
+        // Editorial pair: the historic exterior beside the
         // sunlit courtyard — physical context for the centre.
         oneCol(
           'cream',
           'lg',
           imagePair({
             leftImageKey: 'villa-exterior',
-            leftAlt: 'The Anara Wellness building — a white architectural retreat amongst green trees.',
+            leftAlt: 'The Anara Wellness building — a nineteenth-century ivy-covered house behind a low white stone wall.',
             rightImageKey: 'courtyard',
             rightAlt: 'The Anara courtyard — sunlit, plant-filled, open-air calm.',
             layout: 'lift-left',
@@ -126,7 +140,7 @@ export const anaraWellnessTemplate: SiteTemplate = {
         ),
 
         closingQuote({
-          background: 'champagne',
+          background: 'bone',
           text: '"I have been three times. I have not yet seen the second floor. There is no rush to."',
           attribution: 'A member, since 2022',
         }),
@@ -148,16 +162,22 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Twenty-two treatments. Massage, bodywork, facials, acupuncture, cupping. Booked online or by phone.',
       sections: [
-        // Hero cover — a freshly prepared treatment room with the page
-        // title painted over.
+        // Treatments hero — atmospheric ritual still life (pampas
+        // grass in amber bottle on linen pillows). Warm soft tones
+        // dominate, so ivory text reads beautifully off a
+        // gradient-bottom overlay anchored to bottom-left. Shorter
+        // than the home hero so the page progresses.
         heroCover({
           imageKey: 'treatment-room',
-          alt: 'An Anara treatment room — a freshly prepared massage table in a calm interior.',
+          alt: 'A quiet treatment-room corner — pampas grass in an amber jar beside linen pillows.',
           eyebrow: 'Treatments',
           title: 'Twenty-two, written down.',
           body: 'Each treatment is described plainly. No "energy clearing," no claims our practitioners would not make to your face. If you do not know which to book, the booking page has a short questionnaire.',
-          minHeight: 'xl',
-          overlay: 'champagne',
+          minHeight: 'lg',
+          ratio: '16:9',
+          overlay: 'gradient-bottom',
+          overlayAlignment: 'bottom-left',
+          overlayTone: 'ivory',
         }),
 
         ...threeColCards({
@@ -222,7 +242,7 @@ export const anaraWellnessTemplate: SiteTemplate = {
         }),
 
         // Editorial pair between facials and acupuncture sections:
-        // the steam suite + the moment of a ritual.
+        // the dry sauna + the moment of touch (oiled-back massage).
         oneCol(
           'cream',
           'lg',
@@ -230,7 +250,7 @@ export const anaraWellnessTemplate: SiteTemplate = {
             leftImageKey: 'treatment-sauna',
             leftAlt: 'The Anara dry sauna — wood-lined with sauna stones beside a small window.',
             rightImageKey: 'ritual-hands',
-            rightAlt: 'A therapist pouring warm oil onto a guest’s hand during a ritual.',
+            rightAlt: 'A therapist working along an oiled back during a Swedish massage.',
             layout: 'lift-right',
             overlap: 'md',
             ratio: '4:5',
@@ -283,26 +303,22 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Seven practitioners. Each one’s training, focus, and what they take seriously is written down here.',
       sections: [
-        // Figure: a practitioner at quiet practice — sets the tone
-        // for the bio cards below. Editorial, not corporate.
-        oneCol(
-          'cream',
-          'sm',
-          figure({
-            imageKey: 'practitioner',
-            alt: 'A practitioner at quiet practice — a woman in a meditative yoga pose on a rug.',
-            ratio: '21:9',
-            corners: 'sharp',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        // Practitioners hero — a single editorial figure of quiet
+        // practice (woman seated in a sun-filled room with incense).
+        // Top-left overlay keeps the eye on the figure but sets the
+        // tone immediately. The room is moody, so ivory text on a
+        // soft 'darken' overlay reads cleanly.
+        heroCover({
+          imageKey: 'practitioner',
+          alt: 'A practitioner at quiet practice — seated in a sun-filled room with the trail of an incense stick.',
           eyebrow: 'The practitioners',
           title: 'Seven people, full-time.',
-          body: 'Each practitioner at Anara is full-time and at one centre only — ours. Training, focus, and the kind of client they are best with is written on each card.',
-          tone: 'obsidian',
+          body: 'Each practitioner at Anara is full-time and at one centre only — ours. Training, focus, and the kind of client they are best with is written on each card below.',
+          minHeight: 'md',
+          ratio: '21:9',
+          overlay: 'darken',
+          overlayAlignment: 'top-left',
+          overlayTone: 'ivory',
         }),
 
         // Editorial figure: the apothecary — gestures at the TCM
@@ -359,6 +375,20 @@ export const anaraWellnessTemplate: SiteTemplate = {
             },
           ],
         }),
+
+        // A small closing material moment — the botanical close-up
+        // as a quiet sign-off before the footer.
+        oneCol(
+          'cream',
+          'lg',
+          figure({
+            imageKey: 'botanical-eucalyptus',
+            alt: 'Dried eucalyptus seed pods arranged beside a wooden spool — a botanical close-up.',
+            ratio: '21:9',
+            corners: 'sharp',
+            animation: 'fade-in',
+          }),
+        ),
       ],
     },
 
@@ -370,30 +400,23 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Short essays from the Anara practitioners. About once a fortnight.',
       sections: [
-        // Hero cover — sunlight on a quiet white wall with the journal
-        // intro painted over.
+        // Journal hero — sunlit white wall, a contemplative image
+        // that already carries the right mood. Centre-left overlay
+        // sits in the soft shadow; obsidian text reads against the
+        // bright wall without needing a heavy overlay, so we leave
+        // it as 'none' and let the light do the work.
         heroCover({
           imageKey: 'meditation-room',
           alt: 'Sunlight streaming onto a quiet white wall — the contemplative quality the journal essays carry.',
           eyebrow: 'Journal',
           title: 'Short essays, once a fortnight.',
           body: 'Notes from the practitioners on what they see most often — chronic tension, screen-time pain, why sleep is upstream of most of it. No supplements to sell.',
-          minHeight: 'xl',
-          overlay: 'champagne',
+          minHeight: 'lg',
+          ratio: '21:9',
+          overlay: 'darken',
+          overlayAlignment: 'center-left',
+          overlayTone: 'ivory',
         }),
-
-        // Editorial figure: a botanical close-up — gives the page
-        // a tactile visual break between the intro and the essay cards.
-        oneCol(
-          'ivory',
-          'md',
-          figure({
-            imageKey: 'botanical-eucalyptus',
-            alt: 'Dried eucalyptus seed pods arranged beside a wooden spool — a botanical close-up.',
-            ratio: '16:9',
-            animation: 'fade-in',
-          }),
-        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -447,34 +470,42 @@ export const anaraWellnessTemplate: SiteTemplate = {
       seoDescription:
         'Book a treatment online, by phone, or by email. We reply within one business day.',
       sections: [
-        // Hero cover — zen stones on water with the booking intro
-        // painted over.
+        // Booking hero — concentric ripples on a still grey water
+        // surface. The whole tone is "settle". 4:3 ratio gives the
+        // photo presence without dominating the page; centred
+        // overlay puts the booking question literally in the middle
+        // of the calm. Ivory text on a 'darken' overlay because the
+        // photo is mid-toned.
         heroCover({
           imageKey: 'zen-stones-water',
-          alt: 'Smooth grey stones arranged on a calm water surface — a minimalist zen composition.',
+          alt: 'Concentric ripples spreading across a still water surface — a moment to settle.',
           eyebrow: 'Booking',
           title: 'When would you like to come?',
           body: 'Booking online is the fastest path. The intake takes about three minutes. If you would prefer to talk to a person, Felix at the front desk takes calls weekdays nine to six.',
-          minHeight: 'xl',
-          overlay: 'champagne',
+          minHeight: 'lg',
+          ratio: '4:3',
+          overlay: 'darken',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
         }),
 
-        // Editorial figure: a natural stone wall — material quality
-        // the centre is built from. Sits between the hero and the
-        // contact channels.
+        // Editorial figure: dried pampas grass against a soft beige
+        // background. A small botanical pause between the hero and
+        // the contact channels — establishes the wellness palette
+        // before we get to the form.
         oneCol(
-          'ivory',
+          'cream',
           'md',
           figure({
             imageKey: 'stone-wall-texture',
-            alt: 'Close-up of a natural stone wall — earthy grey individual rocks pressed together.',
-            ratio: '16:9',
+            alt: 'Soft plumes of dried pampas grass against a warm beige background — a tactile botanical study.',
+            ratio: '21:9',
             animation: 'fade-in',
           }),
         ),
 
         contactChannels({
-          background: 'cream',
+          background: 'ivory',
           email: {
             value: 'booking@anara.example',
             href: 'mailto:booking@anara.example',

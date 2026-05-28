@@ -51,19 +51,19 @@ const SEED_TYPES: Array<{
   icon: LucideIcon
 }> = [
   {
-    type: 'text',
+    type: 'lx_text',
     label: 'Text',
     description: 'A paragraph of rich text — headlines, prose, links.',
     icon: Type,
   },
   {
-    type: 'cta',
+    type: 'lx_cta_banner',
     label: 'Call to action',
     description: 'A short title with a button linking somewhere else.',
     icon: MousePointerClick,
   },
   {
-    type: 'quote',
+    type: 'lx_quote',
     label: 'Quote',
     description: 'A pull-quote or testimonial.',
     icon: Quote,

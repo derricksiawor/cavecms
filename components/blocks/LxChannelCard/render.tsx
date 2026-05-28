@@ -179,7 +179,7 @@ export function LxChannelCard({
           pageVersion={inlineEdit.pageVersion}
           initialData={data}
           field="href"
-          kind="plain"
+          kind="url"
           initialValue={data.href ?? ''}
           as="span"
           className="font-sans text-xs text-warm-stone"

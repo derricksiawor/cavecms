@@ -37,6 +37,11 @@ export interface LatestRelease {
   /** SHA-256 of the zip bytes. Used by the apply route to set
    *  CAVECMS_UPDATE_TARBALL_SHA256 for the orchestrator. */
   sha256: string
+  /** Ed25519 base64 signature over the zip bytes. The apply route
+   *  REQUIRES this for in-app updates — sha256 alone is insufficient
+   *  when the manifest origin is also attacker-controlled. Null
+   *  surfaces a "release not verifiable" affordance in the UI. */
+  signature: string | null
   /** Cap on auto-upgrade jumps. If the running version is older than this,
    *  the operator must step through manually. null = no constraint. */
   minPreviousVersion: string | null
@@ -175,6 +180,7 @@ export async function checkLatestRelease(_ignoredArgs?: {
   const version = body.version
   const downloadUrl = body.downloadUrl
   const sha256 = body.sha256
+  const signature = body.signature ?? null
   // Prefer `changelog` (the /updates/latest.json shape that publish.mjs
   // writes), fall back to `notes` (the /manifest.json shape that
   // build-zip.mjs writes) so an operator who points
@@ -228,6 +234,7 @@ export async function checkLatestRelease(_ignoredArgs?: {
     version,
     downloadUrl,
     sha256,
+    signature,
     minPreviousVersion,
   }
   CACHE.set(cacheKey, { expiresAt: Date.now() + TTL_MS, value })

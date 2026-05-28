@@ -38,6 +38,27 @@ export const BLOCK_TONE_ENUMS = {
   lx_channel_card: ['obsidian', 'ivory'],
   lx_stat: ['obsidian', 'ivory', 'champagne'],
   lx_quote: ['obsidian', 'ivory'],
+
+  // Luxury 2.0 — composites added in the legacy-overhaul release.
+  // Each replaces a legacy widget with a premium feel:
+  //   lx_testimonial → testimonial (portrait + pull-quote)
+  //   lx_video       → video_embed (cinematic poster + lazy iframe)
+  //   lx_accordion   → accordion   (FAQ with smooth open/close motion)
+  //   lx_tabs        → tabs        (product-page tabbed sections)
+  //   lx_icon_list   → icon_list   (vertical feature list, lucide icons)
+  //   lx_icon_box    → icon_box    (icon + headline + body card)
+  lx_testimonial: ['obsidian', 'ivory'],
+  lx_video: ['obsidian', 'ivory'],
+  lx_accordion: ['obsidian', 'ivory'],
+  lx_tabs: ['obsidian', 'ivory'],
+  lx_icon_list: ['obsidian', 'ivory', 'champagne'],
+  lx_icon_box: ['obsidian', 'ivory'],
+
+  // Final composites closing the legacy purge.
+  lx_divider: ['champagne', 'warm-stone', 'copper', 'obsidian', 'ivory'],
+  lx_social_icons: ['obsidian', 'ivory', 'warm-stone'],
+  lx_cta_banner: ['obsidian', 'ivory'],
+  lx_gallery: ['obsidian', 'ivory'],
 } as const satisfies Record<string, readonly [string, ...string[]]>
 
 export type ToneAwareBlockType = keyof typeof BLOCK_TONE_ENUMS

@@ -5,7 +5,6 @@ import {
   contactForm,
   ctaBanner,
   figure,
-  hero,
   heroCover,
   imagePair,
   oneCol,
@@ -14,8 +13,18 @@ import {
 
 // Studio Verde — design studio portfolio.
 // 5 pages: Home, Work, Process, About, Contact.
+//
 // Voice: confident, considered, plain. Avoids studio clichés
 // ("award-winning", "passionate"). Talks about actual work.
+//
+// Visual language: type-driven and restrained. The palette is built
+// on cream / ivory / bone (the studio's quiet rooms), with obsidian
+// reserved for case-study breaks and the closing CTA. Champagne is
+// used sparingly — only on small editorial eyebrows where it adds a
+// hint of warmth without tipping the page toward luxury-hotel
+// territory. The hero rhythm rotates across pages: home is centered
+// and confident, work is the most cinematic, process reads editorial,
+// about is warm, contact is business-formal.
 
 export const studioVerdeTemplate: SiteTemplate = {
   slug: 'studio-verde',
@@ -26,10 +35,15 @@ export const studioVerdeTemplate: SiteTemplate = {
     'A creative studio portfolio template. Case studies, process, the team, contact. Built for studios that let the work do most of the talking.',
   vibe: 'freelance',
   themePalette: {
-    bg: '#0d0e0d',
-    fg: '#eef0ec',
-    accent: '#a8c97a',
-    muted: '#7f8278',
+    // A near-black + bone-cream type system. The accent is a deep
+    // sage — present in the wordmark and in link underlines, never
+    // shouted. Read alongside a confident serif headline and a
+    // workmanlike sans body and the studio reads as type-forward
+    // rather than colour-forward.
+    bg: '#0e0f0e',
+    fg: '#efece4',
+    accent: '#7a8a6b',
+    muted: '#807e76',
   },
   branding: {
     brandText: 'Studio Verde',
@@ -61,6 +75,11 @@ export const studioVerdeTemplate: SiteTemplate = {
   },
   pages: [
     // ─── HOME ─────────────────────────────────────────────────────
+    // Hero rhythm: CENTERED. The portfolio entrance reads as a
+    // confident, plainspoken statement under a sun-streaked
+    // worktable. Screen-height + gradient-bottom keeps the photo
+    // dominant; the centered overlay is the studio's plain-text
+    // signature on the photo, not an interruption of it.
     {
       slug: 'home',
       title: 'Studio Verde',
@@ -71,14 +90,21 @@ export const studioVerdeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'home-hero-workspace',
-          alt: 'A sun-streaked Studio Verde workspace with design tools, sketches, and references spread across a wooden worktable.',
-          eyebrow: 'Studio Verde',
+          alt: 'A sun-streaked Studio Verde worktable with notebooks, sketches, and considered design tools laid out in plain composition.',
+          eyebrow: 'Studio Verde · Brooklyn · est. 2014',
           title: 'Brands that move people.',
           body: 'A six-person studio working in three rooms above a bookshop. We build brand systems, websites, and packaging — usually all three for the same client. Eleven years, ninety-four projects.',
           cta: { label: 'See our work', href: '/work' },
-          minHeight: 'xl',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          ratio: '16:9',
+          minHeight: 'screen',
+          animation: 'parallax',
         }),
 
+        // Disciplines — cream room, no kicker rule. Three plain
+        // columns that read as a studio's own services page.
         ...threeColCards({
           background: 'cream',
           sectionTitle: 'What we make',
@@ -105,9 +131,23 @@ export const studioVerdeTemplate: SiteTemplate = {
           ],
         }),
 
-        // Selected work
+        // A press-check detail before the project list — the studio
+        // saying, "this is what 'on press' actually looks like."
+        oneCol(
+          'ivory',
+          'lg',
+          figure({
+            imageKey: 'studio-press-check',
+            alt: 'An overhead view of a press-check worktable — printed swatches, a loupe, and ink-marked proofs in considered arrangement.',
+            ratio: '21:9',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Selected work — bone background to break the cream-ivory
+        // run with a slightly warmer paper.
         ...threeColCards({
-          background: 'ivory',
+          background: 'bone',
           sectionTitle: 'A few projects from the last two years',
           sectionTone: 'obsidian',
           cards: [
@@ -144,13 +184,14 @@ export const studioVerdeTemplate: SiteTemplate = {
           ],
         }),
 
-        // Team-at-work figure — the studio in motion.
+        // Team-at-work figure — close-up of a designer at the
+        // sketchbook. The "people" feel without an office stock shot.
         oneCol(
           'cream',
           'md',
           figure({
             imageKey: 'home-team-working',
-            alt: 'Over-the-shoulder view of designers at their desks in a warm, naturally lit studio.',
+            alt: 'A designer at a wooden studio desk, hands working over an open sketchbook with type specimens and printed references nearby.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
@@ -172,6 +213,10 @@ export const studioVerdeTemplate: SiteTemplate = {
     },
 
     // ─── WORK ─────────────────────────────────────────────────────
+    // Hero rhythm: MOST CINEMATIC. Screen-height, 21:9, parallax,
+    // darken overlay so the case-study photo reads as a single
+    // dramatic plate. The portfolio page earns the biggest first
+    // impression — this is where the work has to do the talking.
     {
       slug: 'work',
       title: 'Work',
@@ -181,25 +226,45 @@ export const studioVerdeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'work-case-1',
-          alt: 'A branding identity system spread on a worktable — stationery mockups, colour cards, and printed collateral.',
-          eyebrow: 'Selected work',
+          alt: 'A full brand-identity system laid out on a worktable — stationery, colour swatches, printed business cards, and the wordmark in print.',
+          eyebrow: 'Selected work · 2014—',
           title: 'A small portfolio, carefully kept.',
-          body: 'Twelve projects, of the ninety-four we have done. Picked because they show what we do at the studio’s best.',
-          minHeight: 'xl',
+          body: 'Twelve projects, of the ninety-four we have done. Picked because they show what we do at the studio’s best — and because the work, more than anything else we could write here, will tell you whether you want to talk.',
+          cta: { label: 'Start a project', href: '/contact' },
+          overlayAlignment: 'bottom-left',
+          overlayTone: 'ivory',
+          overlay: 'darken',
+          ratio: '21:9',
+          minHeight: 'screen',
+          animation: 'parallax',
         }),
 
-        // Pair: packaging + editorial — two case-study textures.
+        // Pair: packaging + editorial — two case-study textures,
+        // ivory room to let the work-side colour breathe.
         oneCol(
           'ivory',
           'lg',
           imagePair({
             leftImageKey: 'work-case-2',
-            leftAlt: 'Minimalist packaging design in soft earth tones photographed on a neutral textured surface.',
+            leftAlt: 'Minimalist consumer packaging in soft earth tones photographed on a neutral textured surface.',
             rightImageKey: 'work-case-3',
             rightAlt: 'An open editorial magazine spread showing considered typography and generous white space.',
             layout: 'lift-left',
             overlap: 'md',
             ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Typography specimen — a printed letterform close-up. This
+        // is the studio's tell: every project starts at type.
+        oneCol(
+          'bone',
+          'md',
+          figure({
+            imageKey: 'work-typography-specimen',
+            alt: 'Close-up of a printed typography specimen — large lowercase letterforms in deep black ink on cream stock.',
+            ratio: '16:9',
             animation: 'fade-in',
           }),
         ),
@@ -211,7 +276,7 @@ export const studioVerdeTemplate: SiteTemplate = {
           'md',
           figure({
             imageKey: 'work-case-4',
-            alt: 'A digital interface mockup displayed on a screen with clean layouts and a muted colour palette.',
+            alt: 'A digital interface design in progress on a large display — clean layouts, a muted palette, and a confident type system.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
@@ -278,6 +343,10 @@ export const studioVerdeTemplate: SiteTemplate = {
     },
 
     // ─── PROCESS ──────────────────────────────────────────────────
+    // Hero rhythm: EDITORIAL. Top-left overlay, 16:9, lg height,
+    // gradient-bottom — the photo reads like the opening plate of
+    // an article in a design quarterly. Less dramatic than work, more
+    // composed than home.
     {
       slug: 'process',
       title: 'Process',
@@ -285,22 +354,31 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'How a project moves through the studio. Five phases, written down.',
       sections: [
-        hero({
-          background: 'obsidian',
+        heroCover({
+          imageKey: 'process-sketching',
+          alt: 'Close-up of hands sketching layout ideas on paper with markers and pencils scattered nearby.',
           eyebrow: 'How we work',
           title: 'Five phases. Written down.',
           body: 'We have run versions of this process for eleven years. It is plain on purpose — clients should know what they have committed to before the first invoice.',
+          overlayAlignment: 'top-left',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          ratio: '16:9',
+          minHeight: 'lg',
+          animation: 'fade-in',
         }),
 
-        // Process pair: sketching by hand + the collaboration wall.
+        // Reference + journal pair — the studio's collaboration
+        // reality (open books, considered notes), not a stock
+        // meeting-room shot.
         oneCol(
           'ivory',
           'lg',
           imagePair({
-            leftImageKey: 'process-sketching',
-            leftAlt: 'Close-up of hands sketching layout ideas on paper with markers and pencils scattered nearby.',
-            rightImageKey: 'process-collaboration',
-            rightAlt: 'A team collaboration wall with whiteboard sketches, sticky notes, and printed work pinned up.',
+            leftImageKey: 'process-collaboration',
+            leftAlt: 'A designer’s reference table — open notebook, pen, coffee, and printed pages held down by a brass weight.',
+            rightImageKey: 'journal-detail',
+            rightAlt: 'Close-up of an open art and design monograph with tactile printed pages and considered typography.',
             layout: 'lift-right',
             overlap: 'md',
             ratio: '4:5',
@@ -308,21 +386,8 @@ export const studioVerdeTemplate: SiteTemplate = {
           }),
         ),
 
-        // Journal-detail figure between cards and closing quote —
-        // a printed-page close-up, the considered output of process.
-        oneCol(
-          'cream',
-          'md',
-          figure({
-            imageKey: 'journal-detail',
-            alt: 'Close-up of an open art and design book showing tactile printed pages and considered typography.',
-            ratio: '16:9',
-            animation: 'fade-in',
-          }),
-        ),
-
         ...threeColCards({
-          background: 'ivory',
+          background: 'cream',
           cards: [
             {
               kicker: 'Phase 1 · 1 week',
@@ -358,7 +423,7 @@ export const studioVerdeTemplate: SiteTemplate = {
         }),
 
         closingQuote({
-          background: 'cream',
+          background: 'bone',
           text: '"They told us at the start that there would be three rounds and no more. The third round was the one we shipped. They were right."',
           attribution: 'A. Verma, founder, Marshia Coffee',
         }),
@@ -366,6 +431,10 @@ export const studioVerdeTemplate: SiteTemplate = {
     },
 
     // ─── ABOUT ────────────────────────────────────────────────────
+    // Hero rhythm: WARMEST. Bone background, center-left overlay,
+    // 3:2 ratio, xl minHeight, gradient-bottom — the about page is
+    // the room where the studio is the most relaxed. The portrait
+    // is a designer at the worktable, not a corporate headshot.
     {
       slug: 'about',
       title: 'About',
@@ -375,27 +444,34 @@ export const studioVerdeTemplate: SiteTemplate = {
       sections: [
         heroCover({
           imageKey: 'team-founder',
-          alt: 'A warm, considered portrait of a Studio Verde founder in soft natural light.',
+          alt: 'A warm, soft-light portrait of a Studio Verde designer at the studio worktable, mid-conversation about a project.',
+          background: 'bone',
           eyebrow: 'About the studio',
           title: 'Six people. Three rooms. Eleven years.',
           body: 'Studio Verde was founded in 2014 by Esther Loomis and Tobias Greene. It has stayed deliberately small — there are six of us now, the same as in 2018. We work above a bookshop, and we keep one client meeting room with no screens.',
+          overlayAlignment: 'center-left',
+          overlayTone: 'ivory',
+          overlay: 'gradient-bottom',
+          ratio: '3:2',
           minHeight: 'xl',
+          animation: 'fade-in',
         }),
 
-        // Studio detail figure — the considered objects in the room.
+        // Studio detail figure — plants, books, framed prints. The
+        // room you walk into.
         oneCol(
           'ivory',
           'md',
           figure({
             imageKey: 'team-office-detail',
-            alt: 'A moody studio interior detail with a leafy plant, framed prints, and a neat stack of design books.',
+            alt: 'A quiet studio interior detail with a leafy plant, framed prints, and a neat stack of design books.',
             ratio: '16:9',
             animation: 'fade-in',
           }),
         ),
 
         ...threeColCards({
-          background: 'ivory',
+          background: 'cream',
           cards: [
             {
               kicker: 'Esther Loomis',
@@ -440,6 +516,10 @@ export const studioVerdeTemplate: SiteTemplate = {
     },
 
     // ─── CONTACT ──────────────────────────────────────────────────
+    // Hero rhythm: BUSINESS-FORMAL. Bottom-right overlay, darken,
+    // 16:9, lg minHeight. Restrained. The page is about getting a
+    // brief in the door — not selling. The text sits in the lower
+    // right like a signature in the corner of a page.
     {
       slug: 'contact',
       title: 'Contact',
@@ -453,7 +533,12 @@ export const studioVerdeTemplate: SiteTemplate = {
           eyebrow: 'Start a project',
           title: 'Tell us what you’re building.',
           body: 'We take on one new project per month. A note of two paragraphs is plenty — what the company does, what the project is, when you want to start, the budget if you have one. We answer every enquiry within one business day.',
-          minHeight: 'xl',
+          overlayAlignment: 'bottom-right',
+          overlayTone: 'ivory',
+          overlay: 'darken',
+          ratio: '16:9',
+          minHeight: 'lg',
+          animation: 'fade-in',
         }),
 
         contactChannels({

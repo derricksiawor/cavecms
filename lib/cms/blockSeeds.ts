@@ -61,27 +61,8 @@ import {
 // (the image-block Zod schema requires a positive media_id, so a
 // seed payload can't include it).
 export type SeedBlockType =
-  | 'text'
-  | 'cta'
-  | 'quote'
-  | 'heading'
-  | 'button'
-  | 'divider'
-  | 'spacer'
-  | 'icon_box'
-  | 'accordion'
-  | 'icon_list'
-  | 'tabs'
-  // Chunk G - Elementor-parity rich widgets.
-  | 'alert'
-  | 'social_icons'
-  | 'star_rating'
-  | 'stats_row'
-  | 'testimonial'
-  | 'video_embed'
+  // Fixed-slot widget — kept palette-visible for non-contact pages.
   | 'contact_form'
-  | 'eyebrow'
-  | 'channel_card'
   // ─── Luxury redesign — lx_* widget primitives ───────────────────
   | 'lx_heading'
   | 'lx_text'
@@ -96,6 +77,17 @@ export type SeedBlockType =
   | 'lx_channel_card'
   | 'lx_stat'
   | 'lx_quote'
+  // ─── Luxury 2.0 — legacy-overhaul release ───────────────────────
+  | 'lx_testimonial'
+  | 'lx_video'
+  | 'lx_accordion'
+  | 'lx_tabs'
+  | 'lx_icon_list'
+  | 'lx_icon_box'
+  | 'lx_divider'
+  | 'lx_social_icons'
+  | 'lx_cta_banner'
+  | 'lx_gallery'
 
 export interface SeedEntry {
   type: SeedBlockType
@@ -236,201 +228,93 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     keywords: ['quote', 'testimonial', 'cite', 'closing'],
   },
 
-  // ════════════════════════════════════════════════════════════════
-  // LEGACY widgets (kept for unmigrated pages — hidden from palette
-  // via LEGACY_BLOCK_TYPES in isPaletteVisible). Order below preserved
-  // as it was pre-redesign so a git revert during migration emergencies
-  // restores cleanly.
-  // ════════════════════════════════════════════════════════════════
+  // ─── Luxury 2.0 ─────────────────────────────────────────────────
+  // The 6 new composites added in the legacy-overhaul release. Each
+  // replaces a pre-luxury widget that's now hidden from the palette.
   {
-    type: 'heading',
-    label: 'Heading (legacy)',
-    description: 'Standalone H1–H6 with alignment + weight.',
-    icon: HeadingIcon,
-    aliases: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'title'],
-    keywords: ['headline', 'header'],
-  },
-  {
-    type: 'text',
-    label: 'Text (legacy)',
-    description: 'Paragraph, headline, prose.',
-    icon: Type,
-    aliases: ['paragraph', 'p', 'prose'],
-    keywords: ['body', 'rich text', 'copy'],
-  },
-  {
-    type: 'button',
-    label: 'Button',
-    description: 'Standalone CTA — primary, outline, or ghost.',
-    icon: MousePointerClick,
-    aliases: ['btn', 'link'],
-    keywords: ['cta', 'action', 'pill'],
-  },
-  {
-    type: 'quote',
-    label: 'Quote (legacy)',
-    description: 'Pull-quote or testimonial.',
-    icon: QuoteIcon,
-    // "pullquote" is editorial-design jargon operators with print
-    // backgrounds recognise; left as alias. "blockquote" was the HTML
-    // element name (developer-speak) — dropped per architect M-1
-    // audit.
-    aliases: ['pullquote'],
-    keywords: ['testimonial', 'cite'],
-  },
-  {
-    type: 'divider',
-    label: 'Divider',
-    description: 'Horizontal rule between sections.',
-    icon: Minus,
-    aliases: ['hr', 'line'],
-    keywords: ['rule', 'separator', 'break'],
-  },
-  {
-    type: 'spacer',
-    label: 'Spacer',
-    description: 'Vertical whitespace at a chosen tier.',
-    icon: ArrowDownUp,
-    // "gap" is Flexbox terminology — developer-speak. Luxury real-
-    // estate operators reach for "space" / "spacing" / "whitespace".
-    // Dropped per architect M-1 audit; "space" stays.
-    aliases: ['space'],
-    keywords: ['whitespace', 'margin', 'padding'],
-  },
-  {
-    type: 'icon_box',
-    label: 'Icon box',
-    description: 'Icon + headline + body, optionally clickable.',
-    icon: Box,
-    // "iconbox" was a concatenation alias (developer naming
-    // convention). The label "Icon box" with a space already prefix-
-    // matches "icon" + "iconb"; the alias added noise. Dropped per
-    // architect M-1 audit.
-    aliases: ['feature'],
-    keywords: ['card', 'feature tile', 'service'],
-  },
-  {
-    type: 'accordion',
-    label: 'Accordion',
-    description: 'Expandable items — server-rendered for SEO.',
-    icon: ChevronsUpDown,
-    aliases: ['collapse', 'faq', 'expand'],
-    keywords: ['disclosure', 'toggle', 'foldable'],
-  },
-  {
-    type: 'icon_list',
-    label: 'Icon list',
-    description: 'Bullet list with icons — vertical or grid.',
-    icon: ListChecks,
-    // "iconlist" dropped per architect M-1 (same rationale as
-    // iconbox above — label prefix-match already covers it).
-    aliases: ['bullet', 'checklist'],
-    keywords: ['list', 'feature list', 'amenities'],
-  },
-  {
-    type: 'tabs',
-    label: 'Tabs',
-    description: 'Tabbed content panels with ARIA keyboard support.',
-    icon: LayoutPanelTop,
-    aliases: ['tab', 'tabbed'],
-    keywords: ['panels', 'switcher'],
-  },
-  {
-    type: 'cta',
-    label: 'Call to action',
-    description: 'Title + button (composed CTA section).',
-    icon: CircleDot,
-    aliases: ['cta', 'callout'],
-    keywords: ['banner', 'promo'],
-  },
-  // Chunk G - Elementor-parity rich widgets. Appended after F's
-  // curated order so a 3-way merge with Phase-1 and F drops in
-  // cleanly. Order within G is alphabetical by label.
-  {
-    type: 'alert',
-    label: 'Alert',
-    description: 'Info / success / warning / error banner with optional dismissal.',
-    icon: AlertTriangle,
-    aliases: ['notice', 'banner', 'callout'],
-    keywords: ['warning', 'info', 'message', 'announcement'],
-  },
-  {
-    type: 'stats_row',
-    label: 'Counter',
-    description: 'Single animated number tile (count-up on viewport entry).',
-    icon: Hash,
-    aliases: ['stat', 'number', 'metric'],
-    keywords: ['count', 'count up', 'figure', 'kpi'],
-    // Counter is the single-item flavour of the stats_row block. The
-    // picker seeds 1 item + layout='solo' so the freshly created widget
-    // renders as one centred tile. Operator can add items later in the
-    // drawer to convert it into a Stats Row.
-    data: {
-      items: [
-        {
-          value: 100,
-          prefix: '',
-          suffix: '+',
-          label: 'New counter',
-          duration_ms: 1800,
-        },
-      ],
-      layout: 'solo',
-    },
-  },
-  {
-    type: 'social_icons',
-    label: 'Social icons',
-    description: 'Brand-mark row linking to social profiles.',
-    icon: Share2,
-    aliases: ['social', 'share'],
-    keywords: ['instagram', 'facebook', 'twitter', 'tiktok', 'linkedin'],
-  },
-  {
-    type: 'star_rating',
-    label: 'Star rating',
-    description: 'Display-only rating in half-star granularity.',
-    icon: Star,
-    // "score" promoted from keyword to alias per architect M-1 —
-    // operators typing "score" expect the star widget exactly, not
-    // a fuzzy keyword match.
-    aliases: ['stars', 'rating', 'score'],
-    keywords: ['review score', 'feedback'],
-  },
-  {
-    type: 'stats_row',
-    label: 'Stats row',
-    description: 'Multi-counter row (2-4 up) with stagger animation.',
-    icon: BarChart3,
-    aliases: ['stats', 'counters', 'metrics'],
-    keywords: ['kpi', 'numbers', 'figures', 'count up row'],
-    // Stats Row defaults to 3 tiles in a 3-up grid - the canonical
-    // luxury-real-estate layout per the elite-web-researcher pass.
-    data: {
-      items: [
-        { value: 120, prefix: '', suffix: '+', label: 'Residences', duration_ms: 1800 },
-        { value: 14, prefix: '', suffix: '', label: 'Neighbourhoods', duration_ms: 1800 },
-        { value: 18, prefix: '', suffix: '', label: 'Years', duration_ms: 1800 },
-      ],
-      layout: '3up',
-    },
-  },
-  {
-    type: 'testimonial',
+    type: 'lx_testimonial',
     label: 'Testimonial',
-    description: 'Quote + attribution + optional photo / project link.',
+    description: 'Portrait + pull-quote + attribution — the editorial cousin of Quote.',
     icon: MessageSquareQuote,
-    aliases: ['review', 'quote'],
-    keywords: ['praise', 'client', 'feedback', 'reference'],
+    aliases: ['review', 'kudos', 'praise'],
+    keywords: ['customer story', 'social proof', 'endorsement', 'press'],
   },
   {
-    type: 'video_embed',
-    label: 'Video embed',
-    description: 'YouTube or Vimeo video, sandboxed iframe.',
+    type: 'lx_video',
+    label: 'Video',
+    description: 'YouTube / Vimeo embed in a cinematic aspect-ratio frame.',
     icon: PlayCircle,
-    aliases: ['youtube', 'vimeo', 'video'],
-    keywords: ['embed', 'player', 'movie', 'clip'],
+    aliases: ['youtube', 'vimeo', 'embed'],
+    keywords: ['film', 'reel', 'walkthrough', 'demo'],
   },
+  {
+    type: 'lx_accordion',
+    label: 'Accordion',
+    description: 'FAQ with smooth open/close motion — or a permanent list.',
+    icon: ChevronsUpDown,
+    aliases: ['faq', 'expander', 'collapsible'],
+    keywords: ['questions', 'answers', 'how it works', 'help'],
+  },
+  {
+    type: 'lx_tabs',
+    label: 'Tabs',
+    description: 'Tabbed sections for product or feature comparisons.',
+    icon: LayoutPanelTop,
+    aliases: ['tabbed', 'tab group'],
+    keywords: ['compare', 'switch', 'select', 'product'],
+  },
+  {
+    type: 'lx_icon_list',
+    label: 'Icon list',
+    description: 'Vertical or grid feature list — icon + headline + body.',
+    icon: ListChecks,
+    aliases: ['feature list', 'benefits', 'checklist'],
+    keywords: ['features', 'value props', 'what you get'],
+  },
+  {
+    type: 'lx_icon_box',
+    label: 'Icon box',
+    description: 'Icon + headline + body card with optional link.',
+    icon: Box,
+    aliases: ['feature card', 'value card', 'tile'],
+    keywords: ['feature', 'card', 'highlight'],
+  },
+  {
+    type: 'lx_divider',
+    label: 'Divider',
+    description: 'Hairline rule — solid, dashed, dotted, or fleuron break.',
+    icon: Minus,
+    aliases: ['hr', 'rule', 'separator', 'line'],
+    keywords: ['break', 'section', 'fleuron'],
+  },
+  {
+    type: 'lx_social_icons',
+    label: 'Social icons',
+    description: 'Row of brand icons — Instagram, LinkedIn, GitHub, etc.',
+    icon: Share2,
+    aliases: ['social', 'brands', 'follow'],
+    keywords: ['instagram', 'linkedin', 'twitter', 'github', 'footer'],
+  },
+  {
+    type: 'lx_cta_banner',
+    label: 'CTA banner',
+    description: 'Title + body + primary CTA + optional secondary action.',
+    icon: MousePointerClick,
+    aliases: ['call to action', 'cta', 'banner'],
+    keywords: ['conversion', 'lead', 'sign up', 'closing'],
+  },
+  {
+    type: 'lx_gallery',
+    label: 'Gallery',
+    description: 'Grid of editorial photos with optional hover captions.',
+    icon: Images,
+    aliases: ['photo grid', 'images', 'portfolio'],
+    keywords: ['photos', 'showcase', 'work'],
+  },
+
+  // ─── Fixed-slot widget — not strictly in the lx_ family but kept in
+  // the palette because it's the only operator-pickable form widget
+  // and the contact-page renderer expects exactly one instance.
   {
     type: 'contact_form',
     label: 'Contact form',
@@ -439,128 +323,17 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     aliases: ['form', 'lead', 'message'],
     keywords: ['enquiry', 'inquiry', 'reach', 'get in touch'],
   },
-  {
-    type: 'eyebrow',
-    label: 'Eyebrow (legacy)',
-    description: 'Small uppercase kicker label that sits above a heading.',
-    icon: CaseSensitive,
-    aliases: ['kicker', 'label', 'overline'],
-    keywords: ['preheading', 'tagline', 'tag', 'caption'],
-  },
-  {
-    type: 'channel_card',
-    label: 'Channel card (legacy)',
-    description: 'Bordered tile with kicker label, body, and action link.',
-    icon: Contact,
-    aliases: ['contact card', 'channel', 'reach card'],
-    keywords: ['contact', 'tile', 'card', 'reach', 'address'],
-  },
 ]
 
 export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
-  text: { body_richtext: '' },
-  cta: {
-    title: '',
-    cta: { text: 'Learn more', href: '/contact', openInNew: false },
-  },
-  quote: { quote: '' },
-  // Heading seeds with non-empty placeholder so the freshly-added block
-  // renders a visible H2 instead of an invisible empty element. Other
-  // fields are filled in by Zod's .default(...) on parse.
-  heading: { text: 'New heading' },
-  // Button seeds with a meaningful default href so the schema's
-  // CTA_HREF_RE regex passes on initial save. Operators edit text +
-  // href via the EditDrawer or inline edit.
-  button: { text: 'Click me', href: '/contact' },
-  // Divider / Spacer have no required text fields — schema defaults
-  // cover every knob. Empty payload parses cleanly via Zod defaults.
-  divider: {},
-  spacer: {},
-  // IconBox has two required strings (icon name + headline). Body
-  // and link stay optional. Default alignment / accent fill via Zod.
-  icon_box: { icon: 'star', headline: 'New icon box' },
-  // Accordion items array requires min 1. Seed with one empty item —
-  // operators add more via the EditDrawer's repeater UI.
-  accordion: {
-    items: [{ title: 'New item', body_richtext: '' }],
-    allow_multiple: false,
-  },
-  // IconList items array requires min 1. Same pattern as Accordion.
-  icon_list: {
-    items: [{ icon: 'check', label: 'New item' }],
-  },
-  // Tabs seeded with TWO tabs so the tablist is visibly tabbed on first
-  // paint — a one-tab Tabs widget looks broken (just a single underlined
-  // label with no siblings).
-  tabs: {
-    items: [
-      { label: 'Tab 1', body_richtext: '' },
-      { label: 'Tab 2', body_richtext: '' },
-    ],
-  },
-  // Chunk G defaults. Each seed satisfies its Zod schema with the
-  // minimum required fields - the CI pin (tests/unit/blockSeeds.test.ts)
-  // round-trips every entry through parseBlockData and fails the suite
-  // if a seed drifts from its schema.
-  alert: {
-    variant: 'info',
-    title: 'New alert',
-    body_richtext: '',
-    dismissible: false,
-  },
-  social_icons: {
-    items: [
-      { platform: 'instagram', url: 'https://instagram.com/your-handle' },
-    ],
-  },
-  star_rating: {
-    value: 4.5,
-  },
-  // stats_row's DEFAULT seed (when the operator opens it without going
-  // through Counter or Stats Row picker entries - e.g. via a programmatic
-  // call). Matches Stats Row's 3-up layout because that's the canonical
-  // shape; Counter overrides via SeedEntry.data with a 1-item / 'solo'
-  // payload.
-  stats_row: {
-    items: [
-      { value: 120, prefix: '', suffix: '+', label: 'Residences', duration_ms: 1800 },
-      { value: 14, prefix: '', suffix: '', label: 'Neighbourhoods', duration_ms: 1800 },
-      { value: 18, prefix: '', suffix: '', label: 'Years', duration_ms: 1800 },
-    ],
-    layout: '3up',
-  },
-  testimonial: {
-    quote: 'A short, glowing testimonial from a recent client.',
-  },
-  // video_embed seeds with the canonical "Big Buck Bunny" YouTube id -
-  // operators always replace it, but the schema requires a parseable
-  // URL so an empty string won't pass refine() validation. This avoids
-  // creating a widget that immediately fails its own schema on save.
-  video_embed: {
-    url: 'https://www.youtube.com/embed/YE7VzlLtp-4',
-    aspect_ratio: '16:9',
-  },
-  // contact_form seed: minimum required is heading + submit_label.
-  // intro/success_* stay optional so a freshly-picked form renders with
-  // the renderer's default success panel; operators override either via
-  // inline edit (heading / submit_label) or the EditDrawer (intro and
-  // success copy).
+  // contact_form — fixed-slot widget on the contact page; surfaces in
+  // the palette so operators can drop a form on other pages too.
+  // Minimum required is heading + submit_label; intro/success_* stay
+  // optional so a freshly-picked form renders with the renderer's
+  // default success panel.
   contact_form: {
     heading: 'Send us a message',
     submit_label: 'Send message',
-  },
-  // eyebrow defaults: a left-aligned copper kicker. Operators override
-  // color / alignment via the EditDrawer; the .min(1) text gate means
-  // a freshly-picked block renders with placeholder copy the operator
-  // edits inline.
-  eyebrow: { text: 'New kicker' },
-  // channel_card defaults: minimum required is label + body. action is
-  // omitted (Zod's .optional() drops it) so a freshly-picked card
-  // renders with no link — operator adds one via the drawer when they
-  // attach a destination.
-  channel_card: {
-    label: 'New label',
-    body: 'Describe what this channel is best for in one line.',
   },
 
   // ─── Luxury redesign seeds ──────────────────────────────────────
@@ -659,6 +432,112 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
     quote: 'A short, signature closing thought.',
     attribution: 'A Happy Customer',
   },
+
+  // ─── Luxury 2.0 ─────────────────────────────────────────────────
+
+  // lx_testimonial — quote + attribution required. attribution_title
+  // and portrait optional. Operator-named person + title pair so the
+  // first render reads as a real, complete testimonial (the portrait
+  // slot stays empty so operators see the no-portrait composition as
+  // the baseline; they can attach a portrait via the EditDrawer).
+  lx_testimonial: {
+    quote: 'They listened, then they delivered — exactly what we asked for.',
+    attribution: 'Esther Loomis',
+    attribution_title: 'Co-founder, Studio Verde',
+  },
+
+  // lx_video — url required by isValidVideoUrl. Default seed uses
+  // YouTube's "Big Buck Bunny" public-domain short — the same neutral
+  // reference video lx_map uses Greenwich for. Operator pastes their
+  // own share URL via the EditDrawer; the seed must parse so the
+  // picker doesn't 422 on first insert. The CI seed-roundtrip test
+  // round-trips this through parseBlockData.
+  lx_video: {
+    url: 'https://www.youtube.com/watch?v=YE7VzlLtp-4',
+  },
+
+  // lx_accordion — items array .min(1). Default ships 3 sample FAQ
+  // pairs so the widget reads as a complete FAQ on first insert.
+  // body_richtext is plain prose; operator edits via the EditDrawer.
+  lx_accordion: {
+    items: [
+      {
+        title: 'How does it work?',
+        body_richtext:
+          '<p>Tell us about your project. We respond within one business day with a quote and a timeline.</p>',
+      },
+      {
+        title: 'What does it cost?',
+        body_richtext:
+          '<p>Project-based pricing. Most engagements land between $4,000 and $14,000 depending on scope.</p>',
+      },
+      {
+        title: 'How long does it take?',
+        body_richtext:
+          '<p>Six to ten weeks from kickoff to handover. Larger scopes are split into clearly-named phases.</p>',
+      },
+    ],
+  },
+
+  // lx_tabs — tabs array .min(2). Default ships 3 tabs labeled as a
+  // generic feature comparison. Operator replaces via the EditDrawer.
+  lx_tabs: {
+    tabs: [
+      { label: 'Overview', body_richtext: '<p>A short, plain description of the product.</p>' },
+      { label: 'Pricing', body_richtext: '<p>Three plans — Free, Team, Enterprise.</p>' },
+      { label: 'FAQ', body_richtext: '<p>Common questions and the straight answers.</p>' },
+    ],
+  },
+
+  // lx_icon_list — items array .min(1). Default ships 3 generic
+  // feature items so the widget reads as a complete list on insert.
+  // Icon names are lucide kebab-case (validated by ICON_NAME_RE).
+  lx_icon_list: {
+    items: [
+      { icon: 'sparkles', headline: 'Polished by hand', body: 'Every page is reviewed before it ships.' },
+      { icon: 'gauge', headline: 'Built for speed', body: 'Sub-second loads on every viewport.' },
+      { icon: 'shield-check', headline: 'Secure by default', body: 'Standards-grade defenses, out of the box.' },
+    ],
+  },
+
+  // lx_icon_box — icon + headline required. Body and link optional.
+  // Default seed reads as a feature card on a marketing page; the
+  // operator replaces icon + headline + body inline.
+  lx_icon_box: {
+    icon: 'sparkles',
+    headline: 'A feature worth highlighting',
+    body: 'A short, considered sentence describing why this matters.',
+  },
+
+  // lx_divider — every field has a Zod default; empty object is the
+  // happy-path. Default visual = champagne hairline solid, centered.
+  lx_divider: {},
+
+  // lx_social_icons — items array .min(1). Default seeds Instagram +
+  // LinkedIn pointing at example.com so the widget renders complete on
+  // first insert; operators replace the URLs via the EditDrawer.
+  lx_social_icons: {
+    items: [
+      { platform: 'instagram', href: 'https://www.instagram.com/example' },
+      { platform: 'linkedin', href: 'https://www.linkedin.com/in/example' },
+    ],
+  },
+
+  // lx_cta_banner — title + primaryCta required. Default seed reads as
+  // a closing landing-page banner. Operator replaces copy + hrefs.
+  lx_cta_banner: {
+    title: 'Ready to start?',
+    body: 'Tell us about your project and we will get back to you within one business day.',
+    primaryCta: { label: 'Get in touch', href: '/contact' },
+  },
+
+  // lx_gallery — images array .min(1). Default ships a single
+  // placeholder media_id=1 entry (the system "missing image" seed
+  // image). Operators replace via the MediaPicker. The CI seed-
+  // roundtrip test round-trips this through parseBlockData.
+  lx_gallery: {
+    images: [{ media_id: 1, alt: '' }],
+  },
 }
 
 // Convenience for picker UIs that need to include the Image entry
@@ -670,66 +549,23 @@ export const PICTURE_ENTRY = {
 } as const
 
 // ──────────────────────────────────────────────────────────────────
-// Luxury redesign — palette migration gate.
-//
-// Every legacy widget type is listed below. Palette UIs (OutlinePanel,
-// EditableColumn, InsertBlockHere, blockSearch catalog) hide these
-// entries via `isPaletteVisible()`. Operators can no longer ADD new
-// instances of legacy types — they only see the lx_* widgets. Existing
-// DB rows with these block_types continue to PARSE + RENDER (their
-// schemas in block-registry.ts and renderers in components/blocks/*
-// stay in place) — only NEW creation through the palette is gated.
-//
-// When every page has migrated off the legacy widget set, a follow-up
-// cleanup PR removes the legacy schemas, renderers, this set, and the
-// matching SEED_ENTRIES entries. Until then, this set IS the single
-// source of truth for "what's legacy" — adding a type here hides it
-// from operators; removing a type here un-hides it.
+// Luxury 2.0 — the legacy block family is gone. The palette gate
+// stays as an export surface (callers still `.filter(isPaletteVisible)`)
+// but the empty deny-list means every registered entry is visible.
+// Future per-entry deprecation can flip individual `deprecated` flags
+// on SeedEntry without re-introducing a type-string deny-list.
 // ──────────────────────────────────────────────────────────────────
-const LEGACY_BLOCK_TYPES: ReadonlySet<string> = new Set<string>([
-  'text',
-  'cta',
-  'quote',
-  'heading',
-  'button',
-  'divider',
-  'spacer',
-  'icon_box',
-  'accordion',
-  'icon_list',
-  'tabs',
-  'alert',
-  'social_icons',
-  'star_rating',
-  'stats_row',
-  'testimonial',
-  'video_embed',
-  // NB: contact_form intentionally OMITTED from the legacy gate.
-  // Its renderer has been re-skinned for luxury (see
-  // components/blocks/ContactForm/render.tsx + the underlying
-  // components/leads/ContactForm.tsx client form) and the schema is
-  // shared between the legacy + luxury surfaces. The contact page
-  // seeds it as a fixed-slot block; palette discoverability is also
-  // useful so operators on other pages can drop a contact form too.
-  // 'contact_form',
-  'eyebrow',
-  'channel_card',
-])
 
-export function isLegacyBlockType(type: string): boolean {
-  return LEGACY_BLOCK_TYPES.has(type)
+/** True if the given block type is a deprecated legacy type. Always
+ *  false after the legacy purge — kept as an API surface so existing
+ *  callers continue to compile. */
+export function isLegacyBlockType(_type: string): boolean {
+  return false
 }
 
-/**
- * Single-source-of-truth gate for "should this seed entry appear in
- * the palette / search / picker?" Composes two signals:
- *   1. Per-entry `deprecated: true` flag (future per-entry overrides).
- *   2. Legacy-block-type set (migration-wide gate, see above).
- *
- * Every palette UI MUST filter SEED_ENTRIES through this helper —
- * direct .filter(e => !e.deprecated) calls miss the LEGACY_BLOCK_TYPES
- * gate and would re-expose the legacy widgets.
- */
-export function isPaletteVisible(entry: SeedEntry): boolean {
-  return !LEGACY_BLOCK_TYPES.has(entry.type)
+/** Every registered SeedEntry is palette-visible after the legacy
+ *  purge. Kept as an API surface so call-sites can continue to
+ *  `.filter(isPaletteVisible)` without churn. */
+export function isPaletteVisible(_entry: SeedEntry): boolean {
+  return true
 }

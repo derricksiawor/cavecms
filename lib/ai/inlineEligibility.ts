@@ -73,82 +73,7 @@ export interface InlineAiField {
 // caught by tests/unit/ai/inlineEligibility.test.ts which iterates
 // every entry and probes the schema with the seed data.
 const FIELDS: Record<string, InlineAiField[]> = {
-  // ── Legacy block widgets with editable text ─────────────────────
-  hero: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
-    { path: 'subtitle', kind: 'plain', maxLength: TEXT_MAX.short },
-    { path: 'cta.text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
-  services_intro: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-    { path: 'items[].title', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].body', kind: 'plain', maxLength: TEXT_MAX.itemBody },
-  ],
-  about_history: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextLong },
-  ],
-  cta: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
-    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
-    { path: 'cta.text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
-  text: [
-    { path: 'heading', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextLong, primary: true },
-  ],
-  quote: [
-    { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body, primary: true },
-    { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'attribution_title', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  heading: [
-    { path: 'text', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
-  ],
-  button: [
-    { path: 'text', kind: 'plain', maxLength: TEXT_MAX.ctaText, primary: true },
-  ],
-  icon_box: [
-    { path: 'headline', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
-    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
-  ],
-  accordion: [
-    { path: 'items[].title', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-  ],
-  icon_list: [
-    { path: 'items[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  tabs: [
-    { path: 'items[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-  ],
-  alert: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.caption, primary: true },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-  ],
-  testimonial: [
-    { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body, primary: true },
-    { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'role', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  // stats_row / counter — item-only. No primary (Suggest is unsuited;
-  // the operator picks a real number, not a Gemini-invented one). The
-  // `value` field is intentionally NOT in the list — numbers are
-  // operator-authored.
-  stats_row: [
-    { path: 'items[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].helper_text', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  eyebrow: [
-    { path: 'text', kind: 'plain', maxLength: TEXT_MAX.caption, primary: true },
-  ],
-  channel_card: [
-    { path: 'label', kind: 'plain', maxLength: TEXT_MAX.caption, primary: true },
-    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
-    { path: 'action.text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
+  // ── Fixed-slot widget ───────────────────────────────────────────
   contact_form: [
     { path: 'heading', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
     { path: 'intro', kind: 'plain', maxLength: TEXT_MAX.body },
@@ -173,6 +98,11 @@ const FIELDS: Record<string, InlineAiField[]> = {
   lx_figure: [
     { path: 'caption', kind: 'plain', maxLength: TEXT_MAX.short, primary: true },
   ],
+  lx_cover_image: [
+    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
+    { path: 'eyebrow', kind: 'plain', maxLength: TEXT_MAX.caption },
+    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
+  ],
 
   // ── lx_* composites ─────────────────────────────────────────────
   lx_channel_card: [
@@ -189,14 +119,36 @@ const FIELDS: Record<string, InlineAiField[]> = {
     { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body, primary: true },
     { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
   ],
-
-  // featured_projects has only an optional `title` and no body — the
-  // title alone IS edit-worthy via the existing inline editor but is
-  // marginal value for Gemini (operators rarely call AI for a one-
-  // word section heading). Include it for parity since `lx_eyebrow`
-  // and `heading` are included for the same reason.
-  featured_projects: [
+  lx_testimonial: [
+    { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body, primary: true },
+    { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
+    { path: 'attribution_title', kind: 'plain', maxLength: TEXT_MAX.caption },
+  ],
+  lx_video: [
+    { path: 'caption', kind: 'plain', maxLength: TEXT_MAX.short, primary: true },
+  ],
+  lx_accordion: [
+    { path: 'items[].title', kind: 'plain', maxLength: TEXT_MAX.caption },
+    { path: 'items[].body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
+  ],
+  lx_tabs: [
+    { path: 'tabs[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
+    { path: 'tabs[].body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
+  ],
+  lx_icon_list: [
+    { path: 'items[].headline', kind: 'plain', maxLength: TEXT_MAX.title },
+    { path: 'items[].body', kind: 'plain', maxLength: TEXT_MAX.body },
+  ],
+  lx_icon_box: [
+    { path: 'headline', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
+    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
+  ],
+  lx_cta_banner: [
     { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title, primary: true },
+    { path: 'eyebrow', kind: 'plain', maxLength: TEXT_MAX.caption },
+    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
+    { path: 'primaryCta.label', kind: 'plain', maxLength: TEXT_MAX.ctaText },
+    { path: 'secondaryCta.label', kind: 'plain', maxLength: TEXT_MAX.ctaText },
   ],
 }
 

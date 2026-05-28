@@ -8,7 +8,13 @@ import sharp from 'sharp'
 sharp.cache({ memory: 100 })
 sharp.concurrency(1)
 
-const WIDTHS = { thumb: 320, md: 768, lg: 1600 } as const
+// Variant widths. `lg` is the variant the public hero/cover renderers
+// pull (LxCoverImage + LxFigure default to `variant="lg"`). Bumped from
+// 1600 → 2400 in the premium-template pass — at 1600px wide, screen-
+// height covers on 4K / Retina monitors looked softened/compressed.
+// 2400 paired with q88 lands near print-quality without ballooning
+// page weight beyond what a luxury template earns.
+const WIDTHS = { thumb: 320, md: 768, lg: 2400 } as const
 // Reject anything denser than 24 MP at decode time. Defends against
 // bomb images that decode to multi-GB pixel buffers.
 const LIMIT_INPUT_PIXELS = 24_000_000
@@ -108,10 +114,15 @@ async function emitVariants(
   outPaths: { thumb: string; md: string; lg: string; og: string },
 ): Promise<void> {
   for (const [name, w] of Object.entries(WIDTHS) as Array<[keyof typeof WIDTHS, number]>) {
+    // q88 for hero/cover-sized variants (lg), q82 for thumb/md where the
+    // pixel count is small enough that the operator never perceives the
+    // difference. lg at q82 was the "compressed" tell on premium
+    // templates — q88 adds ~25 % file size, removes the artifact.
+    const quality = name === 'lg' ? 88 : 82
     await base
       .clone()
       .resize({ width: w, withoutEnlargement: true })
-      .webp({ quality: 82 })
+      .webp({ quality })
       .toFile(outPaths[name])
   }
   await base

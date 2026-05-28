@@ -1,8 +1,9 @@
 import type { SectionTemplate } from './index'
 
-// Single section, single column, single Accordion widget with 5
-// starter items. Operators add / remove items via the EditDrawer's
-// repeater UI after insert.
+// Single section with an lx_heading framing question and an
+// lx_accordion of five starter items. Operators edit each item
+// inline; the accordion's defaultOpen: 0 surfaces the first answer
+// on first paint so the section is never visually empty.
 
 export const TEMPLATE_FAQ_ACCORDION: SectionTemplate = {
   id: 'faq-accordion',
@@ -20,12 +21,20 @@ export const TEMPLATE_FAQ_ACCORDION: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'heading',
-              data: { text: 'Frequently asked questions' },
+              blockType: 'lx_heading',
+              data: {
+                text: 'Frequently asked questions',
+                level: 'h2',
+                size: 'display-lg',
+                alignment: 'left',
+                tone: 'obsidian',
+                italic: false,
+                animation: 'slide-up',
+              },
             },
             {
               kind: 'widget',
-              blockType: 'accordion',
+              blockType: 'lx_accordion',
               data: {
                 items: [
                   {
@@ -54,8 +63,12 @@ export const TEMPLATE_FAQ_ACCORDION: SectionTemplate = {
                       '<p>Your city + the regions you serve. A map link or address is a nice touch here.</p>',
                   },
                 ],
-                allow_multiple: false,
+                defaultOpen: 0,
+                variant: 'accordion',
+                tone: 'obsidian',
+                animation: 'fade-in',
               },
+              meta: { marginTop: 'md' },
             },
           ],
         },

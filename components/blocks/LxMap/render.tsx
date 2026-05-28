@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import { MotionTarget } from '@/components/motion/MotionTarget'
+import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import type { BlockData } from '@/lib/cms/block-registry'
+import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 
 // Luxury map embed. Mirrors lx_figure's editorial shell: aspect-ratio
 // frame, rounded-2xl corners (no borders per ~/.claude/CLAUDE.md),
@@ -25,9 +27,11 @@ const RATIO_CLASS: Record<BlockData<'lx_map'>['ratio'], string> = {
 
 export function LxMap({
   data,
+  inlineEdit,
   outerClass,
 }: {
   data: BlockData<'lx_map'>
+  inlineEdit?: InlineEditContext
   outerClass?: string
 }) {
   const title = data.caption ?? 'Map'
@@ -65,15 +69,29 @@ export function LxMap({
       )}
     >
       {aspectBox}
-      {data.caption && (
-        // `text-current opacity-70` inherits the parent section's
-        // foreground color (ivory on obsidian, obsidian on ivory)
-        // and dims it for the editorial caption rhythm. Hardcoded
-        // warm-stone read as muddy charcoal on the obsidian
-        // contact-page section.
-        <figcaption className="mt-4 font-sans text-sm font-medium text-current opacity-70 text-center">
-          {data.caption}
-        </figcaption>
+      {inlineEdit ? (
+        <InlineEditable
+          blockId={inlineEdit.blockId}
+          blockVersion={inlineEdit.blockVersion}
+          pageId={inlineEdit.pageId}
+          pageVersion={inlineEdit.pageVersion}
+          initialData={data}
+          field="caption"
+          kind="text"
+          initialValue={data.caption ?? ''}
+          as="p"
+          className="mt-4 font-sans text-sm font-medium text-current opacity-70 text-center"
+          placeholder="Caption (optional)"
+        />
+      ) : (
+        data.caption && (
+          // `text-current opacity-70` inherits the parent section's
+          // foreground color (ivory on obsidian, obsidian on ivory)
+          // and dims it for the editorial caption rhythm.
+          <figcaption className="mt-4 font-sans text-sm font-medium text-current opacity-70 text-center">
+            {data.caption}
+          </figcaption>
+        )
       )}
     </figure>
   )

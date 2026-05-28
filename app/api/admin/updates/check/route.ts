@@ -35,6 +35,12 @@ interface CheckResponse {
     version: string
     downloadUrl: string
     sha256: string
+    // Ed25519 signature over the tarball bytes. The apply route's
+    // Zod schema now REQUIRES this — `null` here means the manifest
+    // entry is unsigned, which is a hard refusal (no in-app update
+    // path for unsigned releases). UI surfaces this as "release not
+    // verifiable, run npx create-cavecms@latest to recover".
+    signature: string | null
     minPreviousVersion: string | null
   } | null
   // Coords for re-installing the CURRENTLY running version (Re-run
@@ -42,7 +48,7 @@ interface CheckResponse {
   // matches the latest manifest entry — the common up-to-date case
   // where `available` is null but the operator still needs known-good
   // tarball coords to recover from a broken local state.
-  currentRelease: { downloadUrl: string; sha256: string } | null
+  currentRelease: { downloadUrl: string; sha256: string; signature: string | null } | null
 }
 
 export const POST = withError(async (req: Request) => {
@@ -98,10 +104,15 @@ export const POST = withError(async (req: Request) => {
           version: latest.version,
           downloadUrl: latest.downloadUrl,
           sha256: latest.sha256,
+          signature: latest.signature ?? null,
           minPreviousVersion: latest.minPreviousVersion,
         },
     currentRelease: upToDate
-      ? { downloadUrl: latest.downloadUrl, sha256: latest.sha256 }
+      ? {
+          downloadUrl: latest.downloadUrl,
+          sha256: latest.sha256,
+          signature: latest.signature ?? null,
+        }
       : null,
   }
 

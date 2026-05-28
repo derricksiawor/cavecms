@@ -1,10 +1,9 @@
 import type { SectionTemplate } from './index'
 
-// Contact section: 2-up split — left column has the address / hours /
-// social block (Heading + Text + SocialIcons); right column has the
-// call-to-action. The actual contact form widget is not in V1's
-// freeform-widget set (InquiryForm is a fixed-slot widget); operators
-// add the form via the contact page template.
+// Contact section: 2-up split — left column has address/hours/social
+// (lx_heading + lx_text + lx_social_icons); right column has a CTA
+// (lx_heading + lx_text + lx_action). The contact form widget itself
+// is a fixed-slot widget on the contact page template.
 
 export const TEMPLATE_CONTACT_SECTION: SectionTemplate = {
   id: 'contact-section',
@@ -22,26 +21,45 @@ export const TEMPLATE_CONTACT_SECTION: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'heading',
-              data: { text: 'Visit or send a note' },
+              blockType: 'lx_heading',
+              data: {
+                text: 'Visit or send a note',
+                level: 'h3',
+                size: 'display-md',
+                alignment: 'left',
+                tone: 'obsidian',
+                italic: false,
+                animation: 'slide-up',
+              },
             },
             {
               kind: 'widget',
-              blockType: 'text',
+              blockType: 'lx_text',
               data: {
                 body_richtext:
                   '<p>123 Studio Lane, City</p><p>Tue – Sat, 10am – 6pm</p><p>hello@example.com</p>',
+                size: 'body-md',
+                alignment: 'left',
+                tone: 'obsidian',
+                maxWidth: 'medium',
+                animation: 'fade-in',
               },
+              meta: { marginTop: 'sm' },
             },
             {
               kind: 'widget',
-              blockType: 'social_icons',
+              blockType: 'lx_social_icons',
               data: {
                 items: [
-                  { platform: 'instagram', url: 'https://instagram.com/your-handle' },
-                  { platform: 'linkedin', url: 'https://linkedin.com/company/your-org' },
+                  { platform: 'instagram', href: 'https://www.instagram.com/example' },
+                  { platform: 'linkedin', href: 'https://www.linkedin.com/company/example' },
                 ],
+                size: 'md',
+                alignment: 'left',
+                tone: 'warm-stone',
+                animation: 'fade-in',
               },
+              meta: { marginTop: 'md' },
             },
           ],
         },
@@ -50,21 +68,44 @@ export const TEMPLATE_CONTACT_SECTION: SectionTemplate = {
           widgets: [
             {
               kind: 'widget',
-              blockType: 'heading',
-              data: { text: 'Prefer a conversation?' },
-            },
-            {
-              kind: 'widget',
-              blockType: 'text',
+              blockType: 'lx_heading',
               data: {
-                body_richtext:
-                  '<p>Open the form on our contact page or send a quick email — we reply within a day.</p>',
+                text: 'Prefer a conversation?',
+                level: 'h3',
+                size: 'display-md',
+                alignment: 'left',
+                tone: 'obsidian',
+                italic: false,
+                animation: 'slide-up',
               },
             },
             {
               kind: 'widget',
-              blockType: 'button',
-              data: { text: 'Open contact form', href: '/contact' },
+              blockType: 'lx_text',
+              data: {
+                body_richtext:
+                  '<p>Open the form on our contact page or send a quick email — we reply within a day.</p>',
+                size: 'body-md',
+                alignment: 'left',
+                tone: 'obsidian',
+                maxWidth: 'medium',
+                animation: 'fade-in',
+              },
+              meta: { marginTop: 'sm' },
+            },
+            {
+              kind: 'widget',
+              blockType: 'lx_action',
+              data: {
+                label: 'Open contact form',
+                href: '/contact',
+                openInNew: false,
+                variant: 'primary-gold',
+                size: 'md',
+                alignment: 'left',
+                animation: 'fade-in',
+              },
+              meta: { marginTop: 'md' },
             },
           ],
         },

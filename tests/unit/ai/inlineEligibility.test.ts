@@ -21,7 +21,14 @@ describe('INLINE_AI_BLOCK_TYPES', () => {
   })
 
   it('excludes structural-only blocks (no text fields)', () => {
-    const structuralOnly = ['image', 'gallery', 'divider', 'spacer', 'social_icons', 'star_rating', 'video_embed', 'lx_space', 'lx_image_pair', 'lx_cover_image', 'lx_map']
+    const structuralOnly = [
+      'lx_space',
+      'lx_image_pair',
+      'lx_map',
+      'lx_divider',
+      'lx_social_icons',
+      'lx_gallery',
+    ]
     for (const type of structuralOnly) {
       expect(isInlineAiEligible(type)).toBe(false)
     }
@@ -46,36 +53,34 @@ describe('INLINE_AI_BLOCK_TYPES', () => {
 describe('isInlineAiEligible', () => {
   it('returns true for known eligible types', () => {
     expect(isInlineAiEligible('lx_heading')).toBe(true)
-    expect(isInlineAiEligible('hero')).toBe(true)
-    expect(isInlineAiEligible('accordion')).toBe(true)
+    expect(isInlineAiEligible('lx_cta_banner')).toBe(true)
+    expect(isInlineAiEligible('lx_accordion')).toBe(true)
   })
 
   it('returns false for sections + columns + unknown types', () => {
     expect(isInlineAiEligible('section')).toBe(false)
     expect(isInlineAiEligible('column')).toBe(false)
     expect(isInlineAiEligible('unknown_type_xyz')).toBe(false)
-    expect(isInlineAiEligible('image')).toBe(false)
+    expect(isInlineAiEligible('lx_gallery')).toBe(false)
   })
 })
 
 describe('supportsSuggest', () => {
   it('true for blocks with a short primary scalar', () => {
     expect(supportsSuggest('lx_heading')).toBe(true) // text, max title
-    expect(supportsSuggest('heading')).toBe(true)
-    expect(supportsSuggest('button')).toBe(true)
     expect(supportsSuggest('lx_eyebrow')).toBe(true)
+    expect(supportsSuggest('lx_action')).toBe(true)
+    expect(supportsSuggest('lx_cta_banner')).toBe(true)
   })
 
   it('false for blocks with no primary field (item-only)', () => {
-    expect(supportsSuggest('accordion')).toBe(false)
-    expect(supportsSuggest('tabs')).toBe(false)
-    expect(supportsSuggest('stats_row')).toBe(false)
-    expect(supportsSuggest('icon_list')).toBe(false)
+    expect(supportsSuggest('lx_accordion')).toBe(false)
+    expect(supportsSuggest('lx_tabs')).toBe(false)
+    expect(supportsSuggest('lx_icon_list')).toBe(false)
   })
 
   it('false for blocks whose primary is a long-form richtext', () => {
-    expect(supportsSuggest('text')).toBe(false) // body_richtext primary, long
-    expect(supportsSuggest('lx_text')).toBe(false)
+    expect(supportsSuggest('lx_text')).toBe(false) // body_richtext primary, long
   })
 })
 
@@ -97,14 +102,21 @@ describe('resolveFieldValues', () => {
   it('reads nested scalars', () => {
     const data = {
       title: 'Hi',
-      subtitle: 'sub',
-      image: { media_id: 1, alt: 'a' },
-      cta: { text: 'Go', href: '/x', openInNew: false },
+      eyebrow: 'sub',
+      body: 'b',
+      primaryCta: { label: 'Go', href: '/x', openInNew: false },
+      secondaryCta: { label: 'More', href: '/y', openInNew: false },
     }
-    const out = resolveFieldValues('hero', data)
+    const out = resolveFieldValues('lx_cta_banner', data)
     const paths = out.map((f) => f.path).sort()
-    expect(paths).toEqual(['cta.text', 'subtitle', 'title'])
-    expect(out.find((f) => f.path === 'cta.text')!.value).toBe('Go')
+    expect(paths).toEqual([
+      'body',
+      'eyebrow',
+      'primaryCta.label',
+      'secondaryCta.label',
+      'title',
+    ])
+    expect(out.find((f) => f.path === 'primaryCta.label')!.value).toBe('Go')
   })
 
   it('expands `items[]` into per-index concrete paths', () => {
@@ -114,7 +126,7 @@ describe('resolveFieldValues', () => {
         { title: 'b', body_richtext: '<p>B</p>' },
       ],
     }
-    const out = resolveFieldValues('accordion', data)
+    const out = resolveFieldValues('lx_accordion', data)
     const paths = out.map((f) => f.path).sort()
     expect(paths).toEqual([
       'items[0].body_richtext',
@@ -133,10 +145,10 @@ describe('resolveFieldValues', () => {
   })
 
   it('handles missing nested keys gracefully', () => {
-    const data = { title: 'T' } // hero with no cta
-    const out = resolveFieldValues('hero', data)
-    // cta.text should resolve to '' (missing)
-    const cta = out.find((f) => f.path === 'cta.text')
+    const data = { title: 'T' } // lx_cta_banner with no primaryCta
+    const out = resolveFieldValues('lx_cta_banner', data)
+    // primaryCta.label should resolve to '' (missing)
+    const cta = out.find((f) => f.path === 'primaryCta.label')
     expect(cta?.value).toBe('')
   })
 })
@@ -213,7 +225,7 @@ describe('countEmptyFields + isMostlyEmpty', () => {
 
   it('isMostlyEmpty true on item-only blocks when ALL items are blank', () => {
     expect(
-      isMostlyEmpty('accordion', {
+      isMostlyEmpty('lx_accordion', {
         items: [{ title: '', body_richtext: '' }],
       }),
     ).toBe(true)

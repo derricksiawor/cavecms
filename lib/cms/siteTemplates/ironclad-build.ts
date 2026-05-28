@@ -5,7 +5,6 @@ import {
   contactForm,
   ctaBanner,
   figure,
-  hero,
   heroCover,
   imagePair,
   oneCol,
@@ -16,6 +15,17 @@ import {
 // Ironclad Build — boutique construction contractor.
 // 5 pages: Home, Services, Projects, About, Quote.
 // Voice: confident, builders' restraint. Specifics over adjectives.
+//
+// Visual identity notes (read before editing):
+// - Steel + concrete + warm wood. Owner-led precision shop, NOT a
+//   tech product. Distinct from Velocity (SaaS) which is uniformly
+//   obsidian/near-black with bottom-left text.
+// - Each page hero uses a different overlayAlignment, minHeight, and
+//   overlay so the rhythm reads intentional, not formulaic.
+// - Home + Services + Projects = cinematic ('screen' height). About
+//   = portrait ('xl'). Quote = editorial / drafting-table ('md').
+// - Moody dusk shots use overlay 'darken' + overlayTone 'ivory'.
+//   Daylight ivory shots flip to overlayTone 'obsidian'.
 
 export const ironcladBuildTemplate: SiteTemplate = {
   slug: 'ironclad-build',
@@ -61,6 +71,10 @@ export const ironcladBuildTemplate: SiteTemplate = {
   },
   pages: [
     // ─── HOME ─────────────────────────────────────────────────────
+    // Cinematic full-viewport cover. Centered display title — first
+    // impression should feel monumental and owner-led, not "marketing
+    // page". 'darken' (not darken-strong) preserves the warm dusk
+    // tones in the sky.
     {
       slug: 'home',
       title: 'Ironclad Build',
@@ -72,11 +86,15 @@ export const ironcladBuildTemplate: SiteTemplate = {
         heroCover({
           imageKey: 'home-hero-site',
           alt: 'Construction crew silhouettes against a warm dusk sky with steel scaffolding framing the worksite.',
-          eyebrow: 'Ironclad Build',
+          eyebrow: 'Ironclad Build · est. 1998',
           title: 'Done. Properly.',
           body: 'A boutique general contractor of two crews and a project manager who answers his phone. Whole-home renovations, additions, ground-up builds. Twenty-eight years in business, every job on the schedule we promised.',
           cta: { label: 'Request a quote', href: '/quote' },
-          minHeight: 'xl',
+          minHeight: 'screen',
+          overlay: 'darken',
+          overlayAlignment: 'center',
+          overlayTone: 'ivory',
+          animation: 'parallax',
         }),
 
         ...threeColCards({
@@ -108,14 +126,16 @@ export const ironcladBuildTemplate: SiteTemplate = {
         }),
 
         // Craftsmanship figure — hands at work, sets the tone of
-        // who's actually doing the building.
+        // who's actually doing the building. Pulled to cream so it
+        // reads as an editorial breath between the ivory cards above
+        // and the dark stat row below.
         oneCol(
           'cream',
           'md',
           figure({
             imageKey: 'home-craftsmanship',
             alt: 'Close-up of a carpenter\'s weathered hands planing a piece of timber on a workbench.',
-            ratio: '16:9',
+            ratio: '21:9',
             caption: 'Our crews are full-time and full-strength — no part-timers.',
             animation: 'fade-in',
           }),
@@ -146,6 +166,9 @@ export const ironcladBuildTemplate: SiteTemplate = {
     },
 
     // ─── SERVICES ─────────────────────────────────────────────────
+    // Cinematic dusk cover, bottom-left text — the editorial-poster
+    // mode. Gradient-bottom keeps the steel-and-glass exterior fully
+    // readable up top while the copy gets contrast at the base.
     {
       slug: 'services',
       title: 'Services',
@@ -159,7 +182,11 @@ export const ironcladBuildTemplate: SiteTemplate = {
           eyebrow: 'Services',
           title: 'What the crews do.',
           body: 'Two crews, one of them led by Mateo Vega (twenty-two years with the firm), the other by Lara Bishop (eleven). Both are general contractors with the full insurance and bonds. Same shape of work, same standards.',
-          minHeight: 'xl',
+          minHeight: 'screen',
+          overlay: 'gradient-bottom',
+          overlayAlignment: 'bottom-left',
+          overlayTone: 'ivory',
+          ratio: '21:9',
         }),
 
         ...threeColCards({
@@ -226,6 +253,10 @@ export const ironcladBuildTemplate: SiteTemplate = {
     },
 
     // ─── PROJECTS ─────────────────────────────────────────────────
+    // Cinematic. Top-right text so the exposed framing & crane
+    // silhouette dominate the lower-left of the frame — reads like a
+    // monograph cover. Darken-strong gives the small top-right block
+    // a quiet authority without crushing the warm timber tones.
     {
       slug: 'projects',
       title: 'Projects',
@@ -236,11 +267,30 @@ export const ironcladBuildTemplate: SiteTemplate = {
         heroCover({
           imageKey: 'projects-progress',
           alt: 'A work-in-progress build with exposed wood framing, partial roof structure and a crane silhouette in the background.',
-          eyebrow: 'Selected projects',
+          eyebrow: 'Selected projects · 1998 – 2024',
           title: 'A few we are proud of.',
           body: 'Twenty-eight years of work, two hundred and forty projects. Six we keep coming back to.',
-          minHeight: 'xl',
+          minHeight: 'screen',
+          overlay: 'darken',
+          overlayAlignment: 'top-right',
+          overlayTone: 'ivory',
+          animation: 'parallax',
         }),
+
+        // Editorial breath: a completed home at golden hour, full
+        // ratio. Anchors the cards below in something finished — the
+        // hero is "in progress", this is "done".
+        oneCol(
+          'ivory',
+          'lg',
+          figure({
+            imageKey: 'projects-residence-dusk',
+            alt: 'A completed modern residence at golden hour, warm light catching the timber soffit and dark steel window frames.',
+            ratio: '21:9',
+            caption: 'Linden ground-up, 2022. Photographed by the homeowner the week they moved in.',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -278,6 +328,23 @@ export const ironcladBuildTemplate: SiteTemplate = {
           ],
         }),
 
+        // Materiality anchor: the Cooper kitchen close-up. Warm wood
+        // cabinetry, brass, stone — a finished room with real
+        // tactility. Sits between the cards and the closing quote so
+        // the operator can also re-use it as the cover for a future
+        // case-study post.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'projects-kitchen',
+            alt: 'A completed residential kitchen with warm walnut cabinetry, honed stone counters and aged brass fixtures, soft afternoon light from a single tall window.',
+            ratio: '16:9',
+            caption: 'Cooper kitchen, 2021. Walnut shop-built cabinetry, honed soapstone, aged brass.',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'cream',
           text: '"They left the site cleaner than they found the kitchen. I asked the foreman who had cleaned the wall — he had."',
@@ -287,6 +354,10 @@ export const ironcladBuildTemplate: SiteTemplate = {
     },
 
     // ─── ABOUT ────────────────────────────────────────────────────
+    // Portrait-mode cover. Foreman meets the camera, copy sits to the
+    // right with 'darken' overlay so the eyes & jacket still read.
+    // Tall ('xl') but not full-screen — this is a human moment, not a
+    // monument shot.
     {
       slug: 'about',
       title: 'About',
@@ -294,23 +365,17 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Twenty-eight years, two crews, one office. Full insurance, full bonds, and a project manager who picks up his phone.',
       sections: [
-        oneCol(
-          'cream',
-          'sm',
-          figure({
-            imageKey: 'team-foreman',
-            alt: 'Documentary-style portrait of a foreman in work jacket and hard hat, on site.',
-            ratio: '21:9',
-            animation: 'fade-in',
-          }),
-        ),
-
-        hero({
-          background: 'cream',
+        heroCover({
+          imageKey: 'team-foreman',
+          alt: 'Documentary-style portrait of a foreman in work jacket and hard hat, on site.',
           eyebrow: 'About the firm',
           title: 'Two crews. One office. Twenty-eight years.',
           body: 'Founded in 1998 by Anders Iversen, now run as a partnership of three with Mateo Vega and Lara Bishop. Both crews are full-time. The office is small — a project manager, a bookkeeper, an apprentice.',
-          tone: 'obsidian',
+          minHeight: 'xl',
+          overlay: 'darken',
+          overlayAlignment: 'center-right',
+          overlayTone: 'ivory',
+          ratio: '16:9',
         }),
 
         // Pair: tool wall + the work truck. The everyday objects
@@ -337,7 +402,7 @@ export const ironcladBuildTemplate: SiteTemplate = {
           figure({
             imageKey: 'about-materials',
             alt: 'A stack of fresh-cut dimensional lumber in a materials yard, end grain visible, soft morning light.',
-            ratio: '16:9',
+            ratio: '21:9',
             animation: 'fade-in',
           }),
         ),
@@ -373,6 +438,10 @@ export const ironcladBuildTemplate: SiteTemplate = {
     },
 
     // ─── QUOTE ────────────────────────────────────────────────────
+    // Editorial / drafting-table mode. Shorter ('md') 21:9 cover, no
+    // overlay darken — the blueprints carry the mood themselves.
+    // Center-left text in obsidian tone reads like a project brief
+    // typed onto the corner of a drafting sheet.
     {
       slug: 'quote',
       title: 'Request a quote',
@@ -386,17 +455,24 @@ export const ironcladBuildTemplate: SiteTemplate = {
           eyebrow: 'Quote request',
           title: 'Tell us about the project.',
           body: 'Shape of the work, address, what you know about the budget, and any deadline. We will visit within ten business days, walk the site with you, and send a written brief within five days of the visit.',
-          minHeight: 'xl',
+          minHeight: 'md',
+          ratio: '21:9',
+          overlay: 'champagne',
+          overlayAlignment: 'center-left',
+          overlayTone: 'obsidian',
+          background: 'ivory',
         }),
 
-        // Certifications inspection figure — the quality-control moment.
+        // Certifications inspection figure — the quality-control
+        // moment. Pulled to near-black to break visual rhythm
+        // before the obsidian contact strip.
         oneCol(
           'near-black',
           'md',
           figure({
             imageKey: 'certifications-inspection',
             alt: 'A spirit level and measuring tape laid across a freshly installed structural beam during a quality inspection.',
-            ratio: '16:9',
+            ratio: '21:9',
             animation: 'fade-in',
           }),
         ),

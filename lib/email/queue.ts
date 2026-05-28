@@ -356,3 +356,26 @@ if (
     runOnce().catch(() => {})
   })
 }
+
+/**
+ * Graceful-drain helper. Called from instrumentation.ts's SIGTERM /
+ * SIGINT handler BEFORE pool.end() — if a sweep tick fires after the
+ * pool drains it would emit a spurious `email_sweep_failed` line on
+ * every pm2 reload. We clear the interval, then await any in-flight
+ * runOnce (bounded externally — caller wraps with raceTimeout). The
+ * caller's swallow on rejection is fine.
+ */
+export async function stopEmailQueueSweeper(): Promise<void> {
+  if (globalThis.__cavecmsEmailSweep) {
+    clearInterval(globalThis.__cavecmsEmailSweep)
+    globalThis.__cavecmsEmailSweep = undefined
+  }
+  const inflight = globalThis.__cavecmsEmailRunOncePromise
+  if (inflight) {
+    try {
+      await inflight
+    } catch {
+      /* swallow — runOnce errors are already logged by its caller */
+    }
+  }
+}

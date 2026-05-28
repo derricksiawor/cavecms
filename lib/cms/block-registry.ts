@@ -192,6 +192,44 @@ function isValidSocialUrl(s: string): boolean {
 // google.com (no www), HTTP, or any other host — is rejected.
 // Middleware CSP frame-src must include both hosts for the iframe to
 // render; the gate here is the input boundary.
+// YouTube + Vimeo share-URL validator for lx_video. Accepts the
+// canonical share forms the operator pastes:
+//   YouTube  — https://www.youtube.com/watch?v=ID, https://youtu.be/ID,
+//              https://www.youtube.com/embed/ID
+//   Vimeo    — https://vimeo.com/ID, https://player.vimeo.com/video/ID
+// Anything else rejects at the write boundary — the renderer never has
+// to defend against arbitrary iframe sources. ID format is conservative:
+// YouTube 11-char URL-safe base64, Vimeo positive integers.
+const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/
+const VIMEO_ID_RE = /^\d{1,12}$/
+function isValidVideoUrl(s: string): boolean {
+  const url = parseStrictHttpsUrl(s)
+  if (!url) return false
+  if (url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com') {
+    if (url.pathname === '/watch') {
+      const v = url.searchParams.get('v')
+      return !!v && YT_ID_RE.test(v)
+    }
+    if (url.pathname.startsWith('/embed/')) {
+      return YT_ID_RE.test(url.pathname.slice('/embed/'.length))
+    }
+    return false
+  }
+  if (url.hostname === 'youtu.be') {
+    return YT_ID_RE.test(url.pathname.slice(1))
+  }
+  if (url.hostname === 'vimeo.com') {
+    return VIMEO_ID_RE.test(url.pathname.slice(1))
+  }
+  if (url.hostname === 'player.vimeo.com') {
+    return (
+      url.pathname.startsWith('/video/') &&
+      VIMEO_ID_RE.test(url.pathname.slice('/video/'.length))
+    )
+  }
+  return false
+}
+
 function isValidMapEmbedUrl(s: string): boolean {
   const url = parseStrictHttpsUrl(s)
   if (!url) return false
@@ -259,404 +297,6 @@ export const contactFormCrmDestinationsSchema = z
   .max(4)
 
 export const blockSchemas = {
-  hero: z.object({
-    title: z.string().min(1).max(TEXT_MAX.title),
-    subtitle: z.string().max(TEXT_MAX.short).optional(),
-    image: MediaRef,
-    cta: Cta.optional(),
-  }),
-  services_intro: z.object({
-    title: z.string().min(1).max(TEXT_MAX.title),
-    body_richtext: z.string().max(TEXT_MAX.richtextShort),
-    items: z
-      .array(
-        z.object({
-          icon: iconName.optional(),
-          title: z.string().max(TEXT_MAX.caption),
-          body: z.string().max(TEXT_MAX.itemBody),
-        }),
-      )
-      .max(12),
-  }),
-  featured_projects: z.object({
-    title: z.string().max(TEXT_MAX.title).optional(),
-    project_ids: z.array(z.number().int().positive()).max(12),
-    layout: z.enum(['grid', 'carousel']).default('grid'),
-  }),
-  about_history: z.object({
-    title: z.string().max(TEXT_MAX.title),
-    body_richtext: z.string().max(TEXT_MAX.richtextLong),
-    image: MediaRef.optional(),
-  }),
-  cta: z.object({
-    title: z.string().max(TEXT_MAX.title),
-    body: z.string().max(TEXT_MAX.body).optional(),
-    cta: Cta,
-  }),
-  text: z.object({
-    heading: z.string().max(TEXT_MAX.title).optional(),
-    body_richtext: z.string().max(TEXT_MAX.richtextLong),
-  }),
-  image: z.object({
-    image: MediaRef,
-    caption: z.string().max(TEXT_MAX.short).optional(),
-    alignment: z.enum(['left', 'center', 'right']).default('center'),
-  }),
-  gallery: z.object({
-    images: z
-      .array(MediaRef.extend({ caption: z.string().max(TEXT_MAX.short).optional() }))
-      .min(1)
-      .max(48),
-    columns: z.union([z.literal(2), z.literal(3), z.literal(4)]),
-  }),
-  quote: z.object({
-    quote: z.string().max(TEXT_MAX.body),
-    attribution: z.string().max(TEXT_MAX.caption).optional(),
-    attribution_title: z.string().max(TEXT_MAX.caption).optional(),
-  }),
-  // Chunk F — Elementor-parity foundation widgets. Heading is the
-  // standalone semantic heading widget (h1..h6). Default level is h2
-  // to prevent SEO H1 collisions with the page metadata's own H1.
-  // Justified alignment ships per Elementor parity (researcher confirmed
-  // `start | center | end | justify` is canonical). Width/font/weight
-  // are CaveCMS-curated knobs — Elementor exposes `typography` as a global
-  // control group; we narrow to a select to keep the operator UI quiet.
-  heading: z.object({
-    // NOTE: text uses .min(1) so an operator who clears the field via
-    // inline edit gets a 422 → InlineEditable.commit() reverts the edit
-    // with a clear toast. The seed payload provides "New heading" so
-    // initial creation passes. Empty heading elements are an a11y/SEO
-    // regression (screen readers announce "heading, blank") — fail
-    // closed at the write boundary.
-    text: z.string().min(1).max(TEXT_MAX.title),
-    level: z.enum(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']).default('h2'),
-    alignment: z.enum(['left', 'center', 'right', 'justify']).default('left'),
-    weight: z.enum(['regular', 'semibold', 'bold']).default('semibold'),
-    font: z.enum(['sans', 'serif']).default('sans'),
-  }),
-  // Standalone CTA button. The href reuses CTA_HREF_RE for the same
-  // scheme allowlist the embedded Cta uses (http/https/mailto/tel/
-  // same-origin-paths). Size scale matches Elementor's 5 named presets;
-  // CaveCMS swaps semantic colours (info/success/danger) for stylistic
-  // variants (primary/secondary/ghost) — see Button render comment.
-  button: z.object({
-    // .min(1) — an empty-text button is a zero-width click target with
-    // no a11y label. Inline edit reverts cleanly on 422.
-    text: z.string().min(1).max(TEXT_MAX.ctaText),
-    href: z
-      .string()
-      .min(1)
-      .max(TEXT_MAX.url)
-      .regex(CTA_HREF_RE, 'href_scheme_not_allowed'),
-    openInNew: z.boolean().default(false),
-    variant: z.enum(['primary', 'secondary', 'ghost']).default('primary'),
-    size: z.enum(['xs', 'sm', 'md', 'lg', 'xl']).default('md'),
-    alignment: z.enum(['left', 'center', 'right']).default('left'),
-  }),
-  // Horizontal rule. Width keys: full / half / quarter / short — short
-  // (w-16) replaces Elementor's degenerate `fit-content` value (an <hr>
-  // has no intrinsic content so fit-content would render at 0px).
-  divider: z.object({
-    style: z.enum(['solid', 'dashed', 'dotted', 'double']).default('solid'),
-    width: z.enum(['full', 'half', 'quarter', 'short']).default('full'),
-    thickness: z
-      .enum(['hairline', '1px', '2px', '4px'])
-      .default('1px'),
-    color: z.enum(['copper', 'warm-stone', 'near-black']).default('warm-stone'),
-    alignment: z.enum(['left', 'center', 'right']).default('center'),
-  }),
-  // Vertical whitespace. Tier scale aligns with lib/cms/spacingTokens
-  // SPACING_TIERS (minus 'none' — see Spacer render comment).
-  spacer: z.object({
-    height: z.enum(['xs', 'sm', 'md', 'lg', 'xl', '2xl']).default('md'),
-  }),
-  // Icon + headline + body, optionally clickable as a single link target.
-  // Matches Elementor's parity: no separate CTA — the whole box is the
-  // link. The optional `link` sub-object reuses CTA_HREF_RE.
-  icon_box: z.object({
-    // Both fields require non-empty values — an empty icon falls back to
-    // a checkmark with no operator signal; an empty headline renders as
-    // an invisible <h3>. Fail closed at the write boundary.
-    icon: iconName,
-    headline: z.string().min(1).max(TEXT_MAX.title),
-    body: z.string().max(TEXT_MAX.body).optional(),
-    link: z
-      .object({
-        href: z
-          .string()
-          .min(1)
-          .max(TEXT_MAX.url)
-          .regex(CTA_HREF_RE, 'href_scheme_not_allowed'),
-        openInNew: z.boolean().default(false),
-      })
-      .optional(),
-    alignment: z.enum(['left', 'center']).default('center'),
-    accent: z
-      .enum(['copper-filled', 'copper-outline', 'cream-tint'])
-      .default('copper-outline'),
-    // Headline + body text colour. Default 'near-black' preserves the
-    // legacy treatment for icon_box widgets that sit on cream / ivory
-    // surfaces. On obsidian / dark sections, set tone='ivory' so the
-    // copy stays high-contrast — warm-stone body text on obsidian
-    // reads as low-contrast/unreadable.
-    tone: z.enum(BLOCK_TONE_ENUMS.icon_box).default('near-black'),
-  }),
-  // Expandable item list. body_richtext flows through the RICHTEXT_FIELDS
-  // walker in parse.ts at both write and read boundaries.
-  //
-  // `variant` selects between the classic collapsed/expandable accordion
-  // (default) and a "list" variant that renders every item visible at
-  // once, separated by horizontal divider lines and stripped of the
-  // chevron + interactive <details>/<summary>. The list variant is the
-  // CaveCMS-Contact-style FAQ shape — operators flip between the two
-  // without changing their item data. See components/blocks/Accordion/
-  // render.tsx for the visual treatment of each branch.
-  accordion: z.object({
-    items: z
-      .array(
-        z.object({
-          // Title required — empty <summary> labels leave only the
-          // chevron with no a11y / visible click affordance.
-          title: z.string().min(1).max(TEXT_MAX.caption),
-          body_richtext: z.string().max(TEXT_MAX.richtextShort),
-        }),
-      )
-      .min(1)
-      .max(20),
-    // max(19) matches items.max(20) - 1. Out-of-range values would also
-    // be caught by the render-time clamp, but rejecting at the write
-    // boundary gives operators immediate "your default index is past
-    // the last item" feedback instead of silent "no item open".
-    default_open_index: z.number().int().min(0).max(19).optional(),
-    allow_multiple: z.boolean().default(false),
-    variant: z.enum(['accordion', 'list']).default('accordion'),
-  }),
-  // Icon + label list. No per-item link (operators use Icon Box for
-  // clickable composition).
-  icon_list: z.object({
-    items: z
-      .array(
-        z.object({
-          // Both required — empty rows are degenerate (no icon to look
-          // up, no label to read).
-          icon: iconName,
-          label: z.string().min(1).max(TEXT_MAX.caption),
-        }),
-      )
-      .min(1)
-      .max(24),
-    layout: z.enum(['vertical', 'grid_2', 'grid_3']).default('vertical'),
-    style: z.enum(['copper-circle', 'copper-inline']).default('copper-inline'),
-  }),
-  // Tabbed content. body_richtext flows through RICHTEXT_FIELDS sanitizer.
-  // default_tab_index is render-time clamped — a stale persisted index
-  // falls back to 0 instead of pointing at a tabpanel that no longer
-  // exists.
-  tabs: z.object({
-    items: z
-      .array(
-        z.object({
-          // Tab label required — empty tabs render an unlabeled button
-          // in the tablist with no a11y name.
-          label: z.string().min(1).max(TEXT_MAX.caption),
-          body_richtext: z.string().max(TEXT_MAX.richtextShort),
-        }),
-      )
-      .min(1)
-      .max(12),
-    // max(11) matches items.max(12) - 1.
-    default_tab_index: z.number().int().min(0).max(11).optional(),
-  }),
-  // ─── Chunk G — Elementor-parity rich widgets ─────────────────────
-  // Appended alphabetically as a block so a future merge with another
-  // chunk's additive registry edits drops in mechanically. Each schema
-  // owns its operator-edited shape; renderer-side defaults / clamps
-  // are spelled out next to the field that needs them.
-  //
-  // Inline-edit notes:
-  //   - alert.title → `inlineEditableFields.ts` registers as 'plain'
-  //   - testimonial.quote → registers as 'plain'. Also automatically
-  //     sanitized by RICHTEXT_FIELDS in parse.ts (the field name 'quote'
-  //     is already on that allowlist - defense-in-depth on input).
-  //   - body_richtext (alert) is in RICHTEXT_FIELDS too - no parse.ts
-  //     edit needed.
-
-  // Status banner. Variant drives the icon + accent; copper-only palette
-  // (no Bootstrap candy reds/greens) per research. `dismissible=true`
-  // promotes the renderer to a client component that persists dismissal
-  // in localStorage keyed on `cavecms:alert:${blockId}:${contentHash}` -
-  // see AlertDismissible.tsx for the exact scheme. The blockId pins
-  // dismissal to a specific block row (no cross-block collisions); the
-  // content hash invalidates dismissal whenever the operator edits the
-  // alert text/variant (a republish without content change does NOT
-  // invalidate - intended, the same alert keeps its dismissal).
-  alert: z.object({
-    variant: z.enum(['info', 'success', 'warning', 'error']).default('info'),
-    // .min(1) - an empty title with a dismiss "x" reads as a stray
-    // close button to assistive tech. Force a label.
-    title: z.string().min(1).max(TEXT_MAX.caption),
-    body_richtext: z.string().max(TEXT_MAX.richtextShort).default(''),
-    dismissible: z.boolean().default(false),
-  }),
-  // Row of brand-mark icons. Platform enum is the EXACT allowlist of
-  // brand SVGs we ship under public/icons/social/ - introducing a new
-  // platform requires adding the official simple-icons SVG too
-  // (project standards #0.57: never hand-roll a brand mark). URL goes through
-  // isValidSocialUrl above which rejects everything except https
-  // without userinfo / control chars.
-  social_icons: z.object({
-    items: z
-      .array(
-        z.object({
-          platform: z.enum([
-            'instagram',
-            'facebook',
-            'x',
-            'linkedin',
-            'youtube',
-            'tiktok',
-            'whatsapp',
-          ]),
-          url: z
-            .string()
-            .min(1)
-            .max(TEXT_MAX.url)
-            .refine(isValidSocialUrl, 'invalid_social_url'),
-          // Operators sometimes want a same-tab link (e.g. a footer
-          // row that includes an internal share). Default true
-          // preserves the dominant pattern (external profile -> new
-          // tab) without forcing every legacy row through a
-          // migration: existing rows without the field get true via
-          // Zod's `.default(true)` on parse.
-          new_window: z.boolean().default(true),
-        }),
-      )
-      .min(1)
-      // max(7) matches the platform enum size - operator can't
-      // configure a platform we don't ship a brand mark for. Allow
-      // duplicates (someone may want two Instagram profiles with
-      // different labels) - we don't enforce uniqueness here.
-      .max(7),
-    shape: z.enum(['circle', 'square', 'naked']).default('circle'),
-    alignment: z.enum(['left', 'center', 'right']).default('left'),
-    size: z.enum(['sm', 'md', 'lg']).default('md'),
-  }),
-  // Display-only rating. Render rounds to nearest 0.5 for half-star
-  // visual; the stored value preserves operator input so "4.7 (412
-  // reviews)" doesn't drift to 4.5 in the DB just because the visual
-  // shows 4.5 stars.
-  star_rating: z.object({
-    value: z.number().min(0).max(5),
-    label: z.string().max(TEXT_MAX.caption).optional(),
-    review_count: z.number().int().min(0).optional(),
-    alignment: z.enum(['left', 'center', 'right']).default('left'),
-    size: z.enum(['sm', 'md', 'lg']).default('md'),
-  }),
-  // Animated number tiles. Shared schema between TWO picker entries:
-  // Counter (seeds 1 item + layout='solo') and Stats Row (seeds 3
-  // items + layout='3up'). Layout='solo' is THIS schema's "Counter"
-  // mode — single centred tile, no grid.
-  //
-  // duration_ms is operator-tunable per item. Bounded at 10s; longer
-  // animations feel broken (visitor scrolls past mid-climb).
-  stats_row: z.object({
-    items: z
-      .array(
-        z.object({
-          // No .min on value - operator may legitimately use 0
-          // (e.g. "0 listing fees"). Non-finite values blocked
-          // by Zod's .number() default (NaN/Infinity rejected).
-          value: z.number().finite(),
-          prefix: z.string().max(8).optional(),
-          suffix: z.string().max(8).optional(),
-          // duration_ms bounded so the easing function (easeOutExpo
-          // in useCountUp) doesn't divide-by-near-zero. 0ms is legal -
-          // the hook short-circuits to the final value on the first
-          // RAF tick.
-          duration_ms: z.number().int().min(0).max(10000).default(1800),
-          // Label required - a number tile with no caption is just a
-          // floating digit, no a11y context, no SEO value.
-          label: z.string().min(1).max(TEXT_MAX.caption),
-          helper_text: z.string().max(TEXT_MAX.caption).optional(),
-        }),
-      )
-      .min(1)
-      // max(6) matches '4up' layout + small overage tolerance for
-      // operators who configured 5-tile layouts via the items array
-      // before deciding on the grid breakpoint. Render clamps the
-      // visible grid to the layout's column count.
-      .max(6),
-    layout: z.enum(['solo', '2up', '3up', '4up']).default('3up'),
-  }),
-  // Quote card with attribution + optional headshot + optional
-  // project link. Richer than the plain `quote` widget: photo /
-  // role / project all surface relationships that matter for luxury
-  // real-estate trust signals.
-  //
-  // Note: the `quote` field reuses the same name as the plain Quote
-  // widget on purpose - the RICHTEXT_FIELDS set in parse.ts catches
-  // both via the same key (defense-in-depth sanitization on a
-  // plain-text field never hurts).
-  testimonial: z.object({
-    quote: z.string().min(1).max(TEXT_MAX.body),
-    attribution: z.string().max(TEXT_MAX.caption).optional(),
-    role: z.string().max(TEXT_MAX.caption).optional(),
-    image: MediaRef.optional(),
-    project_id: z.number().int().positive().optional(),
-    alignment: z.enum(['left', 'center']).default('left'),
-  }),
-  // YouTube / Vimeo embed. URL is gated by parseVideoEmbedUrl
-  // (lib/cms/videoHostAllowlist.ts) - the operator's raw input is
-  // checked against an exact host allowlist + path grammar + id regex.
-  // The renderer then BUILDS the iframe src from the parsed
-  // { kind, id } form (via buildEmbedSrc) - the operator URL never
-  // reaches the iframe. Sandbox in the renderer omits
-  // allow-top-navigation per the master spec.
-  video_embed: z.object({
-    url: z
-      .string()
-      .min(1)
-      .max(TEXT_MAX.url)
-      .refine((u) => parseVideoEmbedUrl(u) !== null, 'invalid_video_url'),
-    aspect_ratio: z.enum(['16:9', '4:3', '1:1', '21:9']).default('16:9'),
-    caption: z.string().max(TEXT_MAX.short).optional(),
-  }),
-  // Editorial kicker / eyebrow label. The small uppercase tracking-wide
-  // accent line that sits above a hero h1, above a section h2, or as
-  // a tiny LABEL on top of a card. Not a heading element semantically
-  // — emits a <p> so screen readers don't announce "heading" for what
-  // is visually a label. Three color tokens map to the CaveCMS palette
-  // (copper accent, warm-stone muted, near-black solid).
-  eyebrow: z.object({
-    // .min(1) — empty eyebrow is a zero-content paragraph; inline edit
-    // reverts cleanly on 422.
-    text: z.string().min(1).max(TEXT_MAX.caption),
-    color: z.enum(['copper', 'warm-stone', 'near-black']).default('copper'),
-    alignment: z.enum(['left', 'center', 'right']).default('left'),
-  }),
-  // Channel tile — small bordered card with a kicker label, body
-  // paragraph, and optional action link. The 3-up shape that appears
-  // in the Contact page's channels grid (Email / Phone / Address) but
-  // generalises to any "ways to reach us / things we offer" 3-column
-  // section. Address-shaped cards omit `action` (no clickable
-  // destination); Email / Phone cards include mailto: / tel: action.
-  // Inline-editable: label is the primary scalar; body + action edit
-  // via the EditDrawer.
-  channel_card: z.object({
-    label: z.string().min(1).max(TEXT_MAX.caption),
-    body: z.string().min(1).max(TEXT_MAX.body),
-    action: z
-      .object({
-        text: z.string().min(1).max(TEXT_MAX.ctaText),
-        href: z
-          .string()
-          .min(1)
-          .max(TEXT_MAX.url)
-          .regex(CTA_HREF_RE, 'href_scheme_not_allowed'),
-        openInNew: z.boolean().default(false),
-      })
-      .optional(),
-  }),
   // Contact form widget. Submission goes to /api/leads/contact unchanged
   // (honeypot + reCAPTCHA + neutral-200 pipeline). The block carries only
   // the COPY around the form fields — heading above the form, optional
@@ -1018,6 +658,264 @@ export const blockSchemas = {
         .default('none'),
     }),
   ),
+
+  // ════════════════════════════════════════════════════════════════
+  // LUXURY 2.0 — composites added in the legacy-overhaul release.
+  // Each replaces a legacy widget; the legacy renderer + schema stay
+  // registered for one release as defence in depth (any pre-migration
+  // row still renders instead of 500-ing).
+  // ════════════════════════════════════════════════════════════════
+
+  // Luxury testimonial — pull-quote + portrait + attribution. The
+  // editorial cousin of lx_quote: same restraint, with a portrait
+  // square that anchors the human reading the quote. Portrait optional
+  // (allows "no portrait" composition that reads as a heavy serif
+  // pull-quote with a name line below). attribution_title is preserved
+  // distinctly from attribution so e.g. "Esther Loomis" + "Co-founder,
+  // Studio Verde" can render as two lines without operator string
+  // concatenation.
+  lx_testimonial: refineFamilyWeight(
+    z.object({
+      quote: safeRequiredText(1, TEXT_MAX.body),
+      attribution: safeRequiredText(1, TEXT_MAX.caption),
+      attribution_title: safeText(TEXT_MAX.caption).optional(),
+      portrait: MediaRef.optional(),
+      alignment: z.enum(['left', 'center']).default('center'),
+      tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_testimonial).default('obsidian'),
+      family: fontFamilyToken,
+      weight: fontWeightToken,
+      animation: z
+        .enum(['none', 'fade-in', 'slide-up', 'line-reveal'])
+        .default('none'),
+    }),
+  ),
+
+  // Luxury video — cinematic aspect-ratio wrapper around a lazy-loaded
+  // YouTube / Vimeo iframe. Operator pastes a normal share URL; the
+  // renderer normalises to the privacy-enhanced embed shape (no
+  // tracking until the operator clicks play). Optional poster MediaRef
+  // shows a still frame until play; without one we fall back to the
+  // provider's own poster.
+  //
+  // url validation: limited to youtube.com / youtu.be / vimeo.com
+  // hostnames. Anything else rejects at the write boundary — the
+  // renderer doesn't have to deal with arbitrary script-injection
+  // iframe URLs, and the operator gets immediate feedback if they
+  // pasted the wrong link.
+  lx_video: z.object({
+    url: z
+      .string()
+      .min(1)
+      .max(TEXT_MAX.url)
+      .refine(isValidVideoUrl, 'invalid_video_url'),
+    poster: MediaRef.optional(),
+    ratio: z.enum(['21:9', '16:9', '4:5', '1:1']).default('16:9'),
+    caption: safeText(TEXT_MAX.short).optional(),
+    autoplay: z.boolean().default(false),
+    muted: z.boolean().default(true),
+    loop: z.boolean().default(false),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_video).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Luxury accordion — FAQ with smooth height-transition motion. The
+  // body_richtext flows through the RICHTEXT_FIELDS walker in parse.ts
+  // at both write and read boundaries (same sanitisation as legacy
+  // accordion). `defaultOpen` is the 0-indexed item to render in the
+  // open state on first paint; -1 leaves every item closed (the
+  // "operator-driven FAQ" shape). variant: 'accordion' is the standard
+  // collapsible/expand UX with chevrons; 'list' renders every body
+  // permanently visible (matches the lx_quote-stack reading mode for
+  // shorter answer sets).
+  lx_accordion: z.object({
+    items: z
+      .array(
+        z.object({
+          title: safeRequiredText(1, TEXT_MAX.caption),
+          body_richtext: z.string().max(TEXT_MAX.richtextShort),
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultOpen: z.number().int().min(-1).max(19).default(0),
+    variant: z.enum(['accordion', 'list']).default('accordion'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_accordion).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Luxury tabs — product-page tabbed sections. Each tab's body is
+  // richtext so operators can drop in mid-length editorial content
+  // (paragraphs, lists, inline links). Tab labels are short — the
+  // tracking-eyebrow treatment in the renderer matches lx_eyebrow's
+  // visual register. Minimum 2 tabs (a 1-tab "tabs" widget is a
+  // text widget); maximum 6 (operator UI gets crowded past that).
+  lx_tabs: z.object({
+    tabs: z
+      .array(
+        z.object({
+          label: safeRequiredText(1, TEXT_MAX.caption),
+          body_richtext: z.string().max(TEXT_MAX.richtextShort),
+        }),
+      )
+      .min(2)
+      .max(6),
+    defaultIndex: z.number().int().min(0).max(5).default(0),
+    alignment: z.enum(['left', 'center']).default('left'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_tabs).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Luxury icon list — vertical feature list (icon + headline + body).
+  // The premium cousin of legacy `icon_list` that doesn't try to be a
+  // grid of icon-boxes. Each row is the lucide-icon + display headline
+  // + body-text shape every premium SaaS landing page uses for the
+  // "what you get" section. variant: 'vertical' stacks rows full-width
+  // (the editorial default); 'grid' lays rows in a 2-or-3-column grid.
+  lx_icon_list: z.object({
+    items: z
+      .array(
+        z.object({
+          icon: iconName,
+          headline: safeRequiredText(1, TEXT_MAX.title),
+          body: safeText(TEXT_MAX.body).optional(),
+        }),
+      )
+      .min(1)
+      .max(12),
+    variant: z.enum(['vertical', 'grid']).default('vertical'),
+    columns: z.union([z.literal(2), z.literal(3)]).default(3),
+    alignment: z.enum(['left', 'center']).default('left'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon_list).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Luxury icon box — icon + headline + body card with optional link.
+  // The premium cousin of legacy `icon_box`. Single card; for rows of
+  // cards, compose three lx_icon_box widgets inside a threeCols.
+  // accent: champagne-fill (default) is the marquee tile treatment;
+  // champagne-outline reads quieter; cream-tint sits on dark sections
+  // (obsidian/near-black) with high contrast.
+  lx_icon_box: z.object({
+    icon: iconName,
+    headline: safeRequiredText(1, TEXT_MAX.title),
+    body: safeText(TEXT_MAX.body).optional(),
+    link: z
+      .object({
+        href: safeCtaHref(TEXT_MAX.url),
+        openInNew: z.boolean().default(false),
+      })
+      .optional(),
+    alignment: z.enum(['left', 'center']).default('center'),
+    accent: z
+      .enum(['champagne-fill', 'champagne-outline', 'cream-tint'])
+      .default('champagne-outline'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon_box).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // ────────────────────────────────────────────────────────────────
+  // Final composites — closes the legacy purge. Every concept the
+  // legacy widget set covered now has a premium lx_ home.
+  // ────────────────────────────────────────────────────────────────
+
+  // Luxury divider — editorial hairline rule with optional fleuron
+  // (a small ornamental diamond at center). Default tone champagne
+  // reads as a warm gold line on light surfaces; warm-stone / copper
+  // give quieter palettes; obsidian / ivory invert for dark vs light
+  // surfaces.
+  lx_divider: z.object({
+    style: z.enum(['solid', 'dashed', 'dotted', 'fleuron']).default('solid'),
+    width: z.enum(['full', 'half', 'quarter', 'short']).default('full'),
+    thickness: z.enum(['hairline', '1px', '2px']).default('hairline'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_divider).default('champagne'),
+    alignment: z.enum(['left', 'center', 'right']).default('center'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // Luxury social icons — a row of brand glyphs. Platform names are
+  // enumerated so the renderer resolves to OFFICIAL simple-icons SVGs
+  // (per ~/.claude/CLAUDE.md #0.57 — never hand-roll brand marks).
+  // Unknown name rejects at the write boundary.
+  lx_social_icons: z.object({
+    items: z
+      .array(
+        z.object({
+          // Every platform listed MUST have a corresponding official
+          // simple-icons SVG bundled at /public/icons/social/<platform>.svg
+          // (renderer uses CSS mask-image — a 404 silently renders as
+          // a solid colour square). Bundled SVGs were fetched from
+          // raw.githubusercontent.com/simple-icons/simple-icons (CC0
+          // licensed). Adding a platform = fetch the official SVG from
+          // that source, drop it under /public/icons/social/, then add
+          // here AND in PLATFORM_LABEL in components/blocks/LxSocialIcons/render.tsx.
+          platform: z.enum([
+            'instagram',
+            'facebook',
+            'linkedin',
+            'twitter',
+            'youtube',
+            'tiktok',
+            'whatsapp',
+            'github',
+            'dribbble',
+            'behance',
+            'pinterest',
+            'vimeo',
+            'spotify',
+            'apple-music',
+            'soundcloud',
+            'threads',
+          ]),
+          href: safeCtaHref(TEXT_MAX.url),
+        }),
+      )
+      .min(1)
+      .max(8),
+    size: z.enum(['sm', 'md', 'lg']).default('md'),
+    alignment: z.enum(['left', 'center', 'right']).default('center'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_social_icons).default('warm-stone'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // Luxury CTA banner — title + body + primary CTA + optional
+  // secondary CTA. Sits on its own section background (operator picks
+  // bg via section meta); the renderer applies generous editorial
+  // padding so the widget fills the section without composition.
+  lx_cta_banner: z.object({
+    eyebrow: safeText(TEXT_MAX.caption).optional(),
+    title: safeRequiredText(1, TEXT_MAX.title),
+    body: safeText(TEXT_MAX.body).optional(),
+    primaryCta: z.object({
+      label: safeRequiredText(1, TEXT_MAX.ctaText),
+      href: safeCtaHref(TEXT_MAX.url),
+      openInNew: z.boolean().default(false),
+    }),
+    secondaryCta: z
+      .object({
+        label: safeRequiredText(1, TEXT_MAX.ctaText),
+        href: safeCtaHref(TEXT_MAX.url),
+        openInNew: z.boolean().default(false),
+      })
+      .optional(),
+    alignment: z.enum(['left', 'center']).default('center'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_cta_banner).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Luxury gallery — array of images in a grid. Each image gets the
+  // lx_figure treatment (sharp corners, fade-in motion, optional
+  // caption). Single-image gallery is valid (showcase page where the
+  // operator hasn't picked the next photo yet).
+  lx_gallery: z.object({
+    images: z
+      .array(MediaRef.extend({ caption: safeText(TEXT_MAX.short).optional() }))
+      .min(1)
+      .max(48),
+    columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
+    ratio: z.enum(['1:1', '4:5', '4:3', '3:2']).default('1:1'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_gallery).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
 } as const
 
 export type BlockType = keyof typeof blockSchemas
@@ -1048,13 +946,13 @@ export function parseBlockData(type: string, data: unknown): BlockData {
 // on these rows; DELETE /api/cms/blocks/[id] refuses to remove a row with
 // non-null block_key (409 cannot_delete_fixed_block). Order here is the
 // initial seed order — runtime order is the position column.
+// Luxury 2.0 — system pages are now block-tree-driven (see
+// db/seeds/systemPageBlocks.ts). home / about / services no longer
+// carry pre-seeded fixed-slot widgets — the operator can clear or
+// restructure them like any other page. The contact page keeps
+// contact_form as a fixed slot because the lead route expects exactly
+// one form widget on that page (POST /api/leads queries by
+// block_key='contact_form').
 export const FIXED_BLOCK_KEYS_PER_PAGE: Record<string, BlockType[]> = {
-  home: ['hero', 'featured_projects', 'services_intro', 'cta'],
-  about: ['hero', 'about_history'],
-  services: ['hero', 'services_intro'],
-  // Luxury redesign: contact's editorial hero is no longer a 'hero'
-  // block — it's composed from lx_eyebrow + lx_heading + lx_text in
-  // section 1. The contact_form remains a fixed slot (the lead route
-  // expects exactly one form on the page).
   contact: ['contact_form'],
 }

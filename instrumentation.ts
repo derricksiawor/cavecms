@@ -252,6 +252,53 @@ export async function register(): Promise<void> {
     process.exit(1)
   }
 
+  // ─── Legacy block-type audit ───────────────────────────────────────
+  // Defence-in-depth after the legacy purge (migration 0024). If any
+  // content_blocks row still carries a block_type the registry no
+  // longer knows about, parseBlockData would throw on render and the
+  // page would 500. The audit WARNS (does not crash) so an operator
+  // with a stray un-migrated row sees a structured forensic line in
+  // the boot log instead of discovering the bad row from a customer
+  // bug report. Skipped in dev / when the DB is unreachable — the
+  // operator-facing crash-on-render still fires loudly in that case.
+  try {
+    if (process.env.SKIP_LEGACY_BLOCK_AUDIT !== '1') {
+      const { db } = await import('@/db/client')
+      const { sql } = await import('drizzle-orm')
+      const { blockSchemas } = await import('@/lib/cms/block-registry')
+      const knownTypes = new Set(Object.keys(blockSchemas))
+      const [rows] = (await db.execute(
+        sql`SELECT DISTINCT block_type FROM content_blocks WHERE kind = 'widget'`,
+      )) as unknown as [Array<{ block_type: string }>]
+      const unknown = rows
+        .map((r) => r.block_type)
+        .filter((t) => !knownTypes.has(t))
+      if (unknown.length > 0) {
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            msg: 'legacy_block_types_surviving',
+            count: unknown.length,
+            types: unknown.slice(0, 40),
+            hint: 'Run migration 0024_legacy_block_type_to_lx or rebuild via the palette.',
+          }),
+        )
+      }
+    }
+  } catch (e) {
+    // Audit failure is non-fatal — the DB-reachability gate already
+    // ran via the fingerprint check above. Log + continue.
+    if (env.NODE_ENV === 'production') {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: 'legacy_block_audit_failed',
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      )
+    }
+  }
+
   // Crash handlers were installed at the top of register() — see the
   // module-scope definitions of isInboundHttpAbort + crash above.
   // Documenting the inbound-HTTP-abort filter here so the rationale
@@ -305,6 +352,16 @@ export async function register(): Promise<void> {
           await raceTimeout(stopAiProposalSweeper(), 2_500)
         } catch {
           /* swallow — sweep module may not be loaded in test mode */
+        }
+        // Same rationale as the AI sweeper above — if the email queue
+        // sweep tick fires during pool.end() it holds a connection
+        // mid-statement and the next reload's logs show a spurious
+        // `email_sweep_failed` line.
+        try {
+          const { stopEmailQueueSweeper } = await import('@/lib/email/queue')
+          await raceTimeout(stopEmailQueueSweeper(), 2_500)
+        } catch {
+          /* swallow — queue module may not be loaded in test mode */
         }
         try {
           const { pool } = await import('@/db/client')
@@ -396,8 +453,17 @@ export async function register(): Promise<void> {
         const lastTs = state.lastCheckedAt ? Date.parse(state.lastCheckedAt) : 0
         if (Number.isFinite(lastTs) && Date.now() - lastTs < intervalMs) return
         await fire()
-      } catch {
-        /* swallow — next tick retries. */
+      } catch (err) {
+        // Log a structured warning so a sustained DB outage / settings-
+        // table corruption shows up in the operator's logs instead of
+        // silently swallowing every tick. Next tick still retries.
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            msg: 'update_check_tick_failed',
+            err: err instanceof Error ? err.message : String(err),
+          }),
+        )
       }
     }, 60 * 60 * 1000)
     updateSchedGlobal.__cavecmsUpdateChecker.unref()

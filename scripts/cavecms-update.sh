@@ -763,6 +763,60 @@ if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
       exit 1
     fi
   fi
+  # Ed25519 signature verification — defends against a release-host
+  # compromise where the attacker controls BOTH downloadUrl and sha256.
+  # sha256 alone is integrity, not authenticity; the signature binds
+  # the zip bytes to the publisher's private key, which only exists on
+  # ~/.cavecms-release-private.pem.
+  #
+  # Both CAVECMS_UPDATE_TARBALL_SIGNATURE and CAVECMS_RELEASE_PUBKEY_PEM
+  # are forwarded by the apply route (app/api/admin/updates/apply/
+  # route.ts) — the pubkey comes from lib/updates/releasePubkey.ts so
+  # the attacker-controlled host CANNOT influence which key we trust.
+  # node is guaranteed available (we're inside the CaveCMS install
+  # whose Node process spawned this script).
+  if [ -n "${CAVECMS_UPDATE_TARBALL_SIGNATURE:-}" ] \
+     && [ -n "${CAVECMS_RELEASE_PUBKEY_PEM:-}" ]; then
+    if ! node -e '
+      const fs = require("node:fs");
+      const { createPublicKey, verify } = require("node:crypto");
+      try {
+        const pubkey = createPublicKey({
+          key: process.env.CAVECMS_RELEASE_PUBKEY_PEM,
+          format: "pem",
+        });
+        if (pubkey.asymmetricKeyType !== "ed25519") {
+          console.error("bundled pubkey is not ed25519");
+          process.exit(2);
+        }
+        const sig = Buffer.from(process.env.CAVECMS_UPDATE_TARBALL_SIGNATURE, "base64");
+        const payload = fs.readFileSync(process.argv[1]);
+        const ok = verify(null, payload, pubkey, sig);
+        if (!ok) {
+          console.error("ed25519 verify returned false");
+          process.exit(1);
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("ed25519 verify threw:", err && err.message ? err.message : String(err));
+        process.exit(3);
+      }
+    ' "$TARBALL_TMP"; then
+      rm -f "$TARBALL_TMP"
+      write_status "failed" 2 "Couldn't verify the new version's signature" "The release archive is not signed by the expected publisher. Refusing to install. Contact support — this could indicate a tampered download." ""
+      post_audit_terminal failed "tarball_signature_invalid"
+      exit 1
+    fi
+  else
+    # Both fields are required. Apply route's Zod schema rejects
+    # missing signature, and we forward the pubkey from server code,
+    # so reaching this branch means a misconfigured apply path or a
+    # manually-invoked script with the env vars cleared.
+    rm -f "$TARBALL_TMP"
+    write_status "failed" 2 "Couldn't verify the new version's signature" "The release signature or trust anchor is missing. Re-run the update from the dashboard, or contact support." ""
+    post_audit_terminal failed "tarball_signature_missing"
+    exit 1
+  fi
   # Path-traversal + symlink/hardlink validation BEFORE extraction.
   if ! verify_tarball "$TARBALL_TMP"; then
     rc=$?
@@ -831,6 +885,19 @@ else
     exit 1
   fi
 fi
+
+# ---------------------------------------------------------------------------
+# Flip maintenance mode ON before Step 3 — destructive migrations
+# (UPDATEs that rewrite content_blocks.data, DELETEs of orphan rows,
+# etc.) must NOT run against live traffic. The toggle was previously
+# inside Step 5, AFTER the migration had already mutated data while
+# customers were hitting the app — a partial-write window we cannot
+# audit. Now: maintenance ON → step 3 (migration + install) → step 4
+# (build) → step 5 (pm2 reload) → step 6 (healthz verify) → toggle
+# OFF. The CAVECMS_MAINT_TOGGLED_BY_US sentinel preserves the EXIT/
+# SIGTERM trap behaviour (only flip back OFF if WE turned it on).
+export CAVECMS_MAINT_TOGGLED_BY_US=1
+post_maintenance_toggle true
 
 # ---------------------------------------------------------------------------
 # Step 3 — install + migrate (with pre-migration DB backup)
@@ -1022,16 +1089,12 @@ ln -sfn "$REPO_DIR/.next/static" "$REPO_DIR/.next/standalone/.next/static" 2>>"$
 CURRENT_STEP=5
 write_status "restarting" 5 "Switching to the new version" "" ""
 
-# Flip security_maintenance.enabled=true BEFORE pm2 reload so visitors
-# see the branded 503 page during the brief Next.js re-compile window
-# (typically 30-90s on small instances). Best-effort — see the helper
-# comments. If the toggle fails the update still proceeds; the worst
-# case is visitors see a connection-error instead of the styled page.
-# Mark the toggle-on as ours so the EXIT/SIGTERM traps know to flip
-# it back off. Without this sentinel, a preflight failure in step 1
-# would silently clobber an operator-set maintenance window.
-export CAVECMS_MAINT_TOGGLED_BY_US=1
-post_maintenance_toggle true
+# Maintenance mode is already ON — flipped before Step 3 (see the
+# block above Step 3). Customers have been seeing the branded 503
+# throughout install + migrate + build; the pm2 reload below is the
+# last operation before Step 6's healthz verify (success → toggle
+# OFF) or the EXIT/SIGTERM trap (failure → also toggle OFF, since
+# CAVECMS_MAINT_TOGGLED_BY_US sentinel marks the toggle as ours).
 
 # Write the new commit + ts to the env file so the new process picks
 # them up. Atomic write via tmp + rename so a partial write can't

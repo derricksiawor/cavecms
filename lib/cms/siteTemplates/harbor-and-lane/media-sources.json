@@ -1,23 +1,23 @@
 [
   {
     "key": "home-hero-house",
-    "sourceUrl": "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=2400&q=85",
-    "alt": "A modern home with warm interior light glowing through floor-to-ceiling windows at golden hour, mature landscaping in the foreground.",
-    "photographer": "Brian Babb",
+    "sourceUrl": "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=4000&q=92",
+    "alt": "A modern two-story home with steep gable roofs, warm interior light glowing through tall windows at twilight, surrounded by mature trees and quiet landscaping.",
+    "photographer": "Frames For Your Heart",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "home-neighborhood",
-    "sourceUrl": "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=2400&q=85",
-    "alt": "A quiet tree-lined residential street with a row of brick brownstones, sunlight filtering through the canopy.",
+    "sourceUrl": "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=4000&q=92",
+    "alt": "A low-rise modern residential block at the end of the day — clean lines, dark masonry, balconies catching the last warmth of the sunset.",
     "photographer": "Julian Ostarek",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "listings-hero",
-    "sourceUrl": "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=4000&q=92",
     "alt": "Wide-angle exterior of a contemporary two-story home with clean lines, large glass panels, and a manicured front lawn.",
     "photographer": "Avi Werde",
     "license": "unsplash",
@@ -25,7 +25,7 @@
   },
   {
     "key": "listings-interior-1",
-    "sourceUrl": "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=4000&q=92",
     "alt": "An open-concept kitchen with a marble centre island, light wood cabinetry, and abundant natural daylight.",
     "photographer": "Zac Gudakov",
     "license": "unsplash",
@@ -33,7 +33,7 @@
   },
   {
     "key": "listings-interior-2",
-    "sourceUrl": "https://images.unsplash.com/photo-1616593969747-4797dc75033e?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1616593969747-4797dc75033e?w=4000&q=92",
     "alt": "A restrained primary bedroom with neutral linens facing a large window framing a quiet city view.",
     "photographer": "Natalia Blauth",
     "license": "unsplash",
@@ -41,7 +41,7 @@
   },
   {
     "key": "listings-outdoor",
-    "sourceUrl": "https://images.unsplash.com/photo-1505843795480-5cfb3c03f6ff?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1505843795480-5cfb3c03f6ff?w=4000&q=92",
     "alt": "A wooden deck beside a still swimming pool at dusk, lounge chairs and warm ambient lighting from the house behind.",
     "photographer": "Jason Grant",
     "license": "unsplash",
@@ -49,7 +49,7 @@
   },
   {
     "key": "agents-office",
-    "sourceUrl": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=4000&q=92",
     "alt": "A warm boutique office interior with wooden desks and tall plants catching afternoon light.",
     "photographer": "Toa Heftiba",
     "license": "unsplash",
@@ -57,15 +57,15 @@
   },
   {
     "key": "agents-portrait-1",
-    "sourceUrl": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=2400&q=85",
-    "alt": "Editorial portrait of an adult woman in soft natural light, calm expression, neutral background.",
+    "sourceUrl": "https://images.unsplash.com/photo-1551836022-deb4988cc6c0?w=4000&q=92",
+    "alt": "Editorial portrait of an agent in a dark blazer, standing against an exposed brick wall in a warmly lit loft office, daylight from a tall window.",
     "photographer": "Christina @ wocintechchat.com",
     "license": "unsplash",
     "mime": "image/jpeg"
   },
   {
     "key": "agents-portrait-2",
-    "sourceUrl": "https://images.unsplash.com/photo-1676989880361-091e12efc056?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1676989880361-091e12efc056?w=4000&q=92",
     "alt": "Editorial portrait of an adult man with glasses, professional, warm natural lighting, looking at camera.",
     "photographer": "Lucas Favre",
     "license": "unsplash",
@@ -73,7 +73,7 @@
   },
   {
     "key": "neighborhoods-cafe",
-    "sourceUrl": "https://images.unsplash.com/photo-1453614512568-c4024d13c247?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1453614512568-c4024d13c247?w=4000&q=92",
     "alt": "A charming neighborhood cafe exterior with a wooden bench out front and a small chalkboard sign on the sidewalk.",
     "photographer": "Valeria Nikitina",
     "license": "unsplash",
@@ -81,7 +81,7 @@
   },
   {
     "key": "neighborhoods-park",
-    "sourceUrl": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=2400&q=85",
+    "sourceUrl": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=4000&q=92",
     "alt": "A grassy community park with mature trees and a curving walking path catching late afternoon light.",
     "photographer": "Josh Hild",
     "license": "unsplash",
@@ -89,9 +89,9 @@
   },
   {
     "key": "contact-reception",
-    "sourceUrl": "https://images.unsplash.com/photo-1564540583246-934409427776?w=2400&q=85",
-    "alt": "A modern reception desk with marble and warm wood accents, soft overhead lighting, restrained entry detail.",
-    "photographer": "Aalo Lens",
+    "sourceUrl": "https://images.unsplash.com/photo-1518733057094-95b53143d2a7?w=4000&q=92",
+    "alt": "The Harbor & Lane reception — a marble entrance hall with a curved staircase, brass railing, and a low constellation of pendant lights catching the morning sun.",
+    "photographer": "Robert Anasch",
     "license": "unsplash",
     "mime": "image/jpeg"
   }

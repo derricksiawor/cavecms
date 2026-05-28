@@ -83,7 +83,7 @@ describe('duplicateBlock — widget', () => {
       pageId,
       parentId: null,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1000,
       data: { heading: 'Source', body_richtext: '<p>x</p>' },
     })
@@ -153,7 +153,7 @@ describe('duplicateBlock — widget', () => {
       pageId,
       parentId: null,
       kind: 'widget',
-      blockType: 'image',
+      blockType: 'lx_figure',
       position: 1000,
       data: { image: { media_id: 7, alt: 'a' }, alignment: 'center' },
     })
@@ -220,7 +220,7 @@ describe('duplicateBlock — failure modes', () => {
       pageId: 1,
       parentId: null,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1000,
       data: { heading: 'A', body_richtext: '<p>a</p>' },
     })
@@ -241,7 +241,7 @@ describe('duplicateBlock — failure modes', () => {
       pageId: 1,
       parentId: null,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1000,
       data: { heading: 'A', body_richtext: '<p>a</p>' },
     })
@@ -267,7 +267,7 @@ describe('duplicateBlock — failure modes', () => {
       pageId: 1,
       parentId: null,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1000,
       data: { heading: 'A', body_richtext: '<p>a</p>' },
     })
@@ -275,7 +275,7 @@ describe('duplicateBlock — failure modes', () => {
       pageId: 1,
       parentId: null,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1001,
       data: { heading: 'B', body_richtext: '<p>b</p>' },
     })
@@ -301,7 +301,7 @@ describe('duplicateBlock — failure modes', () => {
       pageId: 1,
       parentId: null,
       kind: 'widget',
-      blockType: 'hero',
+      blockType: 'lx_cover_image',
       position: 1000,
       data: { title: 'Hero', image: { media_id: 11, alt: 'h' } },
       blockKey: 'hero',
@@ -389,7 +389,7 @@ describe('duplicateBlock — full section subtree', () => {
       pageId: 1,
       parentId: col1,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1000,
       data: { heading: 'W1', body_richtext: '<p>a</p>' },
     })
@@ -397,7 +397,7 @@ describe('duplicateBlock — full section subtree', () => {
       pageId: 1,
       parentId: col2,
       kind: 'widget',
-      blockType: 'text',
+      blockType: 'lx_text',
       position: 1000,
       data: { heading: 'W2', body_richtext: '<p>b</p>' },
     })
@@ -468,7 +468,7 @@ describe('duplicateBlock — full section subtree', () => {
         pageId: 1,
         parentId: colId,
         kind: 'widget',
-        blockType: 'text',
+        blockType: 'lx_text',
         position: (i + 1) * 1000,
         data: { heading: `w${i}`, body_richtext: '<p>x</p>' },
       })

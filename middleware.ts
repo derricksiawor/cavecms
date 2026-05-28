@@ -3,6 +3,7 @@ import { verifySessionJwt } from '@/lib/auth/jwt'
 import { SESSION_COOKIE } from '@/lib/auth/cookies'
 import { SLUG_MAX, SLUG_MIN, SLUG_RE } from '@/lib/cms/slug'
 import { RESERVED } from '@/lib/cms/page-slug'
+import { escapeHtml } from '@/lib/security/escapeHtml'
 import { cidrListMatch, clientIpFromRequest } from '@/lib/security/ipMatch'
 import { classifySuspicious } from '@/lib/security/suspiciousRequest'
 import { buildCsp, type IntegrationsCspFlags } from '@/lib/security/buildCsp'
@@ -239,16 +240,10 @@ function forbiddenResponse(): NextResponse {
 // hostile operator isn't the threat model here, but the SAME field is
 // surfaced on the public 503 to every visitor, so a careless paste of
 // HTML-like text (`<3 BWC`) would otherwise render or break the page.
-// Escape `& < > " '` so the field is rendered as text regardless of
-// content.
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
+// escapeHtml is centralised in lib/security/escapeHtml.ts so every
+// HTML-body surface (maintenance, newsletter confirm/unsubscribe,
+// future error pages) shares the same primitive. See the import at
+// the top of this file.
 
 function maintenanceResponse(message: string): NextResponse {
   // Generic branded HTML 503. The page is served to the END VISITOR of

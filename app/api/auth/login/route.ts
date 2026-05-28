@@ -162,7 +162,36 @@ export const POST = withError(async (req: Request) => {
   const hash = user?.passwordHash ?? (await getDummyScryptHash())
   const passwordOk = await verifyPassword(password, hash)
 
-  const state = await computeLockState({ email, ip })
+  // Fail-CLOSED on lockout-read failure. A DB hiccup that happens to
+  // throw inside computeLockState was previously surfaced as 500 by
+  // withError — but only AFTER scrypt verify ran. That gave an
+  // attacker an unbounded password-guess window during sustained DB
+  // pressure (rate limits still applied, but the per-email lockout
+  // escalation didn't). Now: on read failure we synthesise a locked
+  // state so the request fails the `!state.locked || isKnownIp` gate
+  // unless the attacker also has a known-IP row (which they cannot
+  // synthesise). Structured warn so the operator sees the trail.
+  let state: Awaited<ReturnType<typeof computeLockState>>
+  try {
+    state = await computeLockState({ email, ip })
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'login_lockout_read_failed_fail_closed',
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    )
+    state = {
+      locked: true,
+      // The arrays are window-bucketed failure counts; the failing
+      // path only inspects `locked`, but we synthesise a saturated
+      // shape so downstream code that did read these would treat the
+      // account as already at the highest-tier lockout escalation.
+      eCounts: [Infinity, Infinity, Infinity],
+      iCounts: [Infinity, Infinity, Infinity],
+    }
+  }
 
   // Run the userKnownIps lookup for any existing user (not only locked ones)
   // so its presence/absence doesn't reveal lock state to an attacker timing

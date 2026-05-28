@@ -1,31 +1,6 @@
 import type { ReactNode } from 'react'
-import { Hero } from './Hero/render'
-import { Cta } from './Cta/render'
-import { Text } from './Text/render'
-import { ImageBlock } from './Image/render'
-import { Gallery } from './Gallery/render'
-import { Quote } from './Quote/render'
-import { ServicesIntro } from './ServicesIntro/render'
-import { FeaturedProjects } from './FeaturedProjects/render'
-import { AboutHistory } from './AboutHistory/render'
-import { Heading } from './Heading/render'
-import { Button } from './Button/render'
-import { Divider } from './Divider/render'
-import { Spacer } from './Spacer/render'
-import { IconBox } from './IconBox/render'
-import { Accordion } from './Accordion/render'
-import { IconList } from './IconList/render'
-import { Tabs } from './Tabs/render'
-// Chunk G - Elementor-parity rich widgets.
-import { Alert } from './Alert/render'
-import { SocialIcons } from './SocialIcons/render'
-import { StarRating } from './StarRating/render'
-import { StatsRow } from './StatsRow/render'
-import { Testimonial } from './Testimonial/render'
-import { VideoEmbed } from './VideoEmbed/render'
+// Fixed-slot widget — kept palette-visible even though it's not lx_.
 import { ContactForm } from './ContactForm/render'
-import { Eyebrow } from './Eyebrow/render'
-import { ChannelCard } from './ChannelCard/render'
 // ─── Luxury redesign — lx_* widget primitives ───────────────────────
 import { LxHeading } from './LxHeading/render'
 import { LxText } from './LxText/render'
@@ -39,6 +14,16 @@ import { LxSpace } from './LxSpace/render'
 import { LxChannelCard } from './LxChannelCard/render'
 import { LxStat } from './LxStat/render'
 import { LxQuote } from './LxQuote/render'
+import { LxTestimonial } from './LxTestimonial/render'
+import { LxVideo } from './LxVideo/render'
+import { LxAccordion } from './LxAccordion/render'
+import { LxTabs } from './LxTabs/render'
+import { LxIconList } from './LxIconList/render'
+import { LxIconBox } from './LxIconBox/render'
+import { LxDivider } from './LxDivider/render'
+import { LxSocialIcons } from './LxSocialIcons/render'
+import { LxCtaBanner } from './LxCtaBanner/render'
+import { LxGallery } from './LxGallery/render'
 import type { BlockData, BlockType } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 
@@ -97,89 +82,11 @@ function defineRenderers<
 }
 
 const BLOCK_RENDERERS = defineRenderers({
-  hero: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'hero'>>) => (
-    <Hero data={data} media={media} outerClass={outerClass} />
-  ),
-  cta: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'cta'>>) => (
-    <Cta data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  text: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'text'>>) => (
-    <Text data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  image: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'image'>>) => (
-    <ImageBlock data={data} media={media} outerClass={outerClass} />
-  ),
-  gallery: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'gallery'>>) => (
-    <Gallery data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  quote: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'quote'>>) => (
-    <Quote data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  services_intro: ({ data, outerClass }: BlockRendererArgs<BlockData<'services_intro'>>) => (
-    <ServicesIntro data={data} outerClass={outerClass} />
-  ),
-  featured_projects: ({ data, projects, media, outerClass }: BlockRendererArgs<BlockData<'featured_projects'>>) => (
-    <FeaturedProjects data={data} projects={projects} media={media} outerClass={outerClass} />
-  ),
-  about_history: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'about_history'>>) => (
-    <AboutHistory data={data} media={media} outerClass={outerClass} />
-  ),
-  heading: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'heading'>>) => (
-    <Heading data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  button: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'button'>>) => (
-    <Button data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  divider: ({ data, outerClass }: BlockRendererArgs<BlockData<'divider'>>) => (
-    <Divider data={data} outerClass={outerClass} />
-  ),
-  spacer: ({ data, outerClass }: BlockRendererArgs<BlockData<'spacer'>>) => (
-    <Spacer data={data} outerClass={outerClass} />
-  ),
-  icon_box: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'icon_box'>>) => (
-    <IconBox data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  accordion: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'accordion'>>) => (
-    <Accordion data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  icon_list: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'icon_list'>>) => (
-    <IconList data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  tabs: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'tabs'>>) => (
-    <Tabs data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  // ─── Chunk G — Elementor-parity rich widgets ─────────────────────
-  // Alphabetical within G. The renderers are in components/blocks/<Name>/
-  // and threaded with outerClass via Chunk E's pattern.
-  alert: ({ data, inlineEdit, outerClass, blockId }: BlockRendererArgs<BlockData<'alert'>>) => (
-    <Alert data={data} inlineEdit={inlineEdit} outerClass={outerClass} blockId={blockId} />
-  ),
-  social_icons: ({ data, outerClass }: BlockRendererArgs<BlockData<'social_icons'>>) => (
-    <SocialIcons data={data} outerClass={outerClass} />
-  ),
-  star_rating: ({ data, outerClass }: BlockRendererArgs<BlockData<'star_rating'>>) => (
-    <StarRating data={data} outerClass={outerClass} />
-  ),
-  stats_row: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'stats_row'>>) => (
-    <StatsRow data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  testimonial: ({ data, media, projects, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'testimonial'>>) => (
-    <Testimonial data={data} media={media} projects={projects} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  video_embed: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'video_embed'>>) => (
-    <VideoEmbed data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
   // contact_form is an async server component — it mints a CSRF nonce
   // via ensurePublicPreCsrf() inside its render. React/RSC unwraps the
   // returned Promise<JSX.Element> the same way it handles any async RSC.
   contact_form: ({ data, inlineEdit, outerClass, csrf, blockId }: BlockRendererArgs<BlockData<'contact_form'>>) => (
     <ContactForm data={data} inlineEdit={inlineEdit} outerClass={outerClass} csrf={csrf} blockId={blockId} />
-  ),
-  eyebrow: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'eyebrow'>>) => (
-    <Eyebrow data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
-  ),
-  channel_card: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'channel_card'>>) => (
-    <ChannelCard data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
   // ─── Luxury redesign dispatchers ────────────────────────────────
   // Each lx_* renderer accepts the standard BlockRendererArgs shape:
@@ -208,8 +115,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_image_pair: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_image_pair'>>) => (
     <LxImagePair data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
-  lx_map: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_map'>>) => (
-    <LxMap data={data} outerClass={outerClass} />
+  lx_map: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_map'>>) => (
+    <LxMap data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
   lx_space: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_space'>>) => (
     <LxSpace data={data} outerClass={outerClass} />
@@ -223,6 +130,36 @@ const BLOCK_RENDERERS = defineRenderers({
   ),
   lx_quote: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_quote'>>) => (
     <LxQuote data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_testimonial: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_testimonial'>>) => (
+    <LxTestimonial data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_video: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_video'>>) => (
+    <LxVideo data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_accordion: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_accordion'>>) => (
+    <LxAccordion data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_tabs: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_tabs'>>) => (
+    <LxTabs data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_icon_list: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_icon_list'>>) => (
+    <LxIconList data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_icon_box: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_icon_box'>>) => (
+    <LxIconBox data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_divider: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_divider'>>) => (
+    <LxDivider data={data} outerClass={outerClass} />
+  ),
+  lx_social_icons: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_social_icons'>>) => (
+    <LxSocialIcons data={data} outerClass={outerClass} />
+  ),
+  lx_cta_banner: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_cta_banner'>>) => (
+    <LxCtaBanner data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_gallery: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_gallery'>>) => (
+    <LxGallery data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
 })
 
