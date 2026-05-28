@@ -10,8 +10,10 @@ import type {
 import { buildBlockTree } from '@/lib/cms/blockTree'
 import {
   htmlIdForBlock,
+  parseSectionMeta,
   parseWidgetMeta,
   visibilityClasses,
+  type SectionMeta,
 } from '@/lib/cms/blockMeta'
 import { spacingClass, spacingStyle } from '@/lib/cms/spacingClasses'
 import clsx from 'clsx'
@@ -205,6 +207,7 @@ function EditableSectionSlot({
             pageVersion={pageVersion}
             sectionBackground={sectionBackground}
             parentSectionId={section.id}
+            parentSectionMeta={parseSectionMeta(section.meta)}
             media={media}
             projects={projects}
             csrf={csrf}
@@ -222,6 +225,12 @@ interface ColumnSlotProps {
   pageVersion: number
   sectionBackground: ReturnType<typeof readSectionBackground>
   parentSectionId: number
+  /** Full section meta — threaded to widget renderers so they can
+   *  derive their visual theme from the ancestor surface. Carrying the
+   *  whole meta (not just background) lets `isSectionSurfaceDark` see
+   *  the cover-photo + dark-overlay heroes too, where the bg colour
+   *  alone underreports darkness. */
+  parentSectionMeta: SectionMeta
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   csrf?: string
@@ -234,6 +243,7 @@ function EditableColumnSlot({
   pageVersion,
   sectionBackground,
   parentSectionId,
+  parentSectionMeta,
   media,
   projects,
   csrf,
@@ -283,6 +293,7 @@ function EditableColumnSlot({
               parentBlockId={column.id}
               pageId={pageId}
               pageVersion={pageVersion}
+              parentSectionMeta={parentSectionMeta}
               media={media}
               projects={projects}
               csrf={csrf}
@@ -304,6 +315,7 @@ interface WidgetSlotProps {
   parentBlockId: number | null
   pageId: number
   pageVersion: number
+  parentSectionMeta?: SectionMeta
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   csrf?: string
@@ -314,6 +326,7 @@ function EditableWidgetSlot({
   parentBlockId,
   pageId,
   pageVersion,
+  parentSectionMeta,
   media,
   projects,
   csrf,
@@ -399,6 +412,7 @@ function EditableWidgetSlot({
     widgetSpacingClass,
     block.id,
     'edit',
+    parentSectionMeta,
   )
   // initialData passes the PERSISTED shape (block.data, not the
   // preview-merged effectiveData) downstream to EditableBlock →

@@ -26,6 +26,7 @@ import { LxCtaBanner } from './LxCtaBanner/render'
 import { LxGallery } from './LxGallery/render'
 import type { BlockData, BlockType } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
+import type { SectionMeta } from '@/lib/cms/blockMeta'
 
 export interface RenderContext {
   media: Map<number, { variants: Record<string, string> | null; alt_text: string; width: number | null; height: number | null }>
@@ -58,6 +59,13 @@ type BlockRendererArgs<D> = {
   inlineEdit?: InlineEditContext
   outerClass?: string
   blockId?: number
+  /** Parent section's meta — threaded so a renderer can derive its
+   *  visual theme from the ancestor surface (dark vs light bg, cover-
+   *  photo + dark-overlay heroes, etc.) instead of hardcoding tokens.
+   *  Use `isSectionSurfaceDark(sectionMeta)` from `lib/cms/blockMeta`
+   *  to resolve. `undefined` means the block is rendering at the page
+   *  root (no ancestor section) — treat as light surface. */
+  sectionMeta?: SectionMeta
 }
 
 type BlockRenderer<D> = (args: BlockRendererArgs<D>) => ReactNode
@@ -85,8 +93,8 @@ const BLOCK_RENDERERS = defineRenderers({
   // contact_form is an async server component — it mints a CSRF nonce
   // via ensurePublicPreCsrf() inside its render. React/RSC unwraps the
   // returned Promise<JSX.Element> the same way it handles any async RSC.
-  contact_form: ({ data, inlineEdit, outerClass, csrf, blockId }: BlockRendererArgs<BlockData<'contact_form'>>) => (
-    <ContactForm data={data} inlineEdit={inlineEdit} outerClass={outerClass} csrf={csrf} blockId={blockId} />
+  contact_form: ({ data, inlineEdit, outerClass, csrf, blockId, sectionMeta }: BlockRendererArgs<BlockData<'contact_form'>>) => (
+    <ContactForm data={data} inlineEdit={inlineEdit} outerClass={outerClass} csrf={csrf} blockId={blockId} sectionMeta={sectionMeta} />
   ),
   // ─── Luxury redesign dispatchers ────────────────────────────────
   // Each lx_* renderer accepts the standard BlockRendererArgs shape:
@@ -192,6 +200,7 @@ export function renderBlock(
   outerClass?: string,
   blockId?: number,
   mode: BlockRenderMode = 'public',
+  sectionMeta?: SectionMeta,
 ): ReactNode {
   const renderer = (BLOCK_RENDERERS as Record<string, BlockRenderer<unknown>>)[type]
   if (!renderer) {
@@ -271,5 +280,6 @@ export function renderBlock(
     inlineEdit,
     outerClass,
     blockId,
+    sectionMeta,
   })
 }

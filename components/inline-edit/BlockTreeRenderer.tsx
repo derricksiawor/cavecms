@@ -9,6 +9,7 @@ import type {
 import { buildBlockTree } from '@/lib/cms/blockTree'
 import {
   htmlIdForBlock,
+  parseSectionMeta,
   parseWidgetMeta,
   visibilityClasses,
 } from '@/lib/cms/blockMeta'
@@ -130,6 +131,8 @@ export function BlockTreeRenderer({ blocks, media, projects, csrf }: Props) {
                               undefined,
                               m.outerClass,
                               w.id,
+                              'public',
+                              parseSectionMeta(sec.meta),
                             )}
                           </WidgetStyleWrap>
                         </Fragment>

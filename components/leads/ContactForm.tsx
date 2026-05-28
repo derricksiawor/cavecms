@@ -73,16 +73,28 @@ const FETCH_TIMEOUT_MS = 30_000
 
 // Per ~/.claude/CLAUDE.md "No borders/border lines": inputs are
 // translucent fills that bump to a brighter fill on focus + add a
-// champagne ring for a11y focus indication.
-const INPUT_BASE =
-  'w-full font-sans text-base font-medium text-ivory bg-ivory/5 rounded-xl px-4 py-3.5 transition-all duration-base ease-luxury placeholder:text-ivory/30 focus:outline-none focus:bg-ivory/10 focus:ring-2 focus:ring-champagne focus:ring-offset-0'
+// champagne/copper ring for a11y focus indication.
+//
+// Surface-aware: the dark-theme tokens (ivory/champagne) read correctly
+// against obsidian/near-black sections; the light-theme tokens
+// (obsidian/copper-700) read correctly against ivory/cream/champagne
+// sections. The wrapper renderer (`components/blocks/ContactForm/render`)
+// passes `surface` from the ancestor section's meta via
+// `isSectionSurfaceDark` — no template needs to declare a theme.
+const INPUT_DARK =
+  'w-full font-sans text-base font-medium text-ivory bg-ivory/8 rounded-xl px-4 py-3.5 transition-all duration-base ease-luxury placeholder:text-ivory/40 focus:outline-none focus:bg-ivory/15 focus:ring-2 focus:ring-champagne focus:ring-offset-0'
+const INPUT_LIGHT =
+  'w-full font-sans text-base font-medium text-obsidian bg-obsidian/8 rounded-xl px-4 py-3.5 transition-all duration-base ease-luxury placeholder:text-obsidian/40 focus:outline-none focus:bg-obsidian/12 focus:ring-2 focus:ring-copper-500 focus:ring-offset-0'
 
-const LABEL_TEXT =
+const LABEL_DARK =
   'font-sans text-xs font-semibold uppercase tracking-eyebrow text-champagne'
+const LABEL_LIGHT =
+  'font-sans text-xs font-semibold uppercase tracking-eyebrow text-copper-700'
 
-// Native date/time inputs on dark backgrounds need explicit color-scheme
-// so the browser's native calendar/clock picker uses dark chrome.
-const DATE_TIME_EXTRA = '[color-scheme:dark]'
+// Native date/time pickers need an explicit color-scheme so their
+// browser chrome (calendar grid + clock face) matches the form theme.
+const DATE_TIME_EXTRA_DARK = '[color-scheme:dark]'
+const DATE_TIME_EXTRA_LIGHT = '[color-scheme:light]'
 
 export interface ContactFormProps {
   csrf: string
@@ -93,13 +105,23 @@ export interface ContactFormProps {
    *  addition to) the site-wide integrations_*.formSourceMap.contact
    *  default. Empty/0 → site-wide default only. */
   blockId?: number
+  /** Resolved by the wrapper from the parent section's `bg` token
+   *  (see ContactForm/render.tsx). Dark surfaces use ivory/champagne
+   *  tokens; light surfaces use obsidian/copper. Default 'dark'
+   *  preserves the historic behaviour for any direct caller that
+   *  hasn't been migrated. */
+  surface?: 'dark' | 'light'
 }
 
 export function ContactForm({
   csrf,
   submitLabel = 'Send message',
   blockId,
+  surface = 'dark',
 }: ContactFormProps) {
+  const INPUT_BASE = surface === 'light' ? INPUT_LIGHT : INPUT_DARK
+  const LABEL_TEXT = surface === 'light' ? LABEL_LIGHT : LABEL_DARK
+  const DATE_TIME_EXTRA = surface === 'light' ? DATE_TIME_EXTRA_LIGHT : DATE_TIME_EXTRA_DARK
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState<'idle' | 'ok' | 'expired' | 'error'>('idle')
   const [reloadAborted, setReloadAborted] = useState(false)
