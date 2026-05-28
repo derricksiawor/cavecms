@@ -112,6 +112,7 @@ next-env.d.ts
 !/scripts/verify-route-collisions.ts
 !/scripts/add-contact-map-and-social.ts
 !/scripts/postbuild-check-slug-collisions.ts
+!/scripts/postbuild-patch-trust-host-header.ts
 !/scripts/validate-site-templates.ts
 !/scripts/disk-check.sh
 !/scripts/prune-static-pool.sh

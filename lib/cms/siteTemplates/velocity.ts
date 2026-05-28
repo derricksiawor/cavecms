@@ -3,8 +3,11 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
+  figure,
   hero,
+  imagePair,
   oneCol,
   statRow,
   threeColCards,
@@ -67,6 +70,19 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'A modern engineering operations platform. Plan, ship, measure. Built for teams that want fewer meetings.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-abstract',
+            alt: 'An abstract dark blue circuit board macro with glowing nodes and fibre-optic light trails.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken-strong',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Engineering operations',
@@ -111,6 +127,30 @@ export const velocityTemplate: SiteTemplate = {
           ],
         }),
 
+        // Product surface — laptop with a blurred dashboard.
+        oneCol(
+          'near-black',
+          'md',
+          figure({
+            imageKey: 'home-product-laptop',
+            alt: 'An open laptop on a dark desk displaying a blurred abstract dashboard interface.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Founder portrait — grounds the customer quote below.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'team-founder',
+            alt: 'A considered editorial portrait of one of the Velocity founders in soft natural light.',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'cream',
           text: '"Standups dropped from forty minutes to four. Velocity told us what would have been in the standup anyway."',
@@ -140,6 +180,34 @@ export const velocityTemplate: SiteTemplate = {
           title: 'What Velocity does.',
           body: 'Four product surfaces — Plan, Ship, Measure, Integrate — and a CLI that uses every one of them.',
         }),
+
+        // Pair: engineers reviewing code + a mobile UI close-up.
+        oneCol(
+          'near-black',
+          'lg',
+          imagePair({
+            leftImageKey: 'features-collaboration',
+            leftAlt: 'Over-the-shoulder view of two engineers reviewing code together on a laptop.',
+            rightImageKey: 'features-mobile',
+            rightAlt: 'Close-up of a smartphone showing a minimal dark-mode app interface.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Data viz — the Measure surface, visually.
+        oneCol(
+          'obsidian',
+          'md',
+          figure({
+            imageKey: 'features-data-viz',
+            alt: 'An abstract data visualization of glowing connected nodes and lines on a deep blue background.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'near-black',
@@ -227,6 +295,19 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'Three plans — Free, Team, and Enterprise. Most teams stay on Team for the first three years.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'pricing-office',
+            alt: 'A modern minimalist office workspace with wooden furniture and soft daylight — the kind of team Velocity is built for.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Pricing',
@@ -258,6 +339,23 @@ export const velocityTemplate: SiteTemplate = {
             },
           ],
         }),
+
+        // Pair: customers' meeting + office interior — what Enterprise
+        // looks like in practice.
+        oneCol(
+          'near-black',
+          'lg',
+          imagePair({
+            leftImageKey: 'customers-meeting',
+            leftAlt: 'A wide shot of a boardroom meeting with silhouetted figures backlit by window light.',
+            rightImageKey: 'team-office',
+            rightAlt: 'An industrial-loft office interior at dusk with exposed brick and warm pendant lighting.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'obsidian',
@@ -292,12 +390,38 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'Every change to Velocity, ordered by date. Written by the engineers who shipped them.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'changelog-kanban',
+            alt: 'A whiteboard covered in coloured sticky notes arranged into columns — kanban-style task tracking.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Changelog',
           title: 'Every ship, in plain words.',
           body: 'A weekly post, written by the engineers who shipped the work. Major versions get their own page; the highlights live here.',
         }),
+
+        // Trust-security figure — between the changelog cards and the
+        // end of page. Hints at the security-conscious posture.
+        oneCol(
+          'near-black',
+          'md',
+          figure({
+            imageKey: 'trust-security',
+            alt: 'An abstract security visualization with a glowing padlock motif over a dark grid of binary code.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'near-black',
@@ -346,6 +470,19 @@ export const velocityTemplate: SiteTemplate = {
       seoDescription:
         'How to get started with Velocity. Onboarding, integrations, API reference, CLI reference, migration guides.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'docs-code',
+            alt: 'Close-up of a code editor screen with syntax-highlighted source code on a dark background.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Documentation',

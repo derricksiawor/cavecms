@@ -3,8 +3,11 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
+  figure,
   hero,
+  imagePair,
   oneCol,
   statRow,
   threeColCards,
@@ -66,6 +69,19 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'A boutique general contractor. Whole-home renovations, additions, ground-up builds. Two crews, twenty-eight years.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-site',
+            alt: 'Construction crew silhouettes against a warm dusk sky with steel scaffolding framing the worksite.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Ironclad Build',
@@ -103,6 +119,20 @@ export const ironcladBuildTemplate: SiteTemplate = {
           ],
         }),
 
+        // Craftsmanship figure — hands at work, sets the tone of
+        // who's actually doing the building.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'home-craftsmanship',
+            alt: 'Close-up of a carpenter\'s weathered hands planing a piece of timber on a workbench.',
+            ratio: '16:9',
+            caption: 'Our crews are full-time and full-strength — no part-timers.',
+            animation: 'fade-in',
+          }),
+        ),
+
         statRow({
           background: 'near-black',
           stats: [
@@ -135,6 +165,19 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Whole-home renovations, additions, ground-up builds, kitchen and bath, and the small specialty work that holds the rest together.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'services-commercial',
+            alt: 'A completed modern commercial building exterior at dusk — clean lines of steel, glass, and concrete catching the last warm light.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Services',
@@ -178,6 +221,24 @@ export const ironcladBuildTemplate: SiteTemplate = {
           ],
         }),
 
+        // Pair: a residential staircase + a restored heritage beam.
+        // Two of the visual moods of the services list, anchored to
+        // the cards above.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'services-residential',
+            leftAlt: 'A newly finished hardwood staircase beside a freshly framed window catching afternoon light.',
+            rightImageKey: 'services-restoration',
+            rightAlt: 'Detail of a refinished heritage timber beam meeting carefully repointed brick.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         ctaBanner({
           background: 'obsidian',
           title: 'Which crew, when?',
@@ -195,6 +256,19 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Selected projects from twenty-eight years of building. Whole-home renovations, additions, new builds.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'projects-progress',
+            alt: 'A work-in-progress build with exposed wood framing, partial roof structure and a crane silhouette in the background.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Selected projects',
@@ -254,6 +328,17 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Twenty-eight years, two crews, one office. Full insurance, full bonds, and a project manager who picks up his phone.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          figure({
+            imageKey: 'team-foreman',
+            alt: 'Documentary-style portrait of a foreman in work jacket and hard hat, on site.',
+            ratio: '21:9',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'About the firm',
@@ -261,6 +346,35 @@ export const ironcladBuildTemplate: SiteTemplate = {
           body: 'Founded in 1998 by Anders Iversen, now run as a partnership of three with Mateo Vega and Lara Bishop. Both crews are full-time. The office is small — a project manager, a bookkeeper, an apprentice.',
           tone: 'obsidian',
         }),
+
+        // Pair: tool wall + the work truck. The everyday objects
+        // behind the firm.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'team-tools',
+            leftAlt: 'An organised craftsman\'s tool wall above a heavy workbench — hammers, chisels and hand planes in neat rows.',
+            rightImageKey: 'about-fleet',
+            rightAlt: 'A close-up of a clean work truck parked at a worksite at first light, ladders and material racks loaded on the back.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Materials yard — the raw stock the work begins with.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'about-materials',
+            alt: 'A stack of fresh-cut dimensional lumber in a materials yard, end grain visible, soft morning light.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -300,12 +414,37 @@ export const ironcladBuildTemplate: SiteTemplate = {
       seoDescription:
         'Tell us about the project. We will visit within ten business days and send you a written brief.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'contact-blueprint',
+            alt: 'Architectural blueprints unrolled on a drafting table beside drafting tools.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Quote request',
           title: 'Tell us about the project.',
           body: 'Shape of the work, address, what you know about the budget, and any deadline. We will visit within ten business days, walk the site with you, and send a written brief within five days of the visit.',
         }),
+
+        // Certifications inspection figure — the quality-control moment.
+        oneCol(
+          'near-black',
+          'md',
+          figure({
+            imageKey: 'certifications-inspection',
+            alt: 'A spirit level and measuring tape laid across a freshly installed structural beam during a quality inspection.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         contactChannels({
           background: 'obsidian',

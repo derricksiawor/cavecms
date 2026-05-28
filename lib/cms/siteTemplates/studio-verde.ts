@@ -3,8 +3,11 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
+  figure,
   hero,
+  imagePair,
   oneCol,
   threeColCards,
 } from './_shared'
@@ -66,6 +69,19 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'A six-person design studio. Brand systems, websites, packaging. Eleven years, ninety-four clients.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-workspace',
+            alt: 'A sun-streaked Studio Verde workspace with design tools, sketches, and references spread across a wooden worktable.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Studio Verde',
@@ -140,6 +156,18 @@ export const studioVerdeTemplate: SiteTemplate = {
           ],
         }),
 
+        // Team-at-work figure — the studio in motion.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'home-team-working',
+            alt: 'Over-the-shoulder view of designers at their desks in a warm, naturally lit studio.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'cream',
           text: '"They asked us harder questions than we knew the answers to. By the end we had a brand because we had a clearer company."',
@@ -163,12 +191,54 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'Selected work from Studio Verde — brand systems, websites, packaging.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'work-case-1',
+            alt: 'A branding identity system spread on a worktable — stationery mockups, colour cards, and printed collateral.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Selected work',
           title: 'A small portfolio, carefully kept.',
           body: 'Twelve projects, of the ninety-four we have done. Picked because they show what we do at the studio’s best.',
         }),
+
+        // Pair: packaging + editorial — two case-study textures.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'work-case-2',
+            leftAlt: 'Minimalist packaging design in soft earth tones photographed on a neutral textured surface.',
+            rightImageKey: 'work-case-3',
+            rightAlt: 'An open editorial magazine spread showing considered typography and generous white space.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Digital interface mockup — the third leg of the studio's
+        // three-discipline practice (brand / web / packaging).
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'work-case-4',
+            alt: 'A digital interface mockup displayed on a screen with clean layouts and a muted colour palette.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -245,6 +315,35 @@ export const studioVerdeTemplate: SiteTemplate = {
           body: 'We have run versions of this process for eleven years. It is plain on purpose — clients should know what they have committed to before the first invoice.',
         }),
 
+        // Process pair: sketching by hand + the collaboration wall.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'process-sketching',
+            leftAlt: 'Close-up of hands sketching layout ideas on paper with markers and pencils scattered nearby.',
+            rightImageKey: 'process-collaboration',
+            rightAlt: 'A team collaboration wall with whiteboard sketches, sticky notes, and printed work pinned up.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Journal-detail figure between cards and closing quote —
+        // a printed-page close-up, the considered output of process.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'journal-detail',
+            alt: 'Close-up of an open art and design book showing tactile printed pages and considered typography.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
+
         ...threeColCards({
           background: 'ivory',
           cards: [
@@ -297,6 +396,19 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'Six people, three rooms above a bookshop, eleven years.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'team-founder',
+            alt: 'A warm, considered portrait of a Studio Verde founder in soft natural light.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'About the studio',
@@ -304,6 +416,18 @@ export const studioVerdeTemplate: SiteTemplate = {
           body: 'Studio Verde was founded in 2014 by Esther Loomis and Tobias Greene. It has stayed deliberately small — there are six of us now, the same as in 2018. We work above a bookshop, and we keep one client meeting room with no screens.',
           tone: 'obsidian',
         }),
+
+        // Studio detail figure — the considered objects in the room.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'team-office-detail',
+            alt: 'A moody studio interior detail with a leafy plant, framed prints, and a neat stack of design books.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -358,6 +482,19 @@ export const studioVerdeTemplate: SiteTemplate = {
       seoDescription:
         'Send us a note about your project. We take on one new project per month.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'contact-window',
+            alt: 'Soft morning light streaming through a tall studio window with a city view in the distance.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Start a project',

@@ -4,8 +4,9 @@ A self-hosted, AI-native content management system. WordPress-shaped — every
 page, post, and section lives as a tree of CMS blocks the operator drags,
 drops, and edits in the browser.
 
+- **Website**: [cavecms.derricksiawor.com](https://cavecms.derricksiawor.com)
+- **Get started**: [cavecms.derricksiawor.com/get-started](https://cavecms.derricksiawor.com/get-started)
 - **Source**: [github.com/derricksiawor/cavecms](https://github.com/derricksiawor/cavecms)
-- **Releases**: [cavecms.derricksiawor.com](https://cavecms.derricksiawor.com)
 - **License**: [Prosperity Public License 3.0.0](./LICENSE.md) — free for
   personal, hobby, non-profit, government, and educational use; 30-day free
   commercial trial; paid license required for ongoing commercial use.

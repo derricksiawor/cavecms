@@ -3,10 +3,13 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
   eyebrow,
+  figure,
   heading,
   hero,
+  imagePair,
   oneCol,
   statRow,
   text,
@@ -69,6 +72,19 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'A neighborhood restaurant. Thirty-six seats, one wood-fired oven, dinner Tuesday to Saturday.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-room',
+            alt: 'The Maison Brûlée dining room — warmly lit at evening service, set tables, intimate seating.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Since 2017',
@@ -110,6 +126,19 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ],
         }),
 
+        // The bar — wine list lives behind it.
+        oneCol(
+          'near-black',
+          'md',
+          figure({
+            imageKey: 'home-bar',
+            alt: 'The Maison Brûlée wine bar — backlit shelves of bottles and glassware in warm amber light.',
+            ratio: '16:9',
+            caption: 'About eighty wines on the list, rotating by season.',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'cream',
           text: '"The trout came on a plate so hot the salt sizzled. The waiter said her name and the name of the river. We have come back fourteen times since."',
@@ -133,6 +162,19 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'This week’s menu. Six starters, eight mains, three desserts. Changes every Tuesday.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'menu-wine',
+            alt: 'A hand pouring red wine into a glass at a candlelit table — the kind of moment the menu builds toward.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'This week’s menu',
@@ -216,6 +258,34 @@ export const maisonBruleeTemplate: SiteTemplate = {
           ],
         }),
 
+        // The "main" hero figure — handmade pasta or a roast.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'menu-main',
+            alt: 'A handmade pasta main course twirled on a rustic plate with grated cheese and herbs.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Pair: a starter and a dessert from the current week.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'menu-starter',
+            leftAlt: 'A delicate crudo starter plated on a cream-rimmed ceramic dish with herbs and citrus.',
+            rightImageKey: 'menu-dessert',
+            rightAlt: 'A warm rustic tart with poached fruit and cream, photographed in soft natural light.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         ...threeColCards({
           background: 'champagne',
           sectionTitle: 'To finish',
@@ -256,6 +326,19 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'Esme Lacroix opened Maison Brûlée in 2017 with the wood oven she had cooked on since culinary school.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'story-facade',
+            alt: 'The Maison Brûlée exterior at twilight, warm yellow window glow spilling onto the street.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Since 2017',
@@ -281,6 +364,34 @@ export const maisonBruleeTemplate: SiteTemplate = {
             'Esme Lacroix grew up half a mile from the restaurant. She trained at the Institut Paul Bocuse, cooked at three Michelin-starred kitchens in Copenhagen for six years, and came back at thirty-one to open her own room. Maison Brûlée is named for the burnt-edge cooking she does on the wood oven — and for the small kitchen fire she had on the morning of opening, which the staff still talk about.',
             { tone: 'obsidian', marginTop: 'md' },
           ),
+        ),
+
+        // Chef pair: portrait + kitchen pass — the human story.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'chef-portrait',
+            leftAlt: 'A candid portrait of chef Esme Lacroix in a white jacket in the kitchen under warm overhead light.',
+            rightImageKey: 'chef-kitchen',
+            rightAlt: 'A line cook\'s hands plating at the kitchen pass with steam rising under warm service lights.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
+        // Ingredients close-up — the produce, the kitchen garden.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'story-ingredients',
+            alt: 'Close-up of fresh market herbs and produce on a wooden surface in soft daylight.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
         ),
 
         ...threeColCards({
@@ -322,6 +433,19 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'Reservations open six weeks ahead. Dinner only, Tuesday to Saturday, from 6 PM.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'reservations-table',
+            alt: 'An intimate table for two set with linen, lit candle, water glasses — the seat that waits for you.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'obsidian',
           eyebrow: 'Reservations',
@@ -375,6 +499,19 @@ export const maisonBruleeTemplate: SiteTemplate = {
       seoDescription:
         'Selected press, reviews, and awards for Maison Brûlée since 2017.',
       sections: [
+        oneCol(
+          'obsidian',
+          'sm',
+          coverImage({
+            imageKey: 'press-night',
+            alt: 'The Maison Brûlée exterior glowing warmly at night with a quiet street view.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'darken',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Press',

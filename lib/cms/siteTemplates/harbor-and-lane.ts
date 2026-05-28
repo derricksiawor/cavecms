@@ -3,8 +3,10 @@ import {
   closingQuote,
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
   hero,
+  imagePair,
   oneCol,
   statRow,
   threeColCards,
@@ -69,6 +71,19 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'A modern boutique brokerage. Twelve agents, four neighborhoods, a hundred and forty closings a year.',
       sections: [
+        oneCol(
+          'ivory',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-house',
+            alt: 'A modern home with warm interior light glowing through floor-to-ceiling windows at golden hour.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'ivory',
           eyebrow: 'Harbor & Lane',
@@ -141,6 +156,23 @@ export const harborAndLaneTemplate: SiteTemplate = {
           ],
         }),
 
+        // Pair: street + pool — the lived-in neighborhood and the
+        // outdoor magic, side by side.
+        oneCol(
+          'cream',
+          'lg',
+          imagePair({
+            leftImageKey: 'home-neighborhood',
+            leftAlt: 'A quiet tree-lined residential street with brick brownstones, sunlight filtering through the canopy.',
+            rightImageKey: 'listings-outdoor',
+            rightAlt: 'A wooden deck beside a still swimming pool at dusk, warm ambient lighting from the house behind.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'cream',
           text: '"They drove me past three homes in one afternoon and one of them was mine. We closed nine days later."',
@@ -157,6 +189,19 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Our active listings across Harbor Hill, the Lane, the Marina, and the Old Town.',
       sections: [
+        oneCol(
+          'ivory',
+          'sm',
+          coverImage({
+            imageKey: 'listings-hero',
+            alt: 'A contemporary two-story home with clean lines and large glass panels — the kind we list at Harbor Hill.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'ivory',
           eyebrow: 'Active listings',
@@ -201,6 +246,23 @@ export const harborAndLaneTemplate: SiteTemplate = {
           ],
         }),
 
+        // Pair: kitchen + bedroom — interior moments of two listings
+        // side-by-side. Restrained palette common to both.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'listings-interior-1',
+            leftAlt: 'An open-concept kitchen with a marble centre island and abundant natural daylight.',
+            rightImageKey: 'listings-interior-2',
+            rightAlt: 'A restrained primary bedroom with neutral linens facing a window onto a quiet city view.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         ctaBanner({
           background: 'obsidian',
           title: 'Looking for something specific?',
@@ -218,6 +280,19 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Twelve agents, full-time, working four neighborhoods. Each one writes their own listings.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'agents-office',
+            alt: 'The Harbor & Lane office — a warm boutique interior with wooden desks and tall plants in afternoon light.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'The agents',
@@ -225,6 +300,23 @@ export const harborAndLaneTemplate: SiteTemplate = {
           body: 'Every agent at Harbor & Lane is full-time, by license, working out of one of our four neighborhood offices. No leads are sold off, no listings handed to junior staff.',
           tone: 'obsidian',
         }),
+
+        // Pair: two agent portraits — establishes the team's presence
+        // before the bio cards below.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'agents-portrait-1',
+            leftAlt: 'Editorial portrait of one of the Harbor & Lane agents in soft natural light.',
+            rightImageKey: 'agents-portrait-2',
+            rightAlt: 'Editorial portrait of another Harbor & Lane agent in warm daylight.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -327,6 +419,23 @@ export const harborAndLaneTemplate: SiteTemplate = {
           ],
         }),
 
+        // Pair: cafe + park — two everyday textures of the
+        // neighborhoods we work, anchoring the abstract guides above.
+        oneCol(
+          'ivory',
+          'lg',
+          imagePair({
+            leftImageKey: 'neighborhoods-cafe',
+            leftAlt: 'A charming neighborhood cafe exterior with a wooden bench out front and a chalkboard sign on the sidewalk.',
+            rightImageKey: 'neighborhoods-park',
+            rightAlt: 'A grassy community park with mature trees and a curving walking path catching late afternoon light.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         closingQuote({
           background: 'cream',
           text: '"They knew which side of the street got the morning light. They knew which neighbour was the loud one. They knew it because they lived two doors down."',
@@ -343,6 +452,19 @@ export const harborAndLaneTemplate: SiteTemplate = {
       seoDescription:
         'Talk with an agent. We answer every enquiry within one business day.',
       sections: [
+        oneCol(
+          'ivory',
+          'sm',
+          coverImage({
+            imageKey: 'contact-reception',
+            alt: 'The Harbor & Lane reception desk — marble and warm wood, soft overhead lighting.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'ivory',
           eyebrow: 'Talk with an agent',

@@ -1,6 +1,6 @@
 {
   "name": "cavecms",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
   "author": "Derrick S. K. Siawor",
@@ -18,7 +18,7 @@
     "dev:turbo": "next dev -p 3040 --turbopack",
     "prebuild": "node --env-file-if-exists=.env.local scripts/dev-bootstrap.mjs && node --env-file-if-exists=.env.local --import tsx scripts/verify-route-collisions.ts && pnpm validate:site-templates",
     "build": "next build",
-    "postbuild": "node --env-file-if-exists=.env.local --import tsx scripts/postbuild-check-slug-collisions.ts",
+    "postbuild": "node --env-file-if-exists=.env.local --import tsx scripts/postbuild-patch-trust-host-header.ts && node --env-file-if-exists=.env.local --import tsx scripts/postbuild-check-slug-collisions.ts",
     "prestart": "node --env-file-if-exists=.env.local scripts/dev-bootstrap.mjs",
     "start": "node --env-file-if-exists=.env.local scripts/start-standalone.mjs",
     "lint": "eslint .",

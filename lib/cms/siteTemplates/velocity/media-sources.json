@@ -1,0 +1,98 @@
+[
+  {
+    "key": "home-hero-abstract",
+    "sourceUrl": "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=2400&q=85",
+    "alt": "Abstract dark blue circuit board macro with glowing nodes and fibre-optic light trails, cinematic low-key lighting.",
+    "photographer": "Shubham Dhage",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "home-product-laptop",
+    "sourceUrl": "https://images.unsplash.com/photo-1551434678-e076c223a692?w=2400&q=85",
+    "alt": "Open laptop on a dark desk displaying a blurred abstract dashboard interface in low ambient light.",
+    "photographer": "Austin Distel",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "features-collaboration",
+    "sourceUrl": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=2400&q=85",
+    "alt": "Over-the-shoulder view of two engineers reviewing code together on a laptop in a dimly lit workspace.",
+    "photographer": "Annie Spratt",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "features-data-viz",
+    "sourceUrl": "https://images.unsplash.com/photo-1518186285589-2f7649de83e0?w=2400&q=85",
+    "alt": "Abstract data visualization of glowing connected nodes and lines on a deep blue background.",
+    "photographer": "Joshua Sortino",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "features-mobile",
+    "sourceUrl": "https://images.unsplash.com/photo-1556656793-08538906a9f8?w=2400&q=85",
+    "alt": "Close-up of a smartphone held in hand showing a minimal dark-mode app interface.",
+    "photographer": "Daniel Romero",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "pricing-office",
+    "sourceUrl": "https://images.unsplash.com/photo-1772751541531-e084e8f56630?w=2400&q=85",
+    "alt": "Modern minimalist office workspace with wooden furniture, soft daylight, restrained styling.",
+    "photographer": "lim woojung",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "docs-code",
+    "sourceUrl": "https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=2400&q=85",
+    "alt": "Close-up of a code editor screen with syntax-highlighted source code on a dark background.",
+    "photographer": "James Harrison",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "team-founder",
+    "sourceUrl": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=2400&q=85",
+    "alt": "Considered editorial portrait of a founder facing the camera with soft natural light against a neutral backdrop.",
+    "photographer": "Christina @ wocintechchat.com",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "team-office",
+    "sourceUrl": "https://images.unsplash.com/photo-1604328698692-f76ea9498e76?w=2400&q=85",
+    "alt": "Industrial-loft office interior at dusk with exposed brick, warm pendant lighting, and long communal desks.",
+    "photographer": "Copernico",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "changelog-kanban",
+    "sourceUrl": "https://images.unsplash.com/photo-1677506048148-0c914dd8197b?w=2400&q=85",
+    "alt": "A whiteboard covered in coloured sticky notes arranged into columns — kanban-style task tracking.",
+    "photographer": "Paymo",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "customers-meeting",
+    "sourceUrl": "https://images.unsplash.com/photo-1573164713988-8665fc963095?w=2400&q=85",
+    "alt": "Wide shot of a boardroom meeting with silhouetted figures around a long table backlit by window light.",
+    "photographer": "Christina @ wocintechchat.com",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "trust-security",
+    "sourceUrl": "https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=2400&q=85",
+    "alt": "Abstract security visualization with a glowing padlock motif over a dark grid of binary code.",
+    "photographer": "FLY:D",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  }
+]

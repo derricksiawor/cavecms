@@ -1,0 +1,98 @@
+[
+  {
+    "key": "home-hero-workspace",
+    "sourceUrl": "https://images.unsplash.com/photo-1499951360447-b19be8fe80f5?w=2400&q=85",
+    "alt": "Sun-streaked creative studio workspace with design tools, sketches, and reference materials spread across a wooden worktable.",
+    "photographer": "Alvaro Reyes",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "home-team-working",
+    "sourceUrl": "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=2400&q=85",
+    "alt": "Over-the-shoulder view of designers working at their desks in a warm, naturally lit studio.",
+    "photographer": "Austin Distel",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "work-case-1",
+    "sourceUrl": "https://images.unsplash.com/photo-1626785774573-4b799315345d?w=2400&q=85",
+    "alt": "Branding identity system spread on a worktable with stationery mockups, colour cards, and printed collateral.",
+    "photographer": "Kelly Sikkema",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "work-case-2",
+    "sourceUrl": "https://images.unsplash.com/photo-1607344645866-009c320b63e0?w=2400&q=85",
+    "alt": "Minimalist packaging design in soft earth tones photographed on a neutral textured surface.",
+    "photographer": "Kelly Sikkema",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "work-case-3",
+    "sourceUrl": "https://images.unsplash.com/photo-1519682337058-a94d519337bc?w=2400&q=85",
+    "alt": "Open editorial magazine spread showing considered typography and generous white space on a wooden desk.",
+    "photographer": "Brandi Redd",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "work-case-4",
+    "sourceUrl": "https://images.unsplash.com/photo-1559028012-481c04fa702d?w=2400&q=85",
+    "alt": "Digital interface mockup displayed on a screen with clean layouts and a muted colour palette.",
+    "photographer": "Balazs Ketyi",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "process-sketching",
+    "sourceUrl": "https://images.unsplash.com/photo-1483546363825-7ebf25fb7513?w=2400&q=85",
+    "alt": "Close-up of hands sketching layout ideas on paper with markers and pencils scattered nearby.",
+    "photographer": "Kelly Sikkema",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "process-collaboration",
+    "sourceUrl": "https://images.unsplash.com/photo-1517048676732-d65bc937f952?w=2400&q=85",
+    "alt": "Wide view of a team collaboration session with whiteboard sketches, sticky notes, and printed work pinned to the wall.",
+    "photographer": "Mapbox",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "team-founder",
+    "sourceUrl": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=2400&q=85",
+    "alt": "Warm, considered portrait of a studio founder in soft natural light against a muted interior backdrop.",
+    "photographer": "Christina @ wocintechchat.com",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "team-office-detail",
+    "sourceUrl": "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=2400&q=85",
+    "alt": "Moody studio interior detail with a leafy plant, framed prints, and a neat stack of design books.",
+    "photographer": "Patrick Perkins",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "journal-detail",
+    "sourceUrl": "https://images.unsplash.com/photo-1471107340929-a87cd0f5b5f3?w=2400&q=85",
+    "alt": "Close-up of an open art and design book showing tactile printed pages and considered typography.",
+    "photographer": "Daria Nepriakhina",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "contact-window",
+    "sourceUrl": "https://images.unsplash.com/photo-1674055441615-4a7689fd8e51?w=2400&q=85",
+    "alt": "Soft morning light streaming through a tall studio window with a city view in the distance.",
+    "photographer": "Eugene Chystiakov",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  }
+]

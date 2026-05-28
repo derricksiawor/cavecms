@@ -1,0 +1,98 @@
+[
+  {
+    "key": "home-hero-house",
+    "sourceUrl": "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=2400&q=85",
+    "alt": "A modern home with warm interior light glowing through floor-to-ceiling windows at golden hour, mature landscaping in the foreground.",
+    "photographer": "Brian Babb",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "home-neighborhood",
+    "sourceUrl": "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=2400&q=85",
+    "alt": "A quiet tree-lined residential street with a row of brick brownstones, sunlight filtering through the canopy.",
+    "photographer": "Julian Ostarek",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "listings-hero",
+    "sourceUrl": "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=2400&q=85",
+    "alt": "Wide-angle exterior of a contemporary two-story home with clean lines, large glass panels, and a manicured front lawn.",
+    "photographer": "Avi Werde",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "listings-interior-1",
+    "sourceUrl": "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=2400&q=85",
+    "alt": "An open-concept kitchen with a marble centre island, light wood cabinetry, and abundant natural daylight.",
+    "photographer": "Zac Gudakov",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "listings-interior-2",
+    "sourceUrl": "https://images.unsplash.com/photo-1616593969747-4797dc75033e?w=2400&q=85",
+    "alt": "A restrained primary bedroom with neutral linens facing a large window framing a quiet city view.",
+    "photographer": "Natalia Blauth",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "listings-outdoor",
+    "sourceUrl": "https://images.unsplash.com/photo-1505843795480-5cfb3c03f6ff?w=2400&q=85",
+    "alt": "A wooden deck beside a still swimming pool at dusk, lounge chairs and warm ambient lighting from the house behind.",
+    "photographer": "Jason Grant",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "agents-office",
+    "sourceUrl": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=2400&q=85",
+    "alt": "A warm boutique office interior with wooden desks and tall plants catching afternoon light.",
+    "photographer": "Toa Heftiba",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "agents-portrait-1",
+    "sourceUrl": "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=2400&q=85",
+    "alt": "Editorial portrait of an adult woman in soft natural light, calm expression, neutral background.",
+    "photographer": "Christina @ wocintechchat.com",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "agents-portrait-2",
+    "sourceUrl": "https://images.unsplash.com/photo-1676989880361-091e12efc056?w=2400&q=85",
+    "alt": "Editorial portrait of an adult man with glasses, professional, warm natural lighting, looking at camera.",
+    "photographer": "Lucas Favre",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "neighborhoods-cafe",
+    "sourceUrl": "https://images.unsplash.com/photo-1453614512568-c4024d13c247?w=2400&q=85",
+    "alt": "A charming neighborhood cafe exterior with a wooden bench out front and a small chalkboard sign on the sidewalk.",
+    "photographer": "Valeria Nikitina",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "neighborhoods-park",
+    "sourceUrl": "https://images.unsplash.com/photo-1500964757637-c85e8a162699?w=2400&q=85",
+    "alt": "A grassy community park with mature trees and a curving walking path catching late afternoon light.",
+    "photographer": "Josh Hild",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  },
+  {
+    "key": "contact-reception",
+    "sourceUrl": "https://images.unsplash.com/photo-1564540583246-934409427776?w=2400&q=85",
+    "alt": "A modern reception desk with marble and warm wood accents, soft overhead lighting, restrained entry detail.",
+    "photographer": "Aalo Lens",
+    "license": "unsplash",
+    "mime": "image/jpeg"
+  }
+]

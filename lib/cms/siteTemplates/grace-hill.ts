@@ -2,8 +2,11 @@ import type { SiteTemplate } from './types'
 import {
   contactChannels,
   contactForm,
+  coverImage,
   ctaBanner,
+  figure,
   hero,
+  imagePair,
   oneCol,
   quote,
   statRow,
@@ -67,6 +70,19 @@ export const graceHillTemplate: SiteTemplate = {
       seoDescription:
         'A community church. Two Sunday services, ministries through the week, and a building that is open most weekdays.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'home-hero-sanctuary',
+            alt: 'Grace Hill sanctuary — empty wooden pews with soft daylight through the tall windows.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Welcome',
@@ -109,6 +125,22 @@ export const graceHillTemplate: SiteTemplate = {
           ],
         }),
 
+        // Pair: the congregation from inside, the church from outside.
+        oneCol(
+          'cream',
+          'lg',
+          imagePair({
+            leftImageKey: 'home-community',
+            leftAlt: 'A small congregation seated in wooden pews during a Sunday service.',
+            rightImageKey: 'visit-welcome',
+            rightAlt: 'The Grace Hill church building framed by autumn trees on a clear day.',
+            layout: 'lift-left',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
+
         oneCol(
           'cream',
           'lg',
@@ -136,6 +168,19 @@ export const graceHillTemplate: SiteTemplate = {
       seoDescription:
         'Recent sermons from Grace Hill. Each one is about twenty-five minutes, with the audio posted by Sunday evening.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'sermons-pulpit',
+            alt: 'An open Bible resting on a simple wooden pulpit, warm light.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Recent sermons',
@@ -143,6 +188,19 @@ export const graceHillTemplate: SiteTemplate = {
           body: 'Our pastor records each Sunday morning and the audio is posted by the evening. The current series is on the Sermon on the Mount; the next series, beginning in autumn, will be on the book of Ruth.',
           tone: 'obsidian',
         }),
+
+        // Pastor intro figure — grounds the sermons in a real person.
+        oneCol(
+          'ivory',
+          'md',
+          figure({
+            imageKey: 'about-pastor',
+            alt: 'Pastor John — a warm portrait in soft natural light.',
+            ratio: '4:5',
+            caption: 'Pastor John records each Sunday morning.',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -186,6 +244,18 @@ export const graceHillTemplate: SiteTemplate = {
           ],
         }),
 
+        // Quiet figure between the sermons grid and the closing CTA.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'sermons-listening',
+            alt: 'A hymnal at rest on an empty wooden church pew.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
+
         ctaBanner({
           background: 'obsidian',
           title: 'Looking for a specific sermon?',
@@ -203,6 +273,19 @@ export const graceHillTemplate: SiteTemplate = {
       seoDescription:
         'Two Sunday services at nine and eleven. The eleven o’clock has full children’s programmes.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'events-hall',
+            alt: 'The Grace Hill fellowship hall — rows of tables and chairs set for a community gathering.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'When we meet',
@@ -265,6 +348,19 @@ export const graceHillTemplate: SiteTemplate = {
       seoDescription:
         'Twelve ministries through the week. Men, women, youth, children, music, prayer, mercy, and a few more.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'ministries-music',
+            alt: 'Sheet music resting on a warm brown upright piano in the church hall.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Through the week',
@@ -272,6 +368,23 @@ export const graceHillTemplate: SiteTemplate = {
           body: 'Ministries at Grace Hill are small — most have between eight and twenty people, and most meet weekly. Each one has a name and a phone number on this page; ring them, do not just turn up cold.',
           tone: 'obsidian',
         }),
+
+        // Pair: children's craft table beside the foodbank — two of the
+        // ministries' visual moods, side by side.
+        oneCol(
+          'cream',
+          'lg',
+          imagePair({
+            leftImageKey: 'ministries-children',
+            leftAlt: "A children's craft table — paper, crayons, scissors arranged before a Sunday-school session.",
+            rightImageKey: 'ministries-outreach',
+            rightAlt: 'Hands packing labelled food parcels for the monthly community foodbank.',
+            layout: 'lift-right',
+            overlap: 'md',
+            ratio: '4:5',
+            animation: 'fade-in',
+          }),
+        ),
 
         ...threeColCards({
           background: 'ivory',
@@ -334,6 +447,19 @@ export const graceHillTemplate: SiteTemplate = {
       seoDescription:
         'How to give to Grace Hill, and how to send us a prayer request. Both go to the same office and both are read.',
       sections: [
+        oneCol(
+          'cream',
+          'sm',
+          coverImage({
+            imageKey: 'about-history',
+            alt: 'A small historic white clapboard church with a slim steeple — the kind of building Grace Hill is.',
+            ratio: '21:9',
+            minHeight: 'lg',
+            overlay: 'none',
+            animation: 'fade-in',
+          }),
+        ),
+
         hero({
           background: 'cream',
           eyebrow: 'Giving & prayer',
@@ -362,6 +488,18 @@ export const graceHillTemplate: SiteTemplate = {
             },
           ],
         }),
+
+        // Quiet figure between the giving cards and the contact details.
+        oneCol(
+          'cream',
+          'md',
+          figure({
+            imageKey: 'give-stewardship',
+            alt: 'A quiet detail of a brown wooden church pew — contemplative and still.',
+            ratio: '16:9',
+            animation: 'fade-in',
+          }),
+        ),
 
         contactChannels({
           background: 'obsidian',
