@@ -282,6 +282,39 @@ export async function register(): Promise<void> {
     }
   }
 
+  // ─── One-time projects → CMS-blocks backfill (customer auto-migration) ──
+  // After an update restarts the app, convert any legacy `project_sections`
+  // project that still lacks a block-tree `pages` row into the new tree —
+  // the customer-facing delivery of the projects→blocks feature, via the
+  // SAME validated engine the dev CLI uses (parseAndSanitize per widget,
+  // media checks, one TX per project). FIRE-AND-FORGET (deliberately not
+  // awaited) so it never blocks boot or delays the health check: projects
+  // render via the legacy branch until their tree lands, each migrating in
+  // its own transaction, so a visitor hitting a project mid-backfill always
+  // sees the old render OR the new one — never a half-built page.
+  // Production-only — contributors migrate by hand (pnpm
+  // migrate:projects-to-blocks). The runner is idempotent + cheap-guarded
+  // (a single COUNT short-circuits the all-migrated no-op), so this costs
+  // ~one query on every normal restart after the first successful pass.
+  if (env.NODE_ENV === 'production') {
+    void (async () => {
+      try {
+        const { runProjectsBackfillOnce } = await import(
+          '@/lib/cms/runProjectsBackfillOnce'
+        )
+        await runProjectsBackfillOnce()
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'projects_backfill_failed',
+            err: e instanceof Error ? e.message : String(e),
+          }),
+        )
+      }
+    })()
+  }
+
   // Crash handlers were installed at the top of register() — see the
   // module-scope definitions of isInboundHttpAbort + crash above.
   // Documenting the inbound-HTTP-abort filter here so the rationale

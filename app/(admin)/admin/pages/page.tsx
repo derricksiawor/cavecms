@@ -48,6 +48,11 @@ export default async function AdminPages({
       LEFT JOIN users u ON u.id = p.updated_by
       WHERE p.deleted_at IS NOT NULL
         AND p.deleted_at > NOW(3) - INTERVAL 30 DAY
+        -- Same exclusion as the active list: project body pages are
+        -- managed under /admin/projects, never the generic Pages surface.
+        AND NOT EXISTS (
+          SELECT 1 FROM projects pr WHERE pr.slug = p.slug
+        )
       ORDER BY p.deleted_at DESC, p.id DESC
       LIMIT 1000
     `)) as unknown as [TrashedPageRow[]]
@@ -94,6 +99,14 @@ export default async function AdminPages({
     FROM pages p
     LEFT JOIN users u ON u.id = p.updated_by
     WHERE p.deleted_at IS NULL
+      -- Hide project body pages (a page row whose slug matches a
+      -- project). Those are the block trees backing /projects/[slug];
+      -- they are edited on the live page via the inline editor and
+      -- managed under /admin/projects, so surfacing them here would let
+      -- an operator delete a project body out from under it.
+      AND NOT EXISTS (
+        SELECT 1 FROM projects pr WHERE pr.slug = p.slug
+      )
     ORDER BY p.is_home DESC, p.updated_at DESC, p.id DESC
     LIMIT 1000
   `)) as unknown as [PageListRow[]]

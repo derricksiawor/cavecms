@@ -28,6 +28,8 @@ homepage-*.png
 # Anchored with leading slash so deliberately-tracked PNGs deeper in the tree (icons,
 # brand assets under /public, /components) are unaffected.
 /*.png
+/*.jpeg
+/*.jpg
 
 # Lint cache — local, machine-specific (regenerated on each lint run)
 /.eslintcache
@@ -108,6 +110,7 @@ next-env.d.ts
 !/scripts/restore-drill.sh
 !/scripts/cron-purge.ts
 !/scripts/verify-media-refs.ts
+!/scripts/migrate-projects-to-blocks.ts
 !/scripts/update-fingerprint.ts
 !/scripts/check-fingerprint.ts
 !/scripts/pre-migrate-asserts.ts

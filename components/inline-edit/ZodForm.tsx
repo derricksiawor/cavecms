@@ -1929,6 +1929,25 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       ],
     },
   ],
+
+  // ════════════════════════════════════════════════════════════════
+  // PROJECT lead-form blocks — the only project-specific blocks. Their
+  // intro copy is composed as separate primitive blocks by the
+  // tree-builder; the form block itself carries optional heading/body
+  // for the operator who wants the form's own copy. Everything else on
+  // a project page is primitive blocks, edited like any other block.
+  // ════════════════════════════════════════════════════════════════
+  lx_inquiry_form: [
+    { kind: 'string', key: 'heading', label: 'Heading', maxLength: 220, placeholder: 'Reach out about this project' },
+    { kind: 'richtext', key: 'body_richtext', label: 'Intro copy', maxLength: 2000 },
+  ],
+
+  lx_brochure_form: [
+    {
+      kind: 'richtext', key: 'gate_message_richtext', label: 'Gate message', maxLength: 2000,
+      help: 'Shown beside the brochure request form. The PDF itself is set under Projects → Brochure.',
+    },
+  ],
 }
 
 // Merge identity & visibility entries onto every registered block.

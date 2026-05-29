@@ -23,6 +23,10 @@ const RATIO_CLASS: Record<BlockData<'lx_map'>['ratio'], string> = {
   '16:9': 'aspect-video',
   '4:5': 'aspect-[4/5]',
   '1:1': 'aspect-square',
+  // 'fill' has no fixed aspect — it stretches to its container's height
+  // (h-full) with a min-height floor so it can never collapse to a squat
+  // strip. Used in a side-by-side column to match the content beside it.
+  fill: 'h-full min-h-[440px]',
 }
 
 export function LxMap({
@@ -35,6 +39,7 @@ export function LxMap({
   outerClass?: string
 }) {
   const title = data.caption ?? 'Map'
+  const isFill = data.ratio === 'fill'
 
   const aspectBox = (
     <div
@@ -50,7 +55,13 @@ export function LxMap({
         sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
         referrerPolicy="no-referrer-when-downgrade"
         allow="fullscreen"
-        className="h-full w-full border-0"
+        // Absolutely positioned to fill the box in BOTH modes: the
+        // aspect-ratio box has a definite height, but the 'fill' box's
+        // height comes from min-height — and a percentage `height:100%`
+        // can't resolve against min-height, so a flow iframe collapses to
+        // its 150px default. inset-0 fills the box's rendered size either
+        // way.
+        className="absolute inset-0 h-full w-full border-0"
       />
       {data.goldOverlay && (
         <div
@@ -60,6 +71,15 @@ export function LxMap({
       )}
     </div>
   )
+
+  // Fill mode — the map stretches to its column's height (h-full + the
+  // min-h floor baked into RATIO_CLASS.fill). No editorial py/max-w cap,
+  // no sub-caption (a full-height panel doesn't carry one), and no
+  // MotionTarget wrapper (an extra wrapper div would break the h-full
+  // chain up to the stretched grid column).
+  if (isFill) {
+    return <figure className={clsx('h-full w-full', outerClass)}>{aspectBox}</figure>
+  }
 
   const figure = (
     <figure

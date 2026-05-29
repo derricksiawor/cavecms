@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo } from 'react'
 import { renderBlock } from '@/components/blocks'
+import type { RenderContext } from '@/components/blocks'
 import type {
   HydratedBlock,
   HydratedMedia,
@@ -69,6 +70,12 @@ interface Props {
    *  RenderContext to blocks that need it (today: `contact_form`).
    *  Undefined when no such block is on the page. */
   csrf?: string
+  /** Singular project context — set only on a project detail page's
+   *  block tree (see RenderContext.project). Threaded down to every
+   *  renderBlock so the project block renderers resolve the project row. */
+  project?: RenderContext['project']
+  /** Preview-mode marker — see RenderContext.preview. */
+  preview?: boolean
 }
 
 export function EditableBlockTreeRenderer({
@@ -76,6 +83,8 @@ export function EditableBlockTreeRenderer({
   media,
   projects,
   csrf,
+  project,
+  preview,
 }: Props) {
   const state = useInlineEditState()
   // Memoise tree + topIds against state.blocks identity. The reducer
@@ -127,6 +136,8 @@ export function EditableBlockTreeRenderer({
                   media={media}
                   projects={projects}
                   csrf={csrf}
+                  project={project}
+                  preview={preview}
                 />
               ) : (
                 <EditableWidgetSlot
@@ -137,6 +148,8 @@ export function EditableBlockTreeRenderer({
                   media={media}
                   projects={projects}
                   csrf={csrf}
+                  project={project}
+                  preview={preview}
                 />
               )}
               <InsertSectionHere pageId={pageId} afterBlockId={entryId} />
@@ -157,6 +170,8 @@ interface SectionSlotProps {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   csrf?: string
+  project?: RenderContext['project']
+  preview?: boolean
 }
 
 function EditableSectionSlot({
@@ -167,6 +182,8 @@ function EditableSectionSlot({
   media,
   projects,
   csrf,
+  project,
+  preview,
 }: SectionSlotProps) {
   // Live-preview overlay for the section's meta. The drawer pushes
   // background / padding tweaks here so the operator sees the CSS
@@ -211,6 +228,8 @@ function EditableSectionSlot({
             media={media}
             projects={projects}
             csrf={csrf}
+            project={project}
+            preview={preview}
           />
         ))}
       </SectionFrame>
@@ -234,6 +253,8 @@ interface ColumnSlotProps {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   csrf?: string
+  project?: RenderContext['project']
+  preview?: boolean
 }
 
 function EditableColumnSlot({
@@ -247,6 +268,8 @@ function EditableColumnSlot({
   media,
   projects,
   csrf,
+  project,
+  preview,
 }: ColumnSlotProps) {
   // Memoise widgetIds against the widgets array identity. EditableColumn
   // passes this into the per-column SortableContext as the `items` prop —
@@ -297,6 +320,8 @@ function EditableColumnSlot({
               media={media}
               projects={projects}
               csrf={csrf}
+              project={project}
+              preview={preview}
             />
             <InsertBlockHere
               pageId={pageId}
@@ -319,6 +344,8 @@ interface WidgetSlotProps {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   csrf?: string
+  project?: RenderContext['project']
+  preview?: boolean
 }
 
 function EditableWidgetSlot({
@@ -330,6 +357,8 @@ function EditableWidgetSlot({
   media,
   projects,
   csrf,
+  project,
+  preview,
 }: WidgetSlotProps) {
   // Effective data: shallow-merge any pending drawer preview overlay
   // on top of the persisted block.data. When no preview is pending
@@ -407,7 +436,7 @@ function EditableWidgetSlot({
   const node = renderBlock(
     block.blockType,
     effectiveData,
-    { media, projects, csrf },
+    { media, projects, csrf, project, preview },
     inlineEdit,
     widgetSpacingClass,
     block.id,

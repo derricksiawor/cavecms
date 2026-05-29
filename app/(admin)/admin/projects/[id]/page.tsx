@@ -66,6 +66,19 @@ export default async function AdminProjectEdit({
   const project = projRows[0]
   if (!project) notFound()
 
+  // Has this project been migrated to a CMS block tree? A live `pages`
+  // row at the project's slug means its body content now lives in
+  // content_blocks and is edited on the live page through the inline
+  // editor — the legacy section accordion below must be hidden so it
+  // can't write project_sections that the CMS render ignores (the
+  // split-brain the migration is designed to avoid).
+  const [cmsPageRows] = (await db.execute(sql`
+    SELECT id FROM pages
+    WHERE slug = ${project.slug} AND is_home = 0 AND deleted_at IS NULL
+    LIMIT 1
+  `)) as unknown as [Array<{ id: number }>]
+  const hasCmsPage = cmsPageRows.length > 0
+
   const [sectionRows] = (await db.execute(sql`
     SELECT id, section_key, position, version, data
     FROM project_sections
@@ -129,6 +142,7 @@ export default async function AdminProjectEdit({
           sections={sections}
           media={media}
           sectionKeys={SECTION_KEYS as readonly string[]}
+          hasCmsPage={hasCmsPage}
         />
       </MediaPickerProvider>
     </div>

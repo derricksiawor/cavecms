@@ -85,12 +85,36 @@ export default async function ProjectPage({
   const { slug } = await params
   const sp = await searchParams
 
+  // ─── Session + edit mode (resolved first) ─────────────────────
+  // Resolved BEFORE the project lookup so an admin in edit mode can
+  // resolve + edit an UNPUBLISHED project (a new draft, or a project
+  // being prepared for launch) without a preview token — public
+  // visitors still 404 on an unpublished project. Also gates the page
+  // lookup below (draft / dark-launch block tree reachable for editors).
+  let session: Awaited<ReturnType<typeof getSession>> = null
+  try {
+    session = await getSession()
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        msg: 'project_cms_page_session_resolve_failed',
+        slug,
+        err_name: e instanceof Error ? e.name : 'unknown',
+      }),
+    )
+  }
+  const c = await cookies()
+  const editable = resolveEditableMode(session, c, sp)
+
   // ─── Project lookup (always) ──────────────────────────────────
   // The project row drives SEO, the sticky header, the WhatsApp
   // bubble's CTA copy, and the SimilarProjects rail's exclusion
   // filter — so we resolve it FIRST regardless of which render
-  // branch wins.
-  let hydratedProject = await hydrateProject(slug, { allowUnpublished: false })
+  // branch wins. Editors (edit mode on) may resolve an unpublished
+  // project so they can build its page before publishing; everyone
+  // else is published-only.
+  let hydratedProject = await hydrateProject(slug, { allowUnpublished: editable })
   let previewMode = false
 
   if (!hydratedProject) {
@@ -123,15 +147,21 @@ export default async function ProjectPage({
   }
 
   // ─── CMS page lookup (preferred render path) ──────────────────
-  // Look for a published `pages` row matching the project slug.
-  // When present, this is the canonical render — the project_sections
-  // path below is dead for this project.
+  // A `pages` row matching the project slug is the canonical render —
+  // the project_sections path below is dead for this project.
+  // published=1 is required for PUBLIC visitors; editors (edit mode) and
+  // preview get the row regardless so the draft / dark-launch block tree
+  // is reachable + editable. (A public visitor never reaches here for an
+  // unpublished PROJECT — that 404s above unless a preview token was
+  // presented, so this only ever serves an unpublished page row to an
+  // admin/preview.)
+  const allowUnpublishedPage = editable || previewMode
   const [pageRows] = (await db.execute(sql`
     SELECT id, version FROM pages
     WHERE slug = ${slug}
       AND deleted_at IS NULL
-      AND published = 1
       AND is_home = 0
+      ${allowUnpublishedPage ? sql`` : sql`AND published = 1`}
     LIMIT 1
   `)) as unknown as [Array<{ id: number; version: number }>]
   const pageRow = pageRows[0]
@@ -146,22 +176,6 @@ export default async function ProjectPage({
     // SimilarProjects rail rendered AFTER the EditableMain shell,
     // and (c) the bare slug union in cmsPage.tsx doesn't include
     // arbitrary project slugs.
-    let session: Awaited<ReturnType<typeof getSession>> = null
-    try {
-      session = await getSession()
-    } catch (e) {
-      console.error(
-        JSON.stringify({
-          level: 'error',
-          msg: 'project_cms_page_session_resolve_failed',
-          slug,
-          err_name: e instanceof Error ? e.name : 'unknown',
-        }),
-      )
-    }
-    const c = await cookies()
-    const editable = resolveEditableMode(session, c, sp)
-
     const hydratedPage = await hydratePage(pageRow.id)
     if (!hydratedPage) notFound()
     const { blocks, media, projects } = hydratedPage
@@ -173,10 +187,20 @@ export default async function ProjectPage({
       ? hydratedProject.media.get(hydratedProject.project.hero_image_id)
           ?.variants
       : null
-    const pricingSection = hydratedProject.sections.find(
+    // Pricing for the residence JSON-LD + FactsStrip reads from the
+    // migrated `lx_pricing` BLOCK — the editable source of truth on a
+    // CMS project — so editing the pricing block updates the rich-result
+    // AggregateOffer + the facts strip in lockstep (the legacy section
+    // accordion is hidden once a page row exists). Falls back to the
+    // legacy project_sections.pricing only if no lx_pricing block is on
+    // the tree (defence for an unexpectedly-shaped migration), and that
+    // legacy row is also what the not-yet-migrated legacy branch reads.
+    const pricingBlock = blocks.find((b) => b.blockType === 'lx_pricing')
+    const legacyPricing = hydratedProject.sections.find(
       (s) => s.sectionKey === 'pricing',
-    )
-    const pricingData = pricingSection?.data as PricingData | undefined
+    )?.data as PricingData | undefined
+    const pricingData =
+      (pricingBlock?.data as PricingData | undefined) ?? legacyPricing
     const siteOrigin = await getSiteOrigin()
     const ld = residenceLd({
       name: hydratedProject.project.name,
@@ -203,6 +227,19 @@ export default async function ProjectPage({
           preview={previewMode}
           showEmptyState={false}
           csrf={csrf}
+          project={{
+            id: hydratedProject.project.id,
+            slug: hydratedProject.project.slug,
+            name: hydratedProject.project.name,
+            tagline: hydratedProject.project.tagline,
+            status: hydratedProject.project.status,
+            location: hydratedProject.project.location,
+            brochure_pdf_id: hydratedProject.project.brochure_pdf_id,
+            // Resolved pricing (from the lx_pricing block) so the
+            // auto-derived lx_project_facts band reads the same source
+            // as the JSON-LD AggregateOffer.
+            pricing: pricingData ?? null,
+          }}
         >
           <h1 className="sr-only">{hydratedProject.project.name}</h1>
           <script
@@ -210,6 +247,12 @@ export default async function ProjectPage({
             dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
           />
         </EditableMain>
+
+        {/* FactsStrip is NOT rendered page-level on the CMS branch —
+           it's an in-tree lx_project_facts block (auto-derived from the
+           project context) the backfill places right after the hero, so
+           it sits in the legacy under-hero position instead of at the
+           bottom of the page. */}
 
         {/* Cross-promotion rail — lives outside <main> as a
            page-level discovery surface, analogous to <footer>. Same

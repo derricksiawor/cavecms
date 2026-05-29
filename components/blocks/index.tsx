@@ -25,6 +25,12 @@ import { LxSocialIcons } from './LxSocialIcons/render'
 import { LxCtaBanner } from './LxCtaBanner/render'
 import { LxGallery } from './LxGallery/render'
 import { LxFeaturedProjects } from './LxFeaturedProjects/render'
+// ─── Project lead-form blocks — the only project-specific blocks.
+//     Everything else on a project page is composed from primitives by
+//     lib/cms/projectTreeBuilder.ts. These read RenderContext.project +
+//     csrf (populated only by app/projects/[slug]).
+import { LxInquiryForm } from './LxInquiryForm/render'
+import { LxBrochureForm } from './LxBrochureForm/render'
 import type { BlockData, BlockType } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { SectionMeta } from '@/lib/cms/blockMeta'
@@ -40,6 +46,50 @@ export interface RenderContext {
    *  See `renderCmsPage()` for the mint site + the contact_form
    *  block renderer for the consumer. */
   csrf?: string
+  /** Singular project context — set ONLY when a project detail page
+   *  (`app/projects/[slug]`) renders its block tree. Carries the
+   *  `projects`-row fields the project block renderers need: the hero
+   *  reads name/tagline/status, the lead forms scope to id/name, the
+   *  brochure form gates on brochure_pdf_id. Undefined on every other
+   *  page — the project block renderers degrade gracefully (hero loses
+   *  its name line, forms render their off-project fallback). */
+  project?: RenderProjectContext
+  /** Preview-mode marker — true on admin QA of an unpublished project
+   *  (the `?preview=…` branch of the project route). The lead-form
+   *  blocks suppress live submission in preview so QA never produces a
+   *  false-success state. Undefined / false everywhere else. */
+  preview?: boolean
+}
+
+/** Project-row fields threaded to the project block renderers via
+ *  RenderContext.project. Mirrors the subset of HydratedProjectRow the
+ *  block renderers consume — see app/projects/[slug]/page.tsx for the
+ *  populate site. `pricing` is the resolved pricing payload (from the
+ *  lx_pricing block, the editable source of truth) — carried here so
+ *  the auto-derived lx_project_facts block can read it without a
+ *  sibling-block lookup, the same way the page-level JSON-LD does. */
+export interface RenderProjectContext {
+  id: number
+  slug: string
+  name: string
+  tagline: string | null
+  status: string
+  location: string | null
+  brochure_pdf_id: number | null
+  pricing?: ProjectPricing | null
+}
+
+/** The pricing shape the FactsStrip + JSON-LD read. Mirrors the
+ *  project-section PricingData / the lx_pricing block data. */
+export interface ProjectPricing {
+  display?: 'range' | 'per_unit' | 'contact'
+  value_richtext?: string
+  units_total?: number
+  units_remaining?: number
+  price_min?: number
+  price_max?: number
+  price_currency?: string
+  handover_eta?: string
 }
 
 // Per-block renderer call shape. `data` is the parsed Zod payload for the
@@ -57,6 +107,13 @@ type BlockRendererArgs<D> = {
   media: RenderContext['media']
   projects: RenderContext['projects']
   csrf?: RenderContext['csrf']
+  /** Singular project context — see RenderContext.project. Only the
+   *  project block renderers (lx_project_hero, lx_inquiry_form,
+   *  lx_brochure_form, …) consume it; every other renderer ignores it. */
+  project?: RenderContext['project']
+  /** Preview-mode marker — see RenderContext.preview. The lead-form
+   *  project blocks read it to suppress live submission during admin QA. */
+  preview?: RenderContext['preview']
   inlineEdit?: InlineEditContext
   outerClass?: string
   blockId?: number
@@ -173,6 +230,16 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_featured_projects: ({ data, projects, media, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_featured_projects'>>) => (
     <LxFeaturedProjects data={data} projects={projects} media={media} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
+  // ─── Project lead-form blocks (only project-specific blocks) ────
+  // read RenderContext.project (project_id/name/brochure_pdf_id) +
+  // csrf/preview. Everything else on a project page is composed from
+  // the primitives above by lib/cms/projectTreeBuilder.ts.
+  lx_inquiry_form: ({ data, project, csrf, preview }: BlockRendererArgs<BlockData<'lx_inquiry_form'>>) => (
+    <LxInquiryForm data={data} project={project} csrf={csrf} preview={preview} />
+  ),
+  lx_brochure_form: ({ data, project, csrf, preview }: BlockRendererArgs<BlockData<'lx_brochure_form'>>) => (
+    <LxBrochureForm data={data} project={project} csrf={csrf} preview={preview} />
+  ),
 })
 
 /**
@@ -281,6 +348,8 @@ export function renderBlock(
     media: ctx.media,
     projects: ctx.projects,
     csrf: ctx.csrf,
+    project: ctx.project,
+    preview: ctx.preview,
     inlineEdit,
     outerClass,
     blockId,

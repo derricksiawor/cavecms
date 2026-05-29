@@ -13,7 +13,14 @@ import { EditableMain } from '@/components/inline-edit/EditableMain'
 // form submits cleanly on the first interaction. Listed centrally here
 // so adding a new form block (newsletter, brochure, inquiry, etc) is
 // one line — not a tree-scanning expression in three places.
-const FORM_BLOCK_TYPES = new Set<string>(['contact_form'])
+const FORM_BLOCK_TYPES = new Set<string>([
+  'contact_form',
+  // Project lead forms — both submit to /api/leads/* and need the
+  // public preCsrf nonce minted page-level. Present on migrated
+  // project pages (app/projects/[slug]); harmless on any other page.
+  'lx_inquiry_form',
+  'lx_brochure_form',
+])
 
 /**
  * Walk a hydrated block list looking for any form-bearing block; if

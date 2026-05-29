@@ -324,6 +324,24 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           DELETE FROM slug_redirects
           WHERE resource_type = 'project' AND old_slug = ${body.slug}
         `)
+        // 4) Keep the project's CMS page row in lockstep. A migrated
+        //    project renders its body from a `pages` row whose slug
+        //    equals the project slug (see app/projects/[slug]/page.tsx
+        //    — it resolves `pages WHERE slug = <project slug>`). Without
+        //    this UPDATE a rename would leave the block tree stranded at
+        //    the OLD slug, so the project would silently revert to the
+        //    legacy render. Runs in the SAME TX as the projects rename:
+        //    a `pages.slug` UNIQUE collision (another page already owns
+        //    the new slug) throws ER_DUP_ENTRY → the catch maps it to
+        //    slug_taken and the whole rename rolls back. `slug` is
+        //    globally unique on `pages`, so this touches at most the one
+        //    project page row; is_home guard is belt-and-braces (the
+        //    home page can never carry a project slug).
+        await tx.execute(sql`
+          UPDATE pages
+          SET slug = ${body.slug}
+          WHERE slug = ${row.slug} AND is_home = 0
+        `)
       }
 
       // Bump preview_epoch on slug change OR on unpublish. Both

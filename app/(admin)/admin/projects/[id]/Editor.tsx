@@ -81,12 +81,19 @@ export function ProjectEditor({
   sections,
   media,
   sectionKeys,
+  hasCmsPage,
 }: {
   role: 'admin' | 'editor'
   project: ProjectMeta
   sections: SectionEntry[]
   media: MediaSummary[]
   sectionKeys: readonly string[]
+  // True once the project has been migrated to a CMS block tree (a live
+  // `pages` row at its slug). The legacy section accordion is then
+  // hidden — body content is edited on the live page through the inline
+  // editor, and the accordion would otherwise write project_sections
+  // that the CMS render ignores.
+  hasCmsPage: boolean
 }) {
   const toast = useToast()
   const canPublishAndSlug = role === 'admin'
@@ -464,6 +471,31 @@ export function ProjectEditor({
 
       {/* Sections */}
       <section className="mt-16">
+        {hasCmsPage ? (
+          // Migrated to a CMS block tree — body content is edited on the
+          // live page through the inline editor, so the legacy section
+          // accordion is retired for this project. The meta form above
+          // (name / slug / status / hero / brochure / SEO / publish)
+          // stays — that's still where project metadata is edited.
+          <div className="rounded-2xl border border-copper-200 bg-copper-50/50 p-6 sm:p-8">
+            <h2 className="font-serif text-2xl font-bold tracking-tight text-near-black">
+              Page content
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-warm-stone">
+              This project’s page content — hero, gallery, floor plans,
+              pricing, amenities, and the rest — is now built from editable
+              blocks. Open the live page and click any section to edit it in
+              place, just like any other page.
+            </p>
+            <a
+              href={`/projects/${project.slug}?edit=1`}
+              className="mt-5 inline-flex w-fit items-center gap-2 rounded-full bg-near-black px-6 py-3 text-sm font-semibold tracking-wide text-cream-50 transition-colors hover:bg-copper-700"
+            >
+              Edit page content on the live page
+            </a>
+          </div>
+        ) : (
+        <>
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="font-serif text-2xl font-bold tracking-tight text-near-black">
@@ -542,6 +574,8 @@ export function ProjectEditor({
             })}
           </div>
         </div>
+        </>
+        )}
       </section>
 
       <StickySaveBar

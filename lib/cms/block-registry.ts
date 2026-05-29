@@ -226,7 +226,7 @@ function isValidVideoUrl(s: string): boolean {
   return false
 }
 
-function isValidMapEmbedUrl(s: string): boolean {
+export function isValidMapEmbedUrl(s: string): boolean {
   const url = parseStrictHttpsUrl(s)
   if (!url) return false
   // Form 1 — operator pastes from the share dialog. `pb` is an opaque
@@ -468,7 +468,12 @@ export const blockSchemas = {
       .min(1)
       .max(TEXT_MAX.url)
       .refine(isValidMapEmbedUrl, 'invalid_map_embed_url'),
-    ratio: z.enum(['21:9', '16:9', '4:5', '1:1']).default('16:9'),
+    // 'fill' drops the fixed aspect-ratio + the editorial vertical
+    // padding and stretches the map to fill its container's height
+    // (h-full, with a min-height floor) — for a side-by-side column where
+    // the map should match the height of the content beside it rather
+    // than read as a squat fixed-ratio strip.
+    ratio: z.enum(['21:9', '16:9', '4:5', '1:1', 'fill']).default('16:9'),
     caption: safeText(TEXT_MAX.short).optional(),
     goldOverlay: z.boolean().default(false),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
@@ -765,7 +770,11 @@ export const blockSchemas = {
   // grid of icon-boxes. Each row is the lucide-icon + display headline
   // + body-text shape every premium SaaS landing page uses for the
   // "what you get" section. variant: 'vertical' stacks rows full-width
-  // (the editorial default); 'grid' lays rows in a 2-or-3-column grid.
+  // with the icon ABOVE each headline (the editorial default); 'grid'
+  // lays those icon-above-headline rows in a 2-or-3-column grid; 'row'
+  // places the icon BESIDE the headline (icon-left, text-right) and lays
+  // the rows in a 1-or-2-column grid — the "directory / nearby" register
+  // (e.g. points-of-interest with a drive-time sub-line).
   lx_icon_list: z.object({
     items: z
       .array(
@@ -777,8 +786,10 @@ export const blockSchemas = {
       )
       .min(1)
       .max(12),
-    variant: z.enum(['vertical', 'grid']).default('vertical'),
-    columns: z.union([z.literal(2), z.literal(3)]).default(3),
+    variant: z.enum(['vertical', 'grid', 'row']).default('vertical'),
+    // 1 is meaningful for the 'row' variant — a single stacked column of
+    // icon-beside-text rows (e.g. a POI rail in a narrow layout column).
+    columns: z.union([z.literal(1), z.literal(2), z.literal(3)]).default(3),
     alignment: z.enum(['left', 'center']).default('left'),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon_list).default('obsidian'),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
@@ -926,6 +937,38 @@ export const blockSchemas = {
     // surface (light text on dark sections, dark on light), so there's no
     // per-block colour to mismatch the background.
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // ════════════════════════════════════════════════════════════════
+  // PROJECT lead-form blocks — the ONLY project-specific block types.
+  // A lead form is one irreducible widget (fields + submit + CSRF +
+  // project scoping), so it can't be composed from primitives. Every
+  // OTHER part of a project page (hero, gallery, floor plans, pricing,
+  // amenities, location, timeline, testimonials, facts) is composed
+  // from existing primitive blocks by the tree-builder
+  // (lib/cms/projectTreeBuilder.ts) — each element its own editable
+  // block. These two read the project row from RenderContext.project
+  // (project_id, name, brochure_pdf_id) + csrf; they are NOT in the
+  // operator palette (created only by the backfill + new-project flow).
+  // ════════════════════════════════════════════════════════════════
+
+  // Project inquiry form — always-present lead form to /api/leads/inquiry.
+  // project_id + the visible project name come from RenderContext.project
+  // at render; preCsrf from RenderContext.csrf. Renderer emits
+  // id="inquiry-form" (the hero / sticky-header "Schedule a tour" CTA
+  // target). Lifted from `inquiry` verbatim.
+  lx_inquiry_form: z.object({
+    heading: z.string().max(220).optional(),
+    body_richtext: z.string().max(2000).optional(),
+  }),
+
+  // Project brochure form — lead-gated PDF download to
+  // /api/leads/brochure. The PDF stays canonical on
+  // projects.brochure_pdf_id (the lead route reads THAT); the block
+  // carries only the gate copy. Renderer reads brochure_pdf_id from
+  // RenderContext.project, returns null when absent, emits id="brochure".
+  lx_brochure_form: z.object({
+    gate_message_richtext: z.string().max(2000).optional(),
   }),
 } as const
 

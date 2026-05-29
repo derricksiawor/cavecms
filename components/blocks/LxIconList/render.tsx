@@ -25,7 +25,8 @@ const TONE_BODY: Record<string, string> = {
   champagne: 'text-champagne/80',
 }
 
-const GRID_COLS: Record<2 | 3, string> = {
+const GRID_COLS: Record<1 | 2 | 3, string> = {
+  1: '',
   2: 'sm:grid-cols-2',
   3: 'sm:grid-cols-2 lg:grid-cols-3',
 }
@@ -47,8 +48,60 @@ export function LxIconList({
   const customColor = !isToken ? resolveColorValue(tone) : undefined
 
   const isCenter = data.alignment === 'center'
+  // 'row' places the icon BESIDE the headline (icon-left, text-right,
+  // vertically centred) instead of above it — the "directory / nearby"
+  // register (e.g. points-of-interest with a drive-time sub-line).
+  const isRow = data.variant === 'row'
 
   const items = data.items.map((item, idx) => {
+    const icon = (
+      <div
+        className={clsx(
+          'relative inline-flex h-12 w-12 items-center justify-center',
+          isRow && 'shrink-0',
+        )}
+      >
+        <div aria-hidden="true" className="lx-glow-champagne-icon absolute inset-0" />
+        <IconByName
+          name={item.icon}
+          className="relative h-7 w-7 text-champagne"
+          strokeWidth={1.5}
+          aria-hidden="true"
+        />
+      </div>
+    )
+    const heading = (
+      <h3
+        className={clsx('font-serif font-semibold text-xl tracking-tight', headClass)}
+        style={customColor ? { color: customColor } : undefined}
+      >
+        {item.headline}
+      </h3>
+    )
+    const body = item.body ? (
+      <p
+        className={clsx(
+          'font-sans leading-relaxed',
+          isRow ? 'text-sm' : 'text-base max-w-prose',
+          bodyClass,
+        )}
+        style={customColor ? { color: customColor, opacity: 0.8 } : undefined}
+      >
+        {item.body}
+      </p>
+    ) : null
+
+    if (isRow) {
+      return (
+        <div key={idx} className="flex flex-row items-center gap-4 text-left">
+          {icon}
+          <div className="flex flex-col gap-0.5">
+            {heading}
+            {body}
+          </div>
+        </div>
+      )
+    }
     return (
       <div
         key={idx}
@@ -57,54 +110,33 @@ export function LxIconList({
           isCenter ? 'items-center text-center' : 'items-start text-left',
         )}
       >
-        <div className="relative inline-flex h-12 w-12 items-center justify-center">
-          <div aria-hidden="true" className="lx-glow-champagne-icon absolute inset-0" />
-          <IconByName
-            name={item.icon}
-            className="relative h-7 w-7 text-champagne"
-            strokeWidth={1.5}
-            aria-hidden="true"
-          />
-        </div>
-        <h3
-          className={clsx(
-            'font-serif font-semibold text-xl tracking-tight',
-            headClass,
-          )}
-          style={customColor ? { color: customColor } : undefined}
-        >
-          {item.headline}
-        </h3>
-        {item.body && (
-          <p
-            className={clsx(
-              'font-sans text-base leading-relaxed max-w-prose',
-              bodyClass,
-            )}
-            style={customColor ? { color: customColor, opacity: 0.8 } : undefined}
-          >
-            {item.body}
-          </p>
-        )}
+        {icon}
+        {heading}
+        {body}
       </div>
     )
   })
 
-  const composed = data.variant === 'grid' ? (
-    <div
-      className={clsx(
-        'grid grid-cols-1 gap-10',
-        GRID_COLS[data.columns],
-        outerClass,
-      )}
-    >
-      {items}
-    </div>
-  ) : (
-    <div className={clsx('flex flex-col gap-12 max-w-3xl mx-auto', outerClass)}>
-      {items}
-    </div>
-  )
+  const composed =
+    data.variant === 'grid' ? (
+      <div className={clsx('grid grid-cols-1 gap-10', GRID_COLS[data.columns], outerClass)}>
+        {items}
+      </div>
+    ) : isRow ? (
+      <div
+        className={clsx(
+          'grid grid-cols-1 gap-x-10 gap-y-6 max-w-4xl mx-auto',
+          GRID_COLS[data.columns],
+          outerClass,
+        )}
+      >
+        {items}
+      </div>
+    ) : (
+      <div className={clsx('flex flex-col gap-12 max-w-3xl mx-auto', outerClass)}>
+        {items}
+      </div>
+    )
 
   if (data.animation === 'none') return composed
   return <MotionTarget preset={data.animation}>{composed}</MotionTarget>

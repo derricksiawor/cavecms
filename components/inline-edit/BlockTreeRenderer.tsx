@@ -1,6 +1,7 @@
 import 'server-only'
 import { Fragment } from 'react'
 import { renderBlock } from '@/components/blocks'
+import type { RenderContext } from '@/components/blocks'
 import type {
   HydratedBlock,
   HydratedMedia,
@@ -45,6 +46,13 @@ interface Props {
    *  it (today: `contact_form`) can submit without an extra round trip.
    *  Undefined when the page tree has no form-bearing block. */
   csrf?: string
+  /** Singular project context — set only when a project detail page
+   *  renders its block tree (see RenderContext.project). Threaded into
+   *  every renderBlock dispatch so the project block renderers resolve
+   *  the project row. Undefined on every non-project page. */
+  project?: RenderContext['project']
+  /** Preview-mode marker — see RenderContext.preview. */
+  preview?: boolean
 }
 
 /** One-shot meta-derivation. Returns the three computed values
@@ -91,7 +99,14 @@ function WidgetStyleWrap({
   )
 }
 
-export function BlockTreeRenderer({ blocks, media, projects, csrf }: Props) {
+export function BlockTreeRenderer({
+  blocks,
+  media,
+  projects,
+  csrf,
+  project,
+  preview,
+}: Props) {
   const tree = buildBlockTree(blocks)
   if (tree.length === 0) return null
   return (
@@ -127,7 +142,7 @@ export function BlockTreeRenderer({ blocks, media, projects, csrf }: Props) {
                             {renderBlock(
                               w.blockType,
                               w.data,
-                              { media, projects, csrf },
+                              { media, projects, csrf, project, preview },
                               undefined,
                               m.outerClass,
                               w.id,
@@ -154,7 +169,7 @@ export function BlockTreeRenderer({ blocks, media, projects, csrf }: Props) {
                 {renderBlock(
                   entry.node.blockType,
                   entry.node.data,
-                  { media, projects, csrf },
+                  { media, projects, csrf, project, preview },
                   undefined,
                   m.outerClass,
                   entry.node.id,

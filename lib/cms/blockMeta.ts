@@ -890,6 +890,12 @@ export const SectionMetaSchema = z
 export const ColumnMetaSchema = z
   .object({
     width: z.number().int().min(1).max(12).optional(),
+    // CSS grid self-alignment for the column within its row. The
+    // ColumnMeta interface + parseColumnMeta + ColumnFrame renderer all
+    // already honour this; it belongs on the write-schema too so a
+    // vertically-centred column (short text beside a tall map/image)
+    // round-trips through validation.
+    verticalAlign: z.enum(['center', 'start', 'end']).optional(),
     // Mirrors the section-level cover-image fields so a column can
     // also carry its own background photo. Same write-boundary
     // guarantees: media_id positive int, alt ≤ 320 chars.

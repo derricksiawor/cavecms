@@ -15,6 +15,7 @@ import type {
   HydratedMedia,
   HydratedProject,
 } from '@/lib/cms/hydrate'
+import type { RenderContext } from '@/components/blocks'
 import { getEditorAiSnapshot } from '@/lib/cms/getEditorAiSnapshot'
 
 // Single edit-mode shell shared by every public-page render path
@@ -118,8 +119,16 @@ interface Props {
   session: AdminSession | null
   editable: boolean
   // Optional preview-mode marker — emits `data-preview="1"` on `<main>`
-  // for the dynamic-route preview branch. Defaults to false.
+  // for the dynamic-route preview branch. Defaults to false. Also
+  // threaded into RenderContext.preview so the project lead-form blocks
+  // suppress live submission during admin QA of an unpublished project.
   preview?: boolean
+  // Singular project context — set only by the project detail route
+  // (app/projects/[slug]) when it renders a migrated project's block
+  // tree. Threaded into RenderContext.project so the project block
+  // renderers resolve the project row (hero name/status, lead-form
+  // scoping, brochure gate). Undefined for every non-project page.
+  project?: RenderContext['project']
   // When false, the EditModeEmptyState CTA is suppressed for empty
   // pages. cmsPage.tsx kept the legacy "render nothing for empty"
   // behaviour; defaults to true so home + dynamic routes get the
@@ -156,6 +165,8 @@ export async function EditableMain(p: Props) {
       media={p.media}
       projects={p.projects}
       csrf={p.csrf}
+      project={p.project}
+      preview={p.preview}
     />
   ) : (
     <BlockTreeRenderer
@@ -163,6 +174,8 @@ export async function EditableMain(p: Props) {
       media={p.media}
       projects={p.projects}
       csrf={p.csrf}
+      project={p.project}
+      preview={p.preview}
     />
   )
 

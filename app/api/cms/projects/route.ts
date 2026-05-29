@@ -17,6 +17,7 @@ import {
   SECTION_KEYS,
   EMPTY_SECTION_DATA,
 } from '@/lib/cms/project-section-registry'
+import { insertProjectPageTree } from '@/lib/cms/migrateProjectsToBlocks'
 
 import { SLUG_RE } from '@/lib/cms/slug'
 // projects.slug DB column is varchar(120) — narrower than the
@@ -80,8 +81,12 @@ export const POST = withError(async (req) => {
       const projectId = Number(insertArr.insertId)
 
       // Auto-seed all 10 section rows in registry order at positions
-      // 1000, 2000, 3000... — leaves room for editor reordering
-      // without touching siblings.
+      // 1000, 2000, 3000... Kept as a rollback-safety hedge (a manual
+      // downgrade to a pre-block-render version still renders the project
+      // via the legacy branch) + the data source the backfill would read
+      // were the page tree ever absent. The CMS render ignores these —
+      // the block tree below is the live source. They retire with the
+      // legacy branch next release.
       let pos = 1000
       for (const key of SECTION_KEYS) {
         await tx.execute(sql`
@@ -90,6 +95,33 @@ export const POST = withError(async (req) => {
         `)
         pos += 1000
       }
+
+      // Create the project's CMS block tree (pages row + content_blocks)
+      // from the same empty section seeds, IN THIS TX, so the project is
+      // block-driven + front-end inline-editable from the moment it's
+      // created — no backfill round-trip. The page is created unpublished
+      // (the new project is a draft); admins reach + edit the unpublished
+      // block tree on the live page (the project route relaxes its page
+      // lookup for editors/preview). insertProjectPageTree validates
+      // every band before inserting, so a failure rolls the whole
+      // project creation back (atomic create).
+      await insertProjectPageTree(
+        tx,
+        {
+          id: projectId,
+          slug: body.slug,
+          name: body.name,
+          status: body.status,
+          location: null,
+          published: 0,
+          brochure_pdf_id: null,
+        },
+        SECTION_KEYS.map((key) => ({
+          sectionKey: key as string,
+          data: EMPTY_SECTION_DATA[key],
+        })),
+        'inherit',
+      )
 
       await tx.insert(auditLog).values({
         userId: ctx.userId,
