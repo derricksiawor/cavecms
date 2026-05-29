@@ -51,6 +51,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           '--brand-accent': '#C9A961',
           '--brand-secondary': '#6E665A',
           '--brand-primary': '#050505',
+          '--brand-antique-gold': '#8B6F3A',
+          '--brand-bone': '#E8E1D4',
           '--brand-base-bg': '#F5F1EA',
           '--brand-base-fg': '#050505',
         } as React.CSSProperties

@@ -31,14 +31,14 @@ describe('brandVarsCss', () => {
   })
   it('does NOT override antique-gold/bone when accent/surface are default', () => {
     const css = brandVarsCss(THEME_PALETTE_DEFAULT)
-    expect(css).not.toContain('--color-antique-gold')
-    expect(css).not.toContain('--color-bone')
+    expect(css).not.toContain('antique-gold')
+    expect(css).not.toContain('-bone')
   })
-  it('derives antique-gold when accent changes', () => {
+  it('derives antique-gold (via --brand-antique-gold) when accent changes', () => {
     const css = brandVarsCss({ ...THEME_PALETTE_DEFAULT, accent: '#3366FF' })
     expect(css).toContain('--brand-accent:#3366FF')
     // 0x33*.85=43=0x2B, 0x66*.85=86.7~87=0x57, 0xFF*.85=216.75~217=0xD9
-    expect(css).toContain('--color-antique-gold:#2B57D9')
+    expect(css).toContain('--brand-antique-gold:#2B57D9')
   })
   it('dark mode flips base bg/fg to the dark surface', () => {
     const css = brandVarsCss({ ...THEME_PALETTE_DEFAULT, mode: 'dark' })

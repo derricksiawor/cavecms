@@ -72,11 +72,13 @@ export function brandVarsCss(p: ThemePalette): string {
 
   // Derived tokens — emit ONLY when the source color changed from the
   // default, so a default install keeps the hand-picked #8B6F3A / #E8E1D4.
+  // Override the --brand-* knobs (globals.css aliases --color-antique-gold /
+  // --color-bone to these, and @theme inline maps the utilities to them).
   if (p.accent !== THEME_PALETTE_DEFAULT.accent) {
-    put('--color-antique-gold', darkenHex(p.accent, 0.15))
+    put('--brand-antique-gold', darkenHex(p.accent, 0.15))
   }
   if (p.surfaceLight !== THEME_PALETTE_DEFAULT.surfaceLight) {
-    put('--color-bone', darkenHex(p.surfaceLight, 0.08))
+    put('--brand-bone', darkenHex(p.surfaceLight, 0.08))
   }
 
   return `:root{${decls.join(';')}}`
