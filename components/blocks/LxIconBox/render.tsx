@@ -4,6 +4,7 @@ import { IconByName } from '@/components/project-sections/_shared/IconByName'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
+import { isSectionSurfaceDark, type SectionMeta } from '@/lib/cms/blockMeta'
 import {
   isColorToken,
   resolveColorValue,
@@ -12,10 +13,17 @@ import {
 // Luxury icon box — single card with icon + headline + body + optional
 // link. For a row of cards, compose three lx_icon_box widgets inside
 // threeCols. Accent controls the surface treatment:
-//   champagne-fill    — champagne radial glow on obsidian-ish ground
-//                       (marquee feature)
-//   champagne-outline — quiet ivory surface, champagne ring on hover
-//                       (default editorial)
+//   champagne-fill    — champagne radial glow on a dark glassy ground
+//                       (marquee feature, for dark sections)
+//   champagne-outline — SECTION-AWARE (default editorial). On a dark
+//                       section: a transparent card + champagne hairline
+//                       border (crisp gold on near-black, matching the
+//                       legacy copper-outline it migrated from). On a
+//                       light section: the quiet ivory fill that reads as
+//                       a soft card on cream/ivory. Adapts so it never
+//                       decays to mud — the old behaviour was a fixed
+//                       translucent ivory FILL (bg-ivory/60), which over a
+//                       dark section became a muddy gray.
 //   cream-tint        — soft cream surface, sits on dark sections
 //                       (obsidian / near-black)
 
@@ -29,23 +37,36 @@ const TONE_BODY: Record<string, string> = {
   ivory: 'text-ivory/75',
 }
 
-const ACCENT_SURFACE: Record<BlockData<'lx_icon_box'>['accent'], string> = {
+// The two background-coupled accents (both assume a dark section).
+// champagne-outline is section-aware — computed in champagneOutlineSurface.
+const ACCENT_SURFACE: Record<'champagne-fill' | 'cream-tint', string> = {
   'champagne-fill':
     'relative bg-obsidian/90 px-8 py-10 sm:px-10 sm:py-12 overflow-hidden',
-  'champagne-outline':
-    'relative bg-ivory/60 backdrop-blur-sm px-8 py-10 sm:px-10 sm:py-12 transition-colors hover:bg-ivory/90 group',
   'cream-tint':
     'relative bg-cream/95 px-8 py-10 sm:px-10 sm:py-12 transition-colors hover:bg-cream',
+}
+
+// champagne-outline adapts to the section background so it never decays to
+// mud. Dark section → transparent card + champagne hairline border (crisp
+// gold on near-black). Light section → the quiet ivory fill that reads as
+// a soft editorial card on cream/ivory.
+function champagneOutlineSurface(onDark: boolean): string {
+  const base = 'relative px-8 py-10 sm:px-10 sm:py-12 transition-colors group'
+  return onDark
+    ? clsx(base, 'border border-champagne/35 hover:border-champagne/70 hover:bg-champagne/[0.05]')
+    : clsx(base, 'bg-ivory/60 backdrop-blur-sm hover:bg-ivory/90')
 }
 
 export function LxIconBox({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_icon_box'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const tone = data.tone
   const isToken = isColorToken(tone)
@@ -55,10 +76,17 @@ export function LxIconBox({
 
   const isCenter = data.alignment === 'center'
 
+  // champagne-outline adapts to the ancestor section's surface; the other
+  // two accents carry their own (dark-section) ground.
+  const surfaceClass =
+    data.accent === 'champagne-outline'
+      ? champagneOutlineSurface(isSectionSurfaceDark(sectionMeta))
+      : ACCENT_SURFACE[data.accent]
+
   const card = (
     <div
       className={clsx(
-        ACCENT_SURFACE[data.accent],
+        surfaceClass,
         isCenter ? 'text-center' : 'text-left',
         outerClass,
       )}

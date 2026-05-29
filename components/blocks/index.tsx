@@ -155,8 +155,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_icon_list: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_icon_list'>>) => (
     <LxIconList data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
-  lx_icon_box: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_icon_box'>>) => (
-    <LxIconBox data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_icon_box: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_icon_box'>>) => (
+    <LxIconBox data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_divider: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_divider'>>) => (
     <LxDivider data={data} outerClass={outerClass} />
