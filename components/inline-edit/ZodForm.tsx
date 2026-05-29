@@ -1,5 +1,5 @@
 'use client'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { assertNever } from '@/lib/typeUtils'
 import { Share2, Layers, ListChecks } from 'lucide-react'
 import { EmptyState } from './EmptyState'
@@ -118,6 +118,21 @@ export type FieldShape =
   // defensively — a malformed value or undefined parent meta falls
   // through to "nothing hidden" without throwing.
   | { kind: 'visibility'; key: string; label: string; help?: string }
+  // Logo height slider with a live preview. Reads the sibling media
+  // field named by `logoKey` off the parent record and renders that
+  // image at the slider's current px height so the operator sees the
+  // logo resize in real time as they drag. The persisted value is the
+  // integer px height; cleared / unset falls back to `fallback`.
+  | {
+      kind: 'logoSize'
+      key: string
+      label: string
+      logoKey: string
+      min?: number
+      max?: number
+      fallback?: number
+      help?: string
+    }
 
 export function ZodForm({
   shapes,
@@ -487,6 +502,20 @@ function FieldRenderer({
           onChange={onChange}
         />
       )
+
+    case 'logoSize':
+      return (
+        <LogoSizeField
+          label={shape.label}
+          help={shape.help}
+          value={typeof value === 'number' ? value : undefined}
+          logo={parent[shape.logoKey] as { media_id: number; alt?: string } | undefined}
+          min={shape.min ?? 24}
+          max={shape.max ?? 96}
+          fallback={shape.fallback ?? 40}
+          onChange={onChange}
+        />
+      )
     default:
       // Exhaustiveness gate — a new FieldShape variant lands as a TS
       // error here so the form picker can't silently skip a new kind.
@@ -564,6 +593,113 @@ function VisibilityField({
           This block won&rsquo;t display on any device.
         </p>
       )}
+    </fieldset>
+  )
+}
+
+// Logo height control — a slider plus a live preview that renders the
+// sibling logo (resolved from the media id on the parent record) at the
+// slider's current px height. The operator sees the logo grow/shrink in
+// real time as they drag, on a checkerboard backdrop so transparent
+// logos read clearly. Persists the integer px height.
+function LogoSizeField({
+  label,
+  help,
+  value,
+  logo,
+  min,
+  max,
+  fallback,
+  onChange,
+}: {
+  label: string
+  help?: string
+  value: number | undefined
+  logo: { media_id: number; alt?: string } | undefined
+  min: number
+  max: number
+  fallback: number
+  onChange: (v: unknown) => void
+}) {
+  const { resolveThumb, resolveThumbAsync } = useMediaPicker()
+  const current = typeof value === 'number' ? value : fallback
+  const mediaId = logo?.media_id
+  // Seed from the sync LRU cache so a warmed thumb paints on first frame
+  // (no flash). Fall back to the async fetch when the cache is cold
+  // (settings logo is pre-set before the media modal ever opens).
+  const [src, setSrc] = useState<string | null>(() =>
+    mediaId ? resolveThumb(mediaId) : null,
+  )
+  useEffect(() => {
+    let alive = true
+    if (!mediaId) {
+      setSrc(null)
+      return
+    }
+    const cached = resolveThumb(mediaId)
+    if (cached) {
+      setSrc(cached)
+      return
+    }
+    resolveThumbAsync(mediaId)
+      .then((url) => {
+        if (alive) setSrc(url)
+      })
+      .catch(() => {
+        if (alive) setSrc(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [mediaId, resolveThumb, resolveThumbAsync])
+  return (
+    <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
+      <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
+        <FieldLabel>{label}</FieldLabel>
+      </legend>
+      {help && <FieldHelp>{help}</FieldHelp>}
+      {/* Live preview — logo rendered at the chosen px height on a
+         checkerboard so transparent logos stay legible. Empty state when
+         no logo is set yet. */}
+      <div
+        className="flex items-center justify-center overflow-hidden rounded-xl border border-warm-stone/20 p-4 min-h-[7rem]"
+        style={{
+          backgroundColor: '#ffffff',
+          backgroundImage:
+            'linear-gradient(45deg, #efe9dd 25%, transparent 25%), linear-gradient(-45deg, #efe9dd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #efe9dd 75%), linear-gradient(-45deg, transparent 75%, #efe9dd 75%)',
+          backgroundSize: '16px 16px',
+          backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0',
+        }}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt={logo?.alt || 'Logo preview'}
+            style={{ height: `${current}px` }}
+            className="w-auto max-w-full object-contain transition-all duration-quick"
+          />
+        ) : (
+          <span className="text-center text-[11px] leading-relaxed text-warm-stone/70">
+            Upload a logo above to preview its size here.
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={1}
+          value={current}
+          onChange={(e) => onChange(Number(e.target.value))}
+          aria-label={label}
+          className="h-2 flex-1 cursor-pointer accent-copper-500"
+        />
+        <span className="w-14 shrink-0 text-right text-sm font-medium tabular-nums text-near-black">
+          {current}px
+        </span>
+      </div>
     </fieldset>
   )
 }

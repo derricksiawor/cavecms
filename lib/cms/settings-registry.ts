@@ -144,6 +144,11 @@ const footer = z.object({
   // lighter wordmark on the dark footer if the dark logo doesn't read
   // on cream.
   logo: mediaRef.nullable().optional(),
+  // Rendered footer-logo height in px. Mirrors siteHeader.logoMaxHeight.
+  // Default 48 reproduces the historic hard-coded `h-12`; `.default()`
+  // back-fills on read for installs whose stored footer JSON predates
+  // this field — no migration needed.
+  logoMaxHeight: z.number().int().min(24).max(96).default(48),
   // Newsletter card heading / body / CTA label. Previously hardcoded
   // in SiteFooter.tsx — exposed as flat keys so the admin form
   // renderer (which doesn't do dotted-path access) shows them as
@@ -182,6 +187,13 @@ const siteHeader = z.object({
   brandText: z.string().max(120),
   // Optional uploaded logo. When null, the header falls back to brandText.
   logo: mediaRef.nullable(),
+  // Rendered logo height in px. Operator-tunable via Settings → Site
+  // header (slider). Bounds: 24px floor keeps a logo legible; 96px
+  // ceiling stops the sticky bar from ballooning. Default 40 reproduces
+  // the historic hard-coded `h-10`. `.default()` back-fills on read for
+  // installs whose stored site_header JSON predates this field — no
+  // migration needed (settings are JSON, validated on read).
+  logoMaxHeight: z.number().int().min(24).max(96).default(40),
   // Visual theme — see headerTheme above.
   theme: headerTheme,
   // Primary navigation links shown in the top bar. Capped at 6 per
@@ -841,6 +853,7 @@ export const registry = {
       // columns under Settings → Footer when they're ready.
       columns: [],
       logo: null,
+      logoMaxHeight: 48,
       newsletterHeading: 'Stay informed',
       newsletterBody: 'Updates and announcements. One click to unsubscribe.',
       newsletterCtaLabel: 'Subscribe',
@@ -855,6 +868,7 @@ export const registry = {
     default: {
       brandText: 'Your Site',
       logo: null,
+      logoMaxHeight: 40,
       theme: 'cream',
       // Empty nav for the one-pager welcome template — the operator
       // wires up their own links (or section anchors) under

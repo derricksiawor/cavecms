@@ -78,6 +78,7 @@ export async function SiteHeader() {
     header = {
       brandText: 'CaveCMS',
       logo: null,
+      logoMaxHeight: 40,
       theme: 'cream' as const,
       navItems: [],
       primaryCta: { text: '', href: '' },
@@ -155,7 +156,8 @@ export async function SiteHeader() {
             <img
               src={logoSrc}
               alt={logoAlt}
-              className="h-10 w-auto max-w-[160px] object-contain"
+              style={{ height: `${header.logoMaxHeight ?? 40}px` }}
+              className="w-auto max-w-[280px] object-contain"
             />
           ) : (
             <span className="font-serif text-xl font-bold tracking-tight">

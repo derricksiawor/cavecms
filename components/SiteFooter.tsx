@@ -45,6 +45,7 @@ interface FooterShape {
   theme?: string
   columns: Array<{ label: string; links: Array<{ text: string; href: string }> }>
   logo?: { media_id: number; alt: string } | null
+  logoMaxHeight?: number
   newsletterHeading?: string
   newsletterBody?: string
   newsletterCtaLabel?: string
@@ -56,6 +57,7 @@ const DEFAULT_FOOTER: FooterShape = {
   theme: 'obsidian',
   columns: [],
   logo: null,
+  logoMaxHeight: 48,
   newsletterHeading: 'Stay informed',
   newsletterBody:
     'Quarterly updates on new launches and project milestones. One click to unsubscribe.',
@@ -172,7 +174,8 @@ export async function SiteFooter() {
             <img
               src={logoSrc}
               alt={logoAlt}
-              className={`h-12 w-auto max-w-[200px] object-contain ${ft.logoFilter}`}
+              style={{ height: `${footer.logoMaxHeight ?? 48}px` }}
+              className={`w-auto max-w-[280px] object-contain ${ft.logoFilter}`}
             />
           ) : (
             <p className="font-serif text-2xl font-bold tracking-tight">
