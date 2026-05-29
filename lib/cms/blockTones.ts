@@ -54,10 +54,8 @@ export const BLOCK_TONE_ENUMS = {
   lx_social_icons: ['obsidian', 'ivory', 'warm-stone'],
   lx_cta_banner: ['obsidian', 'ivory'],
   lx_gallery: ['obsidian', 'ivory'],
-  // Data-driven project card grid (0.1.54 — replaces the purged legacy
-  // `featured_projects`). Pulls published projects from the projects
-  // table via RenderContext.projects.
-  lx_featured_projects: ['obsidian', 'ivory'],
+  // lx_featured_projects has NO tone — its renderer auto-contrasts the
+  // ancestor section surface, so there's no per-block colour token.
 } as const satisfies Record<string, readonly [string, ...string[]]>
 
 export type ToneAwareBlockType = keyof typeof BLOCK_TONE_ENUMS

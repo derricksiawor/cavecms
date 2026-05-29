@@ -1027,14 +1027,29 @@ export function useInsertBlock(): InsertBlockFn {
       //     page). The operator looking at the top of the page where
       //     the welcome / hero sections are sees no change.
       //
+      // Product contract (verbatim from the owner): "whenever user
+      // clicks any widgets, make sure to always add a section and
+      // column and add widget inside of it." So a parent-less widget
+      // insert must ALWAYS resolve to section → column → widget — a
+      // loose top-level widget (parent_id IS NULL) is NEVER an
+      // acceptable outcome of this path.
+      //
       // Resolution: when parentId is omitted (undefined — NOT explicit
       // null, which a future caller might use to signal "I really want
       // this loose"), walk the current block tree:
-      //   1. If any kind='section' exists, route the widget to the
-      //      LAST column of the LAST section (append).
-      //   2. If no sections exist, atomically create a section with
-      //      one column (POST kind=section, withColumns=1), then POST
-      //      the widget with parentId = the new column id.
+      //   1. If a section with ≥1 column already exists, route the
+      //      widget to the LAST column of the LAST section (append).
+      //      This is the already-working nesting path — unchanged.
+      //   2. Otherwise (empty page, OR a section that somehow has no
+      //      live column) atomically create a section with one column
+      //      (POST kind=section, withColumns=1), then POST the widget
+      //      with parentId = the new column id.
+      //   3. If that section+column create cannot yield a column id
+      //      (network error, server reject, malformed response) we
+      //      ABORT the widget insert with an error rather than fall
+      //      through to a loose widget. Falling through produced the
+      //      parent_id=NULL rows that then 400'd / soft-deleted — the
+      //      exact bug this guard closes.
       //
       // This applies ONLY to widget kinds (the InsertableBlockType
       // surface). Section / column inserts go through their own paths
@@ -1050,6 +1065,7 @@ export function useInsertBlock(): InsertBlockFn {
         const sections = live
           .filter((b) => b.kind === 'section')
           .sort((a, b) => a.position - b.position)
+        let routedToExistingColumn = false
         if (sections.length > 0) {
           const lastSection = sections[sections.length - 1]!
           const lastColumns = live
@@ -1057,12 +1073,20 @@ export function useInsertBlock(): InsertBlockFn {
             .sort((a, b) => a.position - b.position)
           if (lastColumns.length > 0) {
             resolvedParentId = lastColumns[lastColumns.length - 1]!.id
+            routedToExistingColumn = true
           }
-          // If the section somehow has no columns (shouldn't happen —
-          // sections are always created with ≥1 column), fall through
-          // to loose-widget rather than crashing.
-        } else {
-          // Empty page — create the host section + column first.
+          // If the section somehow has no live column (anomalous —
+          // sections are always created with ≥1 column), DON'T fall
+          // through to a loose widget. Drop into the create-host
+          // branch below so the widget still lands inside a column.
+        }
+        if (!routedToExistingColumn) {
+          // Empty page (or section-without-column): create the host
+          // section + column first, then nest the widget inside it.
+          // The create MUST succeed before the widget POST proceeds —
+          // a failure here aborts the whole insert rather than
+          // degrading to a forbidden loose top-level widget.
+          let newColumnId: number | undefined
           try {
             const wrapRes = await csrfFetch('/api/cms/blocks', {
               method: 'POST',
@@ -1077,24 +1101,39 @@ export function useInsertBlock(): InsertBlockFn {
               const wrapJson = (await wrapRes.json().catch(() => ({}))) as {
                 columnIds?: number[]
               }
-              const newColumnId = wrapJson.columnIds?.[0]
-              if (typeof newColumnId === 'number') {
-                resolvedParentId = newColumnId
+              const candidate = wrapJson.columnIds?.[0]
+              if (typeof candidate === 'number') {
+                newColumnId = candidate
                 // The new section + column are visible to the server
                 // immediately. The router.refresh() at the bottom of
                 // this function picks them up alongside the widget.
               }
+            } else {
+              // Surface the server's reason so the caller's toast /
+              // banner copy is accurate (e.g. rate limit, page gone).
+              const wj = (await wrapRes.json().catch(() => ({}))) as {
+                error?: string
+              }
+              return { ok: false, error: wj.error ?? 'section_wrap_failed' }
             }
-            // On wrapper failure we silently fall through to loose-
-            // widget (existing behaviour). The operator still gets
-            // their toast + the widget renders via the looseWidget
-            // branch; the worst case is they end up where we were
-            // before this auto-wrap landed, not in a strictly worse
-            // place.
-          } catch {
-            // Same fall-through — let the widget POST below proceed
-            // without a parent rather than crash the insert.
+          } catch (wrapErr) {
+            return {
+              ok: false,
+              error:
+                wrapErr instanceof Error && wrapErr.name === 'AbortError'
+                  ? 'timeout'
+                  : 'network_error',
+            }
           }
+          if (typeof newColumnId !== 'number') {
+            // Section POST returned 2xx but no column id (malformed /
+            // proxy-mangled response). Abort — the widget must nest in
+            // a real column, never go loose. The empty section the
+            // server just created is harmless; router.refresh isn't
+            // issued on this abort so the optimistic tree is untouched.
+            return { ok: false, error: 'section_wrap_failed' }
+          }
+          resolvedParentId = newColumnId
         }
       }
 

@@ -5,7 +5,7 @@ import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { RenderContext } from '..'
-import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { isSectionSurfaceDark, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Data-driven project card grid (0.1.54 — the lx_ successor to the
 // purged legacy `featured_projects`). There is no per-block selection:
@@ -22,46 +22,29 @@ const COLS_CLASS: Record<BlockData<'lx_featured_projects'>['columns'], string> =
   4: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8',
 }
 
-// tone → text colours for heading + card name + tagline. `obsidian`
-// reads light (dark surface); `ivory` reads dark (light surface). A
-// custom-hex tone falls back to the obsidian class set but is overridden
-// by the inline `color` style (resolveColorValue) below.
-interface ToneText {
-  heading: string
-  name: string
-  tagline: string
-}
-const TONE_OBSIDIAN: ToneText = {
-  heading: 'text-ivory',
-  name: 'text-ivory',
-  tagline: 'text-ivory/70',
-}
-const TONE_IVORY: ToneText = {
-  heading: 'text-obsidian',
-  name: 'text-obsidian',
-  tagline: 'text-obsidian/70',
-}
-
 export function LxFeaturedProjects({
   data,
   projects,
   media,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_featured_projects'>
   projects: RenderContext['projects']
   media: RenderContext['media']
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const tone = data.tone
-  const isToken = isColorToken(tone)
-  const t: ToneText = tone === 'ivory' ? TONE_IVORY : TONE_OBSIDIAN
-  // Custom hex tone: apply to text via inline style; token tones use the
-  // Tailwind classes above (so the JIT scanner emits them).
-  const customColor = !isToken ? resolveColorValue(tone) : undefined
-  const styleFor = customColor ? { color: customColor } : undefined
+  // Text colour AUTO-CONTRASTS the ancestor section's surface (light text
+  // on dark sections, dark text on light) so the grid is legible wherever
+  // it's dropped. There is no per-block tone field to mismatch the
+  // background — the section background is the single source of truth.
+  const onDark = isSectionSurfaceDark(sectionMeta)
+  const headingClass = onDark ? 'text-ivory' : 'text-obsidian'
+  const nameClass = onDark ? 'text-ivory' : 'text-obsidian'
+  const taglineClass = onDark ? 'text-ivory/70' : 'text-obsidian/70'
 
   // hydrate fills `projects` with the Featured projects in featured
   // order; the Map preserves that order, so iterate its values directly.
@@ -100,9 +83,8 @@ export function LxFeaturedProjects({
           as="h2"
           className={clsx(
             'font-serif text-3xl sm:text-4xl font-bold tracking-tight mb-10',
-            t.heading,
+            headingClass,
           )}
-          style={styleFor}
           placeholder="Section heading…"
         />
       ) : (
@@ -110,9 +92,8 @@ export function LxFeaturedProjects({
           <h2
             className={clsx(
               'font-serif text-3xl sm:text-4xl font-bold tracking-tight mb-10',
-              t.heading,
+              headingClass,
             )}
-            style={styleFor}
           >
             {data.heading}
           </h2>
@@ -131,17 +112,13 @@ export function LxFeaturedProjects({
               <h3
                 className={clsx(
                   'mt-5 font-serif text-xl sm:text-2xl font-bold tracking-tight',
-                  t.name,
+                  nameClass,
                 )}
-                style={styleFor}
               >
                 {p.name}
               </h3>
               {p.tagline && (
-                <p
-                  className={clsx('mt-2 text-base leading-relaxed', t.tagline)}
-                  style={styleFor}
-                >
+                <p className={clsx('mt-2 text-base leading-relaxed', taglineClass)}>
                   {p.tagline}
                 </p>
               )}

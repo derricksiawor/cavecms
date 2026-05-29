@@ -64,18 +64,39 @@ export function rateLimitDyn(
   key: string,
   opts: { limit: number; windowSec: number },
 ): boolean {
+  return rateLimitDynInfo(bucket, key, opts).allowed
+}
+
+// Richer variant: same store + same accounting as rateLimitDyn(), but
+// returns whether the call was allowed AND — when it was NOT — how many
+// whole seconds remain until the offending bucket's window resets. The
+// caller surfaces that as a `Retry-After` so a throttled operator can be
+// told how long to wait. `retryAfter` is undefined on the allowed path
+// (no wait needed). rateLimitDyn() delegates here so the two share one
+// code path and can never drift.
+export function rateLimitDynInfo(
+  bucket: string,
+  key: string,
+  opts: { limit: number; windowSec: number },
+): { allowed: boolean; retryAfter?: number } {
   const store = getStore(bucket)
   const now = Date.now()
   const b = store.get(key)
   if (!b || now - b.windowStart > opts.windowSec * 1000) {
     store.set(key, { count: 1, windowStart: now, lastSeen: now })
     if (store.size > MAX_ENTRIES) evict(store)
-    return true
+    return { allowed: true }
   }
   b.lastSeen = now
-  if (b.count >= opts.limit) return false
+  if (b.count >= opts.limit) {
+    // Window resets `windowSec` after it started; clamp to >= 1s so a
+    // sub-second remainder still tells the operator "wait a moment"
+    // rather than "0".
+    const msLeft = opts.windowSec * 1000 - (now - b.windowStart)
+    return { allowed: false, retryAfter: Math.max(1, Math.ceil(msLeft / 1000)) }
+  }
   b.count += 1
-  return true
+  return { allowed: true }
 }
 
 // Periodic sweep (5 min) to drop entries whose window is way past.

@@ -170,8 +170,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_gallery: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_gallery'>>) => (
     <LxGallery data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
-  lx_featured_projects: ({ data, projects, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_featured_projects'>>) => (
-    <LxFeaturedProjects data={data} projects={projects} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_featured_projects: ({ data, projects, media, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_featured_projects'>>) => (
+    <LxFeaturedProjects data={data} projects={projects} media={media} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
 })
 

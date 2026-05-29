@@ -8,7 +8,7 @@ import { issueCsrf } from '@/lib/auth/csrf'
 import { computeLockState, recordFailure, recordSuccess } from '@/lib/auth/lockout'
 import { invalidateUser } from '@/lib/auth/userCache'
 import { consumePreCsrf } from '@/lib/auth/preCsrf'
-import { rateLimitDyn } from '@/lib/auth/rateLimit'
+import { rateLimitDynInfo } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import {
   getRecaptchaServerConfig,
@@ -40,6 +40,31 @@ const generic = (status = 401): Response =>
     {
       status,
       headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
+    },
+  )
+
+// Distinct response for the THROTTLED / LOCKED-OUT cases only (per-IP +
+// per-email rate-limit windows, and the progressive lockout tier). Unlike
+// `generic`, this tells the operator they're temporarily blocked and how
+// long to wait — but it is ENUMERATION-SAFE: rateLimitDyn buckets by the
+// submitted email/IP string and computeLockState/recordFailure accumulate
+// failures for ANY submitted email (a non-existent address locks identically),
+// so this response NEVER confirms an account exists. It deliberately reveals
+// nothing about WHICH axis (IP vs email) tripped — the body is uniform.
+const lockedResponse = (retryAfter: number): Response =>
+  new Response(
+    JSON.stringify({
+      error: 'Too many failed attempts. Please try again later.',
+      retryAfter,
+      locked: true,
+    }),
+    {
+      status: 429,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'private, no-store',
+        'retry-after': String(retryAfter),
+      },
     },
   )
 
@@ -78,13 +103,12 @@ export const POST = withError(async (req: Request) => {
   const thresholds = await getSetting('security_login_thresholds')
 
   // 1. Per-IP rate limit (only locks attacker's own IP — never another user).
-  if (
-    !rateLimitDyn('login:ip', ip, {
-      limit: thresholds.perIpLimit,
-      windowSec: thresholds.perIpWindowSec,
-    })
-  ) {
-    return generic(429)
+  const ipLimit = rateLimitDynInfo('login:ip', ip, {
+    limit: thresholds.perIpLimit,
+    windowSec: thresholds.perIpWindowSec,
+  })
+  if (!ipLimit.allowed) {
+    return lockedResponse(ipLimit.retryAfter ?? thresholds.perIpWindowSec)
   }
 
   // 2. Body size cap before parsing — prevents memory pressure from oversized
@@ -146,13 +170,14 @@ export const POST = withError(async (req: Request) => {
   const email = rawEmail
 
   // 7. Per-email rate limit — guard against brute-force against ONE account.
-  if (
-    !rateLimitDyn('login:email', email, {
-      limit: thresholds.perEmailLimit,
-      windowSec: thresholds.perEmailWindowSec,
-    })
-  ) {
-    return generic(429)
+  //    Enumeration-safe: the bucket is keyed on the submitted email string
+  //    with no account-existence check, so a bogus email throttles identically.
+  const emailLimit = rateLimitDynInfo('login:email', email, {
+    limit: thresholds.perEmailLimit,
+    windowSec: thresholds.perEmailWindowSec,
+  })
+  if (!emailLimit.allowed) {
+    return lockedResponse(emailLimit.retryAfter ?? thresholds.perEmailWindowSec)
   }
 
   // 8. Credential path — ALWAYS run scrypt regardless of user existence,
@@ -212,6 +237,21 @@ export const POST = withError(async (req: Request) => {
       recordFailure({ email, ip, userAgent, reason: 'bad_credentials', preCheckedState: state }),
       'login_recordFailure',
     )
+    // Distinguish ONLY the progressive-lockout case (`!allowed` ⇒
+    // state.locked && !isKnownIp) from a genuine wrong-password / wrong-user /
+    // inactive verdict. The lockout branch tells the operator how long to wait;
+    // every other branch keeps the existing generic 401 so it never leaks which
+    // field was wrong. Enumeration-safe: `state.locked` is computed from
+    // login_attempts + failed_logins_by_email bucketed by the submitted email
+    // (a non-existent address locks identically), and the recordFailure write
+    // above ran for ALL of these branches, so the locked response carries no
+    // account-existence signal and the failure-accounting timing is unchanged.
+    // state.retryAfter is set whenever state.locked is true; the fail-closed
+    // synthesised state (lockout read error) has no retryAfter, so fall back to
+    // the per-email lockout window as a conservative wait hint.
+    if (!allowed) {
+      return lockedResponse(state.retryAfter ?? thresholds.perEmailWindowSec)
+    }
     return generic()
   }
 

@@ -1738,12 +1738,7 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: '4', label: '4' },
       ],
     },
-    {
-      kind: 'color', key: 'tone', label: 'Tone',
-      tokens: ['obsidian', 'ivory'],
-      allowCustom: true,
-      allowAlpha: false,
-    },
+    // No tone field — the grid auto-contrasts the section background.
     {
       kind: 'select', key: 'animation', label: 'Animation',
       options: [

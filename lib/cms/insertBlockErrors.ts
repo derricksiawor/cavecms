@@ -57,6 +57,16 @@ export function mapInsertBlockError(
       return {
         copy: "This block lives in the page template — edit the existing one instead of adding a new one.",
       }
+    case 'section_wrap_failed':
+      // The empty-page / no-column path couldn't create the host
+      // section + column to nest the widget inside, so the insert was
+      // aborted rather than dropping a loose top-level widget. (See
+      // useInsertBlock's auto-wrap branch.) Generic, retryable copy —
+      // the operator's next click re-runs the whole section→column→
+      // widget create.
+      return {
+        copy: "We couldn't set up a section for that block. Try again in a moment.",
+      }
     case 'timeout':
       return { copy: 'That took too long. Try again.' }
     case 'network_error':

@@ -21,6 +21,16 @@ const SCRIPT_ID_V3 = 'cavecms-recaptcha-v3'
 const SCRIPT_ID_V2 = 'cavecms-recaptcha-v2'
 const easeLuxury = [0.19, 0.91, 0.38, 0.98] as const
 
+// Turn a whole-seconds wait into a human "about X minutes / X seconds"
+// phrase for the lockout message. Rounds up to whole minutes once past 60s
+// so the operator is never told to retry a few seconds early.
+function formatRetry(seconds: number): string {
+  const s = Math.max(1, Math.ceil(seconds))
+  if (s < 60) return `about ${s} second${s === 1 ? '' : 's'}`
+  const mins = Math.ceil(s / 60)
+  return `about ${mins} minute${mins === 1 ? '' : 's'}`
+}
+
 function loadRecaptchaV3(siteKey: string): Promise<GrecaptchaV3Api> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') return reject(new Error('no_window'))
@@ -193,7 +203,9 @@ export function LoginForm({
         }
       }
       const res = await fetch(action, { method: 'POST', body: fd, credentials: 'same-origin' })
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; next?: string; error?: string } | null
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; next?: string; error?: string; locked?: boolean; retryAfter?: number }
+        | null
       if (res.ok && data?.ok && typeof data.next === 'string') {
         window.location.href = data.next
         return
@@ -203,6 +215,25 @@ export function LoginForm({
       if (recaptchaVersion === 'v2' && v2ApiRef.current && v2WidgetIdRef.current !== null) {
         v2ApiRef.current.reset(v2WidgetIdRef.current)
         v2TokenRef.current = ''
+      }
+      // Lockout / rate-limit response (status 429 with locked:true). Tell the
+      // operator how long to wait rather than the generic credential error.
+      // Prefer the JSON retryAfter; fall back to the standard Retry-After
+      // header. If neither is a usable number, show the server message as-is.
+      if (res.status === 429 || data?.locked) {
+        const headerRetry = Number(res.headers.get('retry-after'))
+        const retry =
+          typeof data?.retryAfter === 'number' && data.retryAfter > 0
+            ? data.retryAfter
+            : Number.isFinite(headerRetry) && headerRetry > 0
+              ? headerRetry
+              : null
+        setErr(
+          retry !== null
+            ? `Too many failed attempts — try again in ${formatRetry(retry)}.`
+            : (data?.error ?? 'Too many failed attempts. Please try again later.'),
+        )
+        return
       }
       setErr(data?.error ?? 'Sign in failed.')
     } catch {

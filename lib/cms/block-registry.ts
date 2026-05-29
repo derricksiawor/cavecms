@@ -922,7 +922,9 @@ export const blockSchemas = {
   lx_featured_projects: z.object({
     heading: safeText(TEXT_MAX.title).optional(),
     columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
-    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_featured_projects).default('obsidian'),
+    // No `tone` — the renderer auto-contrasts the ancestor section's
+    // surface (light text on dark sections, dark on light), so there's no
+    // per-block colour to mismatch the background.
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
   }),
 } as const

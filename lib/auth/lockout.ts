@@ -49,6 +49,13 @@ export interface LockState {
   locked: boolean
   eCounts: number[]
   iCounts: number[]
+  // Whole seconds until the active lock expires (the later of the email-
+  // and IP-side `locked_until`, whichever is further out). Undefined when
+  // `locked` is false. Clamped to >= 1 so the caller never tells a locked
+  // operator "try again in 0 seconds". Carries NO account-existence signal:
+  // computeLockState buckets by the submitted email/IP regardless of whether
+  // a users row exists, so this value is identical for real and bogus emails.
+  retryAfter?: number
 }
 
 export async function computeLockState(args: { email: string; ip: string }): Promise<LockState> {
@@ -86,7 +93,14 @@ export async function computeLockState(args: { email: string; ip: string }): Pro
   const now = Date.now()
   const lockedByEmail = !!(el?.lockedUntil && el.lockedUntil.getTime() > now)
   const lockedByIp = !!(il?.lockedUntil && il.lockedUntil.getTime() > now)
-  return { locked: lockedByEmail || lockedByIp, eCounts: e, iCounts: i }
+  const locked = lockedByEmail || lockedByIp
+  // Pick the furthest-out active lock so the operator is told the real wait
+  // (if both axes are locked, the longer one governs when they can retry).
+  let lockedUntilMs = 0
+  if (lockedByEmail && el?.lockedUntil) lockedUntilMs = el.lockedUntil.getTime()
+  if (lockedByIp && il?.lockedUntil) lockedUntilMs = Math.max(lockedUntilMs, il.lockedUntil.getTime())
+  const retryAfter = locked ? Math.max(1, Math.ceil((lockedUntilMs - now) / 1000)) : undefined
+  return { locked, eCounts: e, iCounts: i, retryAfter }
 }
 
 async function applyLockToEmail(email: string, totalCount: number, durationMin: number): Promise<void> {

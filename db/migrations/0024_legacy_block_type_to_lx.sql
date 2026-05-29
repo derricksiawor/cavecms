@@ -419,7 +419,8 @@ WHERE block_type = 'social_icons';
 -- per-block project_ids list, so the legacy project_ids is intentionally
 -- DROPPED — operators re-curate via Projects → Featured order. Maps
 -- title→heading (empty string when absent — the lx_ heading is optional,
--- NOT nullable) and fills columns/tone/animation with schema defaults.
+-- NOT nullable) and fills columns/animation with schema defaults. The
+-- grid has no tone (it auto-contrasts the section), so none is written.
 -- Re-run safety: the production migrators (scripts/install-migrate.mjs,
 -- migrator/run.js) gate on the file HASH, so editing 0024 in place makes
 -- it re-run on update. That's safe here — this UPDATE's WHERE matches
@@ -432,7 +433,6 @@ SET block_type = 'lx_featured_projects',
     data = JSON_OBJECT(
       'heading',   COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.title')), ''),
       'columns',   3,
-      'tone',      'obsidian',
       'animation', 'none'
     )
 WHERE block_type = 'featured_projects';

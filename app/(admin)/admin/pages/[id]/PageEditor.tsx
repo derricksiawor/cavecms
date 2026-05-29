@@ -27,8 +27,6 @@ import {
   Image as ImageIcon,
   Images,
   Star,
-  BookText,
-  Wrench,
   Layers as LayersIcon,
   type LucideIcon,
 } from 'lucide-react'
@@ -69,6 +67,7 @@ import {
 import { formatRelativeSince } from '@/hooks/useAutoSave'
 import { SLUG_RE, SLUG_MIN, SLUG_MAX } from '@/lib/cms/slug'
 import { summariseBlockText } from '@/lib/ai/chatEligibility'
+import { SEED_DATA } from '@/lib/cms/blockSeeds'
 import {
   readDraftBuffer,
   writeDraftBuffer,
@@ -82,14 +81,17 @@ import type { Role } from '@/lib/auth/requireRole'
 // Map block type → Lucide icon. Default to a layered-stack icon for
 // unknown types so a future block kind doesn't render an icon-less card.
 const BLOCK_TYPE_ICON: Record<string, LucideIcon> = {
-  text: TypeIcon,
-  cta: MousePointerClick,
-  quote: QuoteIcon,
+  // lx_* editorial primitives offered by the quick-add menu — so a
+  // freshly-added block shows a meaningful card icon, not the generic
+  // fallback. Every other registered block type still resolves through
+  // the LayersIcon default below.
+  lx_heading: TypeIcon,
+  lx_text: TypeIcon,
+  lx_action: MousePointerClick,
+  lx_quote: QuoteIcon,
   image: ImageIcon,
   gallery: Images,
   hero: Star,
-  about_history: BookText,
-  services_intro: Wrench,
   featured_projects: Star,
 }
 
@@ -849,45 +851,23 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
 
   // Stubs ship just enough data to pass each block's Zod schema at the
   // POST boundary. Operator fills in real content via the inline drawer
-  // after creation. Block types with required media (hero, image,
-  // gallery) are intentionally OMITTED — they need a media-picker flow
-  // upstream of the create call; v1 routes that through the public-
-  // side inline drawer's "Add block" affordance.
+  // after creation. The payloads are pulled straight from SEED_DATA —
+  // the SAME schema-validated source the public-page picker uses — so a
+  // quick-add here can never drift from blockSchemas (the legacy purge
+  // dropped text/cta/quote/about_history/services_intro; adding any of
+  // those produced a schema-less block that dropped at render).
+  //
+  // The quick-menu is intentionally limited to the four no-data
+  // editorial primitives that seed cleanly without a media-picker
+  // round-trip (lx_heading / lx_text / lx_action / lx_quote). Media,
+  // gallery, hero, and featured-projects blocks are added from the
+  // public-page inline editor where the full Widget picker (with its
+  // MediaPicker flow) lives.
   const blockStubs: Record<string, { label: string; data: unknown }> = {
-    text: {
-      label: 'Text',
-      data: { body_richtext: '<p>Type something here…</p>' },
-    },
-    cta: {
-      label: 'Call to action',
-      data: {
-        title: 'New section',
-        cta: {
-          text: 'Learn more',
-          href: 'https://example.com',
-          openInNew: false,
-        },
-      },
-    },
-    quote: {
-      label: 'Quote',
-      data: { quote: 'Replace this with a quote that anchors the page.' },
-    },
-    about_history: {
-      label: 'About history',
-      data: {
-        title: 'New section',
-        body_richtext: '<p>Add your story here.</p>',
-      },
-    },
-    services_intro: {
-      label: 'Services intro',
-      data: {
-        title: 'New section',
-        body_richtext: '<p>Describe what we offer.</p>',
-        items: [],
-      },
-    },
+    lx_heading: { label: 'Heading', data: SEED_DATA.lx_heading },
+    lx_text: { label: 'Text', data: SEED_DATA.lx_text },
+    lx_action: { label: 'Action', data: SEED_DATA.lx_action },
+    lx_quote: { label: 'Quote', data: SEED_DATA.lx_quote },
   }
 
   const addBlockOfType = async (type: string): Promise<void> => {
@@ -1663,8 +1643,9 @@ function AddBlockPopover({
             </button>
           ))}
           <p className="px-4 pt-2 text-[10px] text-warm-stone">
-            Image, gallery, hero, and featured-projects blocks are added
-            from the public-page inline editor.
+            These are quick adds. The full block library — images, gallery,
+            stats, testimonials, and more — lives in the public-page inline
+            editor.
           </p>
         </div>
       )}
