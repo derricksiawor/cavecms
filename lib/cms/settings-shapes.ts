@@ -81,6 +81,18 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
 
   footer: [
     {
+      kind: 'select',
+      key: 'theme',
+      label: 'Footer theme',
+      options: [
+        { value: 'obsidian', label: 'Obsidian — premium dark (default)' },
+        { value: 'cream', label: 'Cream — warm light' },
+        { value: 'ivory', label: 'Ivory — crisp neutral light' },
+        { value: 'champagne', label: 'Champagne — gold statement' },
+        { value: 'bone', label: 'Bone — softest light' },
+      ],
+    },
+    {
       kind: 'string',
       key: 'tagline',
       label: 'Footer tagline',
@@ -136,7 +148,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       kind: 'media',
       key: 'logo',
       label: 'Footer logo (optional)',
-      help: 'A lighter or wordmark variant for the dark footer. If empty, we’ll use the site header’s logo.',
+      help: 'An alternate wordmark for the footer (e.g. a lighter variant for a dark footer theme). If empty, we’ll use the site header’s logo.',
     },
     {
       kind: 'string',

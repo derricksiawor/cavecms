@@ -6,6 +6,7 @@ import { resolveMedia } from '@/lib/cms/resolveMedia'
 import { isLikelyExternal, externalRel } from '@/lib/url/external'
 import { NewsletterForm } from '@/components/leads/NewsletterForm'
 import { CfSafeMailto } from '@/components/CfSafeMailto'
+import { resolveFooterTheme } from '@/lib/cms/footerTheme'
 
 // Public site footer. Renders the newsletter signup form with a
 // freshly-minted HMAC preCsrf nonce so a same-page POST works
@@ -41,6 +42,7 @@ const DEFAULT_CONTACT = {
 }
 interface FooterShape {
   tagline: string
+  theme?: string
   columns: Array<{ label: string; links: Array<{ text: string; href: string }> }>
   logo?: { media_id: number; alt: string } | null
   newsletterHeading?: string
@@ -51,6 +53,7 @@ interface FooterShape {
 }
 const DEFAULT_FOOTER: FooterShape = {
   tagline: '',
+  theme: 'obsidian',
   columns: [],
   logo: null,
   newsletterHeading: 'Stay informed',
@@ -117,11 +120,11 @@ export async function SiteFooter() {
     logDegraded('site_header', settled[3].reason)
   }
   // Mobile CTA awareness — when the operator's sticky bottom pill is
-  // enabled with at least one button, the footer extends its own dark
-  // `bg-near-black` down by the pill's full visual footprint so the
-  // gap between footer copyright and pill matches the footer's theme
-  // (no cream body-bg seam below the dark footer). md:pb-0 disables
-  // on desktop where the pill is hidden.
+  // enabled with at least one button, the footer extends its own
+  // surface (whatever the chosen footer theme) down by the pill's full
+  // visual footprint so the gap between footer copyright and pill
+  // matches the footer's background (no body-bg seam below the footer).
+  // md:pb-0 disables on desktop where the pill is hidden.
   let mobileCtaOn = false
   if (settled[4].status === 'fulfilled') {
     const cta = settled[4].value
@@ -146,6 +149,10 @@ export async function SiteFooter() {
   const logoAlt =
     footer.logo?.alt || resolvedLogo?.alt || headerBrand
 
+  // Operator-selected footer theme (Settings → Footer). Default
+  // 'obsidian' reproduces the original always-dark footer.
+  const ft = resolveFooterTheme(footer.theme)
+
   const newsletterHeading = footer.newsletterHeading || 'Stay informed'
   const newsletterBody =
     footer.newsletterBody ||
@@ -156,7 +163,7 @@ export async function SiteFooter() {
 
   return (
     <footer
-      className={`bg-near-black text-cream-50${mobileCtaOn ? ' pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0' : ''}`}
+      className={`${ft.surface}${mobileCtaOn ? ' pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0' : ''}`}
     >
       <div className="max-w-6xl mx-auto px-6 py-16 grid grid-cols-1 md:grid-cols-3 gap-12">
         <div>
@@ -165,7 +172,7 @@ export async function SiteFooter() {
             <img
               src={logoSrc}
               alt={logoAlt}
-              className="h-12 w-auto max-w-[200px] object-contain brightness-0 invert"
+              className={`h-12 w-auto max-w-[200px] object-contain ${ft.logoFilter}`}
             />
           ) : (
             <p className="font-serif text-2xl font-bold tracking-tight">
@@ -173,12 +180,12 @@ export async function SiteFooter() {
             </p>
           )}
           {footer.tagline && (
-            <p className="mt-4 text-sm text-cream-50/70 max-w-xs leading-relaxed">
+            <p className={`mt-4 text-sm ${ft.muted} max-w-xs leading-relaxed`}>
               {footer.tagline}
             </p>
           )}
           {(contact.address || contact.phone || contact.email) && (
-            <address className="not-italic mt-6 text-sm text-cream-50/80 leading-relaxed">
+            <address className={`not-italic mt-6 text-sm ${ft.strong} leading-relaxed`}>
               {contact.address && (
                 // Address → Google Maps search link so visitors on a
                 // phone can tap straight into navigation. encodeURI
@@ -190,7 +197,7 @@ export async function SiteFooter() {
                   href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.address)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block min-h-[44px] py-2 hover:text-copper-300 transition-colors"
+                  className={`block min-h-[44px] py-2 ${ft.linkHover} transition-colors`}
                 >
                   {contact.address}
                 </a>
@@ -198,7 +205,7 @@ export async function SiteFooter() {
               {contact.phone && (
                 <a
                   href={`tel:${contact.phone.replace(/\s+/g, '')}`}
-                  className="block min-h-[44px] py-2 mt-1 hover:text-copper-300 transition-colors"
+                  className={`block min-h-[44px] py-2 mt-1 ${ft.linkHover} transition-colors`}
                 >
                   {contact.phone}
                 </a>
@@ -206,11 +213,11 @@ export async function SiteFooter() {
               {contact.email && (
                 <CfSafeMailto
                   email={contact.email}
-                  className="block min-h-[44px] py-2 mt-1 hover:text-copper-300 transition-colors break-all"
+                  className={`block min-h-[44px] py-2 mt-1 ${ft.linkHover} transition-colors break-all`}
                 />
               )}
               {contact.hours && (
-                <span className="block mt-3 text-xs text-cream-50/50">
+                <span className={`block mt-3 text-xs ${ft.subtle}`}>
                   {contact.hours}
                 </span>
               )}
@@ -219,10 +226,10 @@ export async function SiteFooter() {
         </div>
 
         <div>
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-400">
+          <h2 className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}>
             {newsletterHeading}
           </h2>
-          <p className="mt-4 text-sm text-cream-50/70 leading-relaxed">
+          <p className={`mt-4 text-sm ${ft.muted} leading-relaxed`}>
             {newsletterBody}
           </p>
           {csrf ? (
@@ -231,7 +238,7 @@ export async function SiteFooter() {
             // CSRF nonce mint failed (upstream blip). Skip the form
             // rather than render a guaranteed-fail submission UX —
             // the contact block + columns above still render.
-            <p className="mt-6 text-sm text-cream-50/50">
+            <p className={`mt-6 text-sm ${ft.subtle}`}>
               Newsletter signup temporarily unavailable.
             </p>
           )}
@@ -240,7 +247,7 @@ export async function SiteFooter() {
         <div className="grid grid-cols-1 gap-6">
           {footer.columns.map((c) => (
             <div key={c.label}>
-              <h4 className="text-[10px] font-semibold uppercase tracking-[0.32em] text-copper-400">
+              <h4 className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}>
                 {c.label}
               </h4>
               <ul className="mt-3 space-y-2">
@@ -250,7 +257,7 @@ export async function SiteFooter() {
                       href={l.href}
                       target={isLikelyExternal(l.href) ? '_blank' : undefined}
                       rel={externalRel(l.href, true)}
-                      className="text-sm text-cream-50/80 hover:text-cream-50 transition-colors"
+                      className={`text-sm ${ft.strong} ${ft.strongHover} transition-colors`}
                     >
                       {l.text}
                     </a>
@@ -262,12 +269,12 @@ export async function SiteFooter() {
         </div>
       </div>
 
-      <div className="border-t border-cream-50/10">
+      <div className={`border-t ${ft.border}`}>
         {/* On mobile: stacked + centered (single column, items
            center horizontally). On md+: flex-row with copyright
            left, legal links right (the original layout). The
            md:justify-between brings the desktop split back. */}
-        <div className="max-w-6xl mx-auto flex flex-col items-center text-center md:flex-row md:flex-wrap md:items-center md:justify-between md:text-left gap-3 px-6 py-6 text-xs text-cream-50/50">
+        <div className={`max-w-6xl mx-auto flex flex-col items-center text-center md:flex-row md:flex-wrap md:items-center md:justify-between md:text-left gap-3 px-6 py-6 text-xs ${ft.subtle}`}>
           <span>
             © {new Date().getFullYear()} {copyrightText}. All rights reserved.
           </span>
@@ -279,7 +286,7 @@ export async function SiteFooter() {
                   href={l.href}
                   target={isLikelyExternal(l.href) ? '_blank' : undefined}
                   rel={externalRel(l.href, true)}
-                  className="text-cream-50/60 transition-colors hover:text-cream-50"
+                  className={`${ft.strong} transition-colors ${ft.strongHover}`}
                 >
                   {l.text}
                 </Link>

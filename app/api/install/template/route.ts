@@ -822,6 +822,11 @@ async function seedTemplateBranding(
 
   await upsertSettingInTx(tx, 'footer', {
     tagline: branding.footerTagline,
+    // Footer theme is linked to the header theme at SETUP time so the
+    // chosen template/theme applies to both surfaces. It remains an
+    // independent setting afterward — the operator can change the
+    // footer theme on its own under Settings → Footer.
+    theme: branding.headerTheme,
     columns: branding.footerColumns,
     logo: existingFooter.logo ?? null,
     newsletterHeading: existingFooter.newsletterHeading ?? 'Stay informed',

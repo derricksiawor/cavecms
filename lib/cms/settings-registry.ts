@@ -111,8 +111,19 @@ const ctaRef = z.object({
   openInNew: z.boolean().optional(),
 })
 
+// Public footer theme. Same palette as the header (headerTheme) so the
+// two surfaces can be matched. Default 'obsidian' reproduces the
+// historic always-dark footer; resolveFooterTheme (lib/cms/footerTheme)
+// maps each value to the footer's class set. Default fills on read for
+// installs whose stored footer JSON predates this field.
+const footerTheme = z
+  .enum(['cream', 'obsidian', 'ivory', 'champagne', 'bone'])
+  .default('obsidian')
+
 const footer = z.object({
   tagline: z.string().max(220),
+  // Visual theme — see footerTheme above.
+  theme: footerTheme,
   columns: z
     .array(
       z.object({
@@ -820,6 +831,9 @@ export const registry = {
     schema: footer,
     default: {
       tagline: '',
+      // Default dark footer — preserves the historic look. Operator
+      // switches it under Settings → Footer to match a light site.
+      theme: 'obsidian',
       // Empty footer columns by default — the welcome one-pager
       // doesn't have a /privacy or /terms page populated yet, so
       // pre-seeding the column produces dead links + dilutes the

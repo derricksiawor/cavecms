@@ -69,11 +69,13 @@ export const POST = withError(async (req: Request) => {
         })()
       : ((existingRaw as Record<string, unknown> | null | undefined) ?? {})
 
+  const resolvedTheme = body.theme ?? existing.theme ?? 'cream'
+
   const merged: Record<string, unknown> = {
     // Operator overrides FIRST so they take priority via explicit
     // assignment below (avoids a duplicate-key literal in the source).
     brandText: body.brandText,
-    theme: body.theme ?? existing.theme ?? 'cream',
+    theme: resolvedTheme,
     // Registry defaults — keep when unset.
     logo: existing.logo ?? null,
     navItems: existing.navItems ?? [
@@ -87,5 +89,37 @@ export const POST = withError(async (req: Request) => {
   }
 
   await upsertSetting('site_header', merged)
+
+  // Link the footer theme to the chosen theme at SETUP time so header +
+  // footer match out of the box. The footer remains an independent
+  // setting afterward (Settings → Footer). Merge so we preserve any
+  // footer shape already written (tagline, columns, newsletter copy).
+  const [footerRows] = (await db.execute(sql`
+    SELECT value FROM settings WHERE \`key\` = 'footer'
+  `)) as unknown as [Array<{ value: unknown }>]
+  const footerRaw = footerRows[0]?.value
+  const existingFooter =
+    typeof footerRaw === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(footerRaw) as Record<string, unknown>
+          } catch {
+            return {}
+          }
+        })()
+      : ((footerRaw as Record<string, unknown> | null | undefined) ?? {})
+  // Only augment an ALREADY-VALID footer (the template step writes a
+  // complete one before this branding step runs). Writing a partial
+  // `{ theme }` would lack the schema-required tagline/columns and
+  // fail the footer Zod parse on read — discarding the theme entirely.
+  // If no valid footer exists yet, skip: the footer default + the
+  // template step's own theme-link cover it.
+  if (
+    typeof existingFooter.tagline === 'string' &&
+    Array.isArray(existingFooter.columns)
+  ) {
+    await upsertSetting('footer', { ...existingFooter, theme: resolvedTheme })
+  }
+
   return okJson()
 })
