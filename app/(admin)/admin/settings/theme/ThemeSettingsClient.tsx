@@ -237,17 +237,17 @@ export function ThemeSettingsClient({ initial }: Props) {
           >
             <div
               className="space-y-3 p-8"
-              style={{ background: 'var(--color-ivory)' }}
+              style={{ background: 'var(--brand-surface-light)' }}
             >
               <h3
                 className="font-serif text-3xl font-bold"
-                style={{ color: 'var(--color-primary)' }}
+                style={{ color: 'var(--brand-primary)' }}
               >
                 A luxury headline
               </h3>
-              <p className="text-sm" style={{ color: 'var(--color-obsidian)' }}>
+              <p className="text-sm" style={{ color: 'var(--brand-surface-dark)' }}>
                 Body copy sits on the light surface.{' '}
-                <span style={{ color: 'var(--color-warm-stone)' }}>
+                <span style={{ color: 'var(--brand-secondary)' }}>
                   This is supporting text.
                 </span>
               </p>
@@ -255,8 +255,8 @@ export function ThemeSettingsClient({ initial }: Props) {
                 type="button"
                 className="rounded-full px-5 py-2 text-sm font-semibold"
                 style={{
-                  background: 'var(--color-champagne)',
-                  color: 'var(--color-obsidian)',
+                  background: 'var(--brand-accent)',
+                  color: 'var(--brand-surface-dark)',
                 }}
               >
                 Primary button
@@ -264,23 +264,23 @@ export function ThemeSettingsClient({ initial }: Props) {
             </div>
             <div
               className="space-y-3 p-8"
-              style={{ background: 'var(--color-obsidian)' }}
+              style={{ background: 'var(--brand-surface-dark)' }}
             >
               <h3
                 className="font-serif text-3xl font-bold"
-                style={{ color: 'var(--color-ivory)' }}
+                style={{ color: 'var(--brand-surface-light)' }}
               >
                 On a dark section
               </h3>
-              <p className="text-sm" style={{ color: 'var(--color-ivory)' }}>
+              <p className="text-sm" style={{ color: 'var(--brand-surface-light)' }}>
                 Headings auto-flip to the light surface so they stay readable.
               </p>
               <button
                 type="button"
                 className="rounded-full px-5 py-2 text-sm font-semibold"
                 style={{
-                  background: 'var(--color-champagne)',
-                  color: 'var(--color-obsidian)',
+                  background: 'var(--brand-accent)',
+                  color: 'var(--brand-surface-dark)',
                 }}
               >
                 Accent button
