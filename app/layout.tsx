@@ -93,6 +93,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           // Brand palette overrides (Settings → Theme). UN-layered so it
           // beats the @layer-base defaults in globals.css. Body is hex-only,
           // re-validated in brandVarsCss — no operator free-text reaches CSS.
+          //
+          // suppressHydrationWarning: the browser strips the `nonce`
+          // attribute value from the DOM after applying CSP (security
+          // behaviour), so the client hydrates seeing nonce="" while the
+          // server rendered the real nonce. The CSS content is identical
+          // server/client — only the browser-cleared nonce differs, which
+          // is expected, so we suppress the otherwise-spurious warning.
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: brandCss }}
         />
         {/* Third-party analytics / tracking / chat. Every <script>
