@@ -17,6 +17,7 @@ import {
   Download,
   Mail,
   Sparkles,
+  Palette,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -58,6 +59,7 @@ export const NAV: readonly NavItem[] = [
   { label: 'Trash', href: '/admin/trash', roles: ['admin', 'editor'], icon: Trash2 },
   { label: 'Users', href: '/admin/users', roles: ['admin'], icon: UsersIcon },
   { label: 'Settings', href: '/admin/settings', roles: ['admin'], icon: SettingsIcon },
+  { label: 'Theme', href: '/admin/settings/theme', roles: ['admin'], icon: Palette, parent: '/admin/settings' },
   { label: 'Security', href: '/admin/settings/security', roles: ['admin'], icon: Lock, parent: '/admin/settings' },
   { label: 'Integrations', href: '/admin/settings/integrations', roles: ['admin'], icon: Plug, parent: '/admin/settings' },
   { label: 'Email', href: '/admin/settings/email', roles: ['admin'], icon: Mail, parent: '/admin/settings' },
