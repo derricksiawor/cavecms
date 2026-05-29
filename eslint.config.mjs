@@ -24,6 +24,12 @@ const config = [
       // bundle gets `pnpm install --prod --filter=migrator` in CI so
       // its dependencies are intentionally tracked separately.
       'migrator/**',
+      // Separate workspace package — the standalone `create-cavecms`
+      // installer CLI (its own package.json, published to npm). It's a
+      // no-dependency Node .mjs with its own conventions (placeholder
+      // args kept for signature clarity, etc.); the app's lint rules
+      // don't govern it.
+      'packages/create-cavecms/**',
     ],
   },
   ...compat.config({

@@ -47,8 +47,12 @@ export interface LatestRelease {
   minPreviousVersion: string | null
 }
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { z } from 'zod'
 import { RELEASE_CHANGELOG_MAX_BYTES, RELEASE_FETCH_TIMEOUT_MS, UPDATE_CHECK_TTL_MS } from './constants'
+
+const execFileAsync = promisify(execFile)
 
 // Zod schema for the /updates/latest.json payload that scripts/release/
 // publish.mjs writes. Defence in depth — the CDN, an operator-pinned
@@ -102,6 +106,26 @@ export function __resetCacheForTests(): void {
 
 const DEFAULT_MANIFEST_URL = 'https://cavecms.derricksiawor.com/updates/latest.json'
 
+// Cloudflare Bot Fight Mode (Free plan, account-wide — can't be scoped via
+// WAF rules) fingerprints Node's undici `fetch` (and curl) by their TLS
+// handshake and 403s them from datacenter IPs regardless of User-Agent, which
+// silently broke the in-app update check on every cloud-hosted install.
+// Empirically only wget's fingerprint + a browser UA clears the challenge, so
+// the check shells out to wget instead of using fetch. (The installer +
+// updater downloader do the same — see create-cavecms + cavecms-update.sh.)
+const RELEASE_FETCH_UA =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+// wget --server-response prints the status line ("  HTTP/1.1 404 Not Found")
+// to stderr; pull the final status code out so the 404-vs-other distinction
+// the check route relies on survives the switch off fetch().
+function httpStatusFromWgetStderr(stderr: string): number | null {
+  const matches = stderr.match(/HTTP\/[\d.]+\s+(\d{3})/g)
+  if (!matches || matches.length === 0) return null
+  const last = matches[matches.length - 1]!.match(/(\d{3})/)
+  return last ? Number(last[1]) : null
+}
+
 /**
  * Fetch the release manifest from the configured static endpoint.
  *
@@ -122,45 +146,54 @@ export async function checkLatestRelease(_ignoredArgs?: {
     return hit.value
   }
 
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    // User-Agent so origin-side log analysis can correlate per-install poll
-    // activity if needed.
-    'User-Agent': 'CaveCMS-Updates-Check',
-  }
-
-  let res: Response
+  // Fetch via wget rather than fetch() — see RELEASE_FETCH_UA above for why.
+  // --server-response puts the status line on stderr; `-O -` streams the body
+  // to stdout. wget exits non-zero on HTTP 4xx/5xx, network failure, or ENOENT
+  // (not installed); each is mapped to the operator-facing tag the check route
+  // branches on (manifest_not_found / manifest_http_* / manifest_unreachable).
+  const timeoutSec = Math.max(1, Math.round(RELEASE_FETCH_TIMEOUT_MS / 1000))
+  let rawStdout: string
   try {
-    res = await fetch(url, {
-      method: 'GET',
-      headers,
-      // No-store on the origin side, but a Cloudflare or other CDN cache
-      // could still serve stale. The scheduler tick is 12h so a stale
-      // manifest at the edge is bounded — fine for now.
-      cache: 'no-store',
-      signal: AbortSignal.timeout(RELEASE_FETCH_TIMEOUT_MS),
-    })
+    const out = await execFileAsync(
+      'wget',
+      [
+        '--server-response',
+        '--tries=2',
+        `--timeout=${timeoutSec}`,
+        '--user-agent',
+        RELEASE_FETCH_UA,
+        '--header',
+        'X-CaveCMS-Client: CaveCMS-Updates-Check',
+        '-O',
+        '-',
+        url,
+      ],
+      { timeout: RELEASE_FETCH_TIMEOUT_MS + 3000, maxBuffer: 4 * 1024 * 1024 },
+    )
+    rawStdout = out.stdout
   } catch (err) {
-    // Distinguish network-class failures so the check route can surface
-    // operator-friendly copy. Timeout via AbortSignal manifests as either
-    // AbortError or TimeoutError depending on the runtime — both mean
-    // "we couldn't reach the release server".
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(`manifest_unreachable: ${msg}`)
-  }
-
-  if (!res.ok) {
-    if (res.status === 404) {
+    const e = err as NodeJS.ErrnoException & { stderr?: string; killed?: boolean }
+    if (e.code === 'ENOENT') {
+      throw new Error('manifest_unreachable: wget is not installed on this server')
+    }
+    if (e.killed) {
+      throw new Error('manifest_unreachable: timed out fetching the release manifest')
+    }
+    const status = httpStatusFromWgetStderr(e.stderr ?? '')
+    if (status === 404) {
       // The manifest path is misconfigured (operator-controlled env var
       // or upstream dist host moved).
       throw new Error('manifest_not_found')
     }
-    throw new Error(`manifest_http_${res.status}`)
+    if (status != null) {
+      throw new Error(`manifest_http_${status}`)
+    }
+    throw new Error(`manifest_unreachable: ${e.message ?? 'unknown error'}`)
   }
 
   let rawBody: unknown
   try {
-    rawBody = await res.json()
+    rawBody = JSON.parse(rawStdout)
   } catch {
     throw new Error('manifest_malformed_json')
   }

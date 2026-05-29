@@ -687,8 +687,9 @@ fi
 #   - Git-fetch (default): pull origin, verify target SHA exists,
 #     reset --hard. Closes the TOCTOU where origin/main could advance
 #     between the check and apply APIs.
-#   - Tarball (when CAVECMS_UPDATE_TARBALL_URL is set): curl the tarball,
-#     SHA256 verify, path-traversal + symlink check, atomic extract.
+#   - Tarball (when CAVECMS_UPDATE_TARBALL_URL is set): wget the tarball
+#     (wget, not curl — Cloudflare Bot Fight Mode 403s curl/node by TLS
+#     fingerprint), SHA256 verify, path-traversal + symlink check, atomic extract.
 #     Requires a git repo as well (rollback uses `git reset --hard` on
 #     the file modifications the tarball made; operators using tarball
 #     without git need their own rollback mechanism — out of scope here).
@@ -742,14 +743,22 @@ fi
 if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
   # ──────── Tarball mode ────────
   TARBALL_TMP="${LOG_DIR}/release-${TARGET_SHA:0:12}.tar.gz.tmp.$(rand_suffix)"
-  if ! curl -fsSL --max-time 300 -o "$TARBALL_TMP" "$CAVECMS_UPDATE_TARBALL_URL" 2>>"${LOG_DIR}/tarball-download.log"; then
+  # Download via wget, NOT curl: the release host sits behind Cloudflare Bot
+  # Fight Mode (Free plan — can't be scoped via WAF rules), which fingerprints
+  # curl + node-fetch by their TLS handshake and 403s them from datacenter IPs
+  # regardless of User-Agent. Only wget's fingerprint + a browser UA clears the
+  # challenge (verified from an AWS VPS: wget+UA → 200, curl → 403). The
+  # X-CaveCMS-Client header (ignored by CF's bot check) keeps the request
+  # identifiable in origin logs.
+  CAVECMS_RELEASE_UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  if ! wget -nv --tries=3 --timeout=300 --user-agent="$CAVECMS_RELEASE_UA" --header="X-CaveCMS-Client: CaveCMS-Updater" -O "$TARBALL_TMP" "$CAVECMS_UPDATE_TARBALL_URL" 2>>"${LOG_DIR}/tarball-download.log"; then
     rm -f "$TARBALL_TMP"
     write_status "failed" 2 "Couldn't download the new version" "We tried to fetch the release archive but the download failed. Check your server's internet access." ""
     post_audit_terminal failed "tarball_download_failed"
     exit 1
   fi
-  # Empty/zero-byte response — curl returns success but the tarball
-  # is unusable. Refuse explicitly.
+  # Empty/zero-byte response — wget can exit 0 yet leave an unusable
+  # zero-byte file. Refuse explicitly.
   if [ ! -s "$TARBALL_TMP" ]; then
     rm -f "$TARBALL_TMP"
     write_status "failed" 2 "The downloaded version is empty" "Something is wrong with the release server. Try again in a few minutes." ""

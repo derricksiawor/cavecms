@@ -1,6 +1,6 @@
 {
   "name": "cavecms",
-  "version": "0.1.55",
+  "version": "0.1.56",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
   "author": "Derrick S. K. Siawor",
@@ -21,7 +21,8 @@
     "postbuild": "node --env-file-if-exists=.env.local --import tsx scripts/postbuild-patch-trust-host-header.ts && node --env-file-if-exists=.env.local --import tsx scripts/postbuild-check-slug-collisions.ts",
     "prestart": "node --env-file-if-exists=.env.local scripts/dev-bootstrap.mjs",
     "start": "node --env-file-if-exists=.env.local scripts/start-standalone.mjs",
-    "lint": "eslint .",
+    "lint": "eslint . --cache --cache-location .eslintcache",
+    "lint:changed": "F=\"$(git diff --name-only --diff-filter=ACMR HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs'; git ls-files --others --exclude-standard -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs')\"; if [ -n \"$F\" ]; then echo \"$F\" | xargs eslint --cache --cache-location .eslintcache; else echo 'lint:changed: nothing to lint'; fi",
     "typecheck": "tsc --noEmit",
     "validate:site-templates": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/validate-site-templates.ts",
     "test": "vitest run",

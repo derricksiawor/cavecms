@@ -1654,6 +1654,51 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     },
   ],
 
+  // Style fields for the icon box. Content (headline, body, link href)
+  // is inline-editable on the page; these are the style knobs that have
+  // no inline affordance, so the drawer is the only way to reach them.
+  lx_icon_box: [
+    {
+      kind: 'icon',
+      key: 'icon',
+      label: 'Icon',
+      help: 'Search 1,950+ Lucide icons — the pick renders with a champagne glow halo above the headline.',
+    },
+    {
+      kind: 'select', key: 'accent', label: 'Accent style',
+      options: [
+        { value: 'champagne-outline', label: 'Champagne outline — section-aware (editorial default)' },
+        { value: 'champagne-fill', label: 'Champagne fill — radial glow on a dark ground' },
+        { value: 'cream-tint', label: 'Cream tint — soft surface on dark sections' },
+      ],
+      help: 'Champagne outline adapts to the section: a gold hairline card on dark sections, a quiet ivory fill on light ones.',
+    },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+      ],
+    },
+    {
+      kind: 'color',
+      key: 'tone',
+      label: 'Tone',
+      tokens: ['obsidian', 'ivory'],
+      allowCustom: true,
+      allowAlpha: false,
+      help: 'Obsidian for ivory/bone sections; ivory for obsidian/champagne sections.',
+    },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
   lx_stat: [
     { kind: 'number', key: 'value', label: 'Number', step: 1 },
     { kind: 'string', key: 'prefix', label: 'Prefix', maxLength: 8, placeholder: 'e.g. $' },

@@ -29,6 +29,9 @@ homepage-*.png
 # brand assets under /public, /components) are unaffected.
 /*.png
 
+# Lint cache — local, machine-specific (regenerated on each lint run)
+/.eslintcache
+
 # Test results / playwright reports
 /test-results
 /playwright-report

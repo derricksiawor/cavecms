@@ -1056,6 +1056,24 @@ export function useInsertBlock(): InsertBlockFn {
       // (EditableSection's +Section button, AddColumnHere widget) and
       // never reach this function.
       let resolvedParentId: number | null | undefined = options.parentId
+      // Tracks a section the auto-wrap branch below creates so a later
+      // failure (widget POST rejects / network drop) can roll it back
+      // instead of stranding an empty section on the page.
+      let autoCreatedSectionId: number | null = null
+      const deleteAutoSection = async () => {
+        if (autoCreatedSectionId === null) return
+        const sid = autoCreatedSectionId
+        autoCreatedSectionId = null
+        try {
+          // Best-effort — the DELETE route soft-cascades the section's
+          // child column too (recursive-CTE subtree delete). If this
+          // itself fails the operator can delete the empty section by
+          // hand; we never block the error return on it.
+          await csrfFetch(`/api/cms/blocks/${sid}`, { method: 'DELETE' })
+        } catch {
+          /* best-effort rollback — swallow */
+        }
+      }
       const needsAutoParent =
         resolvedParentId === undefined &&
         options.afterBlockId === undefined &&
@@ -1094,12 +1112,27 @@ export function useInsertBlock(): InsertBlockFn {
               body: JSON.stringify({
                 pageId: options.pageId,
                 kind: 'section',
+                // SectionMetaSchema is .strict() and REQUIRES columns +
+                // background + padding — an omitted meta is parsed as
+                // {} server-side and 400s (err_kind zod), so the
+                // auto-wrap section never gets created and the widget
+                // insert dies on an empty page. Send the same default
+                // blob InsertSectionHere uses (columns mirrors
+                // withColumns). Operators retune it in the section
+                // settings drawer afterwards.
+                meta: { columns: 1, background: 'cream', padding: 'md' },
                 withColumns: 1,
               }),
             })
             if (wrapRes.ok) {
               const wrapJson = (await wrapRes.json().catch(() => ({}))) as {
+                id?: number
                 columnIds?: number[]
+              }
+              // Remember the section id so a downstream widget-POST
+              // failure can roll the empty host section back.
+              if (typeof wrapJson.id === 'number') {
+                autoCreatedSectionId = wrapJson.id
               }
               const candidate = wrapJson.columnIds?.[0]
               if (typeof candidate === 'number') {
@@ -1126,11 +1159,12 @@ export function useInsertBlock(): InsertBlockFn {
             }
           }
           if (typeof newColumnId !== 'number') {
-            // Section POST returned 2xx but no column id (malformed /
-            // proxy-mangled response). Abort — the widget must nest in
-            // a real column, never go loose. The empty section the
-            // server just created is harmless; router.refresh isn't
-            // issued on this abort so the optimistic tree is untouched.
+            // Section POST returned 2xx but no usable column id
+            // (malformed / proxy-mangled response). Roll back the
+            // orphan section we just created so the abort leaves no
+            // empty section behind, then bail — the widget must nest in
+            // a real column, never go loose.
+            await deleteAutoSection()
             return { ok: false, error: 'section_wrap_failed' }
           }
           resolvedParentId = newColumnId
@@ -1215,8 +1249,17 @@ export function useInsertBlock(): InsertBlockFn {
           const j = (await res.json().catch(() => ({}))) as {
             error?: string
           }
+          // The host section+column were created in a prior request; if
+          // the widget itself can't land, roll them back so no empty
+          // section is stranded (no-op when we routed to an existing
+          // column).
+          await deleteAutoSection()
           return { ok: false, error: j.error ?? 'insert_failed' }
         }
+        // Widget landed — past this point a thrown error (recordCommand,
+        // router.refresh) must NOT roll back the host section, so clear
+        // the rollback handle.
+        autoCreatedSectionId = null
         const j = (await res.json().catch(() => ({}))) as {
           id?: number
         }
@@ -1302,6 +1345,11 @@ export function useInsertBlock(): InsertBlockFn {
         router.refresh()
         return { ok: true, blockId: newId }
       } catch (e) {
+        // Same rollback as the !res.ok branch — a network drop between
+        // the section create and the widget create must not strand an
+        // empty host section. No-op once the widget landed (the handle
+        // is cleared above) or when we routed to an existing column.
+        await deleteAutoSection()
         return {
           ok: false,
           error:

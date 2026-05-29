@@ -61,6 +61,16 @@ const __dirname = dirname(__filename)
 
 const DEFAULT_RELEASE_HOST = 'https://cavecms.derricksiawor.com'
 const RELEASE_HOST = process.env.CAVECMS_RELEASE_HOST ?? DEFAULT_RELEASE_HOST
+
+// Browser User-Agent for release-host downloads (see fetchToFileViaWget for
+// the full rationale): Cloudflare Bot Fight Mode 403s curl + node-fetch by
+// TLS fingerprint from datacenter IPs, and even wget needs a browser UA on
+// top of its (unflagged) fingerprint to clear the challenge. RELEASE_CLIENT_ID
+// rides in a custom header CF ignores so origin logs can still tell installer
+// traffic apart.
+const RELEASE_FETCH_UA =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+const RELEASE_CLIENT_ID = 'create-cavecms'
 const DEFAULT_PORT = 3040
 const MIN_NODE_MAJOR = 20
 
@@ -751,49 +761,45 @@ function preflightTargetDir(targetDir) {
 // Download + verify
 // ════════════════════════════════════════════════════════════════════
 
-async function fetchToFile(url, destPath) {
-  // Native fetch (Node 20+) for the manifest. For the zip we use curl
-  // — fetch streams ArrayBuffer into memory, which would be 70+ MiB
-  // residents for the zip. curl with `-o` writes to disk directly.
-  //
-  // 60-second cap covers slow international links to the manifest
-  // (a few KiB) without hanging forever if DNS / TLS stalls. Node's
-  // fetch has no default timeout otherwise.
-  const r = await fetch(url, {
-    redirect: 'follow',
-    headers: { 'User-Agent': 'create-cavecms' },
-    signal: AbortSignal.timeout(60_000),
-  })
-  if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText} fetching ${url}`)
-  const buf = Buffer.from(await r.arrayBuffer())
-  writeFileSync(destPath, buf)
-  return destPath
-}
-
-function fetchToFileViaCurl(url, destPath) {
-  // -fsSL: fail-on-error, silent, show-errors, follow-redirects.
-  // --max-time 1800: 30-minute cap so a slow international link can
-  //   still finish a ~70 MiB zip (10-minute cap required ≥117 KB/s,
-  //   which broke for some operators).
-  // --retry 2 + --retry-delay 5: cover transient HTTP/2 GOAWAY +
-  //   network blips without bothering the operator.
-  // --connect-timeout 30: don't hang forever on DNS / SYN failures.
+// Cloudflare Bot Fight Mode (Free plan, account-wide — can't be scoped via
+// WAF rules) fingerprints curl + Node's undici `fetch` by their TLS
+// handshake (JA3) and 403s them from datacenter IPs regardless of the
+// User-Agent, which broke installs from every cloud VPS. Empirically, wget's
+// fingerprint + a browser UA is the one combo that clears the challenge
+// (verified against the release host from an AWS VPS: wget+UA → 200, while
+// curl and node-fetch → 403 even with the same UA). So every release-host
+// download — manifest AND zip — goes through wget. `timeoutSec` is wget's
+// per-stall read/connect timeout; the manifest is a few KiB, the zip ~70 MiB.
+function fetchToFileViaWget(url, destPath, timeoutSec) {
   const res = spawnSync(
-    'curl',
+    'wget',
     [
-      '-fsSL',
-      '--connect-timeout', '30',
-      '--max-time', '1800',
-      '--retry', '2',
-      '--retry-delay', '5',
-      '--output', destPath,
+      '--quiet',
+      `--timeout=${timeoutSec}`,
+      '--tries=3',
+      '--user-agent', RELEASE_FETCH_UA,
+      '--header', `X-CaveCMS-Client: ${RELEASE_CLIENT_ID}`,
+      '-O', destPath,
       url,
     ],
     { stdio: ['ignore', 'inherit', 'inherit'] },
   )
-  if (res.status !== 0) {
-    die(`curl failed (exit ${res.status}) downloading ${url}`)
+  if (res.error) {
+    if (res.error.code === 'ENOENT') {
+      die(
+        'wget is required to download the release but is not installed.\n' +
+          '  Install it and re-run:  Debian/Ubuntu → sudo apt install wget   ·   RHEL/Alma → sudo yum install wget',
+      )
+    }
+    die(`wget couldn't run downloading ${url}: ${res.error.message}`)
   }
+  if (res.status !== 0) {
+    die(
+      `wget failed (exit ${res.status}) downloading ${url}. ` +
+        `If this is an HTTP 403, the release host's CDN is challenging this server.`,
+    )
+  }
+  return destPath
 }
 
 function sha256OfFile(path) {
@@ -844,7 +850,7 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
   log.info(`Fetching release index from ${manifestUrl}…`)
   const manifestPath = join(stagingDir, 'manifest.json')
   try {
-    await fetchToFile(manifestUrl, manifestPath)
+    fetchToFileViaWget(manifestUrl, manifestPath, 60)
   } catch (err) {
     die(`Couldn't fetch release manifest: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -901,7 +907,7 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
   // Download the zip via curl (memory-friendly for large files).
   const zipPath = join(stagingDir, `cavecms-${target.version}.zip`)
   log.info(`Downloading ${target.downloadUrl}…`)
-  fetchToFileViaCurl(target.downloadUrl, zipPath)
+  fetchToFileViaWget(target.downloadUrl, zipPath, 1800)
 
   // SHA-256 verify against the manifest's claim.
   log.info('Verifying SHA-256…')

@@ -870,10 +870,54 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
     lx_quote: { label: 'Quote', data: SEED_DATA.lx_quote },
   }
 
+  // Best-effort rollback of an auto-created host section (cascades its
+  // child column server-side). Swallows its own errors — the operator
+  // can delete an empty section by hand if this misses.
+  const rollbackAutoSection = async (sectionId: number | null): Promise<void> => {
+    if (sectionId === null) return
+    await csrfFetch(`/api/cms/blocks/${sectionId}`, { method: 'DELETE' }).catch(
+      () => {},
+    )
+  }
+
   const addBlockOfType = async (type: string): Promise<void> => {
     const stub = blockStubs[type]
     if (!stub) return
+    // Widgets must never land loose at the top level — every quick-add
+    // builds a host section + column and nests the widget inside it (the
+    // section→column→widget contract the public-page inline editor also
+    // enforces). The section create is one atomic TX (section + 1
+    // column); if the widget POST then fails, the empty host section is
+    // rolled back so nothing is stranded on the page.
+    let autoSectionId: number | null = null
     try {
+      const wrap = await csrfFetch('/api/cms/blocks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          pageId: page.id,
+          kind: 'section',
+          // SectionMetaSchema is strict + requires these — omitting meta
+          // 400s with err_kind zod. Default cream/standard; the operator
+          // retunes via the section settings drawer.
+          meta: { columns: 1, background: 'cream', padding: 'md' },
+          withColumns: 1,
+        }),
+      })
+      if (!wrap.ok) {
+        const j = (await wrap.json().catch(() => ({}))) as { error?: string }
+        throw new Error(j.error ?? `Couldn’t set up a section (${wrap.status})`)
+      }
+      const wj = (await wrap.json().catch(() => ({}))) as {
+        id?: number
+        columnIds?: number[]
+      }
+      if (typeof wj.id === 'number') autoSectionId = wj.id
+      const columnId = wj.columnIds?.[0]
+      if (typeof columnId !== 'number') {
+        await rollbackAutoSection(autoSectionId)
+        throw new Error('Couldn’t set up a section for that block.')
+      }
       const r = await csrfFetch('/api/cms/blocks', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -881,10 +925,14 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
           pageId: page.id,
           blockType: type,
           data: stub.data,
+          parentId: columnId,
         }),
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
+        // Roll back the empty host section so a failed widget insert
+        // never strands a section on the page.
+        await rollbackAutoSection(autoSectionId)
         if (j.error === 'block_type_reserved_for_fixed_slot') {
           toast.error(
             'That block type is reserved for a fixed slot on this page.',
