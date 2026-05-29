@@ -39,8 +39,14 @@ const ALIGN_CLASS: Record<BlockData<'lx_heading'>['alignment'], string> = {
 // utility lookup and emit an inline style — the only path that can't
 // be precomputed at build time. resolveColorValue() returns either a
 // `var(--color-*)` string or the raw hex literal.
+// Headings map the dark-text tone to `text-primary` (the operator's
+// Primary brand color, default #050505 = obsidian) so Primary colors
+// headings on light surfaces. ivory keeps the light-surface flip (the
+// insert pipeline stores ivory for headings dropped onto dark sections);
+// champagne keeps the gold accent. Body text (lx_text) is unaffected —
+// it owns a separate map.
 const TOKEN_TEXT_CLASS: Record<string, string> = {
-  obsidian: 'text-obsidian',
+  obsidian: 'text-primary',
   ivory: 'text-ivory',
   champagne: 'text-champagne',
 }
