@@ -229,10 +229,11 @@ snapshot_current_tree() {
   #     persistent user-content dir; add new excludes when adding new
   #     content surfaces.
   if ! rsync -a --delete \
-    --exclude='node_modules' \
+    --exclude='/node_modules' \
     --exclude='.git' \
     --exclude='.next/cache' \
     --exclude='snapshots' \
+    --exclude='.cavecms-state' \
     --exclude='.tarball-old.*' \
     --exclude='*.tmp.*' \
     --exclude='public/uploads' \
@@ -287,10 +288,11 @@ restore_from_snapshot() {
   # `public/uploads` (--delete doesn't touch it) leave operator
   # uploads intact across the restore. Likewise public/media.
   if ! rsync -a --delete \
-    --exclude='node_modules' \
+    --exclude='/node_modules' \
     --exclude='.git' \
     --exclude='.next/cache' \
     --exclude='snapshots' \
+    --exclude='.cavecms-state' \
     --exclude='public/uploads' \
     --exclude='public/media' \
     "$snap_dir/" "$REPO_DIR/" 2>>"$restore_log"; then

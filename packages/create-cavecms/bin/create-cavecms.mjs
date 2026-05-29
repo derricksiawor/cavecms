@@ -44,6 +44,10 @@ import {
   writeFileSync,
   chmodSync,
   rmSync,
+  openSync,
+  closeSync,
+  writeSync,
+  unlinkSync,
 } from 'node:fs'
 import { randomBytes, createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
 import { spawnSync, spawn } from 'node:child_process'
@@ -227,6 +231,21 @@ function runSudoOrDie(args, label) {
 // the interactive prompt at line ~1690 uses.
 const SITE_NAME_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
 
+// Reject install paths carrying bytes that would break out of a
+// double-quoted bash context. The `cavecms` shim interpolates the install
+// path into a `cd "..."` line, so a path with $, backtick, backslash,
+// quote, or a control char could inject commands into a persisted,
+// PATH-exposed, often-sudo'd script. Mirrors the apply route's
+// assertSafePathForShell (SHELL_DOUBLEQUOTE_DANGEROUS) + the double-quote
+// char the shim's raw interpolation adds. Spaces / non-ASCII still pass so
+// legit paths like `/srv/café/cavecms` keep working.
+const SHELL_UNSAFE_PATH = /[$`\\'"\x00-\x1f]/
+function assertSafeInstallPath(p) {
+  if (SHELL_UNSAFE_PATH.test(p)) {
+    die(`Unsafe install path (contains shell metacharacters): ${JSON.stringify(p)}`)
+  }
+}
+
 function parseArgv(argv) {
   const out = {
     siteName: null,
@@ -278,8 +297,20 @@ function showHelp() {
   console.log([
     '',
     c('bold', 'Usage:') + ' npx create-cavecms <site-name> [options]',
+    '       npx create-cavecms <command> [options]   ' + c('gray', '(manage an existing install)'),
     '',
-    c('bold', 'Options:'),
+    c('bold', 'Commands (run from an install dir, or pass --dir):'),
+    '  update [--check] [--force] [--version=X.Y.Z]   Update an existing install (latest, or a pinned release)',
+    '                                     --check prints JSON (current vs latest), applies nothing',
+    '                                     --force re-installs the current version (recover a broken build)',
+    '                                     --version=X.Y.Z pins a specific release (re-install / downgrade)',
+    '  rollback                           Restore the previous version from the most recent snapshot',
+    '  status                             Show the running version + whether an update is available',
+    '  version                            Print the installed version',
+    '  help                               Show this message',
+    c('gray', '  (these command names are reserved and cannot be used as a site name)'),
+    '',
+    c('bold', 'Install options:'),
     '  --surface=auto|vps|pm2|cpanel|laptop  Force a deployment surface (default: auto)',
     '  --port=NUMBER                      Port the app listens on (default: 3040)',
     '  --version=X.Y.Z|latest             Release to install (default: latest)',
@@ -491,7 +522,11 @@ function preflightPlatform() {
 }
 
 function preflightDeps() {
-  const required = ['unzip', 'curl']
+  // wget is the hard download dependency for BOTH install (zip) and update
+  // (manifest + tarball) — release-host downloads go through wget because
+  // Cloudflare Bot Fight Mode 403s curl/node-fetch. unzip extracts install
+  // zips; curl is used by the orchestrator for the release probe + healthz.
+  const required = ['wget', 'unzip', 'curl']
   const missing = []
   for (const cmd of required) {
     const r = spawnSync('command', ['-v', cmd], { shell: '/bin/bash', stdio: 'ignore' })
@@ -770,31 +805,45 @@ function preflightTargetDir(targetDir) {
 // curl and node-fetch → 403 even with the same UA). So every release-host
 // download — manifest AND zip — goes through wget. `timeoutSec` is wget's
 // per-stall read/connect timeout; the manifest is a few KiB, the zip ~70 MiB.
-function fetchToFileViaWget(url, destPath, timeoutSec) {
+// `soft: true` makes failures THROW instead of die()ing (process.exit), so
+// graceful-degradation callers (e.g. `cavecms status` when the host is
+// offline) can catch + warn rather than hard-exit. Default stays hard-exit.
+function fetchToFileViaWget(url, destPath, timeoutSec, { soft = false, tries = 3 } = {}) {
+  const fail = (msg) => { if (soft) throw new Error(msg); die(msg) }
   const res = spawnSync(
     'wget',
     [
       '--quiet',
       `--timeout=${timeoutSec}`,
-      '--tries=3',
+      `--tries=${tries}`,
       '--user-agent', RELEASE_FETCH_UA,
       '--header', `X-CaveCMS-Client: ${RELEASE_CLIENT_ID}`,
       '-O', destPath,
       url,
     ],
-    { stdio: ['ignore', 'inherit', 'inherit'] },
+    {
+      stdio: ['ignore', 'inherit', 'inherit'],
+      // wget's --timeout is a per-stall, per-try cap; against a black-holed
+      // host it can burn timeoutSec × tries. Add a Node wall-clock backstop
+      // (a little over that budget) so an interactive `cavecms status` can't
+      // block for minutes — a SIGKILL'd wget lands in the res.error branch
+      // and fail()s cleanly. killSignal SIGKILL because wget ignores TERM mid-
+      // connect on some platforms.
+      timeout: (timeoutSec * tries + 10) * 1000,
+      killSignal: 'SIGKILL',
+    },
   )
   if (res.error) {
     if (res.error.code === 'ENOENT') {
-      die(
+      fail(
         'wget is required to download the release but is not installed.\n' +
           '  Install it and re-run:  Debian/Ubuntu → sudo apt install wget   ·   RHEL/Alma → sudo yum install wget',
       )
     }
-    die(`wget couldn't run downloading ${url}: ${res.error.message}`)
+    fail(`wget couldn't run downloading ${url}: ${res.error.message}`)
   }
   if (res.status !== 0) {
-    die(
+    fail(
       `wget failed (exit ${res.status}) downloading ${url}. ` +
         `If this is an HTTP 403, the release host's CDN is challenging this server.`,
     )
@@ -826,8 +875,105 @@ function verifyEd25519(payloadPath, sigBase64, pubkeyPem) {
   }
 }
 
-async function downloadAndVerify({ targetDir, version, skipSignature }) {
+// Same-origin + HTTPS guard on a manifest entry's downloadUrl. A
+// tampered manifest could point downloadUrl at attacker.com with a
+// matching sha256 + a signature from a key the attacker controls. The
+// in-app updater (lib/updates/checkLatestRelease.ts) enforces the same
+// gate via CAVECMS_RELEASE_DOWNLOAD_ORIGINS — extracted here so the
+// install path AND the `update`/`status` subcommands share one copy of
+// this security-critical check (no drift between them).
+function assertManifestTargetSafe(manifestUrl, downloadUrl, { soft = false } = {}) {
+  const fail = (msg) => { if (soft) throw new Error(msg); die(msg) }
+  try {
+    const manifestOrigin = new URL(manifestUrl).origin
+    const downloadOrigin = new URL(downloadUrl).origin
+    if (downloadOrigin !== manifestOrigin) {
+      const allowedRaw = process.env.CAVECMS_RELEASE_DOWNLOAD_ORIGINS
+      const allowed = allowedRaw
+        ? allowedRaw.split(',').map((s) => s.trim()).filter(Boolean)
+        : []
+      if (!allowed.includes(downloadOrigin)) {
+        fail(
+          `Manifest points downloadUrl at a different origin than the manifest itself.\n` +
+            `  manifest: ${manifestOrigin}\n` +
+            `  download: ${downloadOrigin}\n` +
+            `  Refusing. If your fork legitimately splits manifest + zip across origins,\n` +
+            `  set CAVECMS_RELEASE_DOWNLOAD_ORIGINS to the allowed list (comma-separated).`,
+        )
+      }
+    }
+    // Strict HTTPS, matching the dashboard apply route + checkLatestRelease.
+    // The loopback-http exception is for local dev mirrors only, so gate it
+    // behind CAVECMS_DEV_BUILD (same gate as the pubkey override / dry-run) —
+    // production CLI runs enforce the exact same gate as the dashboard.
+    const allowLoopbackHttp = process.env.CAVECMS_DEV_BUILD === '1' &&
+      /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(downloadUrl)
+    if (!/^https:\/\//i.test(downloadUrl) && !allowLoopbackHttp) {
+      fail(`downloadUrl must be HTTPS (got: ${downloadUrl})`)
+    }
+  } catch (err) {
+    // Re-throw our own deliberate failures; only wrap genuine URL-parse errors.
+    if (err instanceof Error && (err.message.startsWith('Manifest points') || err.message.startsWith('downloadUrl must be HTTPS'))) throw err
+    fail(`Invalid downloadUrl in manifest: ${downloadUrl}`)
+  }
+}
+
+// Resolve the manifest entry to install/update to WITHOUT downloading
+// the zip. Returns { target, manifestUrl }. Shared by the installer
+// (downloadAndVerify) and the `update`/`status` subcommands — the
+// latter hand the coords to the orchestrator's tarball mode rather
+// than unpacking here.
+function resolveReleaseTarget({ version, soft = false }) {
+  const fail = (msg) => { if (soft) throw new Error(msg); die(msg) }
   const manifestUrl = `${RELEASE_HOST}/manifest.json`
+  const tmpManifest = join(
+    tmpdir(),
+    `cavecms-manifest-${process.pid}-${randomBytes(6).toString('hex')}.json`,
+  )
+  // die() is process.exit() and does NOT run `finally`; register an
+  // exit handler so the tmp file is reaped on the hard-exit error paths too.
+  const cleanup = () => { try { rmSync(tmpManifest, { force: true }) } catch { /* best-effort */ } }
+  process.once('exit', cleanup)
+  try {
+    // Progress to stderr so `update --check` keeps stdout pure JSON.
+    console.error(c('gray', `ℹ Fetching release index from ${manifestUrl}…`))
+    // The manifest is a few KiB. On the soft (interactive status/--check) path
+    // fail fast against a stalled/black-holed host — one try, short timeout —
+    // so the command degrades in seconds, not minutes. Non-soft (install/
+    // update apply) keeps the patient 60s × 3 budget.
+    fetchToFileViaWget(manifestUrl, tmpManifest, soft ? 10 : 60, { soft, tries: soft ? 1 : 3 })
+    let manifest
+    try {
+      manifest = JSON.parse(readFileSync(tmpManifest, 'utf8'))
+    } catch {
+      // Cloudflare challenge HTML / truncated body / garbage → clean message,
+      // not a raw SyntaxError stack at the operator.
+      return fail(
+        `The release index from ${manifestUrl} couldn't be read (it wasn't valid JSON).\n` +
+          `  The dist host may be returning an error or challenge page. Try again in a moment.`,
+      )
+    }
+    if (!Array.isArray(manifest.releases) || manifest.releases.length === 0) {
+      return fail('Release manifest is empty — the dist host is misconfigured.')
+    }
+    const target = version === 'latest'
+      ? manifest.releases[0]
+      : manifest.releases.find((r) => r.version === version)
+    if (!target) {
+      return fail(
+        `Version "${version}" not found in the release manifest. ` +
+          `Available: ${manifest.releases.map((r) => r.version).join(', ')}`,
+      )
+    }
+    assertManifestTargetSafe(manifestUrl, target.downloadUrl, { soft })
+    return { target, manifestUrl }
+  } finally {
+    cleanup()
+  }
+}
+
+async function downloadAndVerify({ targetDir, version, skipSignature }) {
+  const { target } = resolveReleaseTarget({ version })
   // Put staging in $TMPDIR so a half-failed download doesn't leave
   // artifacts inside the operator's target dir (which would then trip
   // preflightTargetDir's non-empty refusal on retry). Random suffix
@@ -847,64 +993,12 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
   }
   process.on('exit', cleanupOnExit)
 
-  log.info(`Fetching release index from ${manifestUrl}…`)
-  const manifestPath = join(stagingDir, 'manifest.json')
-  try {
-    fetchToFileViaWget(manifestUrl, manifestPath, 60)
-  } catch (err) {
-    die(`Couldn't fetch release manifest: ${err instanceof Error ? err.message : String(err)}`)
-  }
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  if (!Array.isArray(manifest.releases) || manifest.releases.length === 0) {
-    die('Release manifest is empty — the dist host is misconfigured.')
-  }
-  const target = version === 'latest'
-    ? manifest.releases[0]
-    : manifest.releases.find((r) => r.version === version)
-  if (!target) {
-    die(
-      `Version "${version}" not found in the release manifest. ` +
-        `Available: ${manifest.releases.map((r) => r.version).join(', ')}`,
-    )
-  }
   log.ok(`Will install CaveCMS ${target.version} (published ${target.publishedAt})`)
   if (target.isSecurity) {
     log.warn('This is marked as a security release. Continuing.')
   }
 
-  // Same-origin guard on downloadUrl. Without this, a tampered manifest
-  // could point downloadUrl at attacker.com with a matching sha256 +
-  // signature from a key the attacker controls. The in-app updater
-  // (lib/updates/checkLatestRelease.ts) enforces the same gate via
-  // CAVECMS_RELEASE_DOWNLOAD_ORIGINS — mirror it here so the CLI path
-  // can't be the soft spot.
-  try {
-    const manifestOrigin = new URL(manifestUrl).origin
-    const downloadOrigin = new URL(target.downloadUrl).origin
-    if (downloadOrigin !== manifestOrigin) {
-      const allowedRaw = process.env.CAVECMS_RELEASE_DOWNLOAD_ORIGINS
-      const allowed = allowedRaw
-        ? allowedRaw.split(',').map((s) => s.trim()).filter(Boolean)
-        : []
-      if (!allowed.includes(downloadOrigin)) {
-        die(
-          `Manifest points downloadUrl at a different origin than the manifest itself.\n` +
-            `  manifest: ${manifestOrigin}\n` +
-            `  download: ${downloadOrigin}\n` +
-            `  Refusing to install. If your fork legitimately splits manifest + zip across origins,\n` +
-            `  set CAVECMS_RELEASE_DOWNLOAD_ORIGINS to the allowed list (comma-separated).`,
-        )
-      }
-    }
-    if (!/^https:\/\//i.test(target.downloadUrl) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(target.downloadUrl)) {
-      die(`downloadUrl must be HTTPS (got: ${target.downloadUrl})`)
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('Manifest points')) throw err
-    die(`Invalid downloadUrl in manifest: ${target.downloadUrl}`)
-  }
-
-  // Download the zip via curl (memory-friendly for large files).
+  // Download the zip via wget (memory-friendly for large files).
   const zipPath = join(stagingDir, `cavecms-${target.version}.zip`)
   log.info(`Downloading ${target.downloadUrl}…`)
   fetchToFileViaWget(target.downloadUrl, zipPath, 1800)
@@ -2059,6 +2153,695 @@ function startService({ surface, targetDir, envPath, config, skipStart, siteName
 }
 
 // ════════════════════════════════════════════════════════════════════
+// Recovery subcommands — `update` / `rollback` / `version` / `status`
+//
+// These let an operator with only shell access update or roll back an
+// EXISTING install from the terminal, WITHOUT the admin dashboard — the
+// recovery path for "I'm locked out of the dashboard" or "a bad release
+// broke the site". Because they ship in the npm-published CLI (run via
+// `npx create-cavecms@latest <cmd>` or the installed `cavecms` shim),
+// the recovery logic is fetched fresh each run and can't be taken down
+// by the install's own (possibly-broken) tree.
+//
+// They reuse the install's scripts/cavecms-update.sh orchestrator
+// (tarball mode + Ed25519 verify + snapshot/rollback) and the sealed
+// env.production for all connection + path config, mirroring the env
+// recipe in app/api/admin/updates/apply/route.ts.
+// ════════════════════════════════════════════════════════════════════
+
+const RECOVERY_SUBCOMMANDS = new Set(['update', 'rollback', 'version', 'status'])
+
+function parseSubArgv(argv, sub) {
+  const out = { dir: null, check: false, force: false, version: 'latest' }
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '--check') out.check = true
+    else if (a === '--force') out.force = true
+    else if (a.startsWith('--dir=')) {
+      const v = a.slice('--dir='.length)
+      if (v === '') die('--dir requires a path (e.g. --dir /opt/cavecms)')
+      out.dir = v
+    }
+    else if (a === '--dir') {
+      const v = argv[++i]
+      // Guard against `--dir` as the last token or `--dir --force` (which
+      // would silently target cwd / swallow the next flag).
+      if (v === undefined || v === '' || v.startsWith('--')) die('--dir requires a path (e.g. --dir /opt/cavecms)')
+      out.dir = v
+    }
+    else if (a.startsWith('--version=')) {
+      const v = a.slice('--version='.length)
+      if (v === '') die('--version requires a value (e.g. --version 0.1.50 or latest)')
+      out.version = v
+    }
+    else if (a === '--version') {
+      const v = argv[++i]
+      if (v === undefined || v === '' || v.startsWith('--')) die('--version requires a value (e.g. --version 0.1.50 or latest)')
+      out.version = v
+    }
+    else if (a.startsWith('--')) die(`Unknown flag for this command: ${a}`)
+    else die(`Unexpected argument "${a}"${sub === 'update' ? ` — did you mean --version=${a}?` : ''}`)
+  }
+  // Reject flags a command doesn't honour, instead of silently no-op'ing,
+  // so a mistyped recovery command fails loudly. Only `update` reads
+  // check/force/version.
+  if (sub && sub !== 'update') {
+    if (out.check) die(`\`cavecms ${sub}\` does not take --check`)
+    if (out.force) die(`\`cavecms ${sub}\` does not take --force`)
+    if (out.version !== 'latest') die(`\`cavecms ${sub}\` does not take --version`)
+  }
+  return out
+}
+
+function parseEnvFile(envPath) {
+  const env = {}
+  for (const raw of readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq < 0) continue
+    env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
+  }
+  return env
+}
+
+function resolveInstallDir(opts) {
+  const dir = opts.dir ? resolve(opts.dir) : process.cwd()
+  const envPath = join(dir, 'env.production')
+  if (!existsSync(envPath)) {
+    die(
+      `No CaveCMS install found at ${dir}\n` +
+        `  (expected a sealed env.production there).\n` +
+        `  Run this from your install directory, or pass --dir /path/to/install.`,
+    )
+  }
+  return { dir, envPath, env: parseEnvFile(envPath) }
+}
+
+function detectInstallSurface(dir, env) {
+  // Detect from THIS install's own signals only — never a global path like
+  // /etc/systemd/system/cavecms.service, which could belong to a SIBLING
+  // install on a multi-install host and shadow the cpanel/laptop checks.
+  // writeSealedEnv is the sole producer of /opt/cavecms-rooted paths and
+  // writes them only for the vps surface, so the env is an install-specific
+  // vps signal.
+  if (existsSync(join(dir, 'pm2.config.cjs'))) return 'pm2'
+  if (
+    (typeof env.UPLOADS_ROOT === 'string' && env.UPLOADS_ROOT.startsWith('/opt/cavecms')) ||
+    (typeof env.CAVECMS_STATE_DIR === 'string' && env.CAVECMS_STATE_DIR.startsWith('/opt/cavecms'))
+  ) return 'vps'
+  if (existsSync(join(dir, 'app.js'))) return 'cpanel'
+  return 'laptop'
+}
+
+// Read the pm2 app name + PM2_HOME the installer baked into
+// pm2.config.cjs so the orchestrator reloads the RIGHT app under the
+// RIGHT daemon — matches the CAVECMS_PM2_APP_NAME / PM2_HOME forwarding
+// in app/api/admin/updates/apply/route.ts's buildScriptEnv.
+function readPm2Config(dir) {
+  const p = join(dir, 'pm2.config.cjs')
+  if (!existsSync(p)) return {}
+  const text = readFileSync(p, 'utf8')
+  const nameM = text.match(/CAVECMS_PM2_APP_NAME:\s*(['"])(.*?)\1/) || text.match(/name:\s*(['"])(.*?)\1/)
+  const homeM = text.match(/PM2_HOME:\s*(['"])(.*?)\1/)
+  return {
+    pm2AppName: nameM ? nameM[2] : undefined,
+    pm2Home: homeM ? homeM[2] : undefined,
+  }
+}
+
+function shortSha(s) {
+  return typeof s === 'string' ? s.slice(0, 12) : s
+}
+
+// Allowlist of env vars the orchestrator actually needs — mirrors the
+// dashboard apply route's SCRIPT_ENV_ALLOWLIST. The app-auth secrets
+// (JWT/CSRF/PREVIEW/BROCHURE/SECRETS_ENCRYPTION_KEY/INSTALL_BOOTSTRAP_TOKEN)
+// are DELIBERATELY excluded: the orchestrator never reads them, and
+// forwarding them into the spawned bash + its `pnpm install` lifecycle
+// scripts would let a malicious dependency postinstall read the full secret
+// set (and echo it into the inherited stdio). The CLI must not be a
+// weaker-trust path than the dashboard.
+const ORCHESTRATOR_ENV_ALLOWLIST = [
+  // Process essentials so node/pnpm/pm2/wget/git resolve.
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'NODE_ENV',
+  'NPM_CONFIG_USERCONFIG', 'XDG_RUNTIME_DIR',
+  // DB connectivity for db:migrate.
+  'DATABASE_URL', 'DATABASE_MIGRATOR_URL',
+  // The only two secrets the orchestrator genuinely uses (internal
+  // maintenance/audit POST + healthz verify) — NOT the app-auth secrets.
+  'INTERNAL_REVALIDATE_SECRET', 'HEALTHZ_TOKEN',
+  // Process-manager handles + the surface's restart mechanism.
+  'PM2_HOME', 'CAVECMS_PM2_APP_NAME', 'CAVECMS_RESTART_MODE', 'CAVECMS_SYSTEMD_UNIT',
+  // Per-install runtime state + snapshot + log dirs.
+  'CAVECMS_STATE_DIR', 'CAVECMS_SNAPSHOT_ROOT', 'CAVECMS_LOG_DIR',
+  // Release bookkeeping the orchestrator restamps into env.production.
+  'CAVECMS_COMMIT', 'CAVECMS_RELEASE_TS',
+  // PORT — used to derive CAVECMS_HEALTHZ_URL. CAVECMS_RELEASE_PROBE_URL is
+  // forwarded only if an operator explicitly set it (parity with the dashboard
+  // allowlist); the CLI never defaults it (see runOrchestrator note on the CF
+  // curl-403 hazard), so the orchestrator keeps its curl-friendly default.
+  'PORT', 'CAVECMS_RELEASE_PROBE_URL',
+  // Operator opt-ins the orchestrator honours only when explicitly set.
+  // (CAVECMS_UPDATE_DRY_RUN is intentionally NOT here — it's a dev/test
+  //  harness flag, gated behind CAVECMS_DEV_BUILD in runOrchestrator so an
+  //  ambient shell value can't make a real recovery silently no-op.)
+  'CAVECMS_ALLOW_CONTRACT', 'CAVECMS_FORCE_SINGLE_TREE',
+]
+
+// Decide whether an existing lock is stale (its holder is gone or not
+// actually one of our orchestrator processes, or it's old with no live
+// holder). Mirrors lib/updates/statusFile.ts lockIsStale() so the CLI can
+// reclaim an orphaned PID-stamped lock in the OOM-kill / recycled-PID /
+// cross-user cases the dashboard already handles — otherwise the recovery
+// CLI gets permanently wedged on "already in progress" in exactly the
+// bad-release scenario it exists for.
+function lockIsStaleCli(lockPath, statusPath) {
+  const STALE_MS = 15 * 60 * 1000
+  let pid = 0
+  try { pid = Number((readFileSync(lockPath, 'utf8') || '').trim()) } catch { /* unreadable */ }
+  if (Number.isInteger(pid) && pid > 0) {
+    let alive
+    try {
+      process.kill(pid, 0)
+      alive = true
+    } catch (e) {
+      if (e && e.code === 'ESRCH') return true // no such process → stale
+      alive = true // EPERM → a live process we don't own (maybe recycled)
+    }
+    if (alive) {
+      // Identity check (Linux /proc): a live PID that is NOT one of our
+      // orchestrator scripts is a recycled/cross-user PID → stale. If /proc
+      // is unavailable (macOS dev) or unreadable, fall through to the mtime
+      // backstop rather than trusting the bare PID.
+      try {
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+        if (cmdline) {
+          return !/cavecms-update|cavecms-watchdog/.test(cmdline)
+        }
+      } catch { /* no /proc → mtime backstop below */ }
+    }
+  }
+  // mtime backstop — prefer the status file's updatedAt (the orchestrator
+  // rewrites it every step), fall back to the lock file's mtime.
+  try {
+    const s = JSON.parse(readFileSync(statusPath, 'utf8'))
+    if (s && typeof s.updatedAt === 'string') {
+      const age = Date.now() - Date.parse(s.updatedAt)
+      if (Number.isFinite(age)) return age > STALE_MS
+    }
+  } catch { /* no/garbage status → lock mtime */ }
+  try {
+    return (Date.now() - statSync(lockPath).mtimeMs) > STALE_MS
+  } catch {
+    return false // can't stat → treat as held (conservative)
+  }
+}
+
+// Acquire the update lock the orchestrator + dashboard share, so a CLI
+// update/rollback can't run concurrently with the dashboard (or a second
+// CLI run) on the same tree, and can never delete a lock it doesn't own.
+// Returns the open fd on success, the string 'held' if a LIVE updater holds
+// it (caller refuses), or 'skip' if the lock infra is unavailable (legacy
+// install with no writable state dir — proceed unlocked rather than block
+// recovery). Mirrors the apply route's O_EXCL acquire + staleness check.
+function acquireCliLock(lockPath, statusPath) {
+  const flags = fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let fd
+    try {
+      fd = openSync(lockPath, flags, 0o600)
+    } catch (err) {
+      const code = err && err.code
+      // ENOENT (no state dir at all → legacy install) degrades to unlocked
+      // recovery. But EACCES/EPERM must fail CLOSED, matching the dashboard
+      // apply route (which 500s `state_dir_not_writable`) — otherwise the CLI
+      // would be a weaker-trust path and a concurrent update could race.
+      if (code === 'ENOENT') return 'skip'
+      if (code === 'EACCES' || code === 'EPERM') {
+        die(
+          "Can't acquire the update lock — the runtime user can't write the update state dir.\n" +
+            '  A concurrent dashboard or CLI update can\'t be detected safely from here.\n' +
+            '  Re-run as the install\'s runtime user or with sudo (e.g. `sudo cavecms ' + 'update`/`rollback`), or fix the state-dir ownership.',
+        )
+      }
+      if (code !== 'EEXIST') throw err
+      if (attempt === 0 && lockIsStaleCli(lockPath, statusPath)) {
+        try { unlinkSync(lockPath) } catch { /* raced */ }
+        continue
+      }
+      return 'held'
+    }
+    // Stamp our PID so a concurrent staleness check sees a live holder in
+    // the window before the orchestrator re-stamps its own PID.
+    try { writeSync(fd, String(process.pid)) } catch { /* best-effort */ }
+    return fd
+  }
+  return 'held'
+}
+
+// Build the env the orchestrator needs + spawn it in the FOREGROUND
+// (stdio inherit) so the operator watches progress live and gets the
+// real exit code. Reconstructs the recipe from
+// app/api/admin/updates/apply/route.ts (SCRIPT_ENV_ALLOWLIST /
+// buildScriptEnv) out of the sealed env.production instead of the
+// running process's env.
+function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, force, target }) {
+  const scriptPath = join(dir, 'scripts', 'cavecms-update.sh')
+  if (!existsSync(scriptPath)) {
+    die(
+      `Updater engine missing at ${scriptPath}.\n` +
+        `  The install tree looks incomplete. Reinstall: npx create-cavecms@latest --dir ${dir}`,
+    )
+  }
+  const surface = detectInstallSurface(dir, env)
+  const isRoot = typeof process.geteuid === 'function' && process.geteuid() === 0
+
+  // The orchestrator must run as the RIGHT user per surface so the restart
+  // talks to the right daemon and snapshots get the right ownership.
+  if (surface === 'pm2') {
+    // pm2 installs are managed by a dedicated runtime user (www-data). Running
+    // pm2 as root would hit a DIFFERENT root daemon (reload no-ops, the live
+    // www-data process keeps serving) AND write root-owned snapshots the
+    // dashboard updater later can't restore. So root is WRONG here — refuse.
+    const runUser = env.CAVECMS_PM2_USER || process.env.CAVECMS_PM2_USER || 'www-data'
+    if (isRoot) {
+      die(
+        `This is a pm2 install managed by "${runUser}". Running ${mode} as root would reload the wrong pm2 daemon and write snapshots ${runUser} can't restore.\n` +
+          `  Re-run as the runtime user:  sudo -u ${runUser} cavecms ${mode}`,
+      )
+    }
+    log.warn(`pm2 install (managed by "${runUser}"). If ${mode} fails with a permission/daemon error, run it as that user:`)
+    log.gray(`  sudo -u ${runUser} cavecms ${mode}`)
+  } else if (surface === 'vps' && !isRoot) {
+    // vps installs restart via systemd — that needs root (systemctl).
+    log.warn(`vps/systemd install — ${mode} needs root to restart the service (systemctl).`)
+    log.gray(`  If ${mode} fails with a permission error, re-run with: sudo cavecms ${mode}`)
+  }
+
+  // Build a NARROW child env from the allowlist — operator's shell value
+  // first (PATH/HOME so node/pnpm/pm2/wget/git resolve), then the sealed
+  // install config wins. App-auth secrets are never copied (see allowlist).
+  const childEnv = {}
+  for (const k of ORCHESTRATOR_ENV_ALLOWLIST) {
+    if (typeof process.env[k] === 'string') childEnv[k] = process.env[k]
+    if (typeof env[k] === 'string') childEnv[k] = env[k]
+  }
+  childEnv.CAVECMS_REPO_DIR = dir
+  childEnv.CAVECMS_ENV_FILE = envPath
+  const port = env.PORT || '3040'
+  if (!childEnv.CAVECMS_HEALTHZ_URL) {
+    childEnv.CAVECMS_HEALTHZ_URL = `http://127.0.0.1:${port}/healthz`
+  }
+  // NOTE: we deliberately do NOT point the orchestrator's step-1 reachability
+  // probe at the release host. That host is behind Cloudflare Bot Fight Mode,
+  // which 403s plain curl from datacenter IPs (the whole reason downloads use
+  // wget+UA) — and the orchestrator probes with curl. Leaving
+  // CAVECMS_RELEASE_PROBE_URL unset lets the orchestrator use its
+  // curl-friendly api.github.com/zen default (matching the dashboard), and the
+  // CLI has ALREADY proven the release host reachable via wget in
+  // resolveReleaseTarget just above, so a second probe adds no signal.
+  // Tell the orchestrator how to restart THIS install's service. Without it
+  // the orchestrator defaults to pm2, which silently no-ops on systemd (vps)
+  // + Passenger (cpanel) installs.
+  childEnv.CAVECMS_RESTART_MODE = surface === 'vps' ? 'systemd' : surface
+  if (surface === 'vps') childEnv.CAVECMS_SYSTEMD_UNIT = 'cavecms.service'
+  // Resolve the status + lock path the same way the dashboard does, so our
+  // lock and its lock are the same file. For legacy installs (no
+  // CAVECMS_STATE_DIR) fall back to the per-install `.cavecms-state` dir
+  // (owned by the runtime user) — NOT /var/lib/cavecms, which the runtime
+  // user typically can't write. Mirrors statusFile.ts getInstallStateDir().
+  const stateDir = env.CAVECMS_STATE_DIR || join(dir, '.cavecms-state')
+  const statusPath = join(stateDir, 'update-status.json')
+  childEnv.CAVECMS_UPDATE_STATUS_PATH = statusPath
+  if (!childEnv.CAVECMS_STATE_DIR) childEnv.CAVECMS_STATE_DIR = stateDir
+  childEnv.CAVECMS_UPDATE_FROM = fromSha || env.CAVECMS_COMMIT || 'unknown'
+
+  // Dry-run is a dev/test harness affordance only — honour an ambient
+  // CAVECMS_UPDATE_DRY_RUN ONLY under CAVECMS_DEV_BUILD so a stale shell
+  // export can't make a real operator's recovery silently no-op.
+  if (process.env.CAVECMS_DEV_BUILD === '1' && process.env.CAVECMS_UPDATE_DRY_RUN === '1') {
+    childEnv.CAVECMS_UPDATE_DRY_RUN = '1'
+  }
+
+  if (surface === 'pm2') {
+    const { pm2AppName, pm2Home } = readPm2Config(dir)
+    if (pm2AppName) childEnv.CAVECMS_PM2_APP_NAME = pm2AppName
+    if (pm2Home) childEnv.PM2_HOME = pm2Home
+  }
+
+  let args
+  if (mode === 'rollback') {
+    args = ['rollback']
+  } else {
+    // Update: hand the orchestrator tarball-mode coords + the bundled
+    // pubkey so it verifies the SAME way the dashboard apply path does.
+    childEnv.CAVECMS_UPDATE_TARBALL_URL = target.downloadUrl
+    childEnv.CAVECMS_UPDATE_TARBALL_SHA256 = target.sha256
+    if (target.signature) childEnv.CAVECMS_UPDATE_TARBALL_SIGNATURE = target.signature
+    childEnv.CAVECMS_RELEASE_PUBKEY_PEM = BUNDLED_PUBKEY_PEM
+    args = force ? ['--force', targetSha] : [targetSha]
+  }
+
+  // Cross-process mutual exclusion — O_EXCL lock so a CLI update/rollback
+  // can't run concurrently with the dashboard (or a second CLI run) on the
+  // same tree, and can't delete a lock it doesn't own. Unlike the dashboard
+  // apply route (which DETACHES the orchestrator and hands the lock off to
+  // it), this path runs the orchestrator in the FOREGROUND and holds the
+  // lock for the whole synchronous run; the orchestrator best-effort
+  // re-stamps its own PID and rm's the lock in its EXIT/signal traps, and we
+  // rm it again defensively below.
+  const lockPath = `${statusPath}.lock`
+  const lock = acquireCliLock(lockPath, statusPath)
+  if (lock === 'held') {
+    die('An update or rollback is already in progress on this install. Wait for it to finish, then try again.')
+  }
+
+  const r = spawnSync('bash', [scriptPath, ...args], {
+    cwd: dir,
+    stdio: 'inherit',
+    env: childEnv,
+    // Overall wall-clock backstop so a wedged sub-step (hung pm2 daemon,
+    // stalled mirror) can't pin an unattended `cavecms update` forever. 60 min
+    // is well above a legitimate pnpm install+build on a small VPS. SIGTERM so
+    // the orchestrator's TERM trap still runs lock + maintenance cleanup; the
+    // r.signal branch below then prints the actionable retry message.
+    timeout: 60 * 60 * 1000,
+    killSignal: 'SIGTERM',
+  })
+  // spawnSync ran to completion in the foreground; the orchestrator's EXIT
+  // trap already rm'd the lock. Defensively clean up in case it was SIGKILL'd
+  // before its trap ran — but ONLY unlink a lock that still carries OUR pid,
+  // so we can't delete a lock a concurrent dashboard apply re-acquired in the
+  // tiny window after the orchestrator removed it.
+  if (typeof lock === 'number') {
+    try { closeSync(lock) } catch { /* already closed */ }
+    try {
+      if ((readFileSync(lockPath, 'utf8') || '').trim() === String(process.pid)) {
+        unlinkSync(lockPath)
+      }
+    } catch { /* gone, re-stamped by the orchestrator, or re-acquired — leave it */ }
+  }
+  // vps + root: the orchestrator just wrote snapshots + update-status.json as
+  // root, but the systemd-managed app (and thus the dashboard updater) runs as
+  // the unit's runtime user. Hand ownership of the state dir back so a later
+  // dashboard rollback can read those snapshots / rewrite status.
+  if (surface === 'vps' && isRoot && env.CAVECMS_STATE_DIR) {
+    let runUser = process.env.SUDO_USER || 'cavecms'
+    try {
+      const u = spawnSync('systemctl', ['show', '-p', 'User', '--value', 'cavecms.service'], { encoding: 'utf8' })
+      if (u.status === 0 && typeof u.stdout === 'string' && u.stdout.trim()) runUser = u.stdout.trim()
+    } catch { /* keep default */ }
+    spawnSync('chown', ['-R', `${runUser}:${runUser}`, env.CAVECMS_STATE_DIR], { stdio: 'ignore' })
+  }
+  if (r.error) {
+    die(`Couldn't run the updater engine: ${r.error.message}`)
+  }
+  if (r.signal) {
+    if (mode === 'rollback') {
+      die(`The rollback engine was stopped by ${r.signal} (often the out-of-memory killer or an external stop). The restore may have been interrupted — your site could be left in maintenance mode and partially rolled back. Re-run \`cavecms rollback\` (it's idempotent), then check \`cavecms status\`.`)
+    }
+    die(`The updater engine was stopped by ${r.signal} (often the out-of-memory killer or an external stop). No changes were committed; your previous version should still be running — check 'cavecms status'.`)
+  }
+  process.exit(r.status ?? 1)
+}
+
+function readInstallVersion(dir) {
+  const pkgPath = join(dir, 'package.json')
+  if (existsSync(pkgPath)) {
+    try {
+      const v = JSON.parse(readFileSync(pkgPath, 'utf8')).version
+      if (typeof v === 'string') return v
+    } catch { /* fall through */ }
+  }
+  return 'unknown'
+}
+
+async function commandUpdate(argv) {
+  const opts = parseSubArgv(argv, 'update')
+  const { dir, envPath, env } = resolveInstallDir(opts)
+  const current = env.CAVECMS_COMMIT || 'dev'
+  // Validate current up front (parity with the dashboard, which throws
+  // current_sha_malformed) — a hand-edited/truncated CAVECMS_COMMIT would
+  // otherwise corrupt the prefix comparison below and flow into the
+  // orchestrator as PREVIOUS_SHA.
+  if (current !== 'dev' && !/^[0-9a-f]{7,64}$/i.test(current)) {
+    die(`This install's CAVECMS_COMMIT is malformed (${JSON.stringify(current)}). Reinstall from a current release: npx create-cavecms@latest --dir ${dir}`)
+  }
+  if (!opts.check) {
+    log.header('CaveCMS update')
+    preflightDeps() // wget (manifest + tarball), unzip, curl — checked up front
+    // The update path takes a mandatory pre-destructive snapshot via rsync
+    // (snapshot_current_tree hard-fails without it) — check it here so a
+    // missing rsync fails fast with an actionable hint, like rollback does,
+    // instead of opaquely at orchestrator step 2.
+    if (spawnSync('command', ['-v', 'rsync'], { shell: '/bin/bash', stdio: 'ignore' }).status !== 0) {
+      die(
+        'update needs rsync (it snapshots your current version before applying), which is not installed.\n' +
+          '  Install it and retry:  Debian/Ubuntu → sudo apt install rsync   ·   RHEL/Alma → sudo yum install rsync',
+      )
+    }
+  }
+  const { target } = resolveReleaseTarget({ version: opts.version })
+  const targetSha = (target.sha || '').toLowerCase()
+  if (!/^[0-9a-f]{7,64}$/.test(targetSha)) {
+    die(`Latest release manifest has no usable commit SHA (got ${JSON.stringify(target.sha)}). Can't update safely.`)
+  }
+  const upToDate =
+    current !== 'dev' &&
+    (targetSha.startsWith(current) || current.startsWith(targetSha))
+
+  if (opts.check) {
+    // Machine-readable. resolveReleaseTarget logs progress to stderr so
+    // stdout stays pure JSON. A dev install's updater is disabled (the apply
+    // path refuses), so report updateAvailable:false + an explicit
+    // updaterDisabled flag rather than a misleading true.
+    const updaterDisabled = current === 'dev'
+    console.log(JSON.stringify({
+      current,
+      latest: {
+        version: target.version,
+        sha: targetSha,
+        publishedAt: target.publishedAt,
+        isSecurity: !!target.isSecurity,
+      },
+      updateAvailable: updaterDisabled ? false : !upToDate,
+      updaterDisabled,
+    }, null, 2))
+    return
+  }
+
+  if (current === 'dev') {
+    die(
+      `This install reports CAVECMS_COMMIT=dev — the updater is disabled.\n` +
+        `  Reinstall from a current release: npx create-cavecms@latest --dir ${dir}`,
+    )
+  }
+  if (upToDate && !opts.force) {
+    log.ok(`Already on the latest release (${target.version}, ${shortSha(current)}).`)
+    log.gray('  Force a clean re-install of the same version with: cavecms update --force')
+    return
+  }
+  if (!target.signature) {
+    die(`Latest release (${target.version}) has no Ed25519 signature — refusing to update.`)
+  }
+  // Require sha256 too — the dashboard apply route hard-requires it (Zod
+  // /^[a-f0-9]{64}$/); without parity the CLI would accept a manifest the
+  // dashboard rejects and the orchestrator's sha256 check would be skipped.
+  if (!/^[a-f0-9]{64}$/i.test(String(target.sha256 || ''))) {
+    die(`Latest release (${target.version}) has no usable sha256 fingerprint — refusing to update.`)
+  }
+
+  log.ok(`Updating ${shortSha(current)} → ${target.version} (${targetSha.slice(0, 12)})`)
+  log.gray('Your site stays online until the new version is verified healthy; a failed update rolls back automatically.')
+  console.log('')
+  runOrchestrator({ dir, envPath, env, mode: 'update', targetSha, fromSha: current, force: opts.force, target })
+}
+
+async function commandRollback(argv) {
+  const opts = parseSubArgv(argv, 'rollback')
+  const { dir, envPath, env } = resolveInstallDir(opts)
+  const current = env.CAVECMS_COMMIT || 'dev'
+  // Validate up front (parity with commandUpdate + the dashboard) so a
+  // malformed CAVECMS_COMMIT can't flow un-escaped into the orchestrator's
+  // FROM_SHA → status/audit JSON. rollback is destructive, so die loudly.
+  if (current !== 'dev' && !/^[0-9a-f]{7,64}$/i.test(current)) {
+    die(`This install's CAVECMS_COMMIT is malformed (${JSON.stringify(current)}). Reinstall from a current release: npx create-cavecms@latest --dir ${dir}`)
+  }
+  // A dev install has no recorded version to roll back from — refuse (parity
+  // with commandUpdate's dev guard), but DON'T tell the operator to reinstall
+  // (that would discard a recoverable install).
+  if (current === 'dev') {
+    die(
+      `This install reports CAVECMS_COMMIT=dev — there's no recorded version to roll back from.\n` +
+        `  If your site is broken, install a known-good release: npx create-cavecms@latest --version=X.Y.Z --dir ${dir}`,
+    )
+  }
+  log.header('CaveCMS rollback')
+  // rollback restores the snapshot via rsync and verifies health via curl
+  // (no download → no wget/unzip needed). Fail early with a clear hint if a
+  // hard dep is missing, instead of an opaque mid-restore failure.
+  for (const cmd of ['rsync', 'curl']) {
+    if (spawnSync('command', ['-v', cmd], { shell: '/bin/bash', stdio: 'ignore' }).status !== 0) {
+      die(
+        `rollback needs ${cmd}, which is not installed.\n` +
+          `  Install it and retry:  Debian/Ubuntu → sudo apt install ${cmd}   ·   RHEL/Alma → sudo yum install ${cmd}`,
+      )
+    }
+  }
+  log.warn('This restores the previous version from the most recent snapshot.')
+  log.gray(`  Current version: ${shortSha(current)}`)
+  console.log('')
+  runOrchestrator({ dir, envPath, env, mode: 'rollback', fromSha: current })
+}
+
+function commandVersion(argv) {
+  const opts = parseSubArgv(argv, 'version')
+  const { dir, env } = resolveInstallDir(opts)
+  console.log(`${c('bold', 'CaveCMS')} v${readInstallVersion(dir)}  ${c('gray', `(commit ${shortSha(env.CAVECMS_COMMIT || 'dev')})`)}`)
+}
+
+async function commandStatus(argv) {
+  const opts = parseSubArgv(argv, 'status')
+  const { dir, env } = resolveInstallDir(opts)
+  // Coerce a malformed CAVECMS_COMMIT to 'dev' (parity with
+  // getCurrentVersion) so the prefix comparison can't false-match an
+  // empty/truncated value. status must NOT die on a broken box.
+  let current = env.CAVECMS_COMMIT || 'dev'
+  if (current !== 'dev' && !/^[0-9a-f]{7,64}$/i.test(current)) current = 'dev'
+  console.log(`${c('bold', 'CaveCMS')} v${readInstallVersion(dir)}  ${c('gray', `(commit ${shortSha(current)})`)}`)
+  console.log(c('gray', `Install dir: ${dir}`))
+  // Mirror runOrchestrator's (and getInstallStateDir's) legacy fallback so the
+  // 'Last update' line shows on legacy installs (no CAVECMS_STATE_DIR), where
+  // the CLI wrote status to <dir>/.cavecms-state.
+  {
+    const stateDir = env.CAVECMS_STATE_DIR || join(dir, '.cavecms-state')
+    const statusPath = join(stateDir, 'update-status.json')
+    if (existsSync(statusPath)) {
+      try {
+        const s = JSON.parse(readFileSync(statusPath, 'utf8'))
+        console.log(c('gray', `Last update: ${s.state} (step ${s.step}/${s.totalSteps}) — ${s.stepLabel || ''}`))
+      } catch { /* ignore unreadable status */ }
+    }
+  }
+  if (current === 'dev') {
+    log.warn('Updater disabled (CAVECMS_COMMIT=dev).')
+    return
+  }
+  try {
+    // soft:true → resolveReleaseTarget throws (not process.exit) on an
+    // unreachable/garbage host, so this catch degrades gracefully instead
+    // of hard-exiting — `status` must work on a broken/offline box.
+    const { target } = resolveReleaseTarget({ version: 'latest', soft: true })
+    const targetSha = (target.sha || '').toLowerCase()
+    if (!/^[0-9a-f]{7,64}$/.test(targetSha)) {
+      log.warn(`Latest release (${target.version}) has no usable commit SHA — can't determine update state.`)
+      return
+    }
+    const upToDate = targetSha.startsWith(current) || current.startsWith(targetSha)
+    if (upToDate) {
+      log.ok(`Up to date (latest is ${target.version}).`)
+    } else {
+      log.warn(`Update available: ${target.version} (${targetSha.slice(0, 12)})${target.isSecurity ? ' — security release' : ''}.`)
+      log.gray('  Apply it with: cavecms update')
+    }
+  } catch (err) {
+    log.warn(`Couldn't check for updates: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+async function runSubcommand(sub, argv) {
+  if (sub === 'update') return commandUpdate(argv)
+  if (sub === 'rollback') return commandRollback(argv)
+  if (sub === 'version') return commandVersion(argv)
+  if (sub === 'status') return commandStatus(argv)
+  die(`Unknown command: ${sub}`)
+}
+
+// Install the `cavecms` recovery shim into the install dir + (best
+// effort) onto PATH at /usr/local/bin/cavecms.
+//
+// Engine sourcing strategy:
+//   - update/status/version → `npx create-cavecms@latest` (fresh logic; a
+//     broken local app tree can't break recovery — ceymail decouples via a
+//     system binary, we via npm).
+//   - rollback → run the BUNDLED engine copy (in the update-surviving state
+//     dir) so it works OFFLINE / when npm is unreachable. Rollback is a
+//     purely-local snapshot restore that needs no network, and is the
+//     primary "get me back online now" affordance. Falls back to npx if the
+//     bundled copy is missing.
+function installCavecmsShim({ targetDir, stateDir }) {
+  // The paths are interpolated raw into double-quoted bash lines below —
+  // refuse shell-dangerous paths so the persisted, PATH-exposed, often-sudo'd
+  // shim can't be turned into a command-injection sink.
+  assertSafeInstallPath(targetDir)
+  if (stateDir) assertSafeInstallPath(stateDir)
+  const shimPath = join(targetDir, 'cavecms')
+  // Bundle this very engine (a self-contained zero-dep ESM file) into the
+  // state dir, which survives in-app updates (it's outside the tarball
+  // move-aside set) and isn't part of the app build that a bad release could
+  // corrupt — so offline `cavecms rollback` keeps working.
+  const localEngine = stateDir ? join(stateDir, 'cavecms-cli.mjs') : ''
+  if (localEngine) {
+    try {
+      cpSync(__filename, localEngine)
+      chmodSync(localEngine, 0o755)
+    } catch (err) {
+      log.warn(`Couldn't bundle the offline recovery engine: ${err instanceof Error ? err.message : String(err)} (rollback will require npm)`)
+    }
+  }
+  const localEngineLine = localEngine
+    ? `LOCAL_ENGINE="${localEngine}"`
+    : `LOCAL_ENGINE=""`
+  const shim = `#!/bin/bash
+# CaveCMS recovery CLI shim.
+#   cavecms update [--check] [--force] [--version=X.Y.Z]   pull + apply a release
+#   cavecms rollback                     restore the previous version (works offline)
+#   cavecms status | version | help
+#
+# Prefer the BUNDLED engine (a self-contained zero-dep copy in the state dir,
+# outside the app build a bad release could corrupt) for ALL commands: it works
+# offline, needs no npm cache, and runs cleanly under \`sudo -u <runuser>\` on
+# pm2 installs (where the nologin runtime user can't run npx). Fall back to
+# \`npx create-cavecms@latest\` only when the bundled copy is missing. The actual
+# release download still goes over the release host via wget, not npm. For the
+# absolutely-latest CLI logic, run \`npx create-cavecms@latest <cmd>\` directly.
+set -euo pipefail
+cd "${targetDir}" || { echo "CaveCMS install dir missing: ${targetDir}" >&2; exit 1; }
+${localEngineLine}
+if [ -n "\$LOCAL_ENGINE" ] && [ -f "\$LOCAL_ENGINE" ]; then
+  exec node "\$LOCAL_ENGINE" "\$@"
+fi
+exec npx --yes create-cavecms@latest "\$@"
+`
+  try {
+    writeFileSync(shimPath, shim, { mode: 0o755 })
+    chmodSync(shimPath, 0o755)
+  } catch (err) {
+    log.warn(`Couldn't write the cavecms CLI shim: ${err instanceof Error ? err.message : String(err)}`)
+    return
+  }
+  const globalPath = '/usr/local/bin/cavecms'
+  const isRoot = typeof process.geteuid === 'function' && process.geteuid() === 0
+  const canSudo = isRoot || spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0
+  let linked = false
+  // Never clobber another install's global shim silently.
+  if (canSudo && !existsSync(globalPath)) {
+    const r = runSudo(['ln', '-sf', shimPath, globalPath])
+    linked = r.status === 0
+  }
+  console.log('')
+  if (linked) {
+    log.ok(`Recovery CLI ready: ${c('bold', 'cavecms update')} / ${c('bold', 'cavecms rollback')} (from anywhere).`)
+  } else {
+    log.info('Recovery CLI (run from the install dir, or put it on your PATH):')
+    log.gray(`  ${shimPath} update        # pull + apply the latest release`)
+    log.gray(`  ${shimPath} rollback      # restore the previous version`)
+    log.gray(`  On PATH:  sudo ln -sf ${shimPath} /usr/local/bin/cavecms`)
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 // Main pipeline
 // ════════════════════════════════════════════════════════════════════
 
@@ -2110,6 +2893,9 @@ async function main(argv) {
   const targetDir = args.targetDir
     ? resolve(args.targetDir)
     : defaultInstallDir(surface, args.siteName)
+  // --dir bypasses SITE_NAME_RE; reject shell-dangerous install paths before
+  // any sudo chown/symlink work or the shim write touches them.
+  assertSafeInstallPath(targetDir)
 
   console.log(c('gray', 'Target:   ') + targetDir)
   console.log(c('gray', 'Release:  ') + (args.version === 'latest' ? `latest (${RELEASE_HOST})` : args.version))
@@ -2164,7 +2950,7 @@ async function main(argv) {
 
     log.step(5, 7, 'Generating secrets + writing sealed env.production…')
     const secrets = generateSecrets()
-    const { envPath, uploadsRoot } = writeSealedEnv({
+    const { envPath, uploadsRoot, stateDir } = writeSealedEnv({
       targetDir,
       surface,
       config,
@@ -2208,6 +2994,12 @@ async function main(argv) {
     console.log(c('gray', '  Lost the URL? Run:  ') + c('bold', `grep INSTALL_BOOTSTRAP_TOKEN ${envPath}`))
     console.log('')
 
+    // Drop the `cavecms` recovery CLI shim so the operator can
+    // update/roll back from the shell even if the dashboard is later
+    // unreachable. Done BEFORE startService because the laptop surface's
+    // foreground start never returns.
+    installCavecmsShim({ targetDir, stateDir })
+
     startService({ surface, targetDir, envPath, config, skipStart: args.skipStart, siteName: args.siteName })
   } catch (err) {
     if (createdTargetDir && installPhase === 'pre-extract') {
@@ -2245,7 +3037,25 @@ async function main(argv) {
   }
 }
 
-main(process.argv.slice(2)).catch((err) => {
+// Entry router. `npx create-cavecms <site>` installs; the reserved
+// first words route to the recovery subcommands instead. `help` / -h /
+// --help always show usage (so the `cavecms help` shim works without
+// trying to install a site literally named "help").
+const _argv = process.argv.slice(2)
+const _sub = _argv[0]
+let _run
+// Bare `cavecms` (the recovery shim with no args) or an explicit help flag →
+// show usage. Treating a missing first arg as help stops the recovery shim
+// from silently dropping into a NEW-site install prompt.
+if (!_sub || _sub === 'help' || _sub === '-h' || _sub === '--help') {
+  showHelp()
+  _run = Promise.resolve()
+} else if (RECOVERY_SUBCOMMANDS.has(_sub)) {
+  _run = runSubcommand(_sub, _argv.slice(1))
+} else {
+  _run = main(_argv)
+}
+_run.catch((err) => {
   log.err(err instanceof Error ? (err.stack ?? err.message) : String(err))
   process.exit(1)
 })

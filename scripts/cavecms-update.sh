@@ -50,24 +50,35 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${HOME
 # build / stuck migration without bumping the version.
 # ---------------------------------------------------------------------------
 FORCE=0
+# ROLLBACK_MODE=1 → standalone rollback (no target SHA). Triggered by
+# `cavecms-update.sh rollback`, used by the `cavecms rollback` CLI to
+# restore the previous version from the most recent snapshot when the
+# dashboard is unreachable. The snapshot to restore TO is resolved later
+# (most-recent dir under SNAPSHOT_ROOT), so no SHA argument is required.
+ROLLBACK_MODE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; shift ;;
     --) shift; break ;;
+    rollback) ROLLBACK_MODE=1; shift; break ;;
     -*) echo "[cavecms-update] unknown flag: $1" >&2; exit 2 ;;
     *) break ;;
   esac
 done
-if [ $# -lt 1 ]; then
-  echo "[cavecms-update] usage: cavecms-update.sh [--force] <target-sha>" >&2
-  exit 2
+if [ "$ROLLBACK_MODE" = "1" ]; then
+  TARGET_SHA=""
+else
+  if [ $# -lt 1 ]; then
+    echo "[cavecms-update] usage: cavecms-update.sh [--force] <target-sha> | rollback" >&2
+    exit 2
+  fi
+  TARGET_SHA="$1"
+  if [[ ! "$TARGET_SHA" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
+    echo "[cavecms-update] invalid target SHA '$TARGET_SHA'" >&2
+    exit 2
+  fi
+  TARGET_SHA="$(echo "$TARGET_SHA" | tr 'A-F' 'a-f')"
 fi
-TARGET_SHA="$1"
-if [[ ! "$TARGET_SHA" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
-  echo "[cavecms-update] invalid target SHA '$TARGET_SHA'" >&2
-  exit 2
-fi
-TARGET_SHA="$(echo "$TARGET_SHA" | tr 'A-F' 'a-f')"
 # Allow CAVECMS_UPDATE_FORCE=1 env to set force without re-spawning the
 # script — apply route sets this when it spawns the child, so an
 # operator clicking "Re-run install" doesn't need a CLI flag.
@@ -252,6 +263,78 @@ fi
 # SIGTERM from systemd / pm2 stop / operator kill should.
 trap '' INT HUP
 
+# ---------------------------------------------------------------------------
+# restart_app — restart the running app using the install's service manager.
+#
+# CAVECMS_RESTART_MODE is forwarded by the CLI (systemd|cpanel|pm2|laptop)
+# from its surface detection. When UNSET (dashboard apply route + bare-metal
+# deploy.sh) it defaults to pm2, preserving the historical behaviour exactly.
+# Used by BOTH forward step 5 and rollback_to_previous so every surface that
+# the installer supports can actually reload — previously the orchestrator
+# only ever did `pm2 reload`, so systemd (vps) / Passenger (cpanel) installs
+# swapped files on disk but never restarted the live process.
+# ---------------------------------------------------------------------------
+# Extract the "commit" field from a /healthz?verbose=1 JSON body. python3
+# preferred; awk fallback (same idiom as read_status_state) so the commit-match
+# verify guard still works on hosts without python3 (e.g. minimal containers /
+# bare macOS) instead of silently degrading to a status:ok-only check.
+healthz_commit() {
+  local body="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$body" | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get("commit", "") if isinstance(d, dict) else "")
+except Exception:
+    print("")
+' 2>/dev/null || true
+  else
+    printf '%s' "$body" | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="commit"){print $(i+2); exit}}' 2>/dev/null || true
+  fi
+}
+
+restart_app() {
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  local mode="${CAVECMS_RESTART_MODE:-pm2}"
+  # Append stdin to the reload log BEST-EFFORT — an unwritable LOG_DIR
+  # (cpanel / laptop where /var/log/cavecms isn't provisioned, or a
+  # restore that wiped an in-repo log dir) must NEVER block the actual
+  # restart command. The restart runs UPSTREAM of this pipe, so its
+  # execution is independent of whether the log write succeeds.
+  _restart_log() { cat >> "${LOG_DIR}/pm2-reload.log" 2>/dev/null || cat >/dev/null; }
+  case "$mode" in
+    systemd)
+      local unit="${CAVECMS_SYSTEMD_UNIT:-cavecms.service}"
+      if [ "$(id -u)" = "0" ]; then
+        { echo "[cavecms-update] restarting via systemd unit ${unit}"; systemctl restart "$unit" 2>&1 || echo "[cavecms-update] systemctl restart exit non-zero — verifying via healthz"; } | _restart_log || true
+      else
+        { echo "[cavecms-update] restarting via systemd unit ${unit} (sudo)"; sudo -n systemctl restart "$unit" 2>&1 || echo "[cavecms-update] 'sudo -n systemctl restart ${unit}' failed (need root or a sudoers entry) — verifying via healthz"; } | _restart_log || true
+      fi
+      ;;
+    cpanel)
+      mkdir -p "$REPO_DIR/tmp" 2>/dev/null || true
+      if touch "$REPO_DIR/tmp/restart.txt" 2>/dev/null; then
+        echo "[cavecms-update] restarted via Passenger (tmp/restart.txt)" | _restart_log || true
+      else
+        echo "[cavecms-update] couldn't touch ${REPO_DIR}/tmp/restart.txt" | _restart_log || true
+      fi
+      ;;
+    laptop)
+      echo "[cavecms-update] laptop/dev surface — no managed service to reload; restart the foreground CaveCMS process to load the changes." | _restart_log || true
+      ;;
+    pm2|*)
+      local target="${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}"
+      if [ -n "${CAVECMS_PM2_APP_NAME:-}" ]; then
+        if ! timeout 10s pm2 describe "$target" >/dev/null 2>&1; then
+          echo "[cavecms-update] pm2 reload pre-check: app \"$target\" not registered (or pm2 daemon wedged) under PM2_HOME=\"${PM2_HOME:-<unset>}\"." | _restart_log || true
+        fi
+      fi
+      { (cd "$REPO_DIR" && pm2 reload "$target" --update-env 2>&1) || echo "[cavecms-update] pm2 reload CLI exit non-zero (likely SIGINT'd by reload signal — verifying via healthz)"; } | _restart_log || true
+      ;;
+  esac
+}
+
 # Rollback helper — defined BEFORE the steps that call it so bash has
 # registered the function in its table by the time we hit a failure.
 #
@@ -336,21 +419,42 @@ rollback_to_previous() {
   # — which the snapshot DOES include — so the restore already gave us
   # back the dependency tree. Most CLI install hosts don't even have
   # pnpm on PATH; running pnpm install here would hard-fail the rollback.
-  if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
+  #
+  # Gate on git-presence, NOT just the tarball URL: the standalone
+  # `cavecms rollback` path calls rollback_to_previous WITHOUT
+  # CAVECMS_UPDATE_TARBALL_URL set, so keying off that var alone would run
+  # pnpm on every CLI install (no .git, no pnpm) and break the very
+  # recovery this function performs. A real git-mode install has a .git
+  # work-tree; a CLI/tarball install does not.
+  if [ -z "${CAVECMS_UPDATE_TARBALL_URL:-}" ] && git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     if ! (cd "$REPO_DIR" && pnpm install --frozen-lockfile >/dev/null 2>>"${LOG_DIR}/rollback-install.log"); then
       write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version's files but couldn't reinstall its dependencies" "Your site may be offline — contact support immediately." ""
       return 1
     fi
   fi
 
-  # Reload pm2. Exit code intentionally suppressed — same reasoning as
-  # the forward path (pm2 CLI can SIGINT mid-reload and exit non-zero
-  # while the daemon completes successfully). Healthz below is the
-  # canonical signal. Target by name when CAVECMS_PM2_APP_NAME is set
-  # (CLI-install layout); else fall back to the bundled config file.
-  (cd "$REPO_DIR" && pm2 reload "${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}" --update-env >/dev/null 2>&1 || true)
+  # Restart the app via the install's service manager (systemd / pm2 /
+  # Passenger / none-on-laptop). Exit code not fatal — the healthz verify
+  # below is the canonical success signal.
+  restart_app
 
-  # Verify rollback health before claiming success.
+  # Verify rollback health before claiming success. When HEALTHZ_TOKEN is
+  # set we ALSO require the running commit to match the restored version —
+  # so a surface where the restart silently no-ops (a foreground laptop
+  # process, a wedged daemon, a missing sudoers entry) can NOT be reported
+  # as a successful rollback while the old code is still live. Mirrors the
+  # forward path's step-6 commit guard. `prev` is the snapshot SHA we
+  # restored to; a `from-N` first-install handle has no real commit to match.
+  local target_commit=""
+  case "$prev" in
+    from-*) target_commit="" ;;
+    *) target_commit="${prev:0:12}" ;;
+  esac
+  # Laptop/dev surface has no managed service — restart_app intentionally
+  # no-ops, so the foreground process still serves the OLD commit. Don't
+  # require a commit match (the FILES are restored); the operator restarts
+  # the foreground process to load the rolled-back code.
+  if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then target_commit=""; fi
   local healthz_args=()
   if [ -n "$HEALTHZ_TOKEN" ]; then
     healthz_args=(-H "Authorization: Bearer $HEALTHZ_TOKEN")
@@ -360,6 +464,17 @@ rollback_to_previous() {
   for i in $(seq 1 15); do
     sleep 2
     if curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>/dev/null | grep -q '"status":"ok"'; then
+      if [ -n "$HEALTHZ_TOKEN" ] && [ -n "$target_commit" ]; then
+        local verbose_response running_commit
+        verbose_response=$(curl -fsS --max-time 5 ${healthz_args[@]+"${healthz_args[@]}"} "${HEALTHZ_URL}?verbose=1" 2>/dev/null || true)
+        running_commit=$(healthz_commit "$verbose_response")
+        # Only reject on a confirmed mismatch; an unreadable/empty commit
+        # (basic healthz, parse miss) falls back to the status:ok signal.
+        if [ -n "$running_commit" ] && [ "$running_commit" != "$target_commit" ]; then
+          success=0
+          continue
+        fi
+      fi
       success=$((success + 1))
       [ $success -ge 2 ] && break
     fi
@@ -496,8 +611,10 @@ extract_tarball_atomic() {
 
 # ---------------------------------------------------------------------------
 # DRY RUN — used by Playwright + manual demos. Walks states on a timer.
+# Skipped for rollback mode, which has its own dry-run branch below — an
+# explicit `rollback` request must never be reported as a successful UPDATE.
 # ---------------------------------------------------------------------------
-if [ "${CAVECMS_UPDATE_DRY_RUN:-}" = "1" ]; then
+if [ "${CAVECMS_UPDATE_DRY_RUN:-}" = "1" ] && [ "${ROLLBACK_MODE:-0}" != "1" ]; then
   write_status "preflight" 1 "Getting ready" "" ""; sleep 1
   CURRENT_STEP=2; write_status "updating" 2 "Downloading the new version" "" ""; sleep 1
   CURRENT_STEP=3; write_status "updating" 3 "Preparing your data" "" ""; sleep 1
@@ -524,6 +641,136 @@ fi
 if [ -L /opt/cavecms/current ] && [ "${CAVECMS_FORCE_SINGLE_TREE:-0}" != "1" ]; then
   write_status "failed" 1 "This server uses the release-archive deploy path" "Your hosting setup uses the more advanced atomic-release deploy. In-app updates aren't supported here — your DevOps team needs to run the deploy script directly." ""
   exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Standalone rollback — `cavecms-update.sh rollback`
+#
+# Restores the previous version from the most recent snapshot under
+# SNAPSHOT_ROOT (taken before the last update). Driven by `cavecms
+# rollback` for shell-only recovery when the dashboard is unreachable.
+# Code-only restore (had_migration=0): the snapshot tree — including its
+# env.production carrying the prior CAVECMS_COMMIT — is the source of
+# truth, and CaveCMS's expand-only migration model keeps the newer
+# schema backward-compatible with the restored (older) code.
+# ---------------------------------------------------------------------------
+if [ "$ROLLBACK_MODE" = "1" ]; then
+  CURRENT_STEP=1
+  # Dry-run rollback (CAVECMS_UPDATE_DRY_RUN=1): report a rolled_back
+  # terminal state without touching the tree. The top-of-file DRY_RUN block
+  # is skipped for rollback mode so this branch owns the dry-run path.
+  if [ "${CAVECMS_UPDATE_DRY_RUN:-}" = "1" ]; then
+    write_status "restarting" 1 "Restoring your previous version" "" ""; sleep 1
+    write_status "rolled_back" 1 "We put your site back on the previous version" "" ""
+    if declare -F post_audit_terminal >/dev/null 2>&1; then
+      post_audit_terminal rolled_back "manual_cli_rollback_dryrun"
+    fi
+    trap - EXIT TERM
+    rm -f "$LOCK_PATH" 2>/dev/null || true
+    exit 0
+  fi
+  # Select the snapshot to restore TO: the most-recent one under
+  # SNAPSHOT_ROOT, EXCLUDING the currently-running commit. The exclusion
+  # matters because `update --force` re-installs the SAME version and
+  # snapshots it — without skipping it, rollback would "restore" the
+  # current version (a misleading no-op) and shadow the genuinely-previous
+  # snapshot. CUR_SHA is matched as a prefix either way (snapshot dirs can
+  # be full 40-char SHAs while CAVECMS_COMMIT is the 12-char form).
+  ROLLBACK_PREV=""
+  CUR_SHA="${CAVECMS_COMMIT:-}"
+  if [ -d "$SNAPSHOT_ROOT" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      ROLLBACK_PREV=$(SNAP_ROOT="$SNAPSHOT_ROOT" CUR_SHA="$CUR_SHA" python3 -c '
+import os
+root = os.environ["SNAP_ROOT"]
+cur = os.environ.get("CUR_SHA", "")
+best = None
+best_mtime = -1.0
+try:
+    for name in os.listdir(root):
+        full = os.path.join(root, name)
+        if not (os.path.isdir(full) and not os.path.islink(full)):
+            continue
+        if cur and (name.startswith(cur) or cur.startswith(name)):
+            continue
+        try:
+            m = os.stat(full).st_mtime
+        except OSError:
+            continue
+        if m > best_mtime:
+            best_mtime = m
+            best = name
+except Exception:
+    pass
+print(best or "")
+' 2>/dev/null || true)
+    else
+      # Portable fallback (host without python3): newest dir by mtime via
+      # `ls -td`, skipping symlinks (parity with the python3 branch's
+      # is_link guard) and the current commit's snapshot.
+      for _d in $(ls -td "$SNAPSHOT_ROOT"/*/ 2>/dev/null); do
+        _dn="${_d%/}"                       # strip trailing slash so -L tests the link, not its target
+        [ -L "$_dn" ] && continue           # skip symlinked snapshots
+        [ -d "$_dn" ] || continue
+        _name=$(basename "$_dn")
+        if [ -n "$CUR_SHA" ]; then
+          case "$_name" in "$CUR_SHA"*) continue ;; esac
+          case "$CUR_SHA" in "$_name"*) continue ;; esac
+        fi
+        ROLLBACK_PREV="$_name"
+        break
+      done
+    fi
+  fi
+  if [ -z "$ROLLBACK_PREV" ]; then
+    write_status "failed" 1 "No previous version to roll back to" "We couldn't find a saved snapshot of an earlier version. If your site is broken, reinstall a known-good release: npx create-cavecms@latest --version=X.Y.Z" ""
+    if declare -F post_audit_terminal >/dev/null 2>&1; then
+      post_audit_terminal failed "rollback_no_snapshot"
+    fi
+    trap - EXIT TERM
+    rm -f "$LOCK_PATH" 2>/dev/null || true
+    exit 1
+  fi
+  if ! is_safe_snapshot_sha "$ROLLBACK_PREV"; then
+    write_status "failed" 1 "Couldn't roll back safely" "The most recent snapshot has an unexpected name and was rejected. Contact support." ""
+    trap - EXIT TERM
+    rm -f "$LOCK_PATH" 2>/dev/null || true
+    exit 1
+  fi
+  TARGET_SHA="$ROLLBACK_PREV"
+  echo "[cavecms-update] standalone rollback → ${ROLLBACK_PREV}"
+  write_status "restarting" 1 "Restoring your previous version" "" ""
+  CAVECMS_MAINT_TOGGLED_BY_US=1
+  # Best-effort maintenance flip — must NOT gate the actual restore. Under
+  # `set -e` a bare non-zero return (loopback HTTP down + direct-DB fallback
+  # unavailable — common when the app is broken, which is WHY we're rolling
+  # back) would abort before rollback_to_previous ever runs.
+  post_maintenance_toggle true || true
+  if rollback_to_previous "$ROLLBACK_PREV" 0 ""; then
+    write_status "rolled_back" 1 "We put your site back on the previous version" "" ""
+    post_maintenance_toggle false || true
+    CAVECMS_MAINT_TOGGLED_BY_US=0
+    if declare -F post_audit_terminal >/dev/null 2>&1; then
+      post_audit_terminal rolled_back "manual_cli_rollback"
+    fi
+    trap - EXIT TERM
+    rm -f "$LOCK_PATH" 2>/dev/null || true
+    echo "[cavecms-update] rollback complete → ${ROLLBACK_PREV}"
+    exit 0
+  else
+    # rollback_to_previous wrote its own failed status. Ensure
+    # maintenance is cleared so the operator isn't stuck on a 503, then
+    # record the terminal audit. Best-effort (|| true) so a failed toggle
+    # can't abort before the lock cleanup + correct exit code below.
+    post_maintenance_toggle false || true
+    CAVECMS_MAINT_TOGGLED_BY_US=0
+    if declare -F post_audit_terminal >/dev/null 2>&1; then
+      post_audit_terminal failed "manual_cli_rollback_failed"
+    fi
+    trap - EXIT TERM
+    rm -f "$LOCK_PATH" 2>/dev/null || true
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -1156,34 +1403,16 @@ fi
 # healthz poll is the canonical "did the reload work" signal — if the
 # new process is healthy, the reload worked regardless of what pm2 CLI
 # reported. If healthz fails step 6 will trigger rollback.
-# Reload target: an app NAME when CAVECMS_PM2_APP_NAME is set
-# (shared-host PM2 surface — the in-tree ecosystem.config.cjs gets
-# clobbered by the new release's bundled legacy version on the atomic
-# swap, so we can't rely on the file path here), else the historical
-# `ecosystem.config.cjs` path (bare-metal deploy.sh layout).
-PM2_RELOAD_TARGET="${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}"
-# Pre-reload sanity: confirm pm2 knows the target (only meaningful in
-# the by-name branch — `pm2 describe <config.cjs>` would also fail
-# trivially). The forward path's healthz verify catches misses too,
-# but this surfaces "wrong CAVECMS_PM2_APP_NAME plumbed" with the
-# actual app-name typo instead of waiting for the verify timeout.
-# Truncate the log file ONCE here so we start each apply run with a
-# clean log, AND so the pre-check diagnostic below (if it fires) is
-# preserved through the subsequent pm2 reload output (which uses
-# append, not truncate, to avoid clobbering the warning).
-: > "${LOG_DIR}/pm2-reload.log"
-if [ -n "${CAVECMS_PM2_APP_NAME:-}" ]; then
-  # Wrap in `timeout 10s` defensively — a wedged pm2 daemon would
-  # otherwise hang the orchestrator here without a wall-clock cap.
-  # The diagnostic log is best-effort regardless; exit code is
-  # ignored so a timeout doesn't fail the orchestrator.
-  if ! timeout 10s pm2 describe "$PM2_RELOAD_TARGET" >/dev/null 2>&1; then
-    echo "[cavecms-update] pm2 reload pre-check: app \"$PM2_RELOAD_TARGET\" not registered (or pm2 daemon wedged) under PM2_HOME=\"${PM2_HOME:-<unset>}\"." >> "${LOG_DIR}/pm2-reload.log"
-    echo "[cavecms-update]   The reload will likely no-op. Check the install's pm2.config.cjs vs the actual registered app." >> "${LOG_DIR}/pm2-reload.log"
-  fi
-fi
-pm2 reload "$PM2_RELOAD_TARGET" --update-env 2>&1 | tail -n 16 >> "${LOG_DIR}/pm2-reload.log" || \
-  echo "[cavecms-update] pm2 reload CLI exit non-zero (likely SIGINT'd by reload signal — verifying via healthz)" >> "${LOG_DIR}/pm2-reload.log"
+# Restart the app via the install's service manager (systemd / pm2 /
+# Passenger / none-on-laptop). Truncate the reload log once so each apply
+# run starts clean (restart_app appends its surface-specific diagnostics).
+# Previously this was a hardcoded `pm2 reload`, which silently no-op'd on
+# the systemd (vps) + Passenger (cpanel) surfaces; restart_app branches on
+# CAVECMS_RESTART_MODE (forwarded by the CLI; unset → pm2 for the dashboard
+# + bare-metal paths, unchanged).
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+: > "${LOG_DIR}/pm2-reload.log" 2>/dev/null || true
+restart_app
 
 # ---------------------------------------------------------------------------
 # Step 6 — verify
@@ -1194,6 +1423,26 @@ pm2 reload "$PM2_RELOAD_TARGET" --update-env 2>&1 | tail -n 16 >> "${LOG_DIR}/pm
 # tight per ops review.
 # ---------------------------------------------------------------------------
 CURRENT_STEP=6
+
+# Laptop/dev surface has no managed service to reload — restart_app
+# intentionally no-op'd, so the still-running foreground process serves the
+# OLD commit and the commit-match verify below would never pass, falsely
+# auto-rolling-back a build that installed fine. The files ARE in place; the
+# operator restarts the foreground process to load them. Report success with
+# that guidance instead of a misleading "didn't come up healthy" rollback.
+if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then
+  write_status "completed" 6 "Update installed — restart your CaveCMS process to load the new version" "" ""
+  post_maintenance_toggle false
+  if declare -F post_audit_terminal >/dev/null 2>&1; then
+    post_audit_terminal completed "laptop_manual_restart_required"
+  fi
+  prune_old_snapshots || true
+  trap - EXIT
+  rm -f "$LOCK_PATH" 2>/dev/null || true
+  echo "[cavecms-update] laptop update complete (manual restart required) → ${TARGET_FULL:0:12}"
+  exit 0
+fi
+
 write_status "restarting" 6 "Verifying the new version" "" ""
 
 # Defensive: disable set -e for the verify loop. The loop's curl can
