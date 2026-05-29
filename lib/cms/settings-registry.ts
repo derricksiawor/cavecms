@@ -6,6 +6,7 @@ import { parseCidr } from '@/lib/security/ipMatch'
 import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
 import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
 import { encryptedSecretSchema } from '@/lib/security/secretCipher'
+import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
 
 // One Zod schema per `settings.key`. getSetting() parses every value
 // through this registry on read — so a tampered DB cell or a
@@ -181,6 +182,19 @@ const footer = z.object({
 const headerTheme = z
   .enum(['cream', 'obsidian', 'ivory', 'champagne', 'bone'])
   .default('cream')
+
+// Operator brand palette. See lib/cms/themeCss.ts for how these values
+// drive --brand-* CSS vars. All colors are 6-char hex; HEX_COLOR_RE
+// (designTokens) also allows 3/8-char but the picker emits 6-char and
+// the brand-var generator re-validates on emit.
+const themePalette = z.object({
+  mode: z.enum(['light', 'dark']).default('light'),
+  primary: z.string().regex(HEX_COLOR_RE).default('#050505'),
+  secondary: z.string().regex(HEX_COLOR_RE).default('#6E665A'),
+  accent: z.string().regex(HEX_COLOR_RE).default('#C9A961'),
+  surfaceDark: z.string().regex(HEX_COLOR_RE).default('#050505'),
+  surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
+})
 
 const siteHeader = z.object({
   // Brand text shown next to (or in place of) the logo.
@@ -992,6 +1006,18 @@ export const registry = {
   site_general: {
     schema: siteGeneral,
     default: {} satisfies z.infer<typeof siteGeneral>,
+  },
+  // ─── Theme / brand palette ───
+  theme_palette: {
+    schema: themePalette,
+    default: {
+      mode: 'light',
+      primary: '#050505',
+      secondary: '#6E665A',
+      accent: '#C9A961',
+      surfaceDark: '#050505',
+      surfaceLight: '#F5F1EA',
+    } satisfies z.infer<typeof themePalette>,
   },
   // ─── Self-update preferences ───
   updates: {

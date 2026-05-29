@@ -46,6 +46,11 @@ interface ColorPickerFieldProps {
   // When false, only the token swatches show — no custom hex / eyedropper /
   // saved row. Useful for fields locked to the brand palette.
   allowCustom?: boolean
+  // When true: the picker is for DEFINING a concrete hex (e.g. the Theme
+  // settings page). Token swatches act as quick-start presets and emit
+  // their hex (never a token name), and the Globe "bind to token" button
+  // is hidden. Default false preserves the inline-editor binding behavior.
+  hexOnly?: boolean
 }
 
 export function ColorPickerField({
@@ -56,6 +61,7 @@ export function ColorPickerField({
   tokens,
   allowAlpha = true,
   allowCustom = true,
+  hexOnly = false,
 }: ColorPickerFieldProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
@@ -253,24 +259,26 @@ export function ColorPickerField({
           <span className="sr-only">Pick {label.toLowerCase()}</span>
         </button>
 
-        <GlobeBindButton<ColorToken>
-          ariaLabel={`${label} — bind to brand colour token`}
-          bound={
-            boundToken
-              ? { token: boundToken, label: COLOR_TOKENS[boundToken].label }
-              : null
-          }
-          options={tokenOptions}
-          onChooseToken={(t) => onChange(t)}
-          onUnbind={() => {
-            // Defensive guard: GlobeBindButton only renders the unbind
-            // affordance when `bound` is non-null, but a fast click
-            // could race the boundToken state. Bail rather than read
-            // an arbitrary first-token fallback.
-            if (!boundToken) return
-            onChange(COLOR_TOKENS[boundToken].hex)
-          }}
-        />
+        {!hexOnly && (
+          <GlobeBindButton<ColorToken>
+            ariaLabel={`${label} — bind to brand colour token`}
+            bound={
+              boundToken
+                ? { token: boundToken, label: COLOR_TOKENS[boundToken].label }
+                : null
+            }
+            options={tokenOptions}
+            onChooseToken={(t) => onChange(t)}
+            onUnbind={() => {
+              // Defensive guard: GlobeBindButton only renders the unbind
+              // affordance when `bound` is non-null, but a fast click
+              // could race the boundToken state. Bail rather than read
+              // an arbitrary first-token fallback.
+              if (!boundToken) return
+              onChange(COLOR_TOKENS[boundToken].hex)
+            }}
+          />
+        )}
 
         {/* Inline hex readout / clearer for ad-hoc custom values. */}
         {value && !boundToken && allowCustom && (
@@ -322,9 +330,11 @@ export function ColorPickerField({
                   title={COLOR_TOKENS[t].label}
                   aria-label={COLOR_TOKENS[t].label}
                   onClick={() => {
-                    onChange(t)
-                    // Don't close — operator may want to fine-tune via
+                    // hexOnly: emit the token's concrete hex (quick-start
+                    // preset). Otherwise emit the token name (binding).
+                    // Either way, don't close — operator may fine-tune via
                     // alpha or eyedropper after picking the base.
+                    onChange(hexOnly ? COLOR_TOKENS[t].hex : t)
                   }}
                   className={
                     'h-9 w-9 rounded-lg border transition-all duration-quick hover:scale-[1.08] hover:border-copper-400/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/70 ' +

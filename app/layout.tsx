@@ -2,6 +2,8 @@ import { headers } from 'next/headers'
 import { Montserrat, Marcellus } from 'next/font/google'
 import { organizationLd } from '@/lib/seo/jsonLd'
 import { safeJsonForScript } from '@/lib/seo/escape'
+import { getSetting } from '@/lib/cms/getSettings'
+import { brandVarsCss } from '@/lib/cms/themeCss'
 import { SiteFooter } from '@/components/SiteFooter'
 import { SiteHeader } from '@/components/SiteHeader'
 import { AdminBar } from '@/components/admin-bar/AdminBar'
@@ -65,6 +67,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // entity (Residence, BlogPosting) is added by the route itself;
   // both coexist via multiple application/ld+json script tags.
   const orgLd = await organizationLd()
+
+  // Operator brand palette → injected CSS-var overrides. getSetting
+  // fails-closed to the registry default, so a missing/garbage row
+  // yields the luxury defaults. brandVarsCss re-validates every hex.
+  const palette = await getSetting('theme_palette')
+  const brandCss = brandVarsCss(palette)
   return (
     <html
       lang="en"
@@ -80,11 +88,32 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           // script tag even if CSP strict-dynamic is ever relaxed.
           dangerouslySetInnerHTML={{ __html: safeJsonForScript(orgLd) }}
         />
+        <style
+          nonce={nonce}
+          // Brand palette overrides (Settings → Theme). UN-layered so it
+          // beats the @layer-base defaults in globals.css. Body is hex-only,
+          // re-validated in brandVarsCss — no operator free-text reaches CSS.
+          //
+          // suppressHydrationWarning: the browser strips the `nonce`
+          // attribute value from the DOM after applying CSP (security
+          // behaviour), so the client hydrates seeing nonce="" while the
+          // server rendered the real nonce. The CSS content is identical
+          // server/client — only the browser-cleared nonce differs, which
+          // is expected, so we suppress the otherwise-spurious warning.
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: brandCss }}
+        />
         {/* Third-party analytics / tracking / chat. Every <script>
            carries the request nonce; toggles off emit zero bytes. */}
         <ThirdPartyScripts />
       </head>
-      <body className="flex min-h-screen flex-col font-sans antialiased bg-cream text-near-black">
+      <body
+        className="flex min-h-screen flex-col font-sans antialiased"
+        // Base surface follows Settings → Theme (Light/Dark mode). Defaults
+        // to the brand light surface (ivory) — unifies the page base onto
+        // the luxury palette; content blocks render their own tones.
+        style={{ background: 'var(--brand-base-bg)', color: 'var(--brand-base-fg)' }}
+      >
         {/* Public header + footer are mounted at the root so every
            public page inherits them. Admin routes have their own
            layout shell and these components self-suppress by reading

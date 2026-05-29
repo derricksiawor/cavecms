@@ -28,7 +28,9 @@
 
   --color-near-black: #050505;
   --color-deep-charcoal: #1A1A1A;
-  --color-warm-stone: #6E665A;
+  /* --color-warm-stone moved to the luxury @theme inline block below so it
+     routes through var(--brand-secondary) — a plain @theme token cannot hold
+     a var() value (Tailwind drops it), which is why it lives in @theme inline. */
 
   --font-sans: var(--font-montserrat), system-ui, -apple-system, sans-serif;
   --font-serif: var(--font-playfair), Georgia, serif;
@@ -372,15 +374,54 @@
    that admin-bar pickers consume. Adding a new token requires editing
    BOTH this file AND that one — they stay in sync by hand.
    ════════════════════════════════════════════════════════════════════════ */
-@theme {
-  /* ─── Palette — six tokens. Luxury restraint. ──────────────────── */
-  --color-obsidian:     #050505;
-  --color-ivory:        #F5F1EA;
-  --color-champagne:    #C9A961;
-  --color-antique-gold: #8B6F3A;
-  --color-bone:         #E8E1D4;
-  /* --color-warm-stone is defined in the legacy @theme block above
-     (#6E665A) and serves both systems — no redefinition here. */
+/* ── Brand palette source-of-truth ──────────────────────────────────
+   Defaults equal the luxury hex so a fresh install is identical. Declared
+   in @layer base so the runtime-injected <style> (root layout, UN-layered)
+   always wins on the cascade — no specificity hacks needed. The operator
+   edits these via Settings → Theme; see lib/cms/themeCss.ts.
+
+   The @theme inline block below maps Tailwind utilities (bg-champagne,
+   text-obsidian, …) to these brand vars. We ALSO alias the global
+   --color-* tokens here: @theme inline does NOT emit global custom
+   properties, but resolveColorValue() (designTokens.ts) writes
+   `var(--color-champagne)` into inline styles, so those globals must
+   exist. Both the utilities and the aliases route through the same
+   --brand-* knob, so one injected override re-skins everything. */
+@layer base {
+  :root {
+    --brand-surface-dark:  #050505;
+    --brand-surface-light: #F5F1EA;
+    --brand-accent:        #C9A961;
+    --brand-secondary:     #6E665A;
+    --brand-primary:       #050505;
+    --brand-antique-gold:  #8B6F3A;  /* derived hover; injection overrides when accent changes */
+    --brand-bone:          #E8E1D4;  /* derived divider; injection overrides when light surface changes */
+    --brand-base-bg:       #F5F1EA;  /* light mode default */
+    --brand-base-fg:       #050505;
+
+    /* Global --color-* aliases for var(--color-*) inline styles. */
+    --color-obsidian:     var(--brand-surface-dark);
+    --color-ivory:        var(--brand-surface-light);
+    --color-champagne:    var(--brand-accent);
+    --color-warm-stone:   var(--brand-secondary);
+    --color-antique-gold: var(--brand-antique-gold);
+    --color-bone:         var(--brand-bone);
+    --color-primary:      var(--brand-primary);
+  }
+}
+
+@theme inline {
+  /* ─── Palette. `inline` keeps the var() reference in the generated
+     utilities (Tailwind would DROP a var() value in a plain @theme),
+     so bg-champagne → var(--brand-accent) etc. and Settings → Theme
+     re-skins the whole site at runtime. ──────────────────────────── */
+  --color-obsidian:     var(--brand-surface-dark);
+  --color-ivory:        var(--brand-surface-light);
+  --color-champagne:    var(--brand-accent);
+  --color-warm-stone:   var(--brand-secondary);
+  --color-antique-gold: var(--brand-antique-gold);
+  --color-bone:         var(--brand-bone);
+  --color-primary:      var(--brand-primary);
 
   /* ─── Typography families — Playfair Display for titles/headings,
      Montserrat for body/UI text. Matches the client's brand identity

@@ -36,7 +36,28 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     // with the page instead of sticking). The ambient blur below is
     // `fixed`-positioned so it doesn't need the parent to clip — it
     // sits relative to the viewport regardless.
-    <div className="relative min-h-screen bg-cream">
+    <div
+      className="relative min-h-screen bg-cream"
+      // Isolate the admin UI from the operator's public-site brand palette.
+      // Public pages re-skin via the root-layout-injected --brand-* vars
+      // (Settings → Theme); resetting them here to the luxury defaults keeps
+      // every admin surface (incl. shared tokens like warm-stone) on-brand.
+      // Custom-property inheritance resolves from the nearest ancestor that
+      // sets the var, so this reset wins for all admin descendants.
+      style={
+        {
+          '--brand-surface-dark': '#050505',
+          '--brand-surface-light': '#F5F1EA',
+          '--brand-accent': '#C9A961',
+          '--brand-secondary': '#6E665A',
+          '--brand-primary': '#050505',
+          '--brand-antique-gold': '#8B6F3A',
+          '--brand-bone': '#E8E1D4',
+          '--brand-base-bg': '#F5F1EA',
+          '--brand-base-fg': '#050505',
+        } as React.CSSProperties
+      }
+    >
       {/* Ambient depth — single soft glow, never overpowers content. */}
       <div
         aria-hidden="true"
