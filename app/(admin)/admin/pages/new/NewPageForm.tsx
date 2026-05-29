@@ -174,7 +174,7 @@ export function NewPageForm({ role }: { role: Role }) {
                 value="clone-about"
                 label="Clone “About”"
                 description="Copy every block from the About page as a starting point."
-                preview={<ClonePreview rows={['lead', 'paragraph', 'milestones', 'cta']} />}
+                preview={<ClonePreview rows={['lead', 'paragraph', 'grid', 'cta']} />}
                 checked={template === 'clone-about'}
                 onSelect={() => setTemplate('clone-about')}
               />
@@ -182,7 +182,7 @@ export function NewPageForm({ role }: { role: Role }) {
                 value="clone-services"
                 label="Clone “Services”"
                 description="Copy every block from the Services page as a starting point."
-                preview={<ClonePreview rows={['lead', 'grid', 'grid', 'cta']} />}
+                preview={<ClonePreview rows={['lead', 'grid', 'cta']} />}
                 checked={template === 'clone-services'}
                 onSelect={() => setTemplate('clone-services')}
               />
@@ -190,7 +190,7 @@ export function NewPageForm({ role }: { role: Role }) {
                 value="clone-contact"
                 label="Clone “Contact”"
                 description="Copy every block from the Contact page as a starting point."
-                preview={<ClonePreview rows={['lead', 'form', 'form', 'cta']} />}
+                preview={<ClonePreview rows={['lead', 'grid', 'form']} />}
                 checked={template === 'clone-contact'}
                 onSelect={() => setTemplate('clone-contact')}
               />
@@ -342,14 +342,13 @@ function BlankPreview() {
 // Clone-template preview — small stacked sections sized by row "kind".
 // Lead = a wide bold bar (looks like a headline).
 // Paragraph = stacked thin lines (body copy).
-// Milestones = three small inline pills (year markers).
-// Grid = a 3-column grid (service cards).
+// Grid = a 3-column grid (cards / channel cards).
 // Form = labeled input rows.
 // Cta = a pill button alone, right-aligned.
 function ClonePreview({
   rows,
 }: {
-  rows: Array<'lead' | 'paragraph' | 'milestones' | 'grid' | 'form' | 'cta'>
+  rows: Array<'lead' | 'paragraph' | 'grid' | 'form' | 'cta'>
 }) {
   // Layout: stack `rows` vertically inside the 200x120 viewbox with
   // 10px outer padding and 8px between rows. Each row gets a slot
@@ -385,25 +384,6 @@ function ClonePreview({
                 <rect x={padX} y={y + slotH * 0.7} width={w * 0.78} height={slotH * 0.18} rx="2" className="fill-warm-stone/35" />
               </g>
             )
-          case 'milestones': {
-            const pillW = (w - 16) / 3
-            return (
-              <g key={i}>
-                {[0, 1, 2].map((p) => (
-                  <rect
-                    key={p}
-                    x={padX + p * (pillW + 8)}
-                    y={y + slotH * 0.2}
-                    width={pillW}
-                    height={slotH * 0.6}
-                    rx={slotH * 0.3}
-                    className="fill-copper-500/25 stroke-copper-500/50"
-                    strokeWidth="0.8"
-                  />
-                ))}
-              </g>
-            )
-          }
           case 'grid': {
             const cellW = (w - 16) / 3
             return (

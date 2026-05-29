@@ -166,6 +166,12 @@ export const INLINE_EDITABLE_FIELDS: Readonly<
     { path: 'images[].alt', type: 'alt', placeholder: 'Describe this image' },
     { path: 'images[].caption', type: 'text', placeholder: 'Caption' },
   ],
+  // lx_featured_projects — only the section heading is canvas-editable;
+  // the project set is curated via Projects → Featured order (the grid
+  // auto-renders the Featured projects).
+  lx_featured_projects: [
+    { path: 'heading', type: 'text', placeholder: 'Section heading' },
+  ],
   // Divider + Social icons have no text-bearing fields the operator
   // would type into the canvas — both live entirely in the drawer.
 

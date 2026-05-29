@@ -289,7 +289,7 @@ export function mergeFieldValues(
 }
 
 /** Internal — write `value` at the parsed path. Path segments may be
- *  either plain keys ('cta') or array-indexed ('items[3]'). Refuses to
+ *  either plain keys ('heading') or array-indexed ('items[3]'). Refuses to
  *  create intermediate containers; if the destination doesn't exist on
  *  the source the write is dropped (Gemini hallucinated a path that
  *  isn't on the block — fail closed). */

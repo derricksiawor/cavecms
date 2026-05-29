@@ -411,6 +411,33 @@ SET
 WHERE block_type = 'social_icons';
 --> statement-breakpoint
 
+-- featured_projects → lx_featured_projects (0.1.54). The lx_ family
+-- regained a project card grid, so this legacy block is now CONVERTED
+-- (it was a PASS-2 DELETE before 0.1.54 — silent data loss for any site
+-- whose home/projects page used the grid). The lx_ grid auto-renders the
+-- projects marked Featured (projects.featured_order) rather than a
+-- per-block project_ids list, so the legacy project_ids is intentionally
+-- DROPPED — operators re-curate via Projects → Featured order. Maps
+-- title→heading (empty string when absent — the lx_ heading is optional,
+-- NOT nullable) and fills columns/tone/animation with schema defaults.
+-- Re-run safety: the production migrators (scripts/install-migrate.mjs,
+-- migrator/run.js) gate on the file HASH, so editing 0024 in place makes
+-- it re-run on update. That's safe here — this UPDATE's WHERE matches
+-- zero rows once featured_projects has been converted (or was already
+-- deleted by the pre-0.1.54 0024), so the re-run is a no-op. Rows the
+-- old 0024 DELETED are unrecoverable; this conversion only preserves the
+-- grid on installs that first reach 0024 on/after 0.1.54.
+UPDATE content_blocks
+SET block_type = 'lx_featured_projects',
+    data = JSON_OBJECT(
+      'heading',   COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.title')), ''),
+      'columns',   3,
+      'tone',      'obsidian',
+      'animation', 'none'
+    )
+WHERE block_type = 'featured_projects';
+--> statement-breakpoint
+
 -- ════════════════════════════════════════════════════════════════════
 -- PASS 2 — DELETE rows whose legacy type has no lx_ analog
 -- ════════════════════════════════════════════════════════════════════
@@ -418,7 +445,7 @@ WHERE block_type = 'social_icons';
 DELETE FROM content_blocks WHERE block_type = 'hero';
 --> statement-breakpoint
 
-DELETE FROM content_blocks WHERE block_type IN ('services_intro', 'featured_projects', 'about_history');
+DELETE FROM content_blocks WHERE block_type IN ('services_intro', 'about_history');
 --> statement-breakpoint
 
 -- stats_row — 1→N split into lx_stat rows is unsafe in SQL. Operator
@@ -446,10 +473,10 @@ VALUES (
       'accordion→lx_accordion','tabs→lx_tabs','icon_list→lx_icon_list',
       'testimonial→lx_testimonial','video_embed→lx_video','image→lx_figure',
       'gallery→lx_gallery','cta→lx_cta_banner','channel_card→lx_channel_card',
-      'social_icons→lx_social_icons'
+      'social_icons→lx_social_icons','featured_projects→lx_featured_projects'
     ),
     'pass2_deletes', JSON_ARRAY(
-      'hero','services_intro','featured_projects','about_history',
+      'hero','services_intro','about_history',
       'stats_row','star_rating','alert'
     )
   ),

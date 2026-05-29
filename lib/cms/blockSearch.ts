@@ -51,8 +51,8 @@ import {
 // POST) + a Templates stub (placeholder until Chunk J lands).
 export interface SearchableItem {
   /** Stable id for React keys + dispatch tracing. Includes the label
-   *  in kebab form to disambiguate the two SEED_ENTRIES that share a
-   *  blockType (Counter + Stats Row both -> 'stats_row'). */
+   *  in kebab form so that if two SEED_ENTRIES ever share a blockType
+   *  (a preset + its base block), their ids stay distinct. */
   id: string
   /** Dispatch hint — tells the caller WHICH insertion path to take.
    *   - 'seed'     → POST /api/cms/blocks with SEED_DATA[blockType]
@@ -354,10 +354,12 @@ function getCatalogIndex(
 let CATALOG_CACHE: ReadonlyArray<SearchableItem> | null = null
 
 function kebabId(entry: SeedEntry): string {
-  // Disambiguates Counter + Stats Row (both blockType='stats_row') by
-  // appending the kebab-cased label. Result: 'block:stats_row:counter'
-  // vs 'block:stats_row:stats-row'. Stable across renders (label is
-  // operator-facing and pinned in SEED_ENTRIES).
+  // Appends the kebab-cased label so two SEED_ENTRIES that resolve to
+  // the same blockType (a preset alongside its base block) still get
+  // distinct ids — e.g. 'block:lx_stat:counter' vs 'block:lx_stat:stat'.
+  // Stable across renders (label is operator-facing and pinned in
+  // SEED_ENTRIES). Today every entry's type is unique, so this is a
+  // defensive guard rather than an active disambiguation.
   const labelKey = normalize(entry.label).replace(/\s+/g, '-')
   return `block:${entry.type}:${labelKey}`
 }

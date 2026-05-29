@@ -36,7 +36,7 @@ describe('saveBlock', () => {
     `)
     await db.execute(sql`
       INSERT INTO content_blocks (id, page_id, block_key, block_type, position, data, version)
-      VALUES (1, 1, 'hero', 'hero', 1000,
+      VALUES (1, 1, NULL, 'lx_cover_image', 1000,
               ${JSON.stringify({ title: 'A', image: { media_id: 1, alt: 'a' } })},
               5)
     `)

@@ -88,6 +88,9 @@ export interface HydratedProject {
 export interface HydratedPage {
   blocks: HydratedBlock[]
   media: Map<number, HydratedMedia>
+  // Featured projects (projects.featured_order), in featured order —
+  // populated only when the page has an lx_featured_projects block.
+  // Keyed by id for React keys; iteration order is the featured order.
   projects: Map<number, HydratedProject>
 }
 
@@ -192,7 +195,6 @@ export async function hydratePage(
   ]
 
   const mediaIds = new Set<number>()
-  const projectIds = new Set<number>()
   // Per-render batch of notification_failures intents. Collected during
   // the block-parse loop, flushed fire-and-forget after the loop so a
   // page with K broken blocks doesn't pay K × insert latency on TTFB.
@@ -268,15 +270,6 @@ export async function hydratePage(
     }
 
     collectMediaPaths(data).forEach((p) => mediaIds.add(p.mediaId))
-    if (typeof data === 'object' && data) {
-      const dd = data as Record<string, unknown>
-      const pids = dd['project_ids']
-      if (Array.isArray(pids)) {
-        for (const id of pids) {
-          if (typeof id === 'number' && id > 0) projectIds.add(id)
-        }
-      }
-    }
     // Parse `meta` (per-kind container settings JSON) defensively —
     // same pattern as `data` above. A corrupt meta blob renders as
     // null instead of 500-ing the page.
@@ -317,9 +310,15 @@ export async function hydratePage(
     })
   }
 
-  const projects = projectIds.size
-    ? await fetchProjectsSafely([...projectIds])
-    : []
+  // lx_featured_projects auto-renders the projects marked Featured
+  // (projects.featured_order), in that order — there is no per-block
+  // selection. Fetch them ONLY when such a block is on the page so
+  // pages without it pay no extra query. The Map below preserves the
+  // featured_order insertion order, which the renderer iterates.
+  const hasFeaturedBlock = blocks.some(
+    (b) => b.blockType === 'lx_featured_projects',
+  )
+  const projects = hasFeaturedBlock ? await fetchFeaturedProjectsSafely() : []
   for (const p of projects) {
     if (p.hero_image_id) mediaIds.add(p.hero_image_id)
     if (p.og_image_id) mediaIds.add(p.og_image_id)
@@ -380,17 +379,21 @@ export async function hydratePage(
   }
 }
 
-/** Wraps the projects fetch in a missing-table feature detect so hydrate
- *  stays useful before Plan 04 ships the projects schema. Any other DB
- *  error propagates — silent fallbacks were masking real outages. */
-async function fetchProjectsSafely(ids: number[]): Promise<HydratedProject[]> {
+/** Fetches the Featured projects (projects.featured_order set) in order,
+ *  capped at 12 — the data source for the lx_featured_projects grid.
+ *  Wrapped in a missing-table feature detect so hydrate stays useful on
+ *  installs without the projects schema yet. Any other DB error
+ *  propagates — silent fallbacks were masking real outages. */
+async function fetchFeaturedProjectsSafely(): Promise<HydratedProject[]> {
   try {
     const [rows] = (await db.execute(sql`
       SELECT id, slug, name, tagline, hero_image_id, og_image_id
       FROM projects
-      WHERE id IN (${sql.join(ids, sql.raw(','))})
+      WHERE featured_order IS NOT NULL
         AND published = TRUE
         AND deleted_at IS NULL
+      ORDER BY featured_order
+      LIMIT 12
     `)) as unknown as [HydratedProject[]]
     return rows
   } catch (err) {

@@ -38,6 +38,7 @@ import {
   ImagePlus,
   Image as CoverIcon,
   Images,
+  LayoutGrid,
   MapPin,
   StretchVertical,
   // Composite-widget icons.
@@ -80,6 +81,7 @@ export type SeedBlockType =
   | 'lx_social_icons'
   | 'lx_cta_banner'
   | 'lx_gallery'
+  | 'lx_featured_projects'
 
 export interface SeedEntry {
   type: SeedBlockType
@@ -119,8 +121,8 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
   // LUXURY REDESIGN — lx_* widget primitives. Order here is the order
   // operators see in the palette: Heading → Text → Eyebrow → Action →
   // Figure → Rule → Space. Most-reached-for editorial widgets first.
-  // Legacy entries below are hidden by isPaletteVisible during the
-  // page-by-page migration.
+  // Every entry is an lx_* block (plus contact_form); the legacy widget
+  // family was purged, so the palette is 100% luxury primitives.
   // ════════════════════════════════════════════════════════════════
   {
     type: 'lx_heading',
@@ -302,6 +304,14 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     icon: Images,
     aliases: ['photo grid', 'images', 'portfolio'],
     keywords: ['photos', 'showcase', 'work'],
+  },
+  {
+    type: 'lx_featured_projects',
+    label: 'Featured projects',
+    description: 'Card grid of your Featured projects, pulled live (set Featured order in Projects).',
+    icon: LayoutGrid,
+    aliases: ['projects', 'portfolio', 'work grid', 'case studies'],
+    keywords: ['projects', 'showcase', 'case studies', 'grid', 'featured'],
   },
 
   // ─── Fixed-slot widget — not strictly in the lx_ family but kept in
@@ -530,6 +540,11 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   lx_gallery: {
     images: [{ media_id: 1, alt: '' }],
   },
+  // lx_featured_projects — no per-block fields are required. The grid
+  // auto-renders the projects marked Featured (Projects → Featured
+  // order); columns/tone/animation fall to schema defaults. An empty
+  // grid renders a hint until at least one project is Featured.
+  lx_featured_projects: {},
 }
 
 // Convenience for picker UIs that need to include the Image entry

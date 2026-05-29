@@ -46,100 +46,6 @@ export interface ChatField {
 // within each generation so a future contributor can grep top-to-
 // bottom without surprise.
 const FIELDS: Record<string, ChatField[]> = {
-  // ── Legacy block widgets ────────────────────────────────────────
-  hero: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'subtitle', kind: 'plain', maxLength: TEXT_MAX.short },
-    { path: 'image.alt', kind: 'plain', maxLength: TEXT_MAX.short },
-    { path: 'cta.text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
-  services_intro: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-    { path: 'items[].title', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].body', kind: 'plain', maxLength: TEXT_MAX.itemBody },
-  ],
-  featured_projects: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title },
-  ],
-  about_history: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextLong },
-    { path: 'image.alt', kind: 'plain', maxLength: TEXT_MAX.short },
-  ],
-  cta: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
-    { path: 'cta.text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
-  text: [
-    { path: 'heading', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextLong },
-  ],
-  image: [
-    { path: 'image.alt', kind: 'plain', maxLength: TEXT_MAX.short },
-    { path: 'caption', kind: 'plain', maxLength: TEXT_MAX.short },
-  ],
-  gallery: [
-    { path: 'images[].alt', kind: 'plain', maxLength: TEXT_MAX.short },
-    { path: 'images[].caption', kind: 'plain', maxLength: TEXT_MAX.short },
-  ],
-  quote: [
-    { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body },
-    { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'attribution_title', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  heading: [
-    { path: 'text', kind: 'plain', maxLength: TEXT_MAX.title },
-  ],
-  button: [
-    { path: 'text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
-  icon_box: [
-    { path: 'headline', kind: 'plain', maxLength: TEXT_MAX.title },
-    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
-  ],
-  accordion: [
-    { path: 'items[].title', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-  ],
-  icon_list: [
-    { path: 'items[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  tabs: [
-    { path: 'items[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-  ],
-  alert: [
-    { path: 'title', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'body_richtext', kind: 'richtext', maxLength: TEXT_MAX.richtextShort },
-  ],
-  star_rating: [
-    { path: 'label', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  testimonial: [
-    { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body },
-    { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'role', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'image.alt', kind: 'plain', maxLength: TEXT_MAX.short },
-  ],
-  video_embed: [
-    { path: 'caption', kind: 'plain', maxLength: TEXT_MAX.short },
-  ],
-  stats_row: [
-    { path: 'items[].label', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].helper_text', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'items[].prefix', kind: 'plain', maxLength: 8 },
-    { path: 'items[].suffix', kind: 'plain', maxLength: 8 },
-  ],
-  eyebrow: [
-    { path: 'text', kind: 'plain', maxLength: TEXT_MAX.caption },
-  ],
-  channel_card: [
-    { path: 'label', kind: 'plain', maxLength: TEXT_MAX.caption },
-    { path: 'body', kind: 'plain', maxLength: TEXT_MAX.body },
-    { path: 'action.text', kind: 'plain', maxLength: TEXT_MAX.ctaText },
-  ],
   contact_form: [
     { path: 'heading', kind: 'plain', maxLength: TEXT_MAX.title },
     { path: 'intro', kind: 'plain', maxLength: TEXT_MAX.body },
@@ -190,6 +96,9 @@ const FIELDS: Record<string, ChatField[]> = {
   lx_quote: [
     { path: 'quote', kind: 'plain', maxLength: TEXT_MAX.body },
     { path: 'attribution', kind: 'plain', maxLength: TEXT_MAX.caption },
+  ],
+  lx_featured_projects: [
+    { path: 'heading', kind: 'plain', maxLength: TEXT_MAX.title },
   ],
 }
 

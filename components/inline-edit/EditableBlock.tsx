@@ -993,14 +993,8 @@ export function EditableBlock(p: EditableBlockProps) {
         // drag handle (-top-3) don't clip against the sibling widget
         // above / against the column's outline. Live mode never mounts
         // EditableBlock — widgets render flush in their natural rhythm.
-        //
-        // Hero is full-bleed BY DESIGN (background image edge-to-edge).
-        // The px-2 inset breaks that visual in edit mode, so we opt
-        // hero out of the horizontal padding — its top toolbar still
-        // has room because the hero's own internal padding (p-8 sm:p-16)
-        // covers the chrome's vertical reach.
         'group/edit relative my-2',
-        p.blockType === 'hero' ? 'px-0' : 'px-2',
+        'px-2',
         sortable.isDragging && 'opacity-50',
         // F14 — optimistic delete: collapse out of flow while the
         // server confirms. `hidden` removes from layout AND a11y.

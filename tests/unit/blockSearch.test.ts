@@ -316,6 +316,9 @@ describe('searchBlocks — catalog composition', () => {
       'icon_box', 'accordion', 'icon_list', 'tabs', 'alert',
       'social_icons', 'star_rating', 'stats_row', 'testimonial',
       'video_embed', 'eyebrow', 'channel_card',
+      // Section-shaped legacy types converted to lx_ by migration 0024.
+      'hero', 'services_intro', 'about_history', 'featured_projects',
+      'image', 'gallery',
     ]
     for (const legacy of LEGACY) {
       expect(seedTypes, `legacy block_type '${legacy}' leaked into palette`).not.toContain(legacy)
@@ -332,6 +335,8 @@ describe('searchBlocks — catalog composition', () => {
       'lx_figure', 'lx_space',
       // Composite widgets (Phase 2)
       'lx_channel_card', 'lx_stat', 'lx_quote',
+      // Data-driven grid (0.1.54) — pulls selected projects live.
+      'lx_featured_projects',
     ]
     for (const lux of LUXURY) {
       expect(seedTypes, `luxury block_type '${lux}' missing from palette`).toContain(lux)

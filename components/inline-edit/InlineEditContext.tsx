@@ -856,40 +856,31 @@ export function useEffectiveVersions(
 // can put it in dep arrays without churn. Each invocation runs to
 // completion + reports back via InsertBlockResult — callers handle the
 // busy-state spinner themselves so per-row spinners stay independent
-// (Counter + Stats Row both POST 'stats_row' but spin independently
-// keyed on their picker label).
+// (two palette entries that resolve to the same blockType still spin
+// independently, keyed on their picker label).
 //
 // MediaPicker round-trip stays OUT of this hook — that's a UI concern
-// (open modal, wait for pick). The 4 image callers open MediaPicker
-// themselves + then call insertBlock('image', { data: ... }) with the
-// picked media_id baked into the data payload.
+// (open modal, wait for pick). The image callers (lx_figure, lx_gallery)
+// open MediaPicker themselves + then call insertBlock with the picked
+// media_id baked into the `data` payload.
 
-// Hero / Gallery / Featured-projects are NOT in SeedBlockType because
-// their schemas require media or project refs that can't be seeded
-// blindly — they need a MediaPicker round-trip (hero/gallery) or are
-// reserved for fixed-slot template pages (hero/featured_projects on
-// /home, /about, /services, /contact — see FIXED_BLOCK_KEYS_PER_PAGE
-// in lib/cms/block-registry.ts). The inline +Add Block palette opens
-// the MediaPicker first and surfaces a clean "reserved for this page"
-// toast on the 409 path.
-export type InsertableBlockType =
-  | SeedBlockType
-  | 'image'
-  | 'hero'
-  | 'gallery'
-  | 'featured_projects'
+// lx_figure / lx_gallery want a MediaPicker round-trip before insert —
+// their click paths pass an explicit media `data` payload. The inline
+// +Add Block palette opens the MediaPicker first and surfaces a clean
+// "reserved for this page" toast on the 409 path. lx_featured_projects
+// needs no payload (it auto-renders the Featured projects) and seeds
+// with empty data like any other field-less block.
+export type InsertableBlockType = SeedBlockType
 
 export interface InsertBlockOptions {
   pageId: number
   /** When omitted (undefined), useInsertBlock falls back to
-   *  SEED_DATA[blockType] (text/cta/quote etc) so the server's
-   *  missing_data 400 never fires for SeedBlockType callers. When the
-   *  caller has a richer seed (e.g. SeedEntry.data for Counter / Stats
-   *  Row that share blockType='stats_row') or a MediaPicker-derived
-   *  image payload, it's passed here verbatim and overrides the
-   *  fallback. Media-bound types ('image' | 'hero' | 'gallery' |
-   *  'featured_projects') aren't in SEED_DATA — the caller MUST
-   *  provide data for these (MediaPicker round-trip path). */
+   *  SEED_DATA[blockType] (lx_heading / lx_text / lx_quote etc) so the
+   *  server's missing_data 400 never fires for SeedBlockType callers.
+   *  When the caller has a richer seed (a SeedEntry.data preset, or a
+   *  MediaPicker-derived image payload) it's passed here verbatim and
+   *  overrides the fallback. The MediaPicker-driven inserts (lx_figure /
+   *  lx_gallery) pass a real media payload here. */
   data?: Record<string, unknown>
   /** Optional spacing/style meta — Chunk H's widget-meta-on-create
    *  path. Used by the context menu's Paste verb today; the palette +
@@ -1116,20 +1107,18 @@ export function useInsertBlock(): InsertBlockFn {
       // means every SeedBlockType insert (the 25+ widgets surfaced in
       // WidgetPicker / OutlinePanel / slash / empty-state / drag-drop)
       // can omit `data` and still satisfy the server's per-kind Zod
-      // schema with the minimum required fields. Media-bound types
-      // ('image' | 'hero' | 'gallery' | 'featured_projects') aren't in
-      // SEED_DATA — the lookup is `undefined` for those and the caller
-      // MUST provide data (every existing caller does — MediaPicker
-      // round-trip on the click paths, MediaPicker required on /slash).
+      // schema with the minimum required fields. The two media-bound
+      // widgets (lx_figure, lx_gallery) have no useful zero-data seed —
+      // their click paths pass an explicit `data` payload from the
+      // MediaPicker round-trip, which overrides the fallback below.
       //
-      // The `blockType in SEED_DATA` runtime check is necessary because
-      // SEED_DATA is typed `Record<SeedBlockType, ...>` and InsertableBlockType
-      // is wider (adds the 4 media-bound types). Bypassing the check would
-      // make `SEED_DATA[blockType]` a TypeScript error at this site.
+      // `blockType` is an InsertableBlockType (=== SeedBlockType) and
+      // SEED_DATA is a total Record<SeedBlockType, …>, so every insertable
+      // widget has a seed row and this lookup never resolves to undefined.
+      // The `in` guard is kept purely as defensive narrowing in case
+      // InsertableBlockType ever widens past SeedBlockType again.
       const dataFallback =
-        blockType in SEED_DATA
-          ? SEED_DATA[blockType as SeedBlockType]
-          : undefined
+        blockType in SEED_DATA ? SEED_DATA[blockType] : undefined
       let resolvedData =
         options.data !== undefined ? options.data : dataFallback
 

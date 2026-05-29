@@ -20,11 +20,6 @@
 // inline-edit insert pipeline (client) import this module.
 
 export const BLOCK_TONE_ENUMS = {
-  // Legacy icon_box — minimum 2-token enum (legacy near-black + ivory
-  // light counterpart). Other legacy widgets (heading, text, eyebrow)
-  // don't carry a tone field and aren't listed here.
-  icon_box: ['near-black', 'ivory'],
-
   // Luxury primitives.
   lx_heading: ['obsidian', 'ivory', 'champagne'],
   lx_text: ['obsidian', 'ivory', 'warm-stone'],
@@ -59,6 +54,10 @@ export const BLOCK_TONE_ENUMS = {
   lx_social_icons: ['obsidian', 'ivory', 'warm-stone'],
   lx_cta_banner: ['obsidian', 'ivory'],
   lx_gallery: ['obsidian', 'ivory'],
+  // Data-driven project card grid (0.1.54 — replaces the purged legacy
+  // `featured_projects`). Pulls published projects from the projects
+  // table via RenderContext.projects.
+  lx_featured_projects: ['obsidian', 'ivory'],
 } as const satisfies Record<string, readonly [string, ...string[]]>
 
 export type ToneAwareBlockType = keyof typeof BLOCK_TONE_ENUMS

@@ -46,7 +46,9 @@ export function tagsForBlockSave(
   blockType?: string,
 ): TagSet {
   const t = new Set<string>([tag.page(pageSlug)])
-  if (blockType === 'featured_projects') {
+  // lx_featured_projects pulls live from the projects table, so a save
+  // touching it must also bust the projects-index + featured fragments.
+  if (blockType === 'lx_featured_projects') {
     t.add(tag.featuredProjects)
     t.add(tag.projectsIndex)
   }

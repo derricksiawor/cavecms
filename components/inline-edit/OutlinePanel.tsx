@@ -32,10 +32,6 @@ import {
   Layers,
   Lock,
   X,
-  Type,
-  MousePointerClick,
-  Quote as QuoteIcon,
-  Image as ImageIcon,
   Component as ComponentIcon,
   Columns3,
   Copy,
@@ -91,19 +87,10 @@ interface TreeNode {
 }
 
 const BLOCK_ICON: Record<string, LucideIcon> = {
-  // Containers
+  // Containers. Every widget (lx_*) falls through to the ComponentIcon
+  // fallback below — no per-widget icon curation today.
   section: Layers,
   column: Columns3,
-  // Widgets (curated — fallback below covers anything unmapped).
-  text: Type,
-  cta: MousePointerClick,
-  quote: QuoteIcon,
-  image: ImageIcon,
-  hero: ComponentIcon,
-  gallery: ComponentIcon,
-  featured_projects: ComponentIcon,
-  about_history: ComponentIcon,
-  services_intro: ComponentIcon,
 }
 
 function iconFor(kind: BlockKind, blockType: string): LucideIcon {

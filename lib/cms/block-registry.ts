@@ -911,6 +911,20 @@ export const blockSchemas = {
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_gallery).default('obsidian'),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
   }),
+  // Data-driven project card grid (0.1.54 — replaces the purged legacy
+  // `featured_projects`). There is no per-block selection: the grid
+  // auto-renders the projects marked Featured (via projects.featured_order,
+  // managed in the Projects admin), in that order, capped at 12 by
+  // hydrate, which fills RenderContext.projects + their hero images so the
+  // renderer resolves name / tagline / hero photo per card. When no
+  // project is Featured the grid renders nothing on the public page (a
+  // hint in the editor).
+  lx_featured_projects: z.object({
+    heading: safeText(TEXT_MAX.title).optional(),
+    columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_featured_projects).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
 } as const
 
 export type BlockType = keyof typeof blockSchemas

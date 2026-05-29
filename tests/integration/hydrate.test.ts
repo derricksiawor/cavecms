@@ -33,11 +33,11 @@ describe('hydratePage', () => {
     await db.execute(sql`
       INSERT INTO content_blocks (id, page_id, block_key, block_type, position, data, version)
       VALUES
-        (10, 1, 'hero', 'hero', 1000,
+        (10, 1, NULL, 'lx_cover_image', 1000,
          ${JSON.stringify({ title: 'A', image: { media_id: 1, alt: 'hero alt' } })}, 0),
-        (20, 1, NULL, 'gallery', 2000,
+        (20, 1, NULL, 'lx_gallery', 2000,
          ${JSON.stringify({ images: [{ media_id: 2, alt: 'gallery1 alt' }], columns: 3 })}, 0),
-        (30, 1, NULL, 'text', 3000,
+        (30, 1, NULL, 'lx_text', 3000,
          ${JSON.stringify({ body_richtext: '<p>plain</p>' })}, 0)
     `)
   })
@@ -78,7 +78,7 @@ describe('hydratePage', () => {
   })
 
   it('omits a malformed block and renders the rest of the page', async () => {
-    // Corrupt block id=10 (hero — needs `image`). Other two blocks stay valid.
+    // Corrupt block id=10 (lx_cover_image — needs `image`). Other two blocks stay valid.
     // hydrate's per-block try/catch should drop just the broken one.
     await db.execute(sql`
       UPDATE content_blocks SET data = ${JSON.stringify({ title: 'broken' })} WHERE id = 10

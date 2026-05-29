@@ -82,7 +82,7 @@ export function EditModeEmptyState({ pageId }: Props) {
   // round-trip for the Picture button. The hook owns: body shape,
   // default seed lookup, router.refresh.
   const add = async (
-    blockType: keyof typeof SEED_DATA | 'image',
+    blockType: keyof typeof SEED_DATA,
     data?: Record<string, unknown>,
   ) => {
     if (busyType) return
@@ -103,10 +103,8 @@ export function EditModeEmptyState({ pageId }: Props) {
   const addImage = () => {
     if (busyType) return
     mediaPicker.open(undefined, (m) => {
-      void add('image', {
+      void add('lx_figure', {
         image: { media_id: m.media_id, alt: m.alt ?? '' },
-        caption: '',
-        alignment: 'center',
       })
     })
   }
@@ -197,7 +195,7 @@ export function EditModeEmptyState({ pageId }: Props) {
               Pick from the media library or upload a new one — image
               with optional caption.
             </p>
-            {busyType === 'image' && (
+            {busyType === 'lx_figure' && (
               <span
                 aria-live="polite"
                 className="absolute right-3 top-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-copper-500"
@@ -210,8 +208,9 @@ export function EditModeEmptyState({ pageId }: Props) {
 
         <div className="mt-8 flex flex-col items-center gap-3 text-[11px] font-medium text-warm-stone">
           <p>
-            Need a hero, image, gallery, or featured projects? Open the
-            outline panel — those need a media pick before they save.
+            Need an image, gallery, or featured projects? Open the
+            outline panel — those need a media or project pick before
+            they save.
           </p>
           {/* Chunk J — secondary CTA opens the section-template gallery
               (previously linked to /admin/pages/new which is the page-

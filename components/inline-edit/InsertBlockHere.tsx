@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Loader2, Image as ImageIcon, ImagePlus, Mountain, Star } from 'lucide-react'
+import { Plus, Loader2, Image as ImageIcon, ImagePlus, Star } from 'lucide-react'
 import clsx from 'clsx'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { useToast } from './Toast'
@@ -114,7 +114,7 @@ export function InsertBlockHere({
   // The hook covers: body shape, default seed data lookup, response
   // parsing, error normalisation, router.refresh.
   const add = async (
-    blockType: SeedBlockType | 'image' | 'hero' | 'gallery' | 'featured_projects',
+    blockType: SeedBlockType,
     data?: Record<string, unknown>,
     // Optional UI-state identifier. Defaults to blockType so callers
     // that don't need to disambiguate keep the pre-Chunk-G behaviour.
@@ -144,49 +144,28 @@ export function InsertBlockHere({
     }
   }
 
-  // Image insertion — open MediaPicker, on pick create an image block
-  // with the chosen media_id. The image-block Zod schema requires
-  // `image.media_id` to be a positive int, so this two-step flow
-  // (pick → create) is the only valid creation path.
+  // Image (lx_figure) — open MediaPicker, on pick create the figure
+  // block with the chosen media_id. lx_figure requires `image.media_id`
+  // (MediaRef); ratio/fit/etc. fall to schema defaults. This two-step
+  // flow (pick → create) is the only valid creation path.
   const addImage = () => {
     if (busy) return
     mediaPicker.open(undefined, (m) => {
-      void add('image', {
-        image: { media_id: m.media_id, alt: m.alt ?? '' },
-        caption: '',
-        alignment: 'center',
-      })
-    })
-  }
-  // Hero — full-bleed image + title + subtitle + optional CTA. The
-  // hero schema requires .min(1) on title and a MediaRef on image, so
-  // the MediaPicker round-trip is mandatory. NOTE: hero is reserved
-  // for fixed-slot template pages (/home, /about, /services, /contact)
-  // via FIXED_BLOCK_KEYS_PER_PAGE; clicking this on a reserved page
-  // surfaces a friendly 409 toast ("edit the existing one instead").
-  const addHero = () => {
-    if (busy) return
-    mediaPicker.open(undefined, (m) => {
       void add(
-        'hero',
-        {
-          title: 'New hero',
-          subtitle: '',
-          image: { media_id: m.media_id, alt: m.alt ?? '' },
-        },
-        'Hero',
+        'lx_figure',
+        { image: { media_id: m.media_id, alt: m.alt ?? '' } },
+        'Picture',
       )
     })
   }
-  // Gallery — same MediaPicker flow as Image, but seeded into the
-  // gallery schema's required images[] array (min 1). Default columns
-  // = 3 (anna-tier "luxury 3-up grid" baseline). Operator can add
-  // more images + change layout via the EditDrawer.
+  // Gallery (lx_gallery) — same MediaPicker flow as Image, seeded into
+  // lx_gallery's required images[] (min 1). Default columns = 3 (luxury
+  // 3-up grid). Operator adds more images via the EditDrawer.
   const addGallery = () => {
     if (busy) return
     mediaPicker.open(undefined, (m) => {
       void add(
-        'gallery',
+        'lx_gallery',
         {
           images: [{ media_id: m.media_id, alt: m.alt ?? '' }],
           columns: 3,
@@ -195,17 +174,12 @@ export function InsertBlockHere({
       )
     })
   }
-  // Featured projects — no MediaPicker needed; the project_ids array
-  // accepts an empty seed. Operator pulls in projects via the drawer's
-  // ProjectPicker. Like hero, this is reserved on /home; the 409 toast
-  // covers that case.
+  // Featured projects (lx_featured_projects) — no MediaPicker, no
+  // per-block selection. The grid auto-renders the projects marked
+  // Featured (Projects → Featured order), so it seeds with empty data.
   const addFeaturedProjects = () => {
     if (busy) return
-    void add(
-      'featured_projects',
-      { project_ids: [], layout: 'grid' },
-      'Featured projects',
-    )
+    void add('lx_featured_projects', {}, 'Featured projects')
   }
 
   return (
@@ -319,37 +293,6 @@ export function InsertBlockHere({
                   </span>
                   <span className="text-[11px] text-warm-stone">
                     Pick from the media library or upload a new one.
-                  </span>
-                </span>
-              </button>
-            </li>
-            {/* Hero — full-bleed image + title + tagline + optional CTA.
-                Same MediaPicker round-trip as Picture; the hero schema
-                requires a MediaRef and a non-empty title. Reserved for
-                fixed-slot pages (/home, /about, /services, /contact) —
-                the 409 toast handles that case. */}
-            <li>
-              <button
-                type="button"
-                role="menuitem"
-                aria-busy={busy === 'Hero'}
-                disabled={busy !== null}
-                onClick={addHero}
-                className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-copper-500/15 text-copper-500 ring-1 ring-copper-400/30">
-                  {busy === 'Hero' ? (
-                    <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-                  ) : (
-                    <Mountain size={12} strokeWidth={2.4} />
-                  )}
-                </span>
-                <span className="flex flex-col">
-                  <span className="text-sm font-semibold text-near-black">
-                    Hero
-                  </span>
-                  <span className="text-[11px] text-warm-stone">
-                    Full-bleed image with headline and tagline.
                   </span>
                 </span>
               </button>

@@ -14,7 +14,7 @@ import { EditModePill } from '@/components/inline-edit/EditModePill'
 import { OutlinePanel } from '@/components/inline-edit/OutlinePanel'
 import { ToastProvider } from '@/components/inline-edit/Toast'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
-import { mintPublicPreCsrfForBlocks } from '@/app/_shared/cmsPage'
+import { mintPublicPreCsrfForBlocks, pageHasVisibleH1 } from '@/app/_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { jsonLdForPage } from '@/lib/seo/page-jsonld'
@@ -218,14 +218,14 @@ async function renderHome(
       preview={opts.preview}
       csrf={csrf}
     >
-      {/* sr-only page H1 — only when no Hero widget is present. The
-          Hero widget emits its own visible <h1>{data.title}</h1>;
-          duplicating a sr-only one above it gives the page two H1s
-          and an SEO duplicate-heading penalty. When NO Hero exists
-          (pages built from Text/Heading widgets only), this sr-only
-          H1 is the page's semantic top-level heading. Audit V3 +
-          self-review dedup (Chunk K). */}
-      {!blocks.some((b) => b.blockType === 'hero') && (
+      {/* sr-only page H1 — only when the tree has no visible <h1>
+          (lx_heading at level h1, or lx_cover_image with a title).
+          Duplicating a sr-only h1 above an existing visible one gives
+          the page two H1s and an SEO duplicate-heading penalty. When
+          no visible h1 exists (pages built from lx_text / lx_figure
+          widgets only), this sr-only H1 is the page's semantic top-
+          level heading. */}
+      {!pageHasVisibleH1(blocks) && (
         <h1 className="sr-only">{page.title}</h1>
       )}
       {/* Per-page JSON-LD. safeJsonForScript escapes </script>, --> and

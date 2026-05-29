@@ -68,6 +68,7 @@ import {
 } from '@/components/inline-edit/MediaPickerProvider'
 import { formatRelativeSince } from '@/hooks/useAutoSave'
 import { SLUG_RE, SLUG_MIN, SLUG_MAX } from '@/lib/cms/slug'
+import { summariseBlockText } from '@/lib/ai/chatEligibility'
 import {
   readDraftBuffer,
   writeDraftBuffer,
@@ -97,70 +98,40 @@ function iconForBlock(blockType: string): LucideIcon {
 }
 
 // Best-effort "what's in this block" excerpt for the admin editor card.
-// Returns `null` if the block has no surfaceable text (e.g. image-only
-// blocks where the surfaceable signal is the media id, not text). The
-// excerpt is purely cosmetic — never relied on for routing or storage.
+// Returns `null` if the block has no surfaceable signal (e.g. structural
+// blocks like lx_divider / lx_space). The excerpt is purely cosmetic —
+// never relied on for routing or storage.
 //
-// Strips HTML tags + collapses whitespace + truncates at ~96 chars.
+// Collection blocks (gallery, featured projects, accordion, tabs, icon
+// list, social icons) surface a count; everything else reuses
+// summariseBlockText, the same chatEligibility FIELDS map that grounds
+// the AI inspect_page summary — so the admin excerpt and the assistant's
+// view of a block's copy stay in lockstep. summariseBlockText already
+// strips HTML, collapses whitespace and truncates.
 function excerptForBlock(blockType: string, data: unknown): string | null {
   if (typeof data !== 'object' || data === null) return null
   const d = data as Record<string, unknown>
-  let raw: string | null = null
-  switch (blockType) {
-    case 'text':
-      if (typeof d['body_richtext'] === 'string') raw = d['body_richtext'] as string
-      break
-    case 'cta': {
-      const title = typeof d['title'] === 'string' ? d['title'] as string : ''
-      const cta = d['cta'] as { text?: string } | undefined
-      const ctaText = cta && typeof cta.text === 'string' ? cta.text : ''
-      raw = [title, ctaText].filter(Boolean).join(' · ')
-      break
-    }
-    case 'quote':
-      if (typeof d['quote'] === 'string') raw = d['quote'] as string
-      break
-    case 'hero':
-      if (typeof d['heading'] === 'string') raw = d['heading'] as string
-      else if (typeof d['title'] === 'string') raw = d['title'] as string
-      break
-    case 'image':
-      if (typeof d['alt'] === 'string' && (d['alt'] as string).trim().length) {
-        raw = d['alt'] as string
-      }
-      break
-    case 'gallery': {
-      const images = d['images']
-      if (Array.isArray(images)) {
-        raw = `${images.length} image${images.length === 1 ? '' : 's'}`
-      }
-      break
-    }
-    case 'about_history': {
-      const m = d['milestones']
-      if (Array.isArray(m)) {
-        raw = `${m.length} milestone${m.length === 1 ? '' : 's'}`
-      }
-      break
-    }
-    case 'services_intro':
-      if (typeof d['heading'] === 'string') raw = d['heading'] as string
-      else if (typeof d['title'] === 'string') raw = d['title'] as string
-      break
-    case 'featured_projects': {
-      const projects = d['projects'] ?? d['project_ids']
-      if (Array.isArray(projects)) {
-        raw = `${projects.length} project${projects.length === 1 ? '' : 's'}`
-      }
-      break
-    }
+
+  const count = (key: string, noun: string): string | null => {
+    const arr = d[key]
+    if (!Array.isArray(arr)) return null
+    return `${arr.length} ${noun}${arr.length === 1 ? '' : 's'}`
   }
-  if (raw === null) return null
-  // Strip HTML, collapse whitespace, truncate.
-  const stripped = raw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
-  if (stripped.length === 0) return null
-  if (stripped.length <= 96) return stripped
-  return stripped.slice(0, 95).trimEnd() + '…'
+
+  switch (blockType) {
+    case 'lx_gallery':
+      return count('images', 'image')
+    case 'lx_accordion':
+    case 'lx_icon_list':
+      return count('items', 'item')
+    case 'lx_tabs':
+      return count('tabs', 'tab')
+    case 'lx_social_icons':
+      return count('items', 'link')
+  }
+
+  const text = summariseBlockText(blockType, data, 96)
+  return text.length > 0 ? text : null
 }
 
 // ─── Sortable block-row wrapper ───────────────────────────────────────

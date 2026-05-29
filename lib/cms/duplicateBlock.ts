@@ -85,8 +85,9 @@ export class DuplicateSourceInvalidError extends Error {
 }
 // Source is a freeform widget whose block_type is reserved for a fixed
 // slot on this page. Allowing the duplicate would create a second row
-// of, say, block_type='hero' on the home page (block_key=NULL so the
-// UNIQUE constraint doesn't trip — but the page would render two heroes).
+// of, say, block_type='contact_form' on the contact page (block_key=NULL
+// so the UNIQUE constraint doesn't trip — but the page would render two
+// contact forms).
 export class DuplicateBlockTypeReservedError extends Error {
   constructor() { super('block_type_reserved_for_fixed_slot') }
 }
@@ -224,11 +225,12 @@ export async function duplicateBlock(args: {
 
     // Step 2a: fixed-slot widget guard. Symmetric with POST /api/cms/
     // blocks's check — page templates guarantee one row per fixed
-    // block_type (hero, services_intro, etc.). The duplicate strips
-    // block_key (so the UNIQUE(page_id, block_key) constraint isn't
-    // tripped), BUT without this gate the page would render two rows
-    // of the same fixed block_type — one with block_key, one without
-    // — and the operator's "Edit hero" gesture becomes non-deterministic.
+    // block_type (currently just contact_form on /contact). The
+    // duplicate strips block_key (so the UNIQUE(page_id, block_key)
+    // constraint isn't tripped), BUT without this gate the page would
+    // render two rows of the same fixed block_type — one with block_key,
+    // one without — and the operator's "Edit form" gesture becomes
+    // non-deterministic.
     if (source.kind === 'widget') {
       const fixed = (FIXED_BLOCK_KEYS_PER_PAGE[pageSlug] ?? []) as readonly string[]
       if (fixed.includes(source.block_type)) {

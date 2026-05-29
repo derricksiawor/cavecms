@@ -104,7 +104,7 @@ describe('duplicateBlock — widget', () => {
       SELECT id, version, block_type FROM content_blocks WHERE id = ${r.newTopId}
     `)) as unknown as [Array<{ id: number; version: number; block_type: string }>]
     expect(rows[0]?.version).toBe(0)
-    expect(rows[0]?.block_type).toBe('text')
+    expect(rows[0]?.block_type).toBe('lx_text')
   })
 
   it('places the duplicate immediately after the source within the same parent bucket', async () => {
@@ -292,25 +292,25 @@ describe('duplicateBlock — failure modes', () => {
   })
 
   it('throws DuplicateBlockTypeReservedError when source widget is a fixed-slot block type for the page', async () => {
-    // home page reserves block_type='hero' as a fixed slot. A widget
-    // duplicate of a hero row would create a second hero on the page —
-    // refuse server-side regardless of whether the source has
-    // block_key set or not.
-    await seedMedia(11)
-    const heroId = await seedBlock({
-      pageId: 1,
+    // The contact page reserves block_type='contact_form' as a fixed
+    // slot. A widget duplicate of the contact form would create a second
+    // form on the page — refuse server-side regardless of whether the
+    // source has block_key set or not.
+    await seedPage(3, 'contact')
+    const formId = await seedBlock({
+      pageId: 3,
       parentId: null,
       kind: 'widget',
-      blockType: 'lx_cover_image',
+      blockType: 'contact_form',
       position: 1000,
-      data: { title: 'Hero', image: { media_id: 11, alt: 'h' } },
-      blockKey: 'hero',
+      data: { heading: 'Contact us', submit_label: 'Send' },
+      blockKey: 'contact_form',
     })
     await expect(
       duplicateBlock({
-        sourceId: heroId,
+        sourceId: formId,
         userId: USER_ID,
-        pageId: 1,
+        pageId: 3,
         ip: null,
         userAgent: null,
         requestId: null,
@@ -440,7 +440,7 @@ describe('duplicateBlock — full section subtree', () => {
     `)) as unknown as [Array<{ id: number; parent_id: number; block_type: string }>]
     expect(newWidgets.length).toBe(2)
     expect(newWidgets.every((w) => w.id !== w1 && w.id !== w2)).toBe(true)
-    expect(newWidgets.every((w) => w.block_type === 'text')).toBe(true)
+    expect(newWidgets.every((w) => w.block_type === 'lx_text')).toBe(true)
   })
 
   it('refuses to duplicate when the source subtree exceeds MAX_DUPLICATE_SUBTREE_SIZE', async () => {

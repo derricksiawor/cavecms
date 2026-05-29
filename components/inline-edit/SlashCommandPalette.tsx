@@ -103,12 +103,10 @@ export function SlashCommandPalette() {
             // of which branch was taken.
             close()
             mediaPicker.open(undefined, (m) => {
-              void insertBlock('image', {
+              void insertBlock('lx_figure', {
                 pageId,
                 data: {
                   image: { media_id: m.media_id, alt: m.alt ?? '' },
-                  caption: '',
-                  alignment: 'center',
                 },
               }).then((res) => {
                 if (!res.ok) {

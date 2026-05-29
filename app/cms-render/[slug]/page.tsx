@@ -24,7 +24,7 @@ import { db } from '@/db/client'
 import { hydratePage } from '@/lib/cms/hydrate'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
-import { mintPublicPreCsrfForBlocks } from '@/app/_shared/cmsPage'
+import { mintPublicPreCsrfForBlocks, pageHasVisibleH1 } from '@/app/_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { jsonLdForPage } from '@/lib/seo/page-jsonld'
@@ -301,13 +301,13 @@ async function renderResolvedPage(
       preview={opts.preview}
       csrf={csrf}
     >
-      {/* sr-only page H1 — only when no Hero widget is present (the
-          Hero widget emits its own visible <h1> from data.title, and
-          a duplicate sr-only h1 would create the SEO duplicate-
-          heading penalty). When the page is built from Text/Heading
-          widgets only, this sr-only H1 is the page's semantic top-
-          level heading. Audit V3 + self-review dedup (Chunk K). */}
-      {!blocks.some((b) => b.blockType === 'hero') && (
+      {/* sr-only page H1 — only when the tree has no visible <h1>
+          (lx_heading at level h1, or lx_cover_image with a title). A
+          duplicate sr-only h1 above an existing visible one would
+          create the SEO duplicate-heading penalty. When the page is
+          built from lx_text / lx_figure widgets only, this sr-only H1
+          is the page's semantic top-level heading. */}
+      {!pageHasVisibleH1(blocks) && (
         <h1 className="sr-only">{page.title}</h1>
       )}
       {/* Per-page JSON-LD. safeJsonForScript escapes </script>, --> and

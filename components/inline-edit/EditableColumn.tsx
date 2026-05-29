@@ -782,7 +782,7 @@ function ColumnInlinePicker({
   // mapping. The hook owns: body shape, default seed lookup,
   // router.refresh.
   const add = async (
-    blockType: SeedBlockType | 'image',
+    blockType: SeedBlockType,
     data?: Record<string, unknown>,
     busyKey?: string,
   ) => {
@@ -808,11 +808,11 @@ function ColumnInlinePicker({
   const addImage = () => {
     if (busy) return
     mediaPicker.open(undefined, (m) => {
-      void add('image', {
-        image: { media_id: m.media_id, alt: m.alt ?? '' },
-        caption: '',
-        alignment: 'center',
-      })
+      void add(
+        'lx_figure',
+        { image: { media_id: m.media_id, alt: m.alt ?? '' } },
+        'image',
+      )
     })
   }
 

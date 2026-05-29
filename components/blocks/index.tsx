@@ -24,6 +24,7 @@ import { LxDivider } from './LxDivider/render'
 import { LxSocialIcons } from './LxSocialIcons/render'
 import { LxCtaBanner } from './LxCtaBanner/render'
 import { LxGallery } from './LxGallery/render'
+import { LxFeaturedProjects } from './LxFeaturedProjects/render'
 import type { BlockData, BlockType } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { SectionMeta } from '@/lib/cms/blockMeta'
@@ -168,6 +169,9 @@ const BLOCK_RENDERERS = defineRenderers({
   ),
   lx_gallery: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_gallery'>>) => (
     <LxGallery data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_featured_projects: ({ data, projects, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_featured_projects'>>) => (
+    <LxFeaturedProjects data={data} projects={projects} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
 })
 

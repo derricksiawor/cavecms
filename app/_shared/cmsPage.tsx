@@ -49,6 +49,33 @@ export async function mintPublicPreCsrfForBlocks(
   }
 }
 
+/**
+ * True when the hydrated block tree already emits a visible top-level
+ * <h1> — either an `lx_heading` whose level is 'h1', or an
+ * `lx_cover_image` carrying a title (its renderer wraps the title in
+ * <h1>). The public page shims call this to decide whether to add a
+ * fallback sr-only <h1>: when a visible h1 already exists, a second
+ * sr-only one would trip the SEO duplicate-heading penalty; when none
+ * exists (page built from body text / figures only), the sr-only h1 is
+ * the page's semantic top-level heading. Shared by app/page.tsx,
+ * app/cms-render/[slug]/page.tsx and renderCmsPage below so the rule
+ * stays identical across every public render path.
+ */
+export function pageHasVisibleH1(
+  blocks: Array<{ blockType: string; data: unknown }>,
+): boolean {
+  return blocks.some((b) => {
+    if (b.blockType === 'lx_heading') {
+      return (b.data as { level?: string }).level === 'h1'
+    }
+    if (b.blockType === 'lx_cover_image') {
+      const title = (b.data as { title?: string }).title
+      return typeof title === 'string' && title.trim().length > 0
+    }
+    return false
+  })
+}
+
 export type CmsPageSlug =
   | 'home'
   | 'about'
@@ -125,15 +152,14 @@ export async function renderCmsPage(
 
   const csrf = await mintPublicPreCsrfForBlocks(blocks, slug)
 
-  // Same sr-only <h1> pattern as app/page.tsx + app/_page/[slug]/
+  // Same sr-only <h1> pattern as app/page.tsx + app/cms-render/[slug]/
   // page.tsx — guarantees every CMS-driven page has a semantic
   // top-level heading for SEO + screen readers even when operators
-  // built the page from Text/Heading widgets only. Skipped when a
-  // Hero widget is present (Hero emits its own visible <h1> from
-  // data.title; a duplicate sr-only would trip the SEO duplicate-
-  // heading penalty). Re-audit fix for V3 regression discovered on
-  // /contact post-Chunk-K.
-  const hasHero = blocks.some((b) => b.blockType === 'hero')
+  // built the page from lx_text / lx_figure widgets only. Skipped when
+  // the tree already emits a visible <h1> (lx_heading at level h1, or
+  // lx_cover_image with a title); a duplicate sr-only would trip the
+  // SEO duplicate-heading penalty.
+  const hasVisibleH1 = pageHasVisibleH1(blocks)
 
   // EditableMain centralises the BlockTreeRenderer + EditModePill +
   // OutlinePanel + ToastProvider/MediaPickerProvider chain that
@@ -155,7 +181,7 @@ export async function renderCmsPage(
       showEmptyState={false}
       csrf={csrf}
     >
-      {!hasHero && <h1 className="sr-only">{pageTitle}</h1>}
+      {!hasVisibleH1 && <h1 className="sr-only">{pageTitle}</h1>}
     </EditableMain>
   )
 }
