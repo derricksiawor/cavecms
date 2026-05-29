@@ -14,11 +14,10 @@ export type RGB = [number, number, number]
 export function hexToRgb(hex: string): RGB | null {
   const m = hex.trim().replace(/^#/, '')
   if (/^[0-9a-fA-F]{3}$/.test(m)) {
-    return [
-      parseInt(m[0] + m[0], 16),
-      parseInt(m[1] + m[1], 16),
-      parseInt(m[2] + m[2], 16),
-    ]
+    const r = m.slice(0, 1)
+    const g = m.slice(1, 2)
+    const b = m.slice(2, 3)
+    return [parseInt(r + r, 16), parseInt(g + g, 16), parseInt(b + b, 16)]
   }
   if (/^[0-9a-fA-F]{6}$/.test(m)) {
     return [
