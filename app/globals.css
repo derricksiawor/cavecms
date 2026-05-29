@@ -28,7 +28,10 @@
 
   --color-near-black: #050505;
   --color-deep-charcoal: #1A1A1A;
-  --color-warm-stone: #6E665A;
+  /* Routes through the brand layer so Settings → Theme "Secondary"
+     re-skins muted text on public pages. Default var = #6E665A (identical).
+     Admin is isolated via a brand-var reset on the admin shell. */
+  --color-warm-stone: var(--brand-secondary);
 
   --font-sans: var(--font-montserrat), system-ui, -apple-system, sans-serif;
   --font-serif: var(--font-playfair), Georgia, serif;
@@ -372,15 +375,38 @@
    that admin-bar pickers consume. Adding a new token requires editing
    BOTH this file AND that one — they stay in sync by hand.
    ════════════════════════════════════════════════════════════════════════ */
+/* ── Brand palette source-of-truth ──────────────────────────────────
+   Defaults equal the luxury hex below so a fresh install is identical.
+   Declared in @layer base so the runtime-injected <style> (root layout,
+   UN-layered) always wins on the cascade — no specificity hacks needed.
+   The operator edits these via Settings → Theme; see lib/cms/themeCss.ts. */
+@layer base {
+  :root {
+    --brand-surface-dark:  #050505;
+    --brand-surface-light: #F5F1EA;
+    --brand-accent:        #C9A961;
+    --brand-secondary:     #6E665A;
+    --brand-primary:       #050505;
+    --brand-base-bg:       #F5F1EA;  /* light mode default */
+    --brand-base-fg:       #050505;
+  }
+}
+
 @theme {
-  /* ─── Palette — six tokens. Luxury restraint. ──────────────────── */
-  --color-obsidian:     #050505;
-  --color-ivory:        #F5F1EA;
-  --color-champagne:    #C9A961;
+  /* ─── Palette — six tokens. Luxury restraint. Each references a
+     --brand-* var so Settings → Theme can re-skin the whole site at
+     runtime. Defaults (in @layer base above) = these exact hex.
+     antique-gold/bone keep static hex defaults; the injected <style>
+     overrides them with operator-derived hex only when accent / light
+     surface change (lib/cms/themeCss.ts). ──────────────────────────── */
+  --color-obsidian:     var(--brand-surface-dark);
+  --color-ivory:        var(--brand-surface-light);
+  --color-champagne:    var(--brand-accent);
+  --color-primary:      var(--brand-primary);
   --color-antique-gold: #8B6F3A;
   --color-bone:         #E8E1D4;
-  /* --color-warm-stone is defined in the legacy @theme block above
-     (#6E665A) and serves both systems — no redefinition here. */
+  /* --color-warm-stone is defined in the legacy @theme block above and
+     now routes through var(--brand-secondary) — see that block. */
 
   /* ─── Typography families — Playfair Display for titles/headings,
      Montserrat for body/UI text. Matches the client's brand identity
