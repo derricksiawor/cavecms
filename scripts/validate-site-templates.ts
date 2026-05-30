@@ -19,9 +19,22 @@
  * This script does NOT touch the DB. Pure validation.
  */
 
-if (process.env.NODE_ENV === 'production') {
+// CAVECMS_BUILD_OK=1 is the legitimate-prod-build opt-in (same pattern as
+// verify-route-collisions.ts + postbuild-check-slug-collisions.ts): the
+// in-app updater's customer-box build AND the server-side release build
+// both run `pnpm build` under NODE_ENV=production live. Without this
+// escape the prebuild gate hard-fails every production build, which would
+// break git-fetch-mode in-app updates too. Refuse only when it's NOT a
+// sanctioned build (a stray invocation on a live server boot).
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env['CAVECMS_BUILD_OK'] !== '1'
+) {
   console.error(
     '[validate-site-templates] refusing to run with NODE_ENV=production.',
+  )
+  console.error(
+    '[validate-site-templates]   In-app updater / release build path: set CAVECMS_BUILD_OK=1.',
   )
   process.exit(1)
 }
