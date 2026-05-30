@@ -255,6 +255,24 @@ do_rollback() {
     return 1
   fi
 
+  # pm2 reload --update-env injects THIS watchdog process's environment
+  # into the restarted app — NOT env.production on disk. This watchdog was
+  # spawned to GUARD the new version, so its CAVECMS_COMMIT is the new
+  # (now-being-rolled-back) commit. Without re-exporting, the restarted
+  # app would keep reporting the new commit even though its files are the
+  # restored old version — leaving /healthz, the audit history, and the
+  # next update's "from" detection inconsistent with what's actually
+  # running. Pin to the restored commit (+ release ts from the restored
+  # env file), mirroring the orchestrator's rollback_to_previous.
+  case "$PREVIOUS_SHA" in
+    from-*) : ;;  # first-install handle: no real commit to pin
+    *) export CAVECMS_COMMIT="${PREVIOUS_SHA:0:12}" ;;
+  esac
+  if [ -n "${CAVECMS_ENV_FILE:-}" ] && [ -f "${CAVECMS_ENV_FILE}" ]; then
+    _restored_ts=$(awk '/^CAVECMS_RELEASE_TS=/{sub(/^CAVECMS_RELEASE_TS=/,"");print;exit}' "${CAVECMS_ENV_FILE}" 2>/dev/null || true)
+    [ -n "$_restored_ts" ] && export CAVECMS_RELEASE_TS="$_restored_ts"
+  fi
+
   # Reload by name when CAVECMS_PM2_APP_NAME is set (CLI-install
   # shared-host layout where the in-tree ecosystem.config.cjs is the
   # bundled legacy version that doesn't match the live app); else

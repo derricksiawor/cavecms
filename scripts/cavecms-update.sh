@@ -433,6 +433,25 @@ rollback_to_previous() {
     fi
   fi
 
+  # pm2 reload --update-env (inside restart_app) injects THIS orchestrator
+  # shell's environment into the restarted process — NOT env.production on
+  # disk. The orchestrator inherited the PRE-rollback CAVECMS_COMMIT (the
+  # version we're rolling back FROM), so without re-exporting the rolled-
+  # back values here the restarted process keeps reporting the old-new
+  # commit and the commit-match verify below falsely fails a rollback that
+  # actually succeeded (files + db + env file all restored). Mirror the
+  # forward path's step-5 env export: pin CAVECMS_COMMIT to the restored
+  # commit and CAVECMS_RELEASE_TS to what the restored env file carries.
+  case "$prev" in
+    from-*) : ;;  # first-install handle: no real commit to pin
+    *) export CAVECMS_COMMIT="${prev:0:12}" ;;
+  esac
+  if [ -f "$ENV_FILE" ]; then
+    local _restored_ts
+    _restored_ts=$(awk '/^CAVECMS_RELEASE_TS=/{sub(/^CAVECMS_RELEASE_TS=/,"");print;exit}' "$ENV_FILE" 2>/dev/null || true)
+    [ -n "$_restored_ts" ] && export CAVECMS_RELEASE_TS="$_restored_ts"
+  fi
+
   # Restart the app via the install's service manager (systemd / pm2 /
   # Passenger / none-on-laptop). Exit code not fatal — the healthz verify
   # below is the canonical success signal.
