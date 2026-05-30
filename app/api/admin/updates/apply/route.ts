@@ -14,7 +14,7 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { RELEASE_PUBKEY_PEM } from '@/lib/updates/releasePubkey'
+import { RELEASE_PUBKEYS_PEM } from '@/lib/updates/releasePubkey'
 import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
@@ -253,11 +253,14 @@ function buildScriptEnv(
   out.CAVECMS_UPDATE_TARBALL_URL = opts.downloadUrl
   out.CAVECMS_UPDATE_TARBALL_SHA256 = opts.sha256
   out.CAVECMS_UPDATE_TARBALL_SIGNATURE = opts.signature
-  // Forward the bundled public key so the orchestrator can verify
+  // Forward the bundled public key(s) so the orchestrator can verify
   // signatures using the value the apply route, not the release host,
   // controls. lib/updates/releasePubkey.ts is the single source of
-  // truth.
-  out.CAVECMS_RELEASE_PUBKEY_PEM = RELEASE_PUBKEY_PEM
+  // truth. The list is concatenated (each PEM is self-delimited by its
+  // BEGIN/END markers); the orchestrator splits it and tries each key,
+  // so a future dual-key rotation verifies without any wire-format
+  // change. Today the list holds one key — identical to before.
+  out.CAVECMS_RELEASE_PUBKEY_PEM = RELEASE_PUBKEYS_PEM.join('\n')
   if (opts.force) {
     out.CAVECMS_UPDATE_FORCE = '1'
   }

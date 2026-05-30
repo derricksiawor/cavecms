@@ -6,7 +6,7 @@ import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
 
 // POST /api/admin/updates/check — operator-triggered version check
-// against the static release manifest at cavecms.derricksiawor.com/updates/latest.json
+// against the static release manifest at cavecms-updates.derricksiawor.com/updates/latest.json
 // (override with CAVECMS_RELEASE_MANIFEST_URL for forks).
 //
 // Marked POST (not GET) so it sits behind CSRF + mutation rate-limit

@@ -152,8 +152,15 @@ next-env.d.ts
 /scripts/release/
 
 # Release artifacts (built by scripts/release/build-zip.mjs) — never committed.
-# Published to cavecms.derricksiawor.com via scripts/release/publish.mjs.
+# Published to cavecms-updates.derricksiawor.com by the server-side build.
 /dist/
+
+# Offline template-media originals cache (239 MB). As of the server-side
+# build migration this is NO LONGER tracked — repo-slim. The permanent
+# copy lives on the build server (smokeleads:/home/time/cavecms-template-media-cache),
+# which the build reads via $TEMPLATE_MEDIA_CACHE. Contributors keep a
+# local copy and rsync new originals to the server after `pnpm template-media:hydrate`.
+/template-media-cache/
 
 # Local operator notes — never tracked.
 /instructions.md

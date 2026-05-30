@@ -17,7 +17,7 @@
 // Pipeline (in order):
 //   1. Parse argv + detect surface
 //   2. Pre-flight: Node ≥ 20, write permission, target dir state
-//   3. Download cavecms.derricksiawor.com/latest.zip (or pinned version)
+//   3. Download cavecms-updates.derricksiawor.com/latest.zip (or pinned version)
 //   4. Verify SHA-256 against the manifest + Ed25519 signature
 //   5. Unzip into the surface's canonical install path
 //   6. Prompt for DB host/port/user/password/name, public URL, port
@@ -29,7 +29,7 @@
 //  11. Print the wizard URL + the hidden LOGIN_PATH the operator
 //      needs after walking the wizard
 //
-// All third-party-network access is via cavecms.derricksiawor.com.
+// All third-party-network access is via cavecms-updates.derricksiawor.com.
 // No bundled npm deps — everything uses Node ≥ 20 built-ins.
 
 import {
@@ -63,7 +63,7 @@ const __dirname = dirname(__filename)
 // Constants
 // ════════════════════════════════════════════════════════════════════
 
-const DEFAULT_RELEASE_HOST = 'https://cavecms.derricksiawor.com'
+const DEFAULT_RELEASE_HOST = 'https://cavecms-updates.derricksiawor.com'
 const RELEASE_HOST = process.env.CAVECMS_RELEASE_HOST ?? DEFAULT_RELEASE_HOST
 
 // Browser User-Agent for release-host downloads (see fetchToFileViaWget for
@@ -116,6 +116,15 @@ const BUNDLED_PUBKEY_PEM =
   process.env.CAVECMS_DEV_BUILD === '1' && process.env.CAVECMS_RELEASE_PUBKEY_PEM
     ? process.env.CAVECMS_RELEASE_PUBKEY_PEM
     : BUNDLED_PUBKEY_PEM_LITERAL
+
+// Full list of trusted public keys the CLI will verify a release zip
+// against — it installs if ANY key verifies. TODAY this holds exactly
+// one key, so behaviour is identical to a single-key anchor. The list
+// shape lets a FUTURE key rotation bundle BOTH the old and the new key
+// in one CLI release, so installs straddling the rotation window verify
+// either signature. To rotate: add the new PEM as a second entry, bump
+// the CLI, and follow the bridge procedure in lib/updates/releasePubkey.ts.
+const BUNDLED_PUBKEYS_PEM = [BUNDLED_PUBKEY_PEM]
 
 // ════════════════════════════════════════════════════════════════════
 // Tiny logging + prompt helpers (no deps)
@@ -1040,7 +1049,9 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
     )
   } else {
     log.info('Verifying Ed25519 signature…')
-    const ok = verifyEd25519(zipPath, target.signature, BUNDLED_PUBKEY_PEM)
+    const ok = BUNDLED_PUBKEYS_PEM.some((pem) =>
+      verifyEd25519(zipPath, target.signature, pem),
+    )
     if (!ok) {
       die(
         `Ed25519 signature verification FAILED for ${target.downloadUrl}.\n` +
@@ -1326,7 +1337,7 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# missing or 'dev' value here disables the updater (cannot_apply_from_dev).`,
     `CAVECMS_COMMIT=${normalizeCommitSha(release?.sha)}`,
     `CAVECMS_RELEASE_TS=${new Date().toISOString()}`,
-    `# The CLI installed this from cavecms.derricksiawor.com — keep this in sync`,
+    `# The CLI installed this from cavecms-updates.derricksiawor.com — keep this in sync`,
     `# with the dist host on forks so the in-app updater stays in lockstep.`,
     `CAVECMS_RELEASE_MANIFEST_URL=${RELEASE_HOST}/updates/latest.json`,
     ``,

@@ -125,7 +125,7 @@ describe('POST /api/admin/updates/apply (integration)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         targetSha: '9999999999999999',
-        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-9999.zip',
+        downloadUrl: 'https://cavecms-updates.derricksiawor.com/releases/cavecms-9999.zip',
         sha256: 'a'.repeat(64),
       }),
     })
@@ -185,7 +185,7 @@ describe('POST /api/admin/updates/apply (integration)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         targetSha: 'abcdef1',
-        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-abcdef1.zip',
+        downloadUrl: 'https://cavecms-updates.derricksiawor.com/releases/cavecms-abcdef1.zip',
         sha256: 'b'.repeat(64),
       }),
     })
@@ -202,7 +202,7 @@ describe('POST /api/admin/updates/apply (integration)', () => {
       body: JSON.stringify({
         targetSha: 'abcdef1',
         force: true,
-        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-abcdef1.zip',
+        downloadUrl: 'https://cavecms-updates.derricksiawor.com/releases/cavecms-abcdef1.zip',
         sha256: 'c'.repeat(64),
       }),
     })
@@ -239,7 +239,7 @@ describe('POST /api/admin/updates/apply (integration)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         targetSha: '!!nope!!',
-        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-bad.zip',
+        downloadUrl: 'https://cavecms-updates.derricksiawor.com/releases/cavecms-bad.zip',
         sha256: 'd'.repeat(64),
       }),
     })
@@ -256,7 +256,7 @@ describe('POST /api/admin/updates/apply (integration)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         targetSha: '9999999999999999',
-        downloadUrl: 'https://cavecms.derricksiawor.com/releases/cavecms-9999.zip',
+        downloadUrl: 'https://cavecms-updates.derricksiawor.com/releases/cavecms-9999.zip',
         sha256: 'a'.repeat(64),
       }),
     })

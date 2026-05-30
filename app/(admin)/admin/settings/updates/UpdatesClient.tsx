@@ -28,7 +28,7 @@ import type { CurrentVersion } from '@/lib/updates/getCurrentVersion'
 // Copy rules: NO SHAs, NO GitHub commit URLs, NO raw timestamps. We
 // talk in "You're currently running CaveCMS, last updated 3 days ago"
 // and "A new version is available, released today" — semver versions
-// will replace the relative dates once cavecms.derricksiawor.com/releases ships its
+// will replace the relative dates once cavecms-updates.derricksiawor.com/releases ships its
 // manifest.
 
 interface SettingRow {

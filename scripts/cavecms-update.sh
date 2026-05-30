@@ -1071,19 +1071,31 @@ if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
       const fs = require("node:fs");
       const { createPublicKey, verify } = require("node:crypto");
       try {
-        const pubkey = createPublicKey({
-          key: process.env.CAVECMS_RELEASE_PUBKEY_PEM,
-          format: "pem",
-        });
-        if (pubkey.asymmetricKeyType !== "ed25519") {
-          console.error("bundled pubkey is not ed25519");
+        // CAVECMS_RELEASE_PUBKEY_PEM may carry MORE THAN ONE trusted
+        // Ed25519 key, concatenated (each self-delimited by its
+        // BEGIN/END markers). The apply route forwards the full
+        // trusted-key list (lib/updates/releasePubkey.ts) so a future
+        // key rotation can be verified by installs that trust both the
+        // old and new key. Today it holds exactly one key. We try each
+        // and pass if ANY verifies.
+        const blob = process.env.CAVECMS_RELEASE_PUBKEY_PEM || "";
+        const pems = blob.match(/-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----/g) || [];
+        if (pems.length === 0) {
+          console.error("no trusted pubkey provided");
           process.exit(2);
         }
         const sig = Buffer.from(process.env.CAVECMS_UPDATE_TARBALL_SIGNATURE, "base64");
         const payload = fs.readFileSync(process.argv[1]);
-        const ok = verify(null, payload, pubkey, sig);
+        let ok = false;
+        for (const pem of pems) {
+          try {
+            const pubkey = createPublicKey({ key: pem, format: "pem" });
+            if (pubkey.asymmetricKeyType !== "ed25519") continue;
+            if (verify(null, payload, pubkey, sig)) { ok = true; break; }
+          } catch (e) { /* malformed key — try the next */ }
+        }
         if (!ok) {
-          console.error("ed25519 verify returned false");
+          console.error("ed25519 verify returned false for all trusted keys");
           process.exit(1);
         }
         process.exit(0);
