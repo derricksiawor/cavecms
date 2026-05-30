@@ -49,6 +49,10 @@ interface AvailableUpdate {
   version: string
   downloadUrl: string
   sha256: string
+  // Ed25519 base64 signature over the zip bytes — REQUIRED by the apply
+  // route (signed-updates, since 0.1.45). The check route returns it; the
+  // apply payload below MUST forward it or apply 400s on the strict schema.
+  signature: string | null
   minPreviousVersion: string | null
 }
 
@@ -56,6 +60,7 @@ interface ApplyPayload {
   targetSha: string
   downloadUrl: string
   sha256: string
+  signature: string
   force?: boolean
 }
 
@@ -66,7 +71,7 @@ interface CheckResponse {
   // populates this when running SHA matches the latest manifest entry
   // so Re-run install has known-good coords even without an upgrade
   // available.
-  currentRelease: { downloadUrl: string; sha256: string } | null
+  currentRelease: { downloadUrl: string; sha256: string; signature: string | null } | null
 }
 
 // Lowercase relative-date formatter for inline-after-verb usage
@@ -93,6 +98,7 @@ export function UpdatesClient({
   // to the orchestrator (no git-pull on fresh CLI installs).
   const [availableDownloadUrl, setAvailableDownloadUrl] = useState<string | null>(null)
   const [availableSha256, setAvailableSha256] = useState<string | null>(null)
+  const [availableSignature, setAvailableSignature] = useState<string | null>(null)
   const [current, setCurrent] = useState<CurrentVersion>(currentVersion)
   const [modalOpen, setModalOpen] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -160,6 +166,7 @@ export function UpdatesClient({
         // toast "Couldn't fetch the release manifest".
         setAvailableDownloadUrl(j.currentRelease?.downloadUrl ?? null)
         setAvailableSha256(j.currentRelease?.sha256 ?? null)
+        setAvailableSignature(j.currentRelease?.signature ?? null)
       } else {
         setRelease(humaniseRelease(j.available))
         // SHA + tarball coords stay in private state slots — used only
@@ -167,6 +174,7 @@ export function UpdatesClient({
         setAvailableShaPrivate(j.available.sha)
         setAvailableDownloadUrl(j.available.downloadUrl)
         setAvailableSha256(j.available.sha256)
+        setAvailableSignature(j.available.signature)
       }
     } finally {
       setChecking(false)
@@ -179,13 +187,14 @@ export function UpdatesClient({
   }, [])
 
   const handleApply = useCallback(async () => {
-    if (!availableShaPrivate || !availableDownloadUrl || !availableSha256 || applying) return
+    if (!availableShaPrivate || !availableDownloadUrl || !availableSha256 || !availableSignature || applying) return
     setApplying(true)
     try {
       const payload: ApplyPayload = {
         targetSha: availableShaPrivate,
         downloadUrl: availableDownloadUrl,
         sha256: availableSha256,
+        signature: availableSignature,
       }
       const r = await csrfFetch('/api/admin/updates/apply', {
         method: 'POST',
@@ -205,7 +214,7 @@ export function UpdatesClient({
     } finally {
       setApplying(false)
     }
-  }, [availableShaPrivate, availableDownloadUrl, availableSha256, applying, toast])
+  }, [availableShaPrivate, availableDownloadUrl, availableSha256, availableSignature, applying, toast])
 
   // Re-run install on the SAME SHA — recovery affordance for a stuck
   // migration / corrupted .next/ cache. The server-side guard refuses
@@ -221,7 +230,8 @@ export function UpdatesClient({
       // (operator hit Re-run before a check), fetch them lazily.
       let downloadUrl = availableDownloadUrl
       let sha256 = availableSha256
-      if (!downloadUrl || !sha256) {
+      let signature = availableSignature
+      if (!downloadUrl || !sha256 || !signature) {
         const c = await csrfFetch('/api/admin/updates/check', { method: 'POST' })
         if (c.ok) {
           const j = (await c.json()) as CheckResponse
@@ -233,12 +243,14 @@ export function UpdatesClient({
           if (coords) {
             downloadUrl = coords.downloadUrl
             sha256 = coords.sha256
+            signature = coords.signature
             setAvailableDownloadUrl(downloadUrl)
             setAvailableSha256(sha256)
+            setAvailableSignature(signature)
           }
         }
       }
-      if (!downloadUrl || !sha256) {
+      if (!downloadUrl || !sha256 || !signature) {
         toast.error("Couldn't fetch the release manifest — try Check Now first.")
         return
       }
@@ -246,6 +258,7 @@ export function UpdatesClient({
         targetSha: current.sha,
         downloadUrl,
         sha256,
+        signature,
         force: true,
       }
       const r = await csrfFetch('/api/admin/updates/apply', {
@@ -266,7 +279,7 @@ export function UpdatesClient({
     } finally {
       setApplying(false)
     }
-  }, [current.sha, applying, toast, availableDownloadUrl, availableSha256])
+  }, [current.sha, applying, toast, availableDownloadUrl, availableSha256, availableSignature])
 
   const handleSaveSettings = useCallback(async () => {
     if (savingSettings || !dirty) return

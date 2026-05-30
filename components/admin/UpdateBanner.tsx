@@ -34,6 +34,12 @@ interface CheckResponse {
     ts: string
     changelog: string
     isSecurity: boolean
+    // Tarball coords + signature the apply route REQUIRES (strict schema,
+    // signed updates since 0.1.45). The banner must forward all three or
+    // every "Update now" 400s — same gap that broke UpdatesClient.
+    downloadUrl: string
+    sha256: string
+    signature: string | null
   } | null
 }
 
@@ -54,6 +60,9 @@ export function UpdateBanner({
   // The raw upstream SHA is held privately for the apply call ONLY.
   // Operator-facing UI never renders it; this is a transport detail.
   const [availableShaPrivate, setAvailableShaPrivate] = useState<string | null>(null)
+  const [availableDownloadUrl, setAvailableDownloadUrl] = useState<string | null>(null)
+  const [availableSha256, setAvailableSha256] = useState<string | null>(null)
+  const [availableSignature, setAvailableSignature] = useState<string | null>(null)
   const [currentSha, setCurrentSha] = useState<string>(initialCurrentSha)
   const [dismissed, setDismissed] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
@@ -97,9 +106,15 @@ export function UpdateBanner({
             // hide tomorrow's.
             setReleaseKey(j.available.ts)
             setAvailableShaPrivate(j.available.sha)
+            setAvailableDownloadUrl(j.available.downloadUrl)
+            setAvailableSha256(j.available.sha256)
+            setAvailableSignature(j.available.signature)
           } else {
             setRelease(null)
             setAvailableShaPrivate(null)
+            setAvailableDownloadUrl(null)
+            setAvailableSha256(null)
+            setAvailableSignature(null)
           }
         }
       } catch {
@@ -133,13 +148,25 @@ export function UpdateBanner({
   }, [releaseKey])
 
   const handleUpdate = useCallback(async () => {
-    if (starting || !availableShaPrivate) return
+    if (
+      starting ||
+      !availableShaPrivate ||
+      !availableDownloadUrl ||
+      !availableSha256 ||
+      !availableSignature
+    )
+      return
     setStarting(true)
     try {
       const r = await csrfFetch('/api/admin/updates/apply', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ targetSha: availableShaPrivate }),
+        body: JSON.stringify({
+          targetSha: availableShaPrivate,
+          downloadUrl: availableDownloadUrl,
+          sha256: availableSha256,
+          signature: availableSignature,
+        }),
       })
       if (r.status === 409 || r.ok) {
         setModalOpen(true)
@@ -147,7 +174,7 @@ export function UpdateBanner({
     } finally {
       setStarting(false)
     }
-  }, [starting, availableShaPrivate])
+  }, [starting, availableShaPrivate, availableDownloadUrl, availableSha256, availableSignature])
 
   if (inProgress) {
     return (
