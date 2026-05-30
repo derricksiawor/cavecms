@@ -250,7 +250,7 @@ export function UpdateHistoryTable() {
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span
-                          className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-medium ${tone}`}
+                          className={`inline-flex items-center justify-center text-center rounded-full px-3 py-1 text-[11px] font-medium leading-tight ${tone}`}
                         >
                           {renderActionLabel(r.action, d.reason)}
                         </span>
