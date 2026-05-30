@@ -162,6 +162,13 @@
       "when": 1779967980000,
       "tag": "0024_legacy_block_type_to_lx",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1780060000000,
+      "tag": "0025_fix_nullable_timestamp_defaults",
+      "breakpoints": true
     }
   ]
 }

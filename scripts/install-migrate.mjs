@@ -233,87 +233,38 @@ async function applyMigration(conn, entry, sql, hash) {
   )
 }
 
-// Tables the app's schema_fingerprint covers — must stay in sync with
-// scripts/update-fingerprint.ts:TRACKED_TABLES. Listed explicitly (not
-// derived from information_schema) so a stray table from another tenant
-// sharing the same DB can't tilt the fingerprint.
-const FINGERPRINT_TABLES = [
-  'ai_proposals',
-  'audit_log',
-  'content_blocks',
-  'failed_logins_by_email',
-  'failed_logins_by_ip',
-  'leads',
-  'login_attempts',
-  'media',
-  'media_references',
-  'newsletter_subscribers',
-  'notification_failures',
-  'pages',
-  'pending_emails',
-  'posts',
-  'project_sections',
-  'projects',
-  'saved_blocks',
-  'schema_fingerprint',
-  'settings',
-  'slug_redirects',
-  'user_known_ips',
-  'users',
-]
-
 /**
- * Compute the schema fingerprint over information_schema.COLUMNS and
- * upsert into the `schema_fingerprint` table (single row, id=1).
+ * Compute the schema fingerprint over the MIGRATION JOURNAL and upsert
+ * into the `schema_fingerprint` table (single row, id=1).
  *
- * Mirrors scripts/update-fingerprint.ts byte-for-byte:
- *  - Same TRACKED_TABLES (kept in sync).
- *  - Same column projection (table_name, column_name, column_type,
- *    is_nullable, column_default, column_key, extra) in ORDER BY
- *    (table_name, column_name) ASC.
- *  - Same canonicalization line shape:
- *      `<table>.<column>:<type>|null=<Y/N>|default=<D>|key=<K>|extra=<E>`
- *  - SHA-256 over the joined string (lines separated by `\n`, no trailing
- *    newline).
- *  - INSERT ... ON DUPLICATE KEY UPDATE so both fresh + re-runs work.
+ * INLINE copy of lib/db/journalFingerprint.ts — the two MUST stay
+ * byte-for-byte identical (this standalone bundle can't import the `@/`
+ * alias). sha256 of each migration's SQL (the same value Drizzle stores
+ * in __drizzle_migrations.hash), joined in journal order, then sha256'd.
+ *
+ * Hashing the migration SQL *text* — not information_schema — makes the
+ * fingerprint byte-identical on every MariaDB/MySQL version. The
+ * materialised schema is NOT portable: `explicit_defaults_for_timestamp`
+ * (OFF on MariaDB ≤10.9 → NOT NULL '0000-00-00'/`on update` timestamps; ON
+ * on ≥10.10 → nullable DEFAULT NULL), integer display widths (`int(11)` vs
+ * `int`), `DEFAULT_GENERATED` in EXTRA, etc. all differ across engines — so
+ * the old column-hash baseline fatally mismatched fresh installs on a
+ * different engine and the release wouldn't boot.
  *
  * Boot-time check in instrumentation.ts reads db/schema-fingerprint.txt
  * (baked into the release zip at build time) and compares against this
- * row; mismatch fatals the process. By computing live from the DB the
- * customer's box just migrated, this row reflects ACTUAL schema state —
- * if migrations drift from schema.ts (i.e. file fingerprint ≠ live
- * fingerprint), boot fails loud rather than masking the drift.
+ * row; mismatch fatals the process — catching "new code on a DB that
+ * didn't run the migrations" on any engine, with zero false positives
+ * from cross-version schema representation.
  */
 async function updateSchemaFingerprint(conn) {
-  const placeholders = FINGERPRINT_TABLES.map(() => '?').join(',')
-  const [rows] = await conn.query(
-    `SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
-            COLUMN_TYPE AS column_type, IS_NULLABLE AS is_nullable,
-            COLUMN_DEFAULT AS column_default, COLUMN_KEY AS column_key,
-            EXTRA AS extra
-     FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME IN (${placeholders})
-     ORDER BY TABLE_NAME, COLUMN_NAME`,
-    FINGERPRINT_TABLES,
-  )
-  if (!Array.isArray(rows) || rows.length === 0) {
-    throw new Error('schema_fingerprint: no tracked tables found in information_schema (did migrations apply?)')
+  const journal = readJournal()
+  const entries = [...journal.entries].sort((a, b) => a.idx - b.idx)
+  if (entries.length === 0) {
+    throw new Error('schema_fingerprint: no migrations in db/migrations/meta/_journal.json')
   }
-  // Verify every tracked table is represented — missing one means a
-  // failed migration that left the schema incomplete.
-  const found = new Set(rows.map((r) => r.table_name))
-  const missing = FINGERPRINT_TABLES.filter((t) => !found.has(t))
-  if (missing.length > 0) {
-    throw new Error(`schema_fingerprint: missing tables: ${missing.join(', ')}`)
-  }
-  const canonical = rows
-    .map(
-      (r) =>
-        `${r.table_name}.${r.column_name}:${r.column_type}|null=${r.is_nullable}|default=${r.column_default ?? '<none>'}|key=${r.column_key}|extra=${r.extra}`,
-    )
-    .join('\n')
-  const fingerprint = createHash('sha256').update(canonical).digest('hex')
+  const hashes = entries.map((entry) => hashSql(readMigration(entry.tag)))
+  const fingerprint = createHash('sha256').update(hashes.join('\n')).digest('hex')
   await conn.query(
     `INSERT INTO schema_fingerprint (id, fingerprint, applied_at)
      VALUES (1, ?, NOW(3))

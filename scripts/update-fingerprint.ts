@@ -1,101 +1,47 @@
-// Computes a SHA-256 fingerprint over the canonical shape of every table
-// the app owns and writes it both to db/schema-fingerprint.txt (baked into
-// the build) and the single-row schema_fingerprint table.
+// Computes the schema fingerprint and writes it both to
+// db/schema-fingerprint.txt (baked into the build) and the single-row
+// schema_fingerprint table.
 //
 // Invoked by `pnpm db:fingerprint` after `pnpm db:migrate`. Boot-time
 // check in instrumentation.ts compares the file vs the row — mismatch
 // means "new code on old schema" or vice versa; process exits 1.
 //
+// ─── Why the fingerprint is over the MIGRATION JOURNAL, not the schema ───
+// It used to hash information_schema.COLUMNS (column_type, is_nullable,
+// column_default, …). That is NOT portable: the SAME migrations
+// materialize a DIFFERENT schema depending on the server's
+// `explicit_defaults_for_timestamp` (OFF on MariaDB ≤10.9 / Ubuntu-22.04's
+// 10.6 → timestamps become NOT NULL with '0000-00-00'/`on update`
+// implicit defaults; ON on MariaDB ≥10.10 / 12.x → nullable DEFAULT NULL),
+// and on integer display widths (`int(11)` on MariaDB, `int` on MySQL 8),
+// `DEFAULT_GENERATED` in EXTRA (MySQL 8), and more. So a baseline generated
+// on one engine fatally mismatched a fresh install on another engine —
+// the release simply would not boot on a different MariaDB/MySQL version.
+//
+// The fingerprint's real job is only "does this DB have the migrations
+// this build expects." So we hash the MIGRATION JOURNAL: sha256 of each
+// applied migration's SQL (exactly what Drizzle + install-migrate.mjs
+// already store in `__drizzle_migrations.hash`), joined in journal order,
+// then sha256'd. That is byte-identical on every engine because it hashes
+// the migration SQL text, never the server's materialised schema.
+//
 // Not guarded with the NODE_ENV=production refusal that destructive dev
 // scripts have, because this is meant to run in CI and on the deploy box
 // during migration — both legitimate production-adjacent use cases.
 
-import { createHash } from 'node:crypto'
-import { open, rename, writeFile } from 'node:fs/promises'
+import { open, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { db, pool } from '@/db/client'
 import { sql } from 'drizzle-orm'
-
-// Tables the app owns. Listed explicitly (not derived from
-// information_schema) so a stray test table or an unrelated schema in the
-// same database cannot tilt the fingerprint.
-const TRACKED_TABLES = [
-  'ai_proposals',
-  'audit_log',
-  'content_blocks',
-  'failed_logins_by_email',
-  'failed_logins_by_ip',
-  'leads',
-  'login_attempts',
-  'media',
-  'media_references',
-  'newsletter_subscribers',
-  'notification_failures',
-  'pages',
-  'pending_emails',
-  'posts',
-  'project_sections',
-  'projects',
-  'saved_blocks',
-  'schema_fingerprint',
-  'settings',
-  'slug_redirects',
-  'user_known_ips',
-  'users',
-] as const
-
-interface ColumnRow {
-  table_name: string
-  column_name: string
-  column_type: string
-  is_nullable: 'YES' | 'NO'
-  column_default: string | null
-  column_key: string
-  extra: string
-}
-
-async function fetchColumns(): Promise<ColumnRow[]> {
-  const [rows] = (await db.execute(sql`
-    SELECT
-      TABLE_NAME      AS table_name,
-      COLUMN_NAME     AS column_name,
-      COLUMN_TYPE     AS column_type,
-      IS_NULLABLE     AS is_nullable,
-      COLUMN_DEFAULT  AS column_default,
-      COLUMN_KEY      AS column_key,
-      EXTRA           AS extra
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME IN (${sql.join([...TRACKED_TABLES], sql.raw(','))})
-    ORDER BY TABLE_NAME, COLUMN_NAME
-  `)) as unknown as [ColumnRow[]]
-  return rows
-}
-
-function canonicalize(rows: ColumnRow[]): string {
-  return rows
-    .map(
-      (r) =>
-        `${r.table_name}.${r.column_name}:${r.column_type}|null=${r.is_nullable}|default=${r.column_default ?? '<none>'}|key=${r.column_key}|extra=${r.extra}`,
-    )
-    .join('\n')
-}
+import { computeMigrationJournalFingerprint } from '@/lib/db/journalFingerprint'
 
 async function main(): Promise<void> {
   try {
-    const rows = await fetchColumns()
-    if (rows.length === 0) {
-      console.error('fingerprint: no tracked tables found — has the migration run?')
-      process.exit(1)
-    }
-    const found = new Set(rows.map((r) => r.table_name))
-    const missing = TRACKED_TABLES.filter((t) => !found.has(t))
-    if (missing.length > 0) {
-      console.error(`fingerprint: missing tables: ${missing.join(', ')}`)
-      process.exit(1)
-    }
-    const canonical = canonicalize(rows)
-    const fingerprint = createHash('sha256').update(canonical).digest('hex')
+    const migrationsDir = path.resolve('db/migrations')
+    const fingerprint = await computeMigrationJournalFingerprint({
+      migrationsDir,
+      readFile: (p) => readFile(p, 'utf8'),
+    })
 
     // Write the DB row FIRST (so the file is always at-least-as-fresh).
     // Single-row table: id=1 always. ON DUPLICATE KEY UPDATE handles
