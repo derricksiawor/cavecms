@@ -104,7 +104,44 @@ HEALTHZ_URL="${CAVECMS_HEALTHZ_URL:-http://127.0.0.1:3040/healthz}"
 HEALTHZ_TOKEN="${HEALTHZ_TOKEN:-}"
 REPO_DIR="${CAVECMS_REPO_DIR:-$(pwd)}"
 LOG_DIR="${CAVECMS_LOG_DIR:-/var/log/cavecms}"
-ENV_FILE="${CAVECMS_ENV_FILE:-/etc/cavecms/env.production}"
+# ENV_FILE — the sealed env.production to load for the migrate step + stamp the
+# new commit into. When CAVECMS_ENV_FILE is unset (installs created before the
+# env-knob convention and upgraded in place never gained it), fall back to the
+# CLI install layout ($REPO_DIR/env.production — where the app runs
+# `node --env-file=env.production` from) BEFORE the bare-metal default. Without
+# this a laptop/CLI install fell back to the missing /etc path and step 3
+# aborted with "node: /etc/cavecms/env.production: not found" → rollback.
+if [ -n "${CAVECMS_ENV_FILE:-}" ]; then
+  ENV_FILE="$CAVECMS_ENV_FILE"
+elif [ -f "$REPO_DIR/env.production" ]; then
+  ENV_FILE="$REPO_DIR/env.production"
+else
+  ENV_FILE="/etc/cavecms/env.production"
+fi
+# RESTART_MODE — resolve ONCE here (consumed by restart_app + the step-6 and
+# rollback verify branches). When CAVECMS_RESTART_MODE is unset (installs that
+# predate the knob), AUTO-DETECT the surface from install-local markers — the
+# same signals the CLI's detectInstallSurface uses — instead of blindly
+# defaulting to pm2. A bare-node laptop install has no pm2 daemon, so the old
+# pm2 default made `pm2 reload` fail AND the step-6 verify loop wait forever for
+# a commit match that a never-restarting foreground process can't produce
+# (the "stuck at Verifying → rollback" symptom).
+if [ -n "${CAVECMS_RESTART_MODE:-}" ]; then
+  RESTART_MODE="$CAVECMS_RESTART_MODE"
+elif [ -f "$REPO_DIR/pm2.config.cjs" ]; then
+  RESTART_MODE="pm2"
+elif [ -f "/etc/systemd/system/${CAVECMS_SYSTEMD_UNIT:-cavecms.service}" ]; then
+  RESTART_MODE="systemd"
+elif [ -f "$REPO_DIR/app.js" ]; then
+  RESTART_MODE="cpanel"
+elif [ -f "$REPO_DIR/env.production" ]; then
+  # CLI install layout (env beside the app) with no service-manager marker ⇒ a
+  # foreground laptop/dev install. Bare-metal deploy.sh keeps env at
+  # /etc/cavecms and falls through to the pm2 default below.
+  RESTART_MODE="laptop"
+else
+  RESTART_MODE="pm2"
+fi
 LOCK_PATH="${STATUS_PATH}.lock"
 
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
@@ -296,7 +333,7 @@ except Exception:
 
 restart_app() {
   mkdir -p "$LOG_DIR" 2>/dev/null || true
-  local mode="${CAVECMS_RESTART_MODE:-pm2}"
+  local mode="$RESTART_MODE"
   # Append stdin to the reload log BEST-EFFORT — an unwritable LOG_DIR
   # (cpanel / laptop where /var/log/cavecms isn't provisioned, or a
   # restore that wiped an in-repo log dir) must NEVER block the actual
@@ -473,7 +510,7 @@ rollback_to_previous() {
   # no-ops, so the foreground process still serves the OLD commit. Don't
   # require a commit match (the FILES are restored); the operator restarts
   # the foreground process to load the rolled-back code.
-  if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then target_commit=""; fi
+  if [ "$RESTART_MODE" = "laptop" ]; then target_commit=""; fi
   local healthz_args=()
   if [ -n "$HEALTHZ_TOKEN" ]; then
     healthz_args=(-H "Authorization: Bearer $HEALTHZ_TOKEN")
@@ -1461,7 +1498,7 @@ CURRENT_STEP=6
 # auto-rolling-back a build that installed fine. The files ARE in place; the
 # operator restarts the foreground process to load them. Report success with
 # that guidance instead of a misleading "didn't come up healthy" rollback.
-if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then
+if [ "$RESTART_MODE" = "laptop" ]; then
   # `restart_required` (distinct terminal state, treated as success by
   # TERMINAL_STATES) tells the modal to show a "restart to finish" affordance
   # instead of the misleading "Reload to see changes" button — a bare-node
