@@ -199,6 +199,15 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   // would target a non-existent app and silently no-op, healthz keeps
   // returning the OLD commit, and the apply fails at the verify step.
   'CAVECMS_PM2_APP_NAME',
+  // CAVECMS_RESTART_MODE: how the orchestrator restarts this install after
+  // a successful build — systemd | cpanel | pm2 | laptop. The CLI detects the
+  // surface at install time and writes it into env.production. When ABSENT
+  // (legacy installs, bare-metal deploy.sh) the orchestrator defaults to pm2,
+  // preserving the historical hosted behaviour exactly. On a laptop/dev
+  // install this is what lets the dashboard update finish in `laptop` mode
+  // (build + "restart required" prompt) instead of attempting a pm2 reload
+  // that has no daemon to talk to → health-check fail → spurious rollback.
+  'CAVECMS_RESTART_MODE',
   // CAVECMS_ENV_FILE: location of the install's sealed env.production.
   // The orchestrator stamps CAVECMS_COMMIT + CAVECMS_RELEASE_TS into
   // this file on successful update so the next pm2 reload picks up

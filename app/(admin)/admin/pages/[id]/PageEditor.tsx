@@ -1473,7 +1473,15 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
                         className="text-[11px] text-warm-stone"
                         title={dateLabel}
                       >
-                        {formatRelativeSince(ts)}
+                        {/* Relative time is computed from the clock, so the
+                            server-rendered value and the value at client
+                            hydration can differ (e.g. "44s ago" vs "47s ago")
+                            for very recent entries — suppressHydrationWarning
+                            keeps that legitimate drift from throwing React
+                            #418. The absolute timestamp is on the title attr. */}
+                        <span suppressHydrationWarning>
+                          {formatRelativeSince(ts)}
+                        </span>
                         {' · '}
                         {a.email ? (
                           <CfSafeMailto email={a.email} linked={false} />

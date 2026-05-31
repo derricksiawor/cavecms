@@ -38,6 +38,7 @@ const STEP_LABELS = [
 const TERMINAL: ReadonlySet<UpdateState> = new Set<UpdateState>([
   'idle',
   'completed',
+  'restart_required',
   'failed',
   'rolled_back',
 ])
@@ -167,7 +168,14 @@ export function UpdatesProgressModal({
   const totalSteps = status?.totalSteps ?? UPDATE_TOTAL_STEPS
   const progressPct = Math.min(100, Math.max(0, (step / totalSteps) * 100))
   const isFailed = state === 'failed' || state === 'rolled_back'
-  const isCompleted = state === 'completed'
+  // `restart_required` (laptop/dev install) is a SUCCESS — the new version is
+  // on disk, it just needs a manual process restart. Fold it into isCompleted
+  // so all the success styling (emerald palette, check icon, steps-done, no
+  // slow/reconnect warnings) applies; isRestartRequired then overrides only
+  // the copy + footer to swap the misleading "Reload" button for restart
+  // guidance.
+  const isRestartRequired = state === 'restart_required'
+  const isCompleted = state === 'completed' || isRestartRequired
   // Split the "restart in progress" phase (server is reachable, just
   // mid-handover via pm2 reload) from "actually lost contact with the
   // server" (fetch failing). The old combined flag rendered
@@ -266,15 +274,17 @@ export function UpdatesProgressModal({
                     : 'text-copper-600'
             }`}
           >
-            {isCompleted
-              ? 'Update complete'
-              : state === 'failed'
-                ? 'Update failed'
-                : state === 'rolled_back'
-                  ? 'Rolled back safely'
-                  : isOrphaned
-                    ? 'Update interrupted'
-                    : `Installing update · step ${Math.max(1, step)} of ${totalSteps}`}
+            {isRestartRequired
+              ? 'Update installed'
+              : isCompleted
+                ? 'Update complete'
+                : state === 'failed'
+                  ? 'Update failed'
+                  : state === 'rolled_back'
+                    ? 'Rolled back safely'
+                    : isOrphaned
+                      ? 'Update interrupted'
+                      : `Installing update · step ${Math.max(1, step)} of ${totalSteps}`}
           </p>
           {/* Hero icon on success — emerald check sits above the
               title for an unambiguous "done" signal. */}
@@ -286,18 +296,22 @@ export function UpdatesProgressModal({
             </div>
           )}
           <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-near-black">
-            {isCompleted
-              ? 'Update successful'
-              : state === 'failed'
-                ? 'Update failed'
-                : state === 'rolled_back'
-                  ? 'Update reverted — your site is safe'
-                  : isOrphaned
-                    ? 'Update interrupted'
-                    : 'Installing your update'}
+            {isRestartRequired
+              ? 'Restart to finish'
+              : isCompleted
+                ? 'Update successful'
+                : state === 'failed'
+                  ? 'Update failed'
+                  : state === 'rolled_back'
+                    ? 'Update reverted — your site is safe'
+                    : isOrphaned
+                      ? 'Update interrupted'
+                      : 'Installing your update'}
           </h2>
           <p className="mt-2 text-sm text-warm-stone">
-            {isCompleted
+            {isRestartRequired
+              ? 'The new version is installed on disk. Your site runs as a foreground process, so it can’t restart itself — stop the running CaveCMS process and start it again to load the new version.'
+              : isCompleted
               ? 'CaveCMS is now on the latest version. Reload this page to see the changes.'
               : state === 'failed'
                 ? 'Your site is still live on the previous version. Nothing was changed.'
@@ -457,7 +471,14 @@ export function UpdatesProgressModal({
         )}
 
         <footer className="relative flex flex-wrap items-center justify-end gap-3 px-8 pt-6 pb-8">
-          {isCompleted ? (
+          {isRestartRequired ? (
+            // A bare-node laptop install won't be on the new version until the
+            // operator restarts it, so "Reload" would just re-show the old
+            // version. Close + let them restart from their terminal.
+            <Button type="button" onClick={onClose}>
+              Got it
+            </Button>
+          ) : isCompleted ? (
             <Button
               type="button"
               onClick={() => {

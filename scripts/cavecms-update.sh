@@ -1462,7 +1462,12 @@ CURRENT_STEP=6
 # operator restarts the foreground process to load them. Report success with
 # that guidance instead of a misleading "didn't come up healthy" rollback.
 if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then
-  write_status "completed" 6 "Update installed — restart your CaveCMS process to load the new version" "" ""
+  # `restart_required` (distinct terminal state, treated as success by
+  # TERMINAL_STATES) tells the modal to show a "restart to finish" affordance
+  # instead of the misleading "Reload to see changes" button — a bare-node
+  # laptop install can't self-restart, so the new code is on disk but not yet
+  # live. The audit row below is still recorded as `completed` (a success).
+  write_status "restart_required" 6 "Update installed — restart your CaveCMS process to load the new version" "" ""
   post_maintenance_toggle false
   if declare -F post_audit_terminal >/dev/null 2>&1; then
     post_audit_terminal completed "laptop_manual_restart_required"

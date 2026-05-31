@@ -44,6 +44,11 @@ export type UpdateState =
   | 'updating'
   | 'restarting'
   | 'completed'
+  /** Terminal success on a laptop/dev install: the new version is on disk
+   *  but a bare-`node` process can't self-restart, so the operator must
+   *  restart it manually to load the new code. Treated as a success
+   *  (no rollback); the modal renders a "restart to finish" affordance. */
+  | 'restart_required'
   | 'failed'
   | 'rolled_back'
 
@@ -74,6 +79,7 @@ export interface UpdateStatus {
 const TERMINAL_STATES: ReadonlySet<UpdateState> = new Set<UpdateState>([
   'idle',
   'completed',
+  'restart_required',
   'failed',
   'rolled_back',
 ])

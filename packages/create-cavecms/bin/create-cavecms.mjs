@@ -1297,6 +1297,16 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
       ? '/opt/cavecms/state'
       : join(targetDir, '.cavecms-state')
 
+  // Restart mode for the in-app updater (scripts/cavecms-update.sh restart_app).
+  // The orchestrator's modes are systemd | cpanel | pm2 | laptop; the CLI's
+  // `vps` surface installs a systemd unit, so it maps to `systemd`. The others
+  // pass through unchanged. Persisting this lets the dashboard apply route
+  // forward it — without it the orchestrator defaults to pm2, and a bare-node
+  // laptop install can't self-restart (pm2 reload → no daemon → health-check
+  // fail → spurious rollback). With it, a laptop install finishes the update
+  // in `laptop` mode (build + "restart required" prompt, no rollback).
+  const restartMode = surface === 'vps' ? 'systemd' : surface
+
   const lines = [
     `# ----------------------------------------------------------------------`,
     `# CaveCMS sealed env.production`,
@@ -1330,6 +1340,12 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# Default would be /var/lib/cavecms/snapshots — requires the cavecmsstate`,
     `# supplementary group which a stale PM2 daemon doesn't have.`,
     `CAVECMS_SNAPSHOT_ROOT=${stateDir}/snapshots`,
+    `# How the in-app updater restarts this install after a successful build.`,
+    `# systemd | cpanel | pm2 | laptop. A laptop/dev install can't self-restart`,
+    `# (bare node, no service manager) — the updater installs the new version`,
+    `# then asks you to restart the process. Hosted surfaces restart`,
+    `# automatically. When unset (legacy installs) the updater defaults to pm2.`,
+    `CAVECMS_RESTART_MODE=${restartMode}`,
     `# Release bookkeeping — re-stamped on every in-app update.`,
     `# CAVECMS_COMMIT is the short (12-char) git SHA the release was built`,
     `# from. The in-app updater compares this against the latest manifest's`,
