@@ -50,6 +50,10 @@ const ENGINE_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_LOG_DIR',
   'CAVECMS_REPO_DIR',
   'CAVECMS_ENV_FILE',
+  // Forwarded so the bash scripts derive the SAME shared-lock path the updater
+  // uses even when this legacy override is set (otherwise the lock would
+  // diverge to the state-dir default and lose mutual exclusion).
+  'CAVECMS_UPDATE_STATUS_PATH',
   'CAVECMS_HEALTHZ_URL',
   'CAVECMS_INTERNAL_URL',
   // Restart + process-manager handles (restore restarts the app).

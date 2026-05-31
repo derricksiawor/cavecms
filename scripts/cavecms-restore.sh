@@ -92,8 +92,12 @@ SCRATCH=""
 SAFETY_DIR=""
 LOCK_HELD=0
 MAINT_ON=0
+MAINT_KEEP_ON=0       # set when a FAILED rollback must leave maintenance ON
 UPLOADS_MOVED=0
 UPLOADS_TRASH=""
+MUTATION_STARTED=0    # set =1 immediately before the first destructive DB op
+RESTORE_COMMITTED=0   # set =1 after migrate succeeds (data is fully restored)
+CURRENT_STEP=0
 ARCHIVE_ID="$(basename "${ARCHIVE:-restore}")"
 
 read_state_at() {
@@ -107,21 +111,28 @@ except Exception: print("")' "$f" 2>/dev/null || true
   fi
 }
 
+# ensure_uploads_dirs — recreate all FOUR subdirs (incl .tmp) on one fs, or the
+# app boot's assertSameFs (lib/media/storage.ts) will process.exit(1).
+ensure_uploads_dirs() {
+  for sub in originals variants brochures-private .tmp; do
+    mkdir -p "${UPLOADS_ROOT}/${sub}" 2>/dev/null || true
+  done
+}
+
 # ---------------------------------------------------------------------------
-# rollback_to_safety — restore the pre-restore DB + uploads snapshot. Called on
-# any failure AFTER the safety snapshot was taken.
+# rollback_to_safety — restore the pre-restore DB + uploads snapshot. Returns 0
+# if the rollback genuinely succeeded (DB restored + healthz green), 1 if it
+# could NOT fully restore (caller must report a hard failure + keep maintenance
+# ON). Called on any failure AFTER the safety snapshot was taken.
 # ---------------------------------------------------------------------------
 rollback_to_safety() {
   echo "[cavecms-restore] rolling back to the pre-restore safety snapshot" >&2
-  # Re-assert maintenance ON so visitors see a 503 (not a half-restored site)
-  # for the duration of the rollback + re-verify, even if a prior step toggled
-  # it off. The EXIT trap turns it back off.
   post_maintenance_toggle true || true
   MAINT_ON=1
+  local ok=1
   if [ -n "$SAFETY_DIR" ] && [ -f "${SAFETY_DIR}/db.sql.gz" ]; then
-    restore_database "${SAFETY_DIR}/db.sql.gz" || echo "[cavecms-restore] safety DB restore failed" >&2
+    restore_database "${SAFETY_DIR}/db.sql.gz" || { echo "[cavecms-restore] safety DB restore FAILED" >&2; ok=0; }
   fi
-  # Uploads: if we moved the originals to trash, restore them.
   if [ "$UPLOADS_MOVED" = "1" ] && [ -n "$UPLOADS_TRASH" ]; then
     for sub in originals variants brochures-private; do
       rm -rf "${UPLOADS_ROOT:?}/${sub}" 2>/dev/null || true
@@ -130,15 +141,8 @@ rollback_to_safety() {
   fi
   ensure_uploads_dirs
   restart_app || true
-  verify_healthz 2 90 || echo "[cavecms-restore] healthz still failing after rollback" >&2
-}
-
-# ensure_uploads_dirs — recreate all FOUR subdirs (incl .tmp) on one fs, or the
-# app boot's assertSameFs (lib/media/storage.ts) will process.exit(1).
-ensure_uploads_dirs() {
-  for sub in originals variants brochures-private .tmp; do
-    mkdir -p "${UPLOADS_ROOT}/${sub}" 2>/dev/null || true
-  done
+  verify_healthz 2 90 || { echo "[cavecms-restore] healthz still failing after rollback" >&2; ok=0; }
+  [ "$ok" = "1" ] && return 0 || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -157,30 +161,66 @@ on_exit() {
         ;;
     esac
   fi
-  [ "$MAINT_ON" = "1" ] && post_maintenance_toggle false || true
+  # Leave maintenance ON if a failed rollback set MAINT_KEEP_ON (a down /
+  # inconsistent site is safer behind a 503 than exposed).
+  if [ "$MAINT_KEEP_ON" != "1" ] && [ "$MAINT_ON" = "1" ]; then
+    post_maintenance_toggle false || true
+  fi
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH" 2>/dev/null || true
   [ -n "$SAFETY_DIR" ] && rm -rf "$SAFETY_DIR" 2>/dev/null || true
-  # One-shot uploaded archive (upload-restore route): delete on any terminal
-  # state so the .incoming upload doesn't linger. Kept local backups are NOT
-  # deleted (the flag is only set for uploads).
   if [ "${CAVECMS_RESTORE_CLEANUP_ARCHIVE:-0}" = "1" ] && [ -n "$ARCHIVE" ]; then
     rm -f "$ARCHIVE" 2>/dev/null || true
   fi
   [ "$LOCK_HELD" = "1" ] && release_op_lock "$SHARED_LOCK_PATH" 2>/dev/null || true
 }
-trap on_exit EXIT
-# pm2 reload leaks SIGINT to the orchestrator during restart — ignore BOTH INT
-# and HUP (matches the updater) so a leaked signal can't `exit 130` mid-restore
-# and bypass the rollback. TERM still aborts (EXIT trap → failed).
-trap '' INT HUP
+
+# on_term — a SIGTERM mid-restore must NOT leave a half-applied DB exposed.
+on_term() {
+  set +e
+  trap '' TERM  # no re-entry
+  local cur; cur=$( (read_state_at "$STATUS_PATH") || true )
+  case "$cur" in
+    completed|restart_required|rolled_back|failed) exit 143 ;;
+  esac
+  if [ "$RESTORE_COMMITTED" = "1" ]; then
+    # Data is fully restored; only the restart/verify was interrupted. Clear
+    # maintenance and ask for a manual restart — do NOT undo a good restore.
+    [ "$MAINT_ON" = "1" ] && post_maintenance_toggle false || true
+    rstatus restart_required 7 "Restore complete — restart your CaveCMS process to finish"
+    post_backup_audit_terminal restore_completed "$ARCHIVE_ID"
+  elif [ "$MUTATION_STARTED" = "1" ]; then
+    fail_and_rollback "$CURRENT_STEP" "Restore interrupted" "The restore was interrupted; your previous data was put back."
+  else
+    [ "$MAINT_ON" = "1" ] && post_maintenance_toggle false || true
+    rstatus failed "$CURRENT_STEP" "Restore interrupted" "The restore was interrupted before any changes were made."
+    post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "interrupted"
+  fi
+  exit 143
+}
 
 fail_and_rollback() {
   local step="$1" label="$2" detail="$3"
-  rstatus rolled_back "$step" "$label" "$detail"
-  rollback_to_safety
-  post_backup_audit_terminal restore_rolled_back "$ARCHIVE_ID" "$detail"
+  if rollback_to_safety; then
+    rstatus rolled_back "$step" "$label" "$detail"
+    post_backup_audit_terminal restore_rolled_back "$ARCHIVE_ID" "$detail"
+  else
+    # The rollback itself could not fully restore the previous data — surface a
+    # hard failure and KEEP maintenance ON (the EXIT trap honours MAINT_KEEP_ON).
+    MAINT_KEEP_ON=1
+    rstatus failed "$step" "Restore failed — needs attention" "We couldn't fully put your previous data back. Your site is paused for safety. Recovery logs are on the server."
+    post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "rollback_failed: ${detail}"
+  fi
   exit 1
 }
+
+# Register traps AFTER all handler functions are defined (so a signal arriving
+# during startup can never invoke an undefined function).
+trap on_exit EXIT
+# pm2 reload leaks SIGINT to the orchestrator during restart — ignore BOTH INT
+# and HUP (matches the updater). TERM → on_term (rollback-aware) so a
+# `systemctl stop` / pm2 stop / CLI-timeout SIGTERM can't bypass the rollback.
+trap '' INT HUP
+trap on_term TERM
 
 # fail_validate — step-1 failure (pre-mutation, no snapshot taken yet): write a
 # failed status + audit and exit. NO rollback (nothing was changed).
@@ -205,9 +245,20 @@ if [ "${CAVECMS_RESTORE_DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
+# Acquire the shared op lock FIRST — before ANY status write — using the same
+# existence/O_EXCL scheme + lock file the updater uses. On contention exit
+# cleanly (nothing mutated; the modal polls the winner's status). The route/CLI
+# pre-check 409'd the common case; this is the authoritative cross-process gate.
+if ! acquire_op_lock "$SHARED_LOCK_PATH"; then
+  echo "[cavecms-restore] another operation holds the lock — exiting without changes" >&2
+  exit 0
+fi
+LOCK_HELD=1
+
 # ===========================================================================
 # STEP 1 — validate + compat gate (NO mutation)
 # ===========================================================================
+CURRENT_STEP=1
 rstatus validating 1 "Checking the archive"
 [ -n "$ARCHIVE" ] || { rstatus failed 1 "Restore failed" "No backup file was provided."; exit 2; }
 [ -f "$ARCHIVE" ] || { rstatus failed 1 "Restore failed" "That backup file couldn't be found."; exit 2; }
@@ -262,17 +313,9 @@ if [ "$COMPAT_REFUSE" = "1" ]; then
 fi
 
 # ===========================================================================
-# STEP 2 — acquire lock + pre-restore safety snapshot + maintenance ON
+# STEP 2 — pre-restore safety snapshot + maintenance ON (lock already held)
 # ===========================================================================
-# Acquire the shared op lock FIRST (existence/O_EXCL scheme, same file the
-# updater uses) BEFORE any mutation or status write that could clobber a
-# concurrent winner. On contention exit cleanly (validate step 1 was read-only;
-# nothing has been mutated yet). The route/CLI pre-check 409'd the common case.
-if ! acquire_op_lock "$SHARED_LOCK_PATH"; then
-  echo "[cavecms-restore] another operation holds the lock — exiting without changes" >&2
-  exit 0
-fi
-LOCK_HELD=1
+CURRENT_STEP=2
 rstatus restoring 2 "Safeguarding current data" "" "$COMPAT_WARN"
 
 # Disk pre-check on the UPLOADS filesystem: the safety uploads tar + the restored
@@ -312,9 +355,17 @@ if ! tar -xzf "$WORK_ARCHIVE" -C "$SCRATCH" database.sql.gz uploads.tar.gz 2>>"$
 fi
 
 # ===========================================================================
-# STEP 3 — restore DB
+# STEP 3 — restore DB (first DESTRUCTIVE step)
 # ===========================================================================
+CURRENT_STEP=3
 rstatus restoring 3 "Restoring your content"
+MUTATION_STARTED=1
+# DROP all existing tables/views FIRST so an OLDER dump (which only DROP+CREATEs
+# the tables it knows about) doesn't leave the install's NEWER tables behind —
+# those would make the subsequent forward-migrate re-run their CREATE and fail.
+if ! drop_all_tables; then
+  fail_and_rollback 3 "Restore failed" "We couldn't prepare the database. Your previous data was put back."
+fi
 if ! restore_database "${SCRATCH}/database.sql.gz"; then
   fail_and_rollback 3 "Restore failed" "We couldn't restore your content. Your previous data was put back."
 fi
@@ -327,6 +378,7 @@ fi
 # ===========================================================================
 # STEP 4 — restore uploads
 # ===========================================================================
+CURRENT_STEP=4
 rstatus restoring 4 "Restoring your media"
 UPLOADS_TRASH="${UPLOADS_ROOT}/.trash-$(date -u +%Y%m%d-%H%M%S).$$"
 mkdir -p "$UPLOADS_TRASH"
@@ -346,10 +398,20 @@ ensure_uploads_dirs
 # ===========================================================================
 # STEP 5 — forward-migrate
 # ===========================================================================
+CURRENT_STEP=5
 rstatus restoring 5 "Bringing things up to date"
-if ! CAVECMS_ALLOW_NONEMPTY_DB=1 node --env-file="$ENV_FILE" "${REPO_DIR}/scripts/install-migrate.mjs" >>"${LOG_DIR}/restore-migrate.log" 2>&1; then
+# Wall-clock guard so a migration that blocks on a held lock can't wedge the
+# restore (and maintenance + the shared lock) forever. `timeout` is GNU/most-
+# Linux; absent on stock macOS → run unguarded there (the laptop migrate is
+# fast + the CLI path has its own 60-min spawnSync timeout).
+_MIGRATE_TIMEOUT=""
+command -v timeout >/dev/null 2>&1 && _MIGRATE_TIMEOUT="timeout 30m"
+if ! CAVECMS_ALLOW_NONEMPTY_DB=1 $_MIGRATE_TIMEOUT node --env-file="$ENV_FILE" "${REPO_DIR}/scripts/install-migrate.mjs" >>"${LOG_DIR}/restore-migrate.log" 2>&1; then
   fail_and_rollback 5 "Restore failed" "We couldn't finish updating your data. Your previous data was put back."
 fi
+# Data is fully restored + migrated. From here a SIGTERM should NOT undo the
+# restore (on_term writes restart_required instead of rolling back).
+RESTORE_COMMITTED=1
 
 # Optional env.production restore (--restore-env).
 if [ "${CAVECMS_RESTORE_ENV:-0}" = "1" ]; then
@@ -362,6 +424,7 @@ fi
 # ===========================================================================
 # STEP 6 — restart (maintenance STAYS ON through verify — mirrors the updater)
 # ===========================================================================
+CURRENT_STEP=6
 rstatus restarting 6 "Restarting your site"
 restart_app
 
@@ -383,6 +446,7 @@ fi
 # STEP 7 — verify (maintenance still ON → a failed verify rolls back behind a
 # 503, not a broken public site). Only clear maintenance AFTER a green verify.
 # ===========================================================================
+CURRENT_STEP=7
 rstatus restarting 7 "Verifying"
 if ! verify_healthz 2 120; then
   fail_and_rollback 7 "Restore failed" "Your site didn't come back up cleanly, so the previous version was put back."

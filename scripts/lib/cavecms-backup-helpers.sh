@@ -171,6 +171,30 @@ restore_database() {
   return $rc
 }
 
+# drop_all_tables — DROP every table + view in the configured DB so a restore is
+# a TRUE replacement, not additive. Without this, restoring an OLDER dump (which
+# only DROP+CREATEs the tables it knows about) leaves the install's NEWER tables
+# in place; the subsequent forward-migrate then re-runs their CREATE and fails.
+# Runs AFTER the pre-restore safety snapshot + maintenance-on. NEVER drops the
+# database itself (project rule) — only its tables, exactly as the dump's own
+# `--add-drop-table` does, just comprehensively.
+drop_all_tables() {
+  local cred_db cf db
+  cred_db=$(_backup_cred_file) || return 1
+  cf=$(echo "$cred_db" | awk 'NR==1'); db=$(echo "$cred_db" | awk 'NR==2')
+  local stmts rc=0
+  stmts=$(mysql --defaults-extra-file="$cf" --connect-timeout=10 -BNe \
+    "SELECT CONCAT('DROP ', IF(table_type='VIEW','VIEW','TABLE'), ' IF EXISTS \`', table_name, '\`;') \
+     FROM information_schema.tables WHERE table_schema = DATABASE();" "$db" \
+    2>>"${LOG_DIR:-/tmp}/restore-db.log") || rc=$?
+  if [ $rc -eq 0 ] && [ -n "$stmts" ]; then
+    { printf 'SET FOREIGN_KEY_CHECKS=0;\n%s\nSET FOREIGN_KEY_CHECKS=1;\n' "$stmts"; } \
+      | mysql --defaults-extra-file="$cf" "$db" 2>>"${LOG_DIR:-/tmp}/restore-db.log" || rc=$?
+  fi
+  rm -f "$cf"
+  return $rc
+}
+
 # ---------------------------------------------------------------------------
 # Read-only DB probes used to build the manifest + post-load guards.
 # _mysql_query runs an arbitrary read query reusing ONE cred-file.

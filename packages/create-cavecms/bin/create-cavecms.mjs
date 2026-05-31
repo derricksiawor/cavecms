@@ -2616,7 +2616,7 @@ function lockIsStaleCli(lockPath, statusPath) {
       try {
         const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
         if (cmdline) {
-          return !/cavecms-update|cavecms-watchdog/.test(cmdline)
+          return !/cavecms-update|cavecms-watchdog|cavecms-backup|cavecms-restore/.test(cmdline)
         }
       } catch { /* no /proc → mtime backstop below */ }
     }

@@ -219,8 +219,12 @@ else
     exit 1
   fi
   # Count source files with a single inode walk (cheaper than gunzip-listing
-  # the whole tar; the count is an informational manifest field).
-  UPLOAD_FILECOUNT=$(find "${UPLOAD_SUBDIRS[@]/#/${UPLOADS_ROOT}/}" -type f 2>/dev/null | grep -vc '/\.tmp/' || echo 0)
+  # the whole tar). `wc -l` ALWAYS prints exactly one integer and exits 0 —
+  # unlike `grep -c` which prints a count AND exits 1 on zero matches, so a
+  # `grep -vc … || echo 0` would emit a second line ("0\n0") on an empty tree
+  # and corrupt the manifest JSON. Exclude .tmp via -path.
+  UPLOAD_FILECOUNT=$(find "${UPLOAD_SUBDIRS[@]/#/${UPLOADS_ROOT}/}" -type f -not -path '*/.tmp/*' 2>/dev/null | wc -l | tr -d ' ')
+  [ -z "$UPLOAD_FILECOUNT" ] && UPLOAD_FILECOUNT=0
 fi
 assert_disk_ok "$CAVECMS_BACKUP_DIR" || { bstatus failed 3 "Backup failed" "Ran out of disk space while saving media."; post_backup_audit_terminal backup_failed unknown "disk full mid-uploads"; exit 1; }
 
@@ -372,10 +376,13 @@ for f in files[keep:]:
 fi
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f \( -name 'cavecms-backup-*.tar.gz' -o -name 'cavecms-backup-*.tar.gz.age' \) -mtime +30 -delete 2>/dev/null || true
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.partial.*' -mtime +1 -delete 2>/dev/null || true
-# Prune trashed archives (dashboard deletes mv into .trash-<ts>/) + orphaned
-# staging dirs older than 1 day, so deleted/aborted backups don't leak space.
+# Prune trashed archives (dashboard deletes mv into .trash-<ts>/), orphaned
+# staging dirs, and orphaned upload partials (.incoming, from a timed-out /
+# interrupted upload-restore that the restore orchestrator never cleaned), so
+# deleted/aborted operations don't leak space.
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type d -name '.trash-*' -mtime +30 -exec rm -rf {} + 2>/dev/null || true
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type d -name '.staging.*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find "$CAVECMS_BACKUP_DIR/.incoming" -maxdepth 1 -type f -name 'upload-*' -mmin +120 -delete 2>/dev/null || true
 
 # Humanised label for the terminal modal copy (no path/timestamp jargon).
 # %d (zero-padded) is portable; %-d is GNU-only.
@@ -383,6 +390,6 @@ ARCHIVE_LABEL=$(date -u +"%b %d, %Y" 2>/dev/null || echo "Today")
 
 bstatus completed 5 "Backup complete" "" "" "$ARCHIVE_LABEL"
 post_backup_audit_terminal backup_completed "$ARCHIVE_ID"
-release_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
+release_op_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
 rm -rf "$STAGING"; STAGING=""
 exit 0

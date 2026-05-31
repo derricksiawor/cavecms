@@ -325,13 +325,17 @@ export function readLockPid(): number | null {
 function pidIsCaveCmsScript(pid: number): boolean | null {
   try {
     const raw = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
-    // /proc cmdline uses NUL separators. Look for our known script
-    // names anywhere in the joined cmdline. Both the orchestrator and
-    // watchdog scripts qualify.
+    // /proc cmdline uses NUL separators. Look for our known script names
+    // anywhere in the joined cmdline. The update orchestrator + watchdog AND
+    // the backup/restore orchestrators all share this lock — they must ALL be
+    // recognized here, or an update would treat a live backup/restore lock as
+    // stale, unlink it, and run concurrently (DB corruption).
     const joined = raw.replace(/\0/g, ' ')
     return (
       joined.includes('cavecms-update.sh') ||
-      joined.includes('cavecms-watchdog.sh')
+      joined.includes('cavecms-watchdog.sh') ||
+      joined.includes('cavecms-backup.sh') ||
+      joined.includes('cavecms-restore.sh')
     )
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
