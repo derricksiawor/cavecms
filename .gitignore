@@ -144,6 +144,10 @@ next-env.d.ts
 !/scripts/lib/
 !/scripts/lib/**
 !/scripts/install-migrate.mjs
+!/scripts/cavecms-backup.sh
+!/scripts/cavecms-restore.sh
+!/scripts/backup/
+!/scripts/backup/**
 
 # Publisher-only tooling — NEVER tracked. `scripts/release/build-zip.mjs`,
 # `publish.mjs`, the SSH known_hosts, and the releases-host nginx config
