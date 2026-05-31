@@ -463,7 +463,7 @@ export function UsersTable({
           isRowSelectable={(u) => u.id !== selfId}
           mobileRowHeader={(u) => (
             <span className="text-base font-semibold text-near-black">
-              {u.email}
+              <CfSafeMailto email={u.email} linked={false} />
             </span>
           )}
           emptyState={<p className="text-sm text-warm-stone">No users yet.</p>}

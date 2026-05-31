@@ -486,7 +486,7 @@ export function NewsletterTable({
           }
           mobileRowHeader={(s) => (
             <span className="text-base font-semibold text-near-black">
-              {s.email}
+              <CfSafeMailto email={s.email} linked={false} />
             </span>
           )}
           emptyState={

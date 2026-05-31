@@ -527,7 +527,13 @@ export function LeadsTable({
           }
           mobileRowHeader={(l) => (
             <span className="text-base font-semibold text-near-black">
-              {l.name ?? l.email ?? `Lead #${l.id}`}
+              {l.name ? (
+                l.name
+              ) : l.email ? (
+                <CfSafeMailto email={l.email} linked={false} />
+              ) : (
+                `Lead #${l.id}`
+              )}
             </span>
           )}
           emptyState={

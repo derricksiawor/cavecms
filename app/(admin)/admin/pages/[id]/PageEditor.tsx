@@ -50,6 +50,7 @@ import { CSS } from '@dnd-kit/utilities'
 import clsx from 'clsx'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { Input } from '@/components/ui/Input'
 import { useToast } from '@/components/inline-edit/Toast'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
@@ -1474,7 +1475,11 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
                       >
                         {formatRelativeSince(ts)}
                         {' · '}
-                        {a.email ?? '—'}
+                        {a.email ? (
+                          <CfSafeMailto email={a.email} linked={false} />
+                        ) : (
+                          '—'
+                        )}
                       </span>
                     </span>
                   </li>
