@@ -44,24 +44,10 @@ else
   STATUS_PATH="/var/lib/cavecms/backup-status.json"
 fi
 
-# Same allowlist guard as lib/backups/statusPath.ts / cavecms-update.sh.
-allowed=0
-case "$STATUS_PATH" in
-  /var/lib/cavecms/*|/tmp/*|/var/folders/*) allowed=1 ;;
-esac
-if [ "$allowed" = "0" ] && [ -n "${CAVECMS_STATE_DIR:-}" ]; then
-  case "$STATUS_PATH" in "$CAVECMS_STATE_DIR"/*) allowed=1 ;; esac
-fi
-if [ "$allowed" = "0" ]; then
-  case "$STATUS_PATH" in */.cavecms-state/*) allowed=1 ;; esac
-fi
-if [ "$allowed" = "0" ]; then
-  echo "[cavecms-backup] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
-  exit 2
-fi
-
-# Shared operation lock — the SAME file the updater locks, so backup / update /
-# restore are mutually exclusive on one install.
+# Shared operation lock — the SAME <update-status>.lock the updater uses, via
+# the SAME existence/O_EXCL scheme (NOT flock — the updater holds no advisory
+# flock, so a flock acquire would NOT exclude an in-flight update). Backup /
+# update / restore are therefore mutually exclusive on one install.
 if [ -n "${CAVECMS_UPDATE_STATUS_PATH:-}" ]; then
   _UPDATE_STATUS="$CAVECMS_UPDATE_STATUS_PATH"
 elif [ -n "${CAVECMS_STATE_DIR:-}" ]; then
@@ -76,20 +62,26 @@ LOG_DIR="${CAVECMS_LOG_DIR:-/var/log/cavecms}"
 ENV_FILE="${CAVECMS_ENV_FILE:-${REPO_DIR}/env.production}"
 UPLOADS_ROOT="${UPLOADS_ROOT:-/opt/cavecms/uploads}"
 
-mkdir -p "$(dirname "$STATUS_PATH")"
-mkdir -p "$LOG_DIR" 2>/dev/null || true
-if ! ( touch "$LOG_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$LOG_DIR/.cavecms-write-probe" 2>/dev/null ); then
-  LOG_DIR=/tmp
-fi
-
 # ---------------------------------------------------------------------------
-# Helpers (update helpers FIRST, then backup helpers which depend on them)
+# Helpers — sourced BEFORE the status-path allowlist check so we can use the
+# shared assert_allowed_status_path / acquire_op_lock (parity with the TS side).
 # ---------------------------------------------------------------------------
 HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=scripts/lib/cavecms-update-helpers.sh
 . "${HELPERS_DIR}/cavecms-update-helpers.sh"
 # shellcheck source=scripts/lib/cavecms-backup-helpers.sh
 . "${HELPERS_DIR}/cavecms-backup-helpers.sh"
+
+if ! assert_allowed_status_path "$STATUS_PATH"; then
+  echo "[cavecms-backup] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
+  exit 2
+fi
+
+mkdir -p "$(dirname "$STATUS_PATH")"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+if ! ( touch "$LOG_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$LOG_DIR/.cavecms-write-probe" 2>/dev/null ); then
+  LOG_DIR=/tmp
+fi
 
 export PHASE_STARTED_AT
 PHASE_STARTED_AT="$(now_iso)"
@@ -100,9 +92,8 @@ LOCK_HELD=0
 
 bstatus() { write_phase_status "$STATUS_PATH" "$TOTAL" "$@"; }
 
-# read_status_state reads $STATUS_PATH (update-shaped); we need it for an
-# arbitrary path. Tiny inline reader (best-effort). Defined before on_exit so
-# the EXIT trap can always call it.
+# Tiny best-effort status-state reader for an arbitrary path (the EXIT trap
+# inspects $STATUS_PATH to avoid overwriting an already-terminal state).
 read_status_state_at() {
   local f="$1"
   if command -v python3 >/dev/null 2>&1; then
@@ -116,6 +107,7 @@ except Exception: print("")' "$f" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # EXIT trap — mark failed if not already terminal; clean staging; release lock.
+# An rc=0 exit (incl. lock-contention) writes NO status and releases nothing.
 # ---------------------------------------------------------------------------
 on_exit() {
   local rc=$?
@@ -131,11 +123,22 @@ on_exit() {
     esac
   fi
   [ -n "$STAGING" ] && rm -rf "$STAGING" 2>/dev/null || true
-  [ "$LOCK_HELD" = "1" ] && release_lock "$SHARED_LOCK_PATH" 2>/dev/null || true
+  [ "$LOCK_HELD" = "1" ] && release_op_lock "$SHARED_LOCK_PATH" 2>/dev/null || true
 }
 trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
+
+# Acquire the shared op lock FIRST — before any status write — so a loser in a
+# concurrent-spawn race exits WITHOUT clobbering the winner's status. The route
+# / CLI pre-check already 409'd / refused the common case; this O_EXCL acquire
+# is the authoritative cross-process gate. Held by another op → exit cleanly
+# (the modal polls the winner's live status).
+if ! acquire_op_lock "$SHARED_LOCK_PATH"; then
+  echo "[cavecms-backup] another operation holds the lock — exiting without changes" >&2
+  exit 0
+fi
+LOCK_HELD=1
 
 # ---------------------------------------------------------------------------
 # Dry-run — walk the states on a timer for Playwright. No real work.
@@ -163,24 +166,26 @@ if ! ( touch "$CAVECMS_BACKUP_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$C
   post_backup_audit_terminal backup_failed unknown "backup dir not writable"
   exit 1
 fi
-if ! assert_disk_ok "$CAVECMS_BACKUP_DIR"; then
+# Disk pre-check — byte-level estimate (raw uploads size × 1.2 + a DB/overhead
+# margin) vs free space on the BACKUP filesystem. Staging lives inside
+# CAVECMS_BACKUP_DIR (same FS as the final archive), so one check covers the
+# whole operation. Raw uploads size over-estimates the gzip'd archive → safe.
+UPLOADS_KB=$(du_kb "${UPLOADS_ROOT}/originals" "${UPLOADS_ROOT}/variants" "${UPLOADS_ROOT}/brochures-private")
+NEED_KB=$(( UPLOADS_KB * 12 / 10 + 51200 ))
+if ! assert_disk_for "$CAVECMS_BACKUP_DIR" "$NEED_KB"; then
   bstatus failed 1 "Backup failed" "There isn't enough free disk space to make a backup."
-  post_backup_audit_terminal backup_failed unknown "disk full"
+  post_backup_audit_terminal backup_failed unknown "insufficient disk"
   exit 1
 fi
-
-# Acquire the shared op lock (mutually exclusive with update + restore).
-if ! acquire_lock_or_defer "$SHARED_LOCK_PATH"; then
-  bstatus failed 1 "Backup failed" "Another update or backup is already running. Try again in a moment."
-  exit 1
-fi
-LOCK_HELD=1
 
 # ===========================================================================
 # STEP 2 — database dump
 # ===========================================================================
 bstatus running 2 "Saving your content"
-STAGING="$(mktemp -d "${TMPDIR:-/tmp}/cavecms-backup-stage.XXXXXX")"
+# Stage INSIDE the backup dir (same FS) so the final publish is an atomic `mv`
+# (no second full copy) and the step-1 disk check covers staging too. The
+# `.staging.*` prefix is ignored by listBackups' archive-name regex.
+STAGING="$(mktemp -d "${CAVECMS_BACKUP_DIR}/.staging.XXXXXX")"
 if ! dump_database "${STAGING}/database.sql.gz" >/dev/null; then
   bstatus failed 2 "Backup failed" "We couldn't save your content."
   post_backup_audit_terminal backup_failed unknown "db dump failed"
@@ -196,9 +201,13 @@ for sub in originals variants brochures-private; do
   [ -d "${UPLOADS_ROOT}/${sub}" ] && UPLOAD_SUBDIRS+=("$sub")
 done
 if [ "${#UPLOAD_SUBDIRS[@]}" -eq 0 ]; then
-  # No uploads tree yet (brand-new install) — produce an empty uploads tar so
-  # the archive shape is uniform and restore always has something to extract.
-  ( cd "$STAGING" && tar -czf uploads.tar.gz --files-from /dev/null )
+  # No uploads tree yet (brand-new install) — tar three EMPTY subdirs so the
+  # archive is valid (GNU tar refuses to create a truly-empty archive via
+  # `--files-from /dev/null`) and restore always has dirs to extract.
+  _emptyup="${STAGING}/_emptyuploads"
+  mkdir -p "${_emptyup}/originals" "${_emptyup}/variants" "${_emptyup}/brochures-private"
+  ( cd "$_emptyup" && tar -czf "${STAGING}/uploads.tar.gz" originals variants brochures-private )
+  rm -rf "$_emptyup"
   UPLOAD_FILECOUNT=0
 else
   if ! tar -C "$UPLOADS_ROOT" \
@@ -209,7 +218,9 @@ else
     post_backup_audit_terminal backup_failed unknown "uploads tar failed"
     exit 1
   fi
-  UPLOAD_FILECOUNT=$(tar -tzf "${STAGING}/uploads.tar.gz" 2>/dev/null | grep -vc '/$' || echo 0)
+  # Count source files with a single inode walk (cheaper than gunzip-listing
+  # the whole tar; the count is an informational manifest field).
+  UPLOAD_FILECOUNT=$(find "${UPLOAD_SUBDIRS[@]/#/${UPLOADS_ROOT}/}" -type f 2>/dev/null | grep -vc '/\.tmp/' || echo 0)
 fi
 assert_disk_ok "$CAVECMS_BACKUP_DIR" || { bstatus failed 3 "Backup failed" "Ran out of disk space while saving media."; post_backup_audit_terminal backup_failed unknown "disk full mid-uploads"; exit 1; }
 
@@ -253,11 +264,27 @@ DB_FILE="${STAGING}/database.sql.gz"
 UP_FILE="${STAGING}/uploads.tar.gz"
 DB_SHA=$(_sha256 "$DB_FILE"); DB_SIZE=$(wc -c < "$DB_FILE" | tr -d ' ')
 UP_SHA=$(_sha256 "$UP_FILE"); UP_SIZE=$(wc -c < "$UP_FILE" | tr -d ' ')
-DB_NAME=$(echo "$DATABASE_URL" | python3 -c 'import sys,urllib.parse as u; print((u.urlparse(sys.stdin.read().strip()).path or "/").lstrip("/").split("?")[0])' 2>/dev/null || echo "cavecms")
-SERVER_VERSION=$(db_server_version 2>/dev/null || echo "unknown")
-FINGERPRINT=$(db_schema_fingerprint 2>/dev/null || echo "")
-MIG_ENCODING=$(detect_migrator_encoding 2>/dev/null || echo "unknown")
-MIG_COUNT=$(db_migration_count 2>/dev/null || echo 0)
+DB_NAME=$(_parse_db_url_portable "$DATABASE_URL" | awk 'NR==5')
+[ -z "$DB_NAME" ] && DB_NAME="cavecms"
+
+# Probe serverVersion + fingerprint + migrationCount + latest-hash in ONE query.
+PROBE=$(db_manifest_probe 2>/dev/null || true)
+SERVER_VERSION=$(printf '%s' "$PROBE" | awk -F'\t' 'NR==1{print $1}')
+FINGERPRINT=$(printf '%s' "$PROBE" | awk -F'\t' 'NR==1{print $2}')
+MIG_COUNT=$(printf '%s' "$PROBE" | awk -F'\t' 'NR==1{print $3+0}')
+MIG_HASH=$(printf '%s' "$PROBE" | awk -F'\t' 'NR==1{print $4}')
+MIG_ENCODING=$(encoding_of_hash "$MIG_HASH")
+[ -z "$SERVER_VERSION" ] && SERVER_VERSION="unknown"
+
+# Refuse to produce a backup whose migration state can't be introspected — an
+# 'unknown' encoding (empty/failed __drizzle_migrations probe) would bake an
+# un-restorable value into the manifest (both validators reject it). Fail loud
+# here instead of writing a poisoned archive.
+if [ "$MIG_ENCODING" = "unknown" ] || [ "${MIG_COUNT:-0}" -eq 0 ]; then
+  bstatus failed 4 "Backup failed" "This site isn't fully set up yet, so there's nothing to back up."
+  post_backup_audit_terminal backup_failed unknown "migrator encoding unknown / no migrations"
+  exit 1
+fi
 [ -z "$FINGERPRINT" ] && FINGERPRINT="0000000000000000000000000000000000000000000000000000000000000000"
 AGE_SCHEME="none"; AGE_RECIP=""
 if [ -n "${CAVECMS_BACKUP_AGE_RECIPIENT:-}" ] && command -v age >/dev/null 2>&1; then
@@ -322,7 +349,9 @@ fi
 
 FINAL_NAME="${ARCHIVE_BASENAME}.${FINAL_EXT}"
 PARTIAL=$(mktemp "${CAVECMS_BACKUP_DIR}/.${FINAL_NAME}.partial.XXXXXX")
-cp "${STAGING}/archive.${FINAL_EXT}" "$PARTIAL"
+# Staging lives on the SAME filesystem as the backup dir → mv is an atomic
+# rename, not a second full copy of a multi-GB archive.
+mv -f "${STAGING}/archive.${FINAL_EXT}" "$PARTIAL"
 chmod 600 "$PARTIAL"
 mv -f "$PARTIAL" "${CAVECMS_BACKUP_DIR}/${FINAL_NAME}"
 
@@ -343,9 +372,14 @@ for f in files[keep:]:
 fi
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f \( -name 'cavecms-backup-*.tar.gz' -o -name 'cavecms-backup-*.tar.gz.age' \) -mtime +30 -delete 2>/dev/null || true
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.partial.*' -mtime +1 -delete 2>/dev/null || true
+# Prune trashed archives (dashboard deletes mv into .trash-<ts>/) + orphaned
+# staging dirs older than 1 day, so deleted/aborted backups don't leak space.
+find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type d -name '.trash-*' -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type d -name '.staging.*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 
 # Humanised label for the terminal modal copy (no path/timestamp jargon).
-ARCHIVE_LABEL=$(date -u +"%b %-d, %Y" 2>/dev/null || echo "Today")
+# %d (zero-padded) is portable; %-d is GNU-only.
+ARCHIVE_LABEL=$(date -u +"%b %d, %Y" 2>/dev/null || echo "Today")
 
 bstatus completed 5 "Backup complete" "" "" "$ARCHIVE_LABEL"
 post_backup_audit_terminal backup_completed "$ARCHIVE_ID"

@@ -267,6 +267,7 @@ function parseArgv(argv) {
     skipMigrate: false,
     skipStart: false,
     targetDir: null,
+    detectOnly: false,
   }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -287,6 +288,9 @@ function parseArgv(argv) {
     }
     else if (a === '--skip-migrate') out.skipMigrate = true
     else if (a === '--skip-start') out.skipStart = true
+    // Dry run: resolve + confirm the deployment surface, then exit
+    // without downloading or installing. Diagnostic + local test hook.
+    else if (a === '--detect-only' || a === '--check-surface') out.detectOnly = true
     else if (a.startsWith('--surface=')) out.surface = a.slice('--surface='.length)
     else if (a === '--surface') out.surface = argv[++i]
     else if (a.startsWith('--port=')) out.port = Number(a.slice('--port='.length))
@@ -326,6 +330,7 @@ function showHelp() {
     '',
     c('bold', 'Install options:'),
     '  --surface=auto|vps|pm2|cpanel|laptop  Force a deployment surface (default: auto)',
+    '  --detect-only                      Show which setup is detected, then exit (no install)',
     '  --port=NUMBER                      Port the app listens on (default: 3040)',
     '  --version=X.Y.Z|latest             Release to install (default: latest)',
     '  --dir=PATH                         Override the install directory',
@@ -479,6 +484,19 @@ function detectSurface() {
   // coexists with whatever else is already on the box.
   if (detectPm2Surface()) return 'pm2'
 
+  // Desktop / laptop signals (Linux only). A personal Linux machine
+  // often looks exactly like a server to the systemd+sudo heuristic
+  // below — a dev laptop with passwordless sudo would wrongly resolve
+  // to `vps`. So BEFORE concluding vps, look for things only a
+  // desktop/laptop has (a battery, a graphical session, an attached
+  // seat). macOS never reaches here — it has no /run/systemd/system
+  // and falls straight through to the laptop default.
+  //
+  // These signals are ADVISORY: they set the default the confirm
+  // prompt shows, never an authoritative answer. A genuine headless
+  // VPS has none of them and still resolves to vps just below.
+  if (platform() === 'linux' && hasDesktopSignals()) return 'laptop'
+
   // VPS signal — has systemd as PID 1 AND we're root-or-sudo-able.
   // /run/systemd/system is the canonical "systemd is in charge" marker.
   if (existsSync('/run/systemd/system')) {
@@ -498,6 +516,52 @@ function detectSurface() {
 }
 
 /**
+ * Linux desktop/laptop signal probe. Returns true if ANY signal that a
+ * personal machine has (and a headless server lacks) is present. Used
+ * to keep a dev laptop with systemd + passwordless sudo from being
+ * mistaken for a VPS. Advisory only — see detectSurface().
+ */
+function hasDesktopSignals() {
+  // Battery — the strongest signal. Servers have no power-supply
+  // battery; laptops expose /sys/class/power_supply/BAT0 (or BAT1).
+  try {
+    const psDir = '/sys/class/power_supply'
+    if (existsSync(psDir) && readdirSync(psDir).some((n) => n.startsWith('BAT'))) {
+      return true
+    }
+  } catch {
+    // power_supply unreadable in this environment — fall through.
+  }
+
+  // Graphical session — these env vars are set inside a desktop login
+  // and absent on a headless server's shell.
+  if (
+    process.env.WAYLAND_DISPLAY ||
+    process.env.DISPLAY ||
+    process.env.XDG_CURRENT_DESKTOP ||
+    process.env.DESKTOP_SESSION
+  ) {
+    return true
+  }
+
+  // systemd's default boot target is graphical.target on a desktop
+  // install, multi-user.target on a server.
+  const def = spawnSync('systemctl', ['get-default'], { encoding: 'utf8' })
+  if (def.status === 0 && /graphical\.target/.test(def.stdout || '')) {
+    return true
+  }
+
+  // An attached seat that can drive a display (loginctl seat0). A
+  // headless server either has no seat0 or reports CanGraphical=no.
+  const seat = spawnSync('loginctl', ['show-seat', 'seat0'], { encoding: 'utf8' })
+  if (seat.status === 0 && /CanGraphical=yes/.test(seat.stdout || '')) {
+    return true
+  }
+
+  return false
+}
+
+/**
  * Reusable PM2-surface signal probe. Lifted out of detectSurface
  * so the help text + the post-detect logging can quote the exact
  * reasons we did/didn't pick pm2 without duplicating the conditions.
@@ -511,6 +575,97 @@ function detectPm2Surface() {
   if (!existsSync(pm2Home)) return false
   if (process.geteuid && process.geteuid() === 0) return true
   return spawnSync('sudo', ['-n', 'true'], { stdio: 'ignore' }).status === 0
+}
+
+// Friendly, jargon-free description of each surface for the confirm
+// gate. Leads with WHAT THE MACHINE IS — the internal word "surface"
+// never appears in operator-visible copy.
+const SURFACE_DESCRIPTIONS = {
+  laptop: 'Laptop / personal computer (runs CaveCMS as a normal app, no server manager)',
+  vps: 'Server (Linux VPS with systemd — runs as a managed system service)',
+  pm2: 'Shared Linux server (runs alongside other sites under PM2)',
+  cpanel: 'cPanel hosting account',
+}
+
+/**
+ * Interactive confirmation gate. Detection is a best guess, and a wrong
+ * surface writes the wrong env knobs + restart mode — which silently
+ * breaks in-app updates later. So on a real TTY we show the operator
+ * what we detected, in plain language, and let them correct it BEFORE
+ * any install work happens. Returns the confirmed (or re-picked) surface.
+ */
+async function confirmSurface(detected) {
+  return withReadline(async (rl) => {
+    console.log('')
+    console.log(`${c('bold', 'Detected setup:')} ${SURFACE_DESCRIPTIONS[detected]}.`)
+    console.log('')
+    console.log(c('gray', '  • Press Enter / y  — yes, continue'))
+    console.log(c('gray', '  • n                — choose a different setup'))
+    console.log('')
+    const ok = await confirm(
+      rl,
+      'CaveCMS will install it for this kind of machine. Is that right?',
+      true,
+    )
+    if (ok) return detected
+
+    // The operator says the guess is wrong — let them pick. Default the
+    // picker to the detected option so a stray Enter doesn't change it.
+    const order = ['laptop', 'vps', 'pm2', 'cpanel']
+    console.log('')
+    console.log('Which setup matches this machine?')
+    console.log('  1) Laptop / personal computer')
+    console.log('  2) Server (Linux VPS with systemd)')
+    console.log('  3) Shared Linux host (PM2)')
+    console.log('  4) cPanel hosting account')
+    const choice = await ask(rl, 'Enter a number', {
+      defaultValue: String(order.indexOf(detected) + 1),
+      validate: (v) => (/^[1-4]$/.test(v.trim()) ? null : 'Enter 1, 2, 3, or 4.'),
+    })
+    return order[Number(choice.trim()) - 1]
+  })
+}
+
+/**
+ * Resolve the deployment surface, applying the precedence the operator
+ * expects:
+ *   - explicit --surface=  → used verbatim, no detection, no prompt
+ *   - auto + interactive   → detect, then CONFIRM (correctable picker)
+ *   - auto + non-TTY / -y  → detect, then log the choice loudly
+ * Shared by main() and the `--detect-only` dry run so both see identical
+ * behaviour. Returns the resolved surface string.
+ */
+async function resolveSurface(args) {
+  if (args.surface !== 'auto') {
+    // An explicit --surface= is a deliberate operator choice. Never
+    // second-guess a deliberate flag with detection or a prompt.
+    if (!['vps', 'pm2', 'laptop', 'cpanel'].includes(args.surface)) {
+      die(`Unknown surface: ${args.surface}`)
+    }
+    return args.surface
+  }
+
+  const detected = detectSurface()
+  // Interactive = a real TTY and the operator didn't pass -y.
+  const interactive = Boolean(process.stdin.isTTY) && !args.yes
+  if (interactive) {
+    return confirmSurface(detected)
+  }
+
+  // Non-interactive (-y / piped / CI): never block on a prompt, but make
+  // the auto-detected choice impossible to miss in the output so a
+  // mismatch is caught on the first run — not after a broken in-app
+  // update weeks later.
+  console.log('')
+  console.log(c('bold', `▶ Surface: ${detected} (auto-detected).`))
+  console.log(
+    c('gray', `  Override with --surface=<vps|pm2|cpanel|laptop> if that's wrong.`),
+  )
+  console.log('')
+  if (!['vps', 'pm2', 'laptop', 'cpanel'].includes(detected)) {
+    die(`Unknown surface: ${detected}`)
+  }
+  return detected
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1317,8 +1472,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   // UPLOADS_ROOT — the engine must locate it + disk-check it BEFORE it can
   // trust the DB is reachable, so it lives in env, not the settings table
   // (infra, not product config). Retention is an engine constant, not here.
-  const backupDir =
-    surface === 'vps' ? '/opt/cavecms/backups' : join(targetDir, 'backups')
+  // Derived from targetDir on ALL surfaces so it stays inside the systemd
+  // unit's ReadWritePaths (= ${targetDir}) even with a custom --dir on vps.
+  // For the default vps install (targetDir=/opt/cavecms) this is the unchanged
+  // /opt/cavecms/backups.
+  const backupDir = join(targetDir, 'backups')
 
   const lines = [
     `# ----------------------------------------------------------------------`,
@@ -2904,6 +3062,13 @@ function buildBackupChildEnv({ dir, envPath, env, script, statusFilename, status
   if (typeof env.UPLOADS_ROOT === 'string') childEnv.UPLOADS_ROOT = env.UPLOADS_ROOT
   if (typeof env.CAVECMS_BACKUP_DIR === 'string') childEnv.CAVECMS_BACKUP_DIR = env.CAVECMS_BACKUP_DIR
   else childEnv.CAVECMS_BACKUP_DIR = join(dir, 'backups')
+  // Backup encryption recipient + retention — from the shell env (advanced
+  // `CAVECMS_BACKUP_AGE_RECIPIENT=age1… cavecms backup`) OR env.production.
+  // Without forwarding these, the bash age path / custom retention is dead.
+  const ageRecip = process.env.CAVECMS_BACKUP_AGE_RECIPIENT || env.CAVECMS_BACKUP_AGE_RECIPIENT
+  if (ageRecip) childEnv.CAVECMS_BACKUP_AGE_RECIPIENT = ageRecip
+  const keep = process.env.CAVECMS_BACKUP_KEEP || env.CAVECMS_BACKUP_KEEP
+  if (keep) childEnv.CAVECMS_BACKUP_KEEP = keep
   const port = env.PORT || '3040'
   childEnv.CAVECMS_HEALTHZ_URL = `http://127.0.0.1:${port}/healthz`
   childEnv.CAVECMS_RESTART_MODE = surface === 'vps' ? 'systemd' : surface
@@ -2922,7 +3087,36 @@ function buildBackupChildEnv({ dir, envPath, env, script, statusFilename, status
   return { childEnv, surface, scriptPath, sharedLockPath }
 }
 
-function spawnBackupEngine({ dir, scriptPath, childEnv, args, mode }) {
+// Refuse if an update/backup/restore is already running (the bash O_EXCL acquire
+// is authoritative; this is a fast pre-check so the CLI fails clearly instead of
+// the bash silently exiting on contention). Reuses lockIsStaleCli so a wedged
+// prior run doesn't block recovery forever.
+function assertNoOpInProgress(sharedLockPath, updateStatusPath, mode) {
+  if (!existsSync(sharedLockPath)) return
+  if (lockIsStaleCli(sharedLockPath, updateStatusPath)) return
+  die(
+    `Another update, backup, or restore is already running on this install. ` +
+      `Wait for it to finish, then re-run \`cavecms ${mode}\`.`,
+  )
+}
+
+// Resolve the runtime user that OWNS the install (so a root CLI run can hand
+// ownership of new artefacts back to it — otherwise the dashboard, running as
+// that user, can't read root-owned mode-600 archives).
+function resolveRuntimeUser(surface, env) {
+  if (surface === 'pm2') return env.CAVECMS_PM2_USER || process.env.CAVECMS_PM2_USER || 'www-data'
+  if (surface === 'vps') {
+    let u = process.env.SUDO_USER || 'cavecms'
+    try {
+      const r = spawnSync('systemctl', ['show', '-p', 'User', '--value', 'cavecms.service'], { encoding: 'utf8' })
+      if (r.status === 0 && typeof r.stdout === 'string' && r.stdout.trim()) u = r.stdout.trim()
+    } catch { /* keep default */ }
+    return u
+  }
+  return null
+}
+
+function spawnBackupEngine({ dir, scriptPath, childEnv, args, mode, surface, backupDir }) {
   const r = spawnSync('bash', [scriptPath, ...args], {
     cwd: dir,
     stdio: 'inherit',
@@ -2939,6 +3133,16 @@ function spawnBackupEngine({ dir, scriptPath, childEnv, args, mode }) {
           : 'No backup was written.'),
     )
   }
+  // Root CLI backup on a managed surface writes a mode-600 root-owned archive
+  // into a runtime-user-owned dir → hand ownership back so the dashboard
+  // (running as that user) can list/download/restore it.
+  const isRoot = typeof process.geteuid === 'function' && process.geteuid() === 0
+  if (r.status === 0 && mode === 'backup' && isRoot && backupDir && (surface === 'vps' || surface === 'pm2')) {
+    const runUser = resolveRuntimeUser(surface, childEnv)
+    if (runUser) {
+      spawnSync('chown', ['-R', `${runUser}:${runUser}`, backupDir], { stdio: 'ignore' })
+    }
+  }
   process.exit(r.status ?? 1)
 }
 
@@ -2946,7 +3150,7 @@ async function commandBackup(argv) {
   const opts = parseSubArgv(argv, 'backup')
   const { dir, envPath, env } = resolveInstallDir(opts)
   log.header('CaveCMS backup')
-  const { childEnv, scriptPath } = buildBackupChildEnv({
+  const { childEnv, scriptPath, surface, sharedLockPath } = buildBackupChildEnv({
     dir,
     envPath,
     env,
@@ -2954,6 +3158,7 @@ async function commandBackup(argv) {
     statusFilename: 'backup-status.json',
     statusEnvVar: 'CAVECMS_BACKUP_STATUS_PATH',
   })
+  assertNoOpInProgress(sharedLockPath, childEnv.CAVECMS_UPDATE_STATUS_PATH || join(childEnv.CAVECMS_STATE_DIR, 'update-status.json'), 'backup')
   if (opts.includeEnv) {
     const hasAge =
       spawnSync('command', ['-v', 'age'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
@@ -2966,7 +3171,7 @@ async function commandBackup(argv) {
     }
     childEnv.CAVECMS_BACKUP_INCLUDE_ENV = '1'
   }
-  spawnBackupEngine({ dir, scriptPath, childEnv, args: [], mode: 'backup' })
+  spawnBackupEngine({ dir, scriptPath, childEnv, args: [], mode: 'backup', surface, backupDir: childEnv.CAVECMS_BACKUP_DIR })
 }
 
 async function commandRestore(argv) {
@@ -2986,7 +3191,7 @@ async function commandRestore(argv) {
     )
     if (ok !== 'restore') die('Cancelled.')
   }
-  const { childEnv, scriptPath } = buildBackupChildEnv({
+  const { childEnv, scriptPath, surface, sharedLockPath } = buildBackupChildEnv({
     dir,
     envPath,
     env,
@@ -2994,10 +3199,11 @@ async function commandRestore(argv) {
     statusFilename: 'restore-status.json',
     statusEnvVar: 'CAVECMS_RESTORE_STATUS_PATH',
   })
+  assertNoOpInProgress(sharedLockPath, childEnv.CAVECMS_UPDATE_STATUS_PATH || join(childEnv.CAVECMS_STATE_DIR, 'update-status.json'), 'restore')
   childEnv.CAVECMS_RESTORE_ARCHIVE = archive
   if (opts.identity) childEnv.CAVECMS_RESTORE_IDENTITY = resolve(opts.identity)
   if (opts.restoreEnv) childEnv.CAVECMS_RESTORE_ENV = '1'
-  spawnBackupEngine({ dir, scriptPath, childEnv, args: [], mode: 'restore' })
+  spawnBackupEngine({ dir, scriptPath, childEnv, args: [], mode: 'restore', surface, backupDir: childEnv.CAVECMS_BACKUP_DIR })
 }
 
 async function commandListBackups(argv) {
@@ -3148,13 +3354,24 @@ async function main(argv) {
 
   preflightPlatform()
   preflightNodeVersion()
+
+  // --detect-only: a dry run that resolves the deployment surface
+  // (detect → confirm / loud log, or an explicit --surface=) and exits
+  // WITHOUT downloading or installing anything. Lets an operator preview
+  // which setup CaveCMS will pick, and lets us exercise the detection +
+  // confirmation gate locally without a full install. Runs before the
+  // dependency pre-flight so it works on a box missing wget/unzip.
+  if (args.detectOnly) {
+    const resolved = await resolveSurface(args)
+    log.ok(`Resolved setup: ${SURFACE_DESCRIPTIONS[resolved]}`)
+    log.gray('(dry run — nothing was downloaded or installed)')
+    return
+  }
+
   preflightDeps()
 
-  // 1. Surface detect.
-  const surface = args.surface === 'auto' ? detectSurface() : args.surface
-  if (!['vps', 'pm2', 'laptop', 'cpanel'].includes(surface)) {
-    die(`Unknown surface: ${args.surface}`)
-  }
+  // 1. Surface detect → (interactive) confirm gate / (non-interactive) loud log.
+  const surface = await resolveSurface(args)
   log.info(`Surface: ${c('bold', surface)}`)
 
   // 2. Site name + target dir.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -41,13 +41,37 @@ function makeManifest(dbSha: string, upSha: string, dbLen: number, upLen: number
   }
 }
 
-function buildArchive(name: string, manifest: object): string {
-  const data = Buffer.from('hello')
-  writeFileSync(join(dir, 'database.sql.gz'), data)
-  writeFileSync(join(dir, 'uploads.tar.gz'), data)
-  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest))
+// Build a VALID inner uploads.tar.gz (one empty dir) at dir/uploads.tar.gz.
+function writeUploadsTar(withSymlink = false): { sha: string; size: number } {
+  const src = join(dir, '_up')
+  mkdirSync(join(src, 'originals'), { recursive: true })
+  if (withSymlink) symlinkSync('/etc', join(src, 'originals', 'escape'))
+  const up = join(dir, 'uploads.tar.gz')
+  execFileSync('tar', ['-C', src, '-czf', up, 'originals'])
+  rmSync(src, { recursive: true, force: true })
+  return { sha: shaOf(up), size: statSync(up).size }
+}
+
+function buildArchive(name: string, over: object = {}, extraFiles: string[] = [], withSymlink = false): string {
+  const dbData = Buffer.from('hello-db')
+  writeFileSync(join(dir, 'database.sql.gz'), dbData)
+  const up = writeUploadsTar(withSymlink)
+  const dbSha = shaOf(join(dir, 'database.sql.gz'))
+  writeFileSync(
+    join(dir, 'manifest.json'),
+    JSON.stringify(makeManifest(dbSha, up.sha, dbData.length, up.size, over)),
+  )
   const tgz = join(dir, name)
-  execFileSync('tar', ['-C', dir, '-czf', tgz, 'manifest.json', 'database.sql.gz', 'uploads.tar.gz'])
+  execFileSync('tar', [
+    '-C',
+    dir,
+    '-czf',
+    tgz,
+    'manifest.json',
+    'database.sql.gz',
+    'uploads.tar.gz',
+    ...extraFiles,
+  ])
   return tgz
 }
 
@@ -64,25 +88,35 @@ describe('backup-lib zip-slip', () => {
 })
 
 describe('backup-lib validateArchive', () => {
-  it('accepts a well-formed archive', () => {
-    writeFileSync(join(dir, 'database.sql.gz'), Buffer.from('hello'))
-    const dbSha = shaOf(join(dir, 'database.sql.gz'))
-    const tgz = buildArchive('a.tar.gz', makeManifest(dbSha, dbSha, 5, 5))
-    const r = validateArchive(tgz)
+  it('accepts a well-formed archive', async () => {
+    const r = await validateArchive(buildArchive('a.tar.gz'))
     expect(r.ok).toBe(true)
     expect(r.manifest.formatVersion).toBe(1)
   })
-  it('rejects a checksum mismatch', () => {
-    const tgz = buildArchive('b.tar.gz', makeManifest('f'.repeat(64), 'f'.repeat(64), 5, 5))
-    expect(validateArchive(tgz).ok).toBe(false)
+  it('rejects a checksum mismatch', async () => {
+    const tgz = buildArchive('b.tar.gz', {
+      database: {
+        name: 'c',
+        engine: 'mariadb',
+        serverVersion: '10.11',
+        schemaFingerprint: 'b'.repeat(64),
+        migratorEncoding: 'drizzle-hash',
+        file: 'database.sql.gz',
+        sha256: 'f'.repeat(64),
+        sizeBytes: 8,
+      },
+    })
+    expect((await validateArchive(tgz)).ok).toBe(false)
   })
-  it('rejects an unknown extra entry', () => {
-    writeFileSync(join(dir, 'database.sql.gz'), Buffer.from('hello'))
-    writeFileSync(join(dir, 'uploads.tar.gz'), Buffer.from('hello'))
-    writeFileSync(join(dir, 'manifest.json'), JSON.stringify(makeManifest(shaOf(join(dir, 'database.sql.gz')), shaOf(join(dir, 'database.sql.gz')), 5, 5)))
+  it('rejects an unknown extra entry', async () => {
     writeFileSync(join(dir, 'evil.sh'), 'rm -rf /')
-    const tgz = join(dir, 'c.tar.gz')
-    execFileSync('tar', ['-C', dir, '-czf', tgz, 'manifest.json', 'database.sql.gz', 'uploads.tar.gz', 'evil.sh'])
-    expect(validateArchive(tgz).ok).toBe(false)
+    const tgz = buildArchive('c.tar.gz', {}, ['evil.sh'])
+    expect((await validateArchive(tgz)).ok).toBe(false)
+  })
+  it('rejects a symlink entry inside the uploads tar (traversal defence)', async () => {
+    const tgz = buildArchive('d.tar.gz', {}, [], true)
+    const r = await validateArchive(tgz)
+    expect(r.ok).toBe(false)
+    expect(String(r.error)).toMatch(/unsafe entry|traversal/i)
   })
 })

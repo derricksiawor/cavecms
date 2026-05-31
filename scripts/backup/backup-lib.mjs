@@ -23,7 +23,6 @@ import {
   mkdtempSync,
   rmSync,
   createReadStream,
-  readFileSync,
   existsSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -40,16 +39,26 @@ const BACKUP_FLOOR_VERSION = '0.1.55'
 const MIGRATION_0024_BOUNDARY = 23
 
 // ---------------------------------------------------------------------------
-// tar helpers (gzip auto-detected by tar's -z)
+// tar helpers (gzip auto-detected by tar's -z). Every child process carries a
+// wall-clock timeout + SIGKILL so a truncated/decompression-bomb archive can't
+// hang the caller forever.
 // ---------------------------------------------------------------------------
+const TAR_LIST_TIMEOUT_MS = 60_000
+const TAR_EXTRACT_TIMEOUT_MS = 30 * 60_000
+
 export function listTarEntries(tgz) {
-  const out = execFileSync('tar', ['-tzf', tgz], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  const out = execFileSync('tar', ['-tzf', tgz], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TAR_LIST_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  })
   return out.split('\n').map((s) => s.trim()).filter(Boolean)
 }
 
 export function hasZipSlip(entries) {
   for (const raw of entries) {
-    const e = String(raw)
+    const e = String(raw).replace(/\/$/, '')
     if (e.startsWith('/')) return true
     if (e.startsWith('~')) return true
     // any path component equal to '..'
@@ -60,15 +69,51 @@ export function hasZipSlip(entries) {
   return false
 }
 
+// innerTarUnsafe(innerTgz) — inspect a NESTED tar.gz (the uploads payload) and
+// return a reason string if it contains anything other than regular files +
+// directories, or any traversal path. Closes the tar symlink-traversal write
+// primitive (a symlink entry followed by a file-through-symlink entry) that a
+// plain `tar -xzf` does NOT defend against. Returns null when safe.
+function innerTarUnsafe(innerTgz) {
+  const paths = execFileSync('tar', ['-tzf', innerTgz], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TAR_LIST_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  })
+    .split('\n')
+    .map((s) => s.replace(/\/$/, '').trim())
+    .filter(Boolean)
+  if (hasZipSlip(paths)) return 'path traversal in uploads archive'
+  // Type flags via -tv: the first char of each line is the entry type
+  // (- file, d dir, l symlink, h hardlink, b/c device, p fifo, s socket).
+  // Reject anything that is not a regular file or directory.
+  const verbose = execFileSync('tar', ['-tvzf', innerTgz], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TAR_LIST_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  })
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+  for (const line of verbose) {
+    const t = line.trim()[0]
+    if (t && t !== '-' && t !== 'd') return `unsafe entry type '${t}' in uploads archive`
+  }
+  return null
+}
+
 export function parseManifestEntry(tgz) {
   const raw = execFileSync('tar', ['-xzO', '-f', tgz, 'manifest.json'], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
+    timeout: TAR_LIST_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
   })
   return JSON.parse(raw)
 }
 
-function sha256File(path) {
+export function sha256File(path) {
   return new Promise((resolve, reject) => {
     const h = createHash('sha256')
     const s = createReadStream(path)
@@ -76,13 +121,6 @@ function sha256File(path) {
     s.on('data', (d) => h.update(d))
     s.on('end', () => resolve(h.digest('hex')))
   })
-}
-
-function sha256FileSync(path) {
-  // Sync variant for the validate path. readFileSync buffers the whole file;
-  // backup payloads validated this way are bounded by the archive the operator
-  // chose to restore, and the restore orchestrator has already disk-checked.
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
 // ---------------------------------------------------------------------------
@@ -135,9 +173,12 @@ export function validateManifestShape(m) {
 // validateArchive — untrusted-input gate run BEFORE any destructive op.
 // 1) list entries, refuse zip-slip + unknown entries
 // 2) parse + shape-check manifest
-// 3) extract to a scratch dir + verify each payload's sha256 vs manifest
+// 3) extract to a scratch dir + verify each payload's sha256 (STREAMING, never
+//    buffering a GB payload in memory) vs manifest
+// 4) enumerate the INNER uploads.tar.gz + reject symlink/traversal entries
+// Async because the streaming hash is async.
 // ---------------------------------------------------------------------------
-export function validateArchive(tgz, opts = {}) {
+export async function validateArchive(tgz, opts = {}) {
   if (!existsSync(tgz)) return { ok: false, error: `archive not found: ${tgz}` }
   let entries
   try {
@@ -162,21 +203,26 @@ export function validateArchive(tgz, opts = {}) {
   const shapeErrs = validateManifestShape(manifest)
   if (shapeErrs.length) return { ok: false, error: `manifest invalid: ${shapeErrs.join('; ')}` }
 
-  // Extract to a scratch dir and verify payload checksums.
+  // Extract the two payloads to a scratch dir and verify (streaming hash +
+  // inner-tar safety). maxBuffer is irrelevant for -xzf (no stdout); the
+  // timeout bounds a decompression-bomb / hang.
   const scratch = opts.extractDir ?? mkdtempSync(join(tmpdir(), 'cavecms-validate-'))
   const cleanup = !opts.extractDir
   try {
     execFileSync('tar', ['-xzf', tgz, '-C', scratch, 'database.sql.gz', 'uploads.tar.gz'], {
-      maxBuffer: 0x7fffffff,
+      timeout: TAR_EXTRACT_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     })
-    const dbActual = sha256FileSync(join(scratch, 'database.sql.gz'))
+    const dbActual = await sha256File(join(scratch, 'database.sql.gz'))
     if (dbActual !== String(manifest.database.sha256).toLowerCase()) {
       return { ok: false, error: 'database.sql.gz checksum mismatch' }
     }
-    const upActual = sha256FileSync(join(scratch, 'uploads.tar.gz'))
+    const upActual = await sha256File(join(scratch, 'uploads.tar.gz'))
     if (upActual !== String(manifest.uploads.sha256).toLowerCase()) {
       return { ok: false, error: 'uploads.tar.gz checksum mismatch' }
     }
+    const innerBad = innerTarUnsafe(join(scratch, 'uploads.tar.gz'))
+    if (innerBad) return { ok: false, error: innerBad }
   } catch (err) {
     return { ok: false, error: `extract/verify failed: ${err?.message ?? err}` }
   } finally {
@@ -254,40 +300,39 @@ if (isMain()) {
     console.error(msg)
     process.exit(1)
   }
-  if (!cmd || !archive) fail('usage: backup-lib.mjs <validate|compat|manifest> <archive> [flags]')
-  if (cmd === 'manifest') {
-    try {
-      console.log(JSON.stringify(parseManifestEntry(archive)))
-      process.exit(0)
-    } catch (err) {
-      fail(`manifest read failed: ${err?.message ?? err}`)
+  ;(async () => {
+    if (!cmd || !archive) fail('usage: backup-lib.mjs <validate|compat|manifest> <archive> [flags]')
+    if (cmd === 'manifest') {
+      try {
+        console.log(JSON.stringify(parseManifestEntry(archive)))
+        process.exit(0)
+      } catch (err) {
+        fail(`manifest read failed: ${err?.message ?? err}`)
+      }
+    } else if (cmd === 'validate') {
+      const r = await validateArchive(archive)
+      console.log(JSON.stringify(r.ok ? { ok: true } : { ok: false, error: r.error }))
+      process.exit(r.ok ? 0 : 1)
+    } else if (cmd === 'compat') {
+      const r = await validateArchive(archive)
+      if (!r.ok) {
+        console.log(JSON.stringify({ refuse: true, reason: r.error, warnings: [] }))
+        process.exit(1)
+      }
+      const v = evaluateCompat(r.manifest, {
+        installVersion: parseFlag(rest, '--install-version') ?? '0.0.0',
+        installFingerprint: parseFlag(rest, '--install-fingerprint') ?? '',
+        installMigrationIndex: rest.includes('--install-migration-index')
+          ? Number(parseFlag(rest, '--install-migration-index'))
+          : undefined,
+        backupMigrationIndex: rest.includes('--backup-migration-index')
+          ? Number(parseFlag(rest, '--backup-migration-index'))
+          : undefined,
+      })
+      console.log(JSON.stringify(v))
+      process.exit(v.refuse ? 1 : 0)
+    } else {
+      fail(`unknown command: ${cmd}`)
     }
-  } else if (cmd === 'validate') {
-    const r = validateArchive(archive)
-    console.log(JSON.stringify(r.ok ? { ok: true } : { ok: false, error: r.error }))
-    process.exit(r.ok ? 0 : 1)
-  } else if (cmd === 'compat') {
-    const r = validateArchive(archive)
-    if (!r.ok) {
-      console.log(JSON.stringify({ refuse: true, reason: r.error, warnings: [] }))
-      process.exit(1)
-    }
-    const v = evaluateCompat(r.manifest, {
-      installVersion: parseFlag(rest, '--install-version') ?? '0.0.0',
-      installFingerprint: parseFlag(rest, '--install-fingerprint') ?? '',
-      installMigrationIndex: rest.includes('--install-migration-index')
-        ? Number(parseFlag(rest, '--install-migration-index'))
-        : undefined,
-      backupMigrationIndex: rest.includes('--backup-migration-index')
-        ? Number(parseFlag(rest, '--backup-migration-index'))
-        : undefined,
-    })
-    console.log(JSON.stringify(v))
-    process.exit(v.refuse ? 1 : 0)
-  } else {
-    fail(`unknown command: ${cmd}`)
-  }
+  })().catch((err) => fail(`backup-lib failed: ${err?.message ?? err}`))
 }
-
-// expose async hasher for callers that prefer streaming (unused by validate)
-export { sha256File }

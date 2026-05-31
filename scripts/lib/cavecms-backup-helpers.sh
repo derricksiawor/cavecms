@@ -67,15 +67,52 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# _parse_db_url_portable <url> — parse mysql://user:pass@host:port/db into 5
+# lines (host, port, user, pass, db). Prefers python3 (handles %-encoding),
+# falls back to an awk parser so backup/restore don't HARD-fail on a host
+# without python3 (the awk path handles URL-safe creds, the common case).
+# ---------------------------------------------------------------------------
+_parse_db_url_portable() {
+  local db_url="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    DATABASE_URL="$db_url" python3 -c '
+import os, sys
+from urllib.parse import urlparse, unquote
+u = urlparse(os.environ["DATABASE_URL"])
+print(u.hostname or "127.0.0.1")
+print(u.port or 3306)
+print(unquote(u.username or ""))
+print(unquote(u.password or ""))
+print((u.path or "/").lstrip("/").split("?")[0])
+' 2>/dev/null && return 0
+  fi
+  # awk fallback — no %-decoding (URL-safe creds only).
+  printf '%s' "$db_url" | awk '{
+    u=$0; sub(/^[a-zA-Z]+:\/\//,"",u)
+    creds=""; rest=u
+    n=index(u,"@"); if(n>0){creds=substr(u,1,n-1); rest=substr(u,n+1)}
+    cu=creds; cp=""
+    c=index(creds,":"); if(c>0){cu=substr(creds,1,c-1); cp=substr(creds,c+1)}
+    s=index(rest,"/"); hp=rest; db=""
+    if(s>0){hp=substr(rest,1,s-1); db=substr(rest,s+1)}
+    q=index(db,"?"); if(q>0){db=substr(db,1,q-1)}
+    host=hp; port="3306"
+    p=index(hp,":"); if(p>0){host=substr(hp,1,p-1); port=substr(hp,p+1)}
+    if(host=="")host="127.0.0.1"
+    print host; print port; print cu; print cp; print db
+  }'
+}
+
+# ---------------------------------------------------------------------------
 # _backup_cred_file — write a mode-0600 mysql defaults-extra-file from
 # DATABASE_URL. Echoes the path; caller rm's it. Password never hits argv.
 # ---------------------------------------------------------------------------
 _backup_cred_file() {
   local db_url="${DATABASE_URL:-}"
   [ -z "$db_url" ] && return 1
-  command -v python3 >/dev/null 2>&1 || return 1
   local parsed
-  parsed=$(_parse_database_url "$db_url") || return 1
+  parsed=$(_parse_db_url_portable "$db_url") || return 1
+  [ -z "$parsed" ] && return 1
   local h p u pw n
   h=$(echo "$parsed" | awk 'NR==1'); p=$(echo "$parsed" | awk 'NR==2')
   u=$(echo "$parsed" | awk 'NR==3'); pw=$(echo "$parsed" | awk 'NR==4')
@@ -117,8 +154,9 @@ dump_database() {
 }
 
 # ---------------------------------------------------------------------------
-# restore_database <in.sql.gz>   /   restore_database_age <in.sql.age> <id>
-# gunzip|mysql (and age-decrypt|gunzip|mysql for cluster-format interop).
+# restore_database <in.sql.gz> — gunzip|mysql. (Cluster .age archives are
+# decrypted to a plaintext working copy by the restore orchestrator BEFORE
+# this is called, so there is no separate age-streaming path here.)
 # ---------------------------------------------------------------------------
 restore_database() {
   local dump="$1"
@@ -133,61 +171,79 @@ restore_database() {
   return $rc
 }
 
-restore_database_age() {
-  local enc="$1" identity="$2"
-  [ -f "$enc" ] || return 1
-  command -v age >/dev/null 2>&1 || return 1
-  local cred_db cf db
-  cred_db=$(_backup_cred_file) || return 1
-  cf=$(echo "$cred_db" | awk 'NR==1'); db=$(echo "$cred_db" | awk 'NR==2')
-  local rc=0
-  age --decrypt -i "$identity" "$enc" | gunzip | mysql --defaults-extra-file="$cf" "$db" \
-    2>>"${LOG_DIR:-/tmp}/restore-db.log" || rc=$?
-  rm -f "$cf"
-  return $rc
-}
-
 # ---------------------------------------------------------------------------
 # Read-only DB probes used to build the manifest + post-load guards.
+# _mysql_query runs an arbitrary read query reusing ONE cred-file.
 # ---------------------------------------------------------------------------
-_mysql_scalar() {
+_mysql_query() {
   local query="$1"
   local cred_db cf db
   cred_db=$(_backup_cred_file) || return 1
   cf=$(echo "$cred_db" | awk 'NR==1'); db=$(echo "$cred_db" | awk 'NR==2')
-  local val rc=0
-  val=$(mysql --defaults-extra-file="$cf" --connect-timeout=10 -BNe "$query" "$db" 2>/dev/null) || rc=$?
+  local out rc=0
+  out=$(mysql --defaults-extra-file="$cf" --connect-timeout=10 -BNe "$query" "$db" 2>/dev/null) || rc=$?
   rm -f "$cf"
   [ $rc -eq 0 ] || return 1
-  printf '%s' "$val"
+  printf '%s' "$out"
 }
 
-db_server_version() { _mysql_scalar "SELECT VERSION();"; }
-db_schema_fingerprint() { _mysql_scalar "SELECT fingerprint FROM schema_fingerprint WHERE id=1;"; }
-db_migration_count() { _mysql_scalar "SELECT COUNT(*) FROM \`__drizzle_migrations\`;"; }
+db_server_version() { _mysql_query "SELECT VERSION();"; }
+db_schema_fingerprint() { _mysql_query "SELECT fingerprint FROM schema_fingerprint WHERE id=1;"; }
+db_migration_count() { _mysql_query "SELECT COUNT(*) FROM \`__drizzle_migrations\`;"; }
+
+# db_manifest_probe — fetch serverVersion, fingerprint, migrationCount, and the
+# latest migration hash in ONE mysql round-trip (4 tab-separated columns on one
+# row). Saves 3 extra connect+cred-file cycles per backup. Echoes:
+#   <serverVersion>\t<fingerprint>\t<migrationCount>\t<latestHash>
+db_manifest_probe() {
+  _mysql_query "SELECT VERSION(), \
+    COALESCE((SELECT fingerprint FROM schema_fingerprint WHERE id=1), ''), \
+    (SELECT COUNT(*) FROM \`__drizzle_migrations\`), \
+    COALESCE((SELECT hash FROM \`__drizzle_migrations\` ORDER BY id DESC LIMIT 1), '');"
+}
+
+# encoding_of_hash <hash> — classify a __drizzle_migrations.hash sample.
+encoding_of_hash() {
+  local sample="$1"
+  if [ -z "$sample" ]; then echo "unknown"; return 0; fi
+  if printf '%s' "$sample" | grep -Eq '^[0-9a-f]{64}$'; then echo "drizzle-hash"
+  elif printf '%s' "$sample" | grep -Eq '\.sql$'; then echo "filename"
+  else echo "unknown"; fi
+}
 
 # detect_migrator_encoding — drizzle-hash (sha256 hex) vs filename (*.sql).
 detect_migrator_encoding() {
   local sample
-  sample=$(_mysql_scalar "SELECT hash FROM \`__drizzle_migrations\` ORDER BY id DESC LIMIT 1;") || { echo "unknown"; return 0; }
-  if [ -z "$sample" ]; then echo "unknown"; return 0; fi
-  if printf '%s' "$sample" | grep -Eq '^[0-9a-f]{64}$'; then
-    echo "drizzle-hash"
-  elif printf '%s' "$sample" | grep -Eq '\.sql$'; then
-    echo "filename"
-  else
-    echo "unknown"
-  fi
+  sample=$(_mysql_query "SELECT hash FROM \`__drizzle_migrations\` ORDER BY id DESC LIMIT 1;") || { echo "unknown"; return 0; }
+  encoding_of_hash "$sample"
 }
 
 # ---------------------------------------------------------------------------
 # Disk space — portable (df -P works on both macOS/BSD and Linux).
-# disk_free_pct echoes the USED percent (0-100). assert_disk_ok refuses if the
-# target FS is at/over CAVECMS_DISK_HIGH_PCT (default 90).
+# disk_used_pct echoes the USED percent (0-100); df_avail_kb echoes available
+# 1K-blocks. assert_disk_ok refuses at/over CAVECMS_DISK_HIGH_PCT (default 90);
+# assert_disk_for refuses when free bytes < estimated need (the real guard).
 # ---------------------------------------------------------------------------
 disk_used_pct() {
   local path="$1"
   df -P "$path" 2>/dev/null | awk 'NR==2 { gsub(/%/,"",$5); print $5+0 }'
+}
+
+df_avail_kb() {
+  # POSIX `df -Pk` → column 4 is available 1K-blocks on both BSD and GNU.
+  df -Pk "$1" 2>/dev/null | awk 'NR==2 { print $4+0 }'
+}
+
+# du_kb <path...> — total apparent size in 1K-blocks (best-effort; 0 if du fails
+# or the path is absent). Used to estimate how much a backup of UPLOADS will need.
+du_kb() {
+  local total=0 d sz
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    sz=$(du -sk "$d" 2>/dev/null | awk 'NR==1{print $1+0}')
+    [ -n "$sz" ] && total=$((total + sz))
+  done
+  printf '%s' "$total"
 }
 
 assert_disk_ok() {
@@ -201,6 +257,23 @@ assert_disk_ok() {
   fi
   if [ "$used" -ge "$high" ]; then
     echo "[backup] disk for ${path} is ${used}% full (>= ${high}%) — refusing to proceed" >&2
+    return 1
+  fi
+  return 0
+}
+
+# assert_disk_for <path> <needed_kb> — refuse if available space on <path>'s FS
+# is below <needed_kb> (already including any margin the caller wants). Falls
+# back to assert_disk_ok's %-gate when df can't report available bytes.
+assert_disk_for() {
+  local path="$1" need_kb="$2"
+  local avail
+  avail=$(df_avail_kb "$path")
+  if [ -z "$avail" ] || [ "$avail" -le 0 ]; then
+    assert_disk_ok "$path"; return $?
+  fi
+  if [ "$avail" -lt "$need_kb" ]; then
+    echo "[backup] not enough free space on ${path}'s filesystem: ${avail}K free, ~${need_kb}K needed — refusing" >&2
     return 1
   fi
   return 0
@@ -319,4 +392,86 @@ verify_healthz() {
     [ $((now - start)) -ge "$deadline_secs" ] && return 1
     sleep 2
   done
+}
+
+# ---------------------------------------------------------------------------
+# assert_allowed_status_path <path> — shared status-path allowlist (parity with
+# lib/backups/statusPath.ts ensureAllowedStatusPath). /tmp + /var/folders are
+# allowed ONLY when NODE_ENV != production (matching the TS gate); /var/lib/
+# cavecms, $CAVECMS_STATE_DIR, and any */.cavecms-state/* path are always
+# allowed. Returns 0 if allowed, 1 otherwise. Replaces the per-script
+# duplicated case-statements (which previously allowed /tmp unconditionally).
+# ---------------------------------------------------------------------------
+assert_allowed_status_path() {
+  local p="$1"
+  case "$p" in
+    /var/lib/cavecms/*) return 0 ;;
+  esac
+  if [ -n "${CAVECMS_STATE_DIR:-}" ]; then
+    case "$p" in "$CAVECMS_STATE_DIR"/*) return 0 ;; esac
+  fi
+  case "$p" in */.cavecms-state/*) return 0 ;; esac
+  if [ "${NODE_ENV:-}" != "production" ]; then
+    case "$p" in /tmp/*|/var/folders/*) return 0 ;; esac
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Shared operation lock — EXISTENCE-based (O_EXCL create), matching the
+# updater's lib/updates/statusFile.ts acquireUpdateLock / the apply route +
+# CLI acquireCliLock. NOT flock: the updater holds NO flock, so a flock-based
+# acquire would NOT exclude an in-flight update. The lock file is the same
+# <update-status>.lock the updater uses, so backup / update / restore are
+# mutually exclusive on one install.
+#
+# acquire_op_lock <lock_path>  → 0 on acquire (file created O_EXCL, PID
+#   stamped), 1 if held by a LIVE holder. Reclaims a stale lock (holder PID
+#   dead, or — on Linux — a recycled/foreign PID, or an unstamped lock older
+#   than 15 min).
+# ---------------------------------------------------------------------------
+op_lock_is_stale() {
+  local lock_path="$1"
+  local pid
+  pid=$(head -n1 "$lock_path" 2>/dev/null | tr -dc '0-9')
+  if [ -n "$pid" ]; then
+    if kill -0 "$pid" 2>/dev/null; then
+      # Alive. On Linux, confirm it's one of OUR scripts (recycled-PID guard).
+      if [ -r "/proc/$pid/cmdline" ]; then
+        if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -Eq 'cavecms-(update|backup|restore|watchdog)'; then
+          return 1   # ours + alive → genuinely held
+        fi
+        return 0     # alive but not ours → recycled PID → stale
+      fi
+      return 1       # no /proc (macOS) → conservatively treat as held
+    fi
+    return 0         # PID dead → stale
+  fi
+  # No PID stamped (malformed/older writer) → lock-file mtime backstop.
+  local now mtime
+  now=$(date +%s)
+  mtime=$(stat -f %m "$lock_path" 2>/dev/null || stat -c %Y "$lock_path" 2>/dev/null || echo "$now")
+  [ $((now - mtime)) -gt 900 ] && return 0
+  return 1
+}
+
+acquire_op_lock() {
+  local lock_path="$1"
+  local attempt
+  for attempt in 1 2; do
+    # O_EXCL create via noclobber — atomic create-or-fail on bash (incl. 3.2).
+    if ( set -o noclobber; printf '%s\n' "$$" > "$lock_path" ) 2>/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" = "1" ] && op_lock_is_stale "$lock_path"; then
+      rm -f "$lock_path" 2>/dev/null || true
+      continue
+    fi
+    return 1
+  done
+  return 1
+}
+
+release_op_lock() {
+  rm -f "$1" 2>/dev/null || true
 }

@@ -16,6 +16,7 @@ import {
   getRestoreStatusPath,
   readBackupStatus,
   isBackupStale,
+  isSharedOpInProgress,
 } from '@/lib/backups/statusFile'
 import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
@@ -40,6 +41,9 @@ export const POST = withError(async (req: Request) => {
   const archivePath = join(resolveBackupDir(), body.file)
   if (!existsSync(archivePath)) throw new HttpError(404, 'not_found')
 
+  if (isSharedOpInProgress()) {
+    return new Response(JSON.stringify({ error: 'operation_in_progress' }), { status: 409, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+  }
   const r = readRestoreStatus()
   if (r && (r.state === 'validating' || r.state === 'restoring' || r.state === 'restarting') && !isRestoreStale(r)) {
     return new Response(JSON.stringify({ error: 'restore_in_progress' }), { status: 409, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })

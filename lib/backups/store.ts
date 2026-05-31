@@ -40,6 +40,50 @@ export interface BackupEntry {
   includeEnv: boolean | null
 }
 
+// Read each archive's manifest at most once per (file, mtime, size) — cached
+// across requests so a settings-page render doesn't re-spawn tar for unchanged
+// archives.
+interface ManifestMeta {
+  version: string | null
+  includeEnv: boolean | null
+}
+const manifestCache = new Map<string, ManifestMeta>()
+
+// Cap how many manifests we read per list call (bounded synchronous tar spawns
+// on the request path / SSR render). Retention keeps ~5, but a bumped
+// CAVECMS_BACKUP_KEEP or a stalled prune could leave more; older archives list
+// without version/includeEnv rather than blocking the event loop on N tar forks.
+const MAX_MANIFEST_READS = 12
+
+function readManifestMeta(dir: string, file: string, mtimeMs: number, size: number): ManifestMeta {
+  const key = `${file}:${Math.round(mtimeMs)}:${size}`
+  const cached = manifestCache.get(key)
+  if (cached) return cached
+  let meta: ManifestMeta = { version: null, includeEnv: null }
+  try {
+    const raw = execFileSync('tar', ['-xzO', '-f', join(dir, file), 'manifest.json'], {
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    })
+    const m = JSON.parse(raw)
+    meta = {
+      version: typeof m?.cavecms?.version === 'string' ? m.cavecms.version : null,
+      includeEnv: typeof m?.env?.included === 'boolean' ? m.env.included : null,
+    }
+  } catch {
+    /* unreadable/corrupt/slow manifest — leave nulls (still listed) */
+  }
+  manifestCache.set(key, meta)
+  // Bound cache growth.
+  if (manifestCache.size > 64) {
+    const firstKey = manifestCache.keys().next().value
+    if (firstKey) manifestCache.delete(firstKey)
+  }
+  return meta
+}
+
 /** List backups newest-first, reading each plaintext archive's manifest. */
 export function listBackups(): BackupEntry[] {
   const dir = resolveBackupDir()
@@ -50,7 +94,8 @@ export function listBackups(): BackupEntry[] {
   } catch {
     return []
   }
-  const entries: BackupEntry[] = []
+  // Stat + filter first, sort by recency, THEN read manifests for the newest N.
+  const stated: { file: string; sizeBytes: number; createdAtMs: number; encrypted: boolean }[] = []
   for (const file of names) {
     if (!isValidArchiveBasename(file)) continue
     let st
@@ -60,33 +105,34 @@ export function listBackups(): BackupEntry[] {
       continue
     }
     if (!st.isFile()) continue
-    const encrypted = file.endsWith('.age')
-    let version: string | null = null
-    let includeEnv: boolean | null = null
-    if (!encrypted) {
-      try {
-        const raw = execFileSync('tar', ['-xzO', '-f', join(dir, file), 'manifest.json'], {
-          encoding: 'utf8',
-          maxBuffer: 8 * 1024 * 1024,
-        })
-        const m = JSON.parse(raw)
-        version = typeof m?.cavecms?.version === 'string' ? m.cavecms.version : null
-        includeEnv = typeof m?.env?.included === 'boolean' ? m.env.included : null
-      } catch {
-        /* unreadable manifest — leave nulls */
-      }
-    }
-    entries.push({
+    stated.push({
       file,
       sizeBytes: st.size,
       createdAtMs: st.mtimeMs,
-      encrypted,
-      version,
-      includeEnv,
+      encrypted: file.endsWith('.age'),
     })
   }
-  entries.sort((a, b) => b.createdAtMs - a.createdAtMs)
-  return entries
+  stated.sort((a, b) => b.createdAtMs - a.createdAtMs)
+
+  let manifestReads = 0
+  return stated.map((s) => {
+    let version: string | null = null
+    let includeEnv: boolean | null = null
+    if (!s.encrypted && manifestReads < MAX_MANIFEST_READS) {
+      manifestReads++
+      const meta = readManifestMeta(dir, s.file, s.createdAtMs, s.sizeBytes)
+      version = meta.version
+      includeEnv = meta.includeEnv
+    }
+    return {
+      file: s.file,
+      sizeBytes: s.sizeBytes,
+      createdAtMs: s.createdAtMs,
+      encrypted: s.encrypted,
+      version,
+      includeEnv,
+    }
+  })
 }
 
 /** Move an archive to a sibling `.trash-<ts>/` dir (never rm). Returns the new path. */

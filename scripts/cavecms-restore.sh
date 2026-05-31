@@ -44,21 +44,6 @@ elif [ -n "${CAVECMS_STATE_DIR:-}" ]; then
 else
   STATUS_PATH="/var/lib/cavecms/restore-status.json"
 fi
-allowed=0
-case "$STATUS_PATH" in
-  /var/lib/cavecms/*|/tmp/*|/var/folders/*) allowed=1 ;;
-esac
-if [ "$allowed" = "0" ] && [ -n "${CAVECMS_STATE_DIR:-}" ]; then
-  case "$STATUS_PATH" in "$CAVECMS_STATE_DIR"/*) allowed=1 ;; esac
-fi
-if [ "$allowed" = "0" ]; then
-  case "$STATUS_PATH" in */.cavecms-state/*) allowed=1 ;; esac
-fi
-if [ "$allowed" = "0" ]; then
-  echo "[cavecms-restore] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
-  exit 2
-fi
-
 if [ -n "${CAVECMS_UPDATE_STATUS_PATH:-}" ]; then
   _UPDATE_STATUS="$CAVECMS_UPDATE_STATUS_PATH"
 elif [ -n "${CAVECMS_STATE_DIR:-}" ]; then
@@ -77,17 +62,24 @@ HEALTHZ_TOKEN="${HEALTHZ_TOKEN:-}"
 ARCHIVE="${CAVECMS_RESTORE_ARCHIVE:-}"
 IDENTITY="${CAVECMS_RESTORE_IDENTITY:-}"
 
-mkdir -p "$(dirname "$STATUS_PATH")"
-mkdir -p "$LOG_DIR" 2>/dev/null || true
-if ! ( touch "$LOG_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$LOG_DIR/.cavecms-write-probe" 2>/dev/null ); then
-  LOG_DIR=/tmp
-fi
-
+# Helpers sourced BEFORE the allowlist check so we can use the shared
+# assert_allowed_status_path / acquire_op_lock (parity with the TS side).
 HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=scripts/lib/cavecms-update-helpers.sh
 . "${HELPERS_DIR}/cavecms-update-helpers.sh"
 # shellcheck source=scripts/lib/cavecms-backup-helpers.sh
 . "${HELPERS_DIR}/cavecms-backup-helpers.sh"
+
+if ! assert_allowed_status_path "$STATUS_PATH"; then
+  echo "[cavecms-restore] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
+  exit 2
+fi
+
+mkdir -p "$(dirname "$STATUS_PATH")"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+if ! ( touch "$LOG_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$LOG_DIR/.cavecms-write-probe" 2>/dev/null ); then
+  LOG_DIR=/tmp
+fi
 
 export PHASE_STARTED_AT
 PHASE_STARTED_AT="$(now_iso)"
@@ -121,6 +113,11 @@ except Exception: print("")' "$f" 2>/dev/null || true
 # ---------------------------------------------------------------------------
 rollback_to_safety() {
   echo "[cavecms-restore] rolling back to the pre-restore safety snapshot" >&2
+  # Re-assert maintenance ON so visitors see a 503 (not a half-restored site)
+  # for the duration of the rollback + re-verify, even if a prior step toggled
+  # it off. The EXIT trap turns it back off.
+  post_maintenance_toggle true || true
+  MAINT_ON=1
   if [ -n "$SAFETY_DIR" ] && [ -f "${SAFETY_DIR}/db.sql.gz" ]; then
     restore_database "${SAFETY_DIR}/db.sql.gz" || echo "[cavecms-restore] safety DB restore failed" >&2
   fi
@@ -163,18 +160,25 @@ on_exit() {
   [ "$MAINT_ON" = "1" ] && post_maintenance_toggle false || true
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH" 2>/dev/null || true
   [ -n "$SAFETY_DIR" ] && rm -rf "$SAFETY_DIR" 2>/dev/null || true
-  [ "$LOCK_HELD" = "1" ] && release_lock "$SHARED_LOCK_PATH" 2>/dev/null || true
+  # One-shot uploaded archive (upload-restore route): delete on any terminal
+  # state so the .incoming upload doesn't linger. Kept local backups are NOT
+  # deleted (the flag is only set for uploads).
+  if [ "${CAVECMS_RESTORE_CLEANUP_ARCHIVE:-0}" = "1" ] && [ -n "$ARCHIVE" ]; then
+    rm -f "$ARCHIVE" 2>/dev/null || true
+  fi
+  [ "$LOCK_HELD" = "1" ] && release_op_lock "$SHARED_LOCK_PATH" 2>/dev/null || true
 }
 trap on_exit EXIT
-trap 'exit 130' INT
-# pm2 reload leaks SIGINT to the orchestrator — ignore INT/HUP during restart.
-trap '' HUP
+# pm2 reload leaks SIGINT to the orchestrator during restart — ignore BOTH INT
+# and HUP (matches the updater) so a leaked signal can't `exit 130` mid-restore
+# and bypass the rollback. TERM still aborts (EXIT trap → failed).
+trap '' INT HUP
 
 fail_and_rollback() {
   local step="$1" label="$2" detail="$3"
   rstatus rolled_back "$step" "$label" "$detail"
   rollback_to_safety
-  post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "$detail"
+  post_backup_audit_terminal restore_rolled_back "$ARCHIVE_ID" "$detail"
   exit 1
 }
 
@@ -243,32 +247,43 @@ if [ -z "$INSTALL_VERSION" ]; then
 fi
 [ -z "$INSTALL_VERSION" ] && INSTALL_VERSION="0.0.0"
 INSTALL_FP=$(db_schema_fingerprint 2>/dev/null || echo "")
-# compat exit code IS the refuse signal (0 = ok, 1 = refuse). Capture the JSON
-# for the reason/warnings, parsed with awk (no python dependency for parsing).
+# compat exit code IS the refuse signal (0 = ok, 1 = refuse). Parse the JSON's
+# reason/warnings with NODE (already present), NOT gawk's match($0,re,arr) which
+# is a GNU-awk extension that silently fails on macOS/BSD awk → would drop the
+# 0024 data-loss warning + the refuse reason on the laptop surface.
 COMPAT_REFUSE=0
 COMPAT_JSON=$(node "$BACKUP_LIB" compat "$WORK_ARCHIVE" --install-version "$INSTALL_VERSION" --install-fingerprint "$INSTALL_FP" 2>>"${LOG_DIR}/restore-validate.log") || COMPAT_REFUSE=1
-# Extract "reason":"..." and join "warnings":["a","b"] → space-separated text.
-COMPAT_REASON=$(printf '%s' "$COMPAT_JSON" | awk 'match($0,/"reason":"([^"]*)"/,m){print m[1]}' 2>/dev/null || true)
-COMPAT_WARN=$(printf '%s' "$COMPAT_JSON" | awk '{
-  if (match($0,/"warnings":\[(.*)\]/,m)) {
-    s=m[1]; gsub(/","/," ",s); gsub(/^"|"$/,"",s); print s
-  }
-}' 2>/dev/null || true)
+COMPAT_REASON=$(printf '%s' "$COMPAT_JSON" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).reason||""))}catch{}})' 2>/dev/null || true)
+COMPAT_WARN=$(printf '%s' "$COMPAT_JSON" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const w=JSON.parse(s).warnings||[];process.stdout.write(Array.isArray(w)?w.join(" "):"")}catch{}})' 2>/dev/null || true)
 if [ "$COMPAT_REFUSE" = "1" ]; then
   rstatus failed 1 "Restore not possible" "${COMPAT_REASON:-This backup cannot be restored to this site.}"
-  post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "compat refuse: ${COMPAT_REASON}"
+  post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "compat refuse"
   exit 1
 fi
 
 # ===========================================================================
-# STEP 2 — pre-restore safety snapshot + acquire lock + maintenance ON
+# STEP 2 — acquire lock + pre-restore safety snapshot + maintenance ON
 # ===========================================================================
-rstatus restoring 2 "Safeguarding current data" "" "$COMPAT_WARN"
-if ! acquire_lock_or_defer "$SHARED_LOCK_PATH"; then
-  rstatus failed 2 "Restore failed" "Another update or backup is already running. Try again in a moment."
-  exit 1
+# Acquire the shared op lock FIRST (existence/O_EXCL scheme, same file the
+# updater uses) BEFORE any mutation or status write that could clobber a
+# concurrent winner. On contention exit cleanly (validate step 1 was read-only;
+# nothing has been mutated yet). The route/CLI pre-check 409'd the common case.
+if ! acquire_op_lock "$SHARED_LOCK_PATH"; then
+  echo "[cavecms-restore] another operation holds the lock — exiting without changes" >&2
+  exit 0
 fi
 LOCK_HELD=1
+rstatus restoring 2 "Safeguarding current data" "" "$COMPAT_WARN"
+
+# Disk pre-check on the UPLOADS filesystem: the safety uploads tar + the restored
+# uploads extraction both land near UPLOADS_ROOT. Estimate ~2× current uploads
+# size + margin vs free space; refuse before mutating if insufficient.
+_UP_KB=$(du_kb "${UPLOADS_ROOT}/originals" "${UPLOADS_ROOT}/variants" "${UPLOADS_ROOT}/brochures-private")
+if ! assert_disk_for "$UPLOADS_ROOT" "$(( _UP_KB * 22 / 10 + 51200 ))"; then
+  rstatus failed 2 "Restore failed" "There isn't enough free disk space to restore safely."
+  post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "insufficient disk"
+  exit 1
+fi
 
 SAFETY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cavecms-restore-safety.XXXXXX")"
 if ! dump_database "${SAFETY_DIR}/db.sql.gz" >/dev/null; then
@@ -319,7 +334,11 @@ for sub in originals variants brochures-private; do
   [ -d "${UPLOADS_ROOT}/${sub}" ] && mv "${UPLOADS_ROOT}/${sub}" "${UPLOADS_TRASH}/${sub}" 2>/dev/null || true
 done
 UPLOADS_MOVED=1
-if ! tar -xzf "${SCRATCH}/uploads.tar.gz" -C "$UPLOADS_ROOT" 2>>"${LOG_DIR}/restore.log"; then
+# `--no-same-owner` (portable on GNU + bsdtar) so a crafted archive can't set
+# ownership on extract. The inner tar's member paths were already enumerated +
+# rejected for symlink/hardlink/absolute/`..` entries by backup-lib.mjs
+# validateArchive (run at step 1), so plain extraction here can't traverse out.
+if ! tar --no-same-owner -xzf "${SCRATCH}/uploads.tar.gz" -C "$UPLOADS_ROOT" 2>>"${LOG_DIR}/restore.log"; then
   fail_and_rollback 4 "Restore failed" "We couldn't restore your media. Your previous files were put back."
 fi
 ensure_uploads_dirs
@@ -341,31 +360,38 @@ if [ "${CAVECMS_RESTORE_ENV:-0}" = "1" ]; then
 fi
 
 # ===========================================================================
-# STEP 6 — restart
+# STEP 6 — restart (maintenance STAYS ON through verify — mirrors the updater)
 # ===========================================================================
 rstatus restarting 6 "Restarting your site"
-post_maintenance_toggle false || true
-MAINT_ON=0
 restart_app
 
 if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then
+  # No service manager: the operator must restart the process manually to reset
+  # DB connections/caches after the swap. Clear maintenance NOW so the site is
+  # live once they restart (nothing else would turn it off from a terminal
+  # restart_required state), then signal restart_required.
+  post_maintenance_toggle false || true; MAINT_ON=0
   rstatus restart_required 7 "Restore complete — restart your CaveCMS process to finish" "" "$COMPAT_WARN"
   post_backup_audit_terminal restore_completed "$ARCHIVE_ID"
-  release_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
+  rm -rf "$UPLOADS_TRASH" 2>/dev/null || true
+  release_op_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
   rm -rf "$SCRATCH" "$SAFETY_DIR"; SCRATCH=""; SAFETY_DIR=""
   exit 0
 fi
 
 # ===========================================================================
-# STEP 7 — verify
+# STEP 7 — verify (maintenance still ON → a failed verify rolls back behind a
+# 503, not a broken public site). Only clear maintenance AFTER a green verify.
 # ===========================================================================
 rstatus restarting 7 "Verifying"
 if ! verify_healthz 2 120; then
   fail_and_rollback 7 "Restore failed" "Your site didn't come back up cleanly, so the previous version was put back."
 fi
+post_maintenance_toggle false || true; MAINT_ON=0
 
 rstatus completed 7 "Restore complete" "" "$COMPAT_WARN"
 post_backup_audit_terminal restore_completed "$ARCHIVE_ID"
-release_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
+rm -rf "$UPLOADS_TRASH" 2>/dev/null || true
+release_op_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
 rm -rf "$SCRATCH" "$SAFETY_DIR"; SCRATCH=""; SAFETY_DIR=""
 exit 0

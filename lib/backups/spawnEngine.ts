@@ -39,6 +39,12 @@ const ENGINE_ENV_ALLOWLIST: readonly string[] = [
   'DATABASE_MIGRATOR_URL',
   'UPLOADS_ROOT',
   'CAVECMS_BACKUP_DIR',
+  // Backup encryption recipient + retention + restore identity — without these
+  // the dashboard path would silently produce PLAINTEXT backups even when an
+  // age recipient is configured (the bash reads CAVECMS_BACKUP_AGE_RECIPIENT).
+  'CAVECMS_BACKUP_AGE_RECIPIENT',
+  'CAVECMS_BACKUP_KEEP',
+  'CAVECMS_RESTORE_IDENTITY',
   // Per-install paths.
   'CAVECMS_STATE_DIR',
   'CAVECMS_LOG_DIR',

@@ -18,6 +18,8 @@ import {
   mkdirSync,
   openSync,
   closeSync,
+  existsSync,
+  statSync,
   constants as fsConstants,
 } from 'node:fs'
 import { dirname } from 'node:path'
@@ -289,3 +291,51 @@ export const isRestoreStaleTerminal = restoreEngine.isStaleTerminal
 export const __setRestoreStatusPathForTests = restoreEngine.setPathForTests
 export const acquireRestoreLock = restoreEngine.acquireLock
 export const releaseRestoreLock = restoreEngine.releaseLock
+
+// ---------------------------------------------------------------------------
+// Shared operation lock — the SAME <update-status>.lock the updater + the
+// backup/restore bash orchestrators contend on (existence/O_EXCL scheme). The
+// admin routes use isSharedOpInProgress() as a fast pre-check to 409 before
+// seeding status / spawning, when ANY of update / backup / restore is running.
+// The bash O_EXCL acquire remains the authoritative cross-process gate.
+// ---------------------------------------------------------------------------
+export function getSharedOpLockPath(): string {
+  const fromEnv = process.env.CAVECMS_UPDATE_STATUS_PATH
+  if (fromEnv) return `${fromEnv}.lock`
+  const stateDir = getInstallStateDir()
+  if (stateDir) return `${stateDir}/update-status.json.lock`
+  return '/var/lib/cavecms/update-status.json.lock'
+}
+
+/**
+ * Best-effort check: is an update/backup/restore currently in progress? True
+ * when the shared lock file exists AND its stamped PID is a live process (or
+ * the lock is recent and unstamped). Stale locks (dead PID, or old + unstamped)
+ * return false so a wedged prior run doesn't block forever.
+ */
+export function isSharedOpInProgress(): boolean {
+  const lockPath = getSharedOpLockPath()
+  if (!existsSync(lockPath)) return false
+  let pid = 0
+  try {
+    pid = Number.parseInt((readFileSync(lockPath, 'utf8') || '').trim().split('\n')[0] ?? '', 10)
+  } catch {
+    /* unreadable */
+  }
+  if (Number.isInteger(pid) && pid > 0) {
+    try {
+      process.kill(pid, 0)
+      return true // live holder
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ESRCH') return false // dead → stale
+      return true // EPERM — a live process we don't own → treat as held
+    }
+  }
+  // No PID stamped — fall back to lock-file age (15-min staleness window).
+  try {
+    const ageMs = Date.now() - statSync(lockPath).mtimeMs
+    return ageMs < BACKUP_STALE_AFTER_MS
+  } catch {
+    return false
+  }
+}

@@ -14,6 +14,7 @@ import {
   getBackupStatusPath,
   readRestoreStatus,
   isRestoreStale,
+  isSharedOpInProgress,
 } from '@/lib/backups/statusFile'
 import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
@@ -26,6 +27,10 @@ export const dynamic = 'force-dynamic'
 const Body = z.object({ includeEnv: z.boolean().optional() }).strict()
 
 function activeError(): Response | null {
+  // Cross-subsystem gate: refuse if ANY update / backup / restore holds the
+  // shared op lock (the bash O_EXCL acquire is authoritative; this is the fast
+  // 409 pre-check).
+  if (isSharedOpInProgress()) return conflict('operation_in_progress')
   const b = readBackupStatus()
   if (b && b.state === 'running' && !isBackupStale(b)) return conflict('backup_in_progress')
   const r = readRestoreStatus()
