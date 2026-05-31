@@ -10,6 +10,7 @@ import {
   brandVarsCss,
   type ThemePalette,
 } from '@/lib/cms/themeCss'
+import { THEME_PRESETS, presetSurfaces } from '@/lib/cms/themePresets'
 import { wcagRatio, apcaLc } from '@/lib/cms/contrast'
 
 interface Props {
@@ -75,6 +76,13 @@ export function ThemeSettingsClient({ initial }: Props) {
     [],
   )
 
+  // Clicking a preset fills every swatch at once. It only populates the
+  // form (marking it dirty + driving the live preview) — the operator
+  // still clicks Save to commit, and can tweak any colour first.
+  const applyPreset = useCallback((p: ThemePalette) => {
+    setForm({ ...p })
+  }, [])
+
   const handleSave = useCallback(async () => {
     if (saving || !dirty) return
     // Soft-block: anything under 3:1 requires explicit confirmation.
@@ -134,6 +142,66 @@ export function ThemeSettingsClient({ initial }: Props) {
   return (
     <section className="mt-10 space-y-6">
       <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
+        {/* Curated presets — one click fills the swatches below. */}
+        <div className="mb-8">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
+            Start from a style
+          </p>
+          <p className="mt-2 text-[11px] text-warm-stone">
+            Pick one of our palettes, then fine-tune any colour below before
+            saving. Or skip these and build your own from scratch.
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {THEME_PRESETS.map((preset) => {
+              const { bg, fg } = presetSurfaces(preset.palette)
+              const active = structuralEqual(form, preset.palette)
+              return (
+                <button
+                  key={preset.slug}
+                  type="button"
+                  onClick={() => applyPreset(preset.palette)}
+                  aria-pressed={active}
+                  title={preset.pairsWith}
+                  className={
+                    'group rounded-xl p-4 text-left transition-shadow ' +
+                    (active
+                      ? 'ring-2 ring-copper-500'
+                      : 'ring-1 ring-warm-stone/15 hover:ring-warm-stone/40')
+                  }
+                  style={{ background: bg, color: fg }}
+                >
+                  {/* Accent bar — mirrors the marketing card. */}
+                  <span
+                    className="block h-1.5 w-10 rounded-full"
+                    style={{ background: preset.palette.accent }}
+                  />
+                  <span
+                    className="mt-3 block text-[9px] font-semibold uppercase tracking-[0.26em]"
+                    style={{ color: preset.palette.secondary }}
+                  >
+                    {preset.label}
+                  </span>
+                  <span className="mt-1 flex items-center justify-between gap-2">
+                    <span className="font-serif text-sm font-semibold leading-tight">
+                      {preset.headline}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span
+                        className="h-3 w-3 rounded-full"
+                        style={{ background: preset.palette.accent }}
+                      />
+                      <span
+                        className="h-3 w-3 rounded-full"
+                        style={{ background: preset.palette.secondary }}
+                      />
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         {/* Default theme toggle */}
         <div className="mb-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">

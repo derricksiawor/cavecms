@@ -23,12 +23,31 @@ import { useRecaptchaForLead } from '@/lib/security/recaptchaClient'
 
 const FETCH_TIMEOUT_MS = 30_000
 
+// Theme-aware class defaults — the dark 'obsidian' footer look, so the
+// form is unchanged when rendered without an explicit footer theme. The
+// SiteFooter passes the resolved FooterThemeClasses field/cta/muted so the
+// input, button, and status copy track the operator's chosen footer theme
+// (and the brand accent) instead of being hard-pinned to the dark palette.
+const DEFAULT_FIELD_CLASS =
+  'bg-ivory/5 border-ivory/20 text-ivory placeholder:text-ivory/40 focus:border-champagne'
+const DEFAULT_CTA_CLASS = 'bg-champagne text-obsidian hover:bg-cream-50'
+const DEFAULT_NOTICE_CLASS = 'text-ivory/70'
+
 export function NewsletterForm({
   csrf,
   ctaLabel = 'Subscribe',
+  fieldClass = DEFAULT_FIELD_CLASS,
+  ctaClass = DEFAULT_CTA_CLASS,
+  noticeClass = DEFAULT_NOTICE_CLASS,
 }: {
   csrf: string
   ctaLabel?: string
+  /** Email <input> classes from the footer theme (bg/border/text/focus). */
+  fieldClass?: string
+  /** Submit button classes from the footer theme (accent fill). */
+  ctaClass?: string
+  /** Status-copy colour from the footer theme (muted tier). */
+  noticeClass?: string
 }) {
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState<'idle' | 'ok' | 'expired' | 'error'>(
@@ -64,7 +83,7 @@ export function NewsletterForm({
 
   if (state === 'ok') {
     return (
-      <p className="mt-6 text-sm text-cream-50/80">
+      <p className={`mt-6 text-sm ${noticeClass}`}>
         Thanks — check your inbox to confirm your subscription.
       </p>
     )
@@ -94,24 +113,24 @@ export function NewsletterForm({
           autoComplete="email"
           inputMode="email"
           placeholder="you@example.com"
-          className="w-full bg-near-black border border-cream-50/20 px-3 py-2 rounded text-cream-50 placeholder:text-cream-50/40 focus:outline-none focus:border-copper-400"
+          className={`w-full border px-3 py-2 rounded focus:outline-none ${fieldClass}`}
         />
       </label>
       <recaptcha.Widget />
       <button
         type="submit"
         disabled={busy}
-        className="bg-copper-600 hover:bg-copper-700 text-cream-50 text-sm font-medium px-5 py-3 min-h-[44px] rounded transition-colors w-fit disabled:opacity-50"
+        className={`text-sm font-medium px-5 py-3 min-h-[44px] rounded transition-colors w-fit disabled:opacity-50 ${ctaClass}`}
       >
         {busy ? 'Subscribing…' : ctaLabel}
       </button>
       {state === 'expired' && (
-        <p className="text-xs text-cream-50/60">
+        <p className={`text-xs ${noticeClass}`}>
           Your session expired — please refresh the page and try again.
         </p>
       )}
       {state === 'error' && (
-        <p className="text-xs text-cream-50/60">
+        <p className={`text-xs ${noticeClass}`}>
           Couldn&apos;t subscribe right now. Please try again in a moment.
         </p>
       )}

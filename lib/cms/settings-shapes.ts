@@ -83,7 +83,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
     {
       kind: 'select',
       key: 'theme',
-      label: 'Footer theme',
+      label: 'Footer tone (light or dark)',
       options: [
         { value: 'obsidian', label: 'Obsidian — premium dark (default)' },
         { value: 'cream', label: 'Cream — warm light' },
@@ -91,6 +91,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
         { value: 'champagne', label: 'Champagne — gold statement' },
         { value: 'bone', label: 'Bone — softest light' },
       ],
+      help: 'This only sets whether the footer reads light or dark — background, text, links, and the Subscribe button shift together. It does NOT set your colours. The actual colours (and the ready-made styles like Obsidian & Gold, Carbon, or Sand & Sea you saw on cavecms) come from your site-wide palette under Settings → Theme. Pick your palette there; pick this footer’s light-or-dark tone here.',
     },
     {
       kind: 'string',
@@ -240,7 +241,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
     {
       kind: 'select',
       key: 'theme',
-      label: 'Header theme',
+      label: 'Header tone (light or dark)',
       options: [
         { value: 'cream', label: 'Cream — warm light (default)' },
         { value: 'obsidian', label: 'Obsidian — premium dark' },
@@ -248,7 +249,7 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
         { value: 'champagne', label: 'Champagne — gold statement' },
         { value: 'bone', label: 'Bone — softest light' },
       ],
-      help: 'Sets the header background, text, border, nav-hover, and primary-button colours together so the bar reads as one coherent surface.',
+      help: 'This only sets whether the header bar reads light or dark — background, text, border, nav-hover, and button shift together. It does NOT set your colours. The actual colours (and the ready-made styles like Obsidian & Gold, Carbon, or Sand & Sea you saw on cavecms) come from your site-wide palette under Settings → Theme. Pick your palette there; pick this bar’s light-or-dark tone here.',
     },
     {
       kind: 'object_array',

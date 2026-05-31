@@ -55,11 +55,19 @@ export default async function ThemeSettingsPage() {
         Theme
       </h1>
       <p className="mt-4 max-w-2xl text-sm font-medium leading-relaxed text-warm-stone">
-        Set your brand colors. Primary colors your headings, Accent your
-        buttons and links, Secondary your supporting text — applied across
-        every page, the header, and the footer. The obsidian / ivory /
-        champagne section tones stay; these colors decide what they look
-        like.
+        This is your site-wide palette — the colours every page, the header,
+        and the footer are built from. Start from one of the ready-made styles
+        below (the same ones shown on cavecms — Obsidian &amp; Gold, Carbon,
+        Sand &amp; Sea…), or set each colour by hand: Primary colours your
+        headings, Accent your buttons and links, Secondary your supporting
+        text.
+      </p>
+      <p className="mt-3 max-w-2xl text-sm font-medium leading-relaxed text-warm-stone">
+        Choosing a style here re-skins the whole site at once. Whether the
+        header and footer each read light or dark is a separate, per-bar choice
+        under <span className="font-semibold text-near-black">Settings → Site
+        header</span> and <span className="font-semibold text-near-black">Settings
+        → Footer</span> — those tone pickers use these colours.
       </p>
 
       <ThemeSettingsClient

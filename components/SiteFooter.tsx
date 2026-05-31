@@ -236,7 +236,13 @@ export async function SiteFooter() {
             {newsletterBody}
           </p>
           {csrf ? (
-            <NewsletterForm csrf={csrf} ctaLabel={newsletterCtaLabel} />
+            <NewsletterForm
+              csrf={csrf}
+              ctaLabel={newsletterCtaLabel}
+              fieldClass={ft.field}
+              ctaClass={ft.cta}
+              noticeClass={ft.muted}
+            />
           ) : (
             // CSRF nonce mint failed (upstream blip). Skip the form
             // rather than render a guaranteed-fail submission UX —
