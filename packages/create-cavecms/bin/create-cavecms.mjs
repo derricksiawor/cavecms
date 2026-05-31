@@ -314,6 +314,11 @@ function showHelp() {
     '                                     --force re-installs the current version (recover a broken build)',
     '                                     --version=X.Y.Z pins a specific release (re-install / downgrade)',
     '  rollback                           Restore the previous version from the most recent snapshot',
+    '  backup [--include-env]             Back up content + media to a dated archive (--include-env adds secrets)',
+    '  backups                            List local backups',
+    '  restore --archive <file>           Restore content + media from a backup (rolls back on failure)',
+    '                                     --identity <age-key> decrypts a .age archive; --restore-env restores env.production',
+    '                                     --yes skips the confirmation prompt',
     '  status                             Show the running version + whether an update is available',
     '  version                            Print the installed version',
     '  help                               Show this message',
@@ -1307,6 +1312,14 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   // in `laptop` mode (build + "restart required" prompt, no rollback).
   const restartMode = surface === 'vps' ? 'systemd' : surface
 
+  // Per-install backup output dir for the operator-facing backup/restore
+  // engine (scripts/cavecms-backup.sh). A host-filesystem fact like
+  // UPLOADS_ROOT — the engine must locate it + disk-check it BEFORE it can
+  // trust the DB is reachable, so it lives in env, not the settings table
+  // (infra, not product config). Retention is an engine constant, not here.
+  const backupDir =
+    surface === 'vps' ? '/opt/cavecms/backups' : join(targetDir, 'backups')
+
   const lines = [
     `# ----------------------------------------------------------------------`,
     `# CaveCMS sealed env.production`,
@@ -1346,6 +1359,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# can't be created without root on a non-root (laptop / shared-host)`,
     `# install — pointing it here keeps the dashboard updater working there.`,
     `CAVECMS_LOG_DIR=${stateDir}/logs`,
+    `# Per-install backup output directory for 'cavecms backup' + the in-app`,
+    `# Settings → Backups page. Host-filesystem fact (like UPLOADS_ROOT); the`,
+    `# backup engine disk-checks + writes archives here. Retention (keep last 5`,
+    `# / 30 days) is an engine constant, not configured here.`,
+    `CAVECMS_BACKUP_DIR=${backupDir}`,
     `# How the in-app updater restarts this install after a successful build.`,
     `# systemd | cpanel | pm2 | laptop. A laptop/dev install can't self-restart`,
     `# (bare node, no service manager) — the updater installs the new version`,
@@ -1416,7 +1434,11 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   // `mkdir -p` + write into it on the very first update without
   // requiring the runtime user to have group write on /var/lib/cavecms/.
   mkdirSync(join(stateDir, 'snapshots'), { recursive: true, mode: 0o750 })
-  return { envPath, databaseUrl, uploadsRoot, stateDir }
+  // Backup output dir for the operator-facing backup/restore engine. Same
+  // chown-on-surface-start mechanism (for laptop/pm2 it's under targetDir; for
+  // vps it's /opt/cavecms/backups, chowned by startVps).
+  mkdirSync(backupDir, { recursive: true, mode: 0o750 })
+  return { envPath, databaseUrl, uploadsRoot, stateDir, backupDir }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2218,14 +2240,38 @@ function startService({ surface, targetDir, envPath, config, skipStart, siteName
 // recipe in app/api/admin/updates/apply/route.ts.
 // ════════════════════════════════════════════════════════════════════
 
-const RECOVERY_SUBCOMMANDS = new Set(['update', 'rollback', 'version', 'status'])
+const RECOVERY_SUBCOMMANDS = new Set([
+  'update',
+  'rollback',
+  'version',
+  'status',
+  'backup',
+  'restore',
+  'backups',
+])
 
 function parseSubArgv(argv, sub) {
-  const out = { dir: null, check: false, force: false, version: 'latest' }
+  const out = {
+    dir: null,
+    check: false,
+    force: false,
+    version: 'latest',
+    // backup/restore flags
+    includeEnv: false,
+    restoreEnv: false,
+    insecurePlaintextEnv: false,
+    yes: false,
+    archive: null,
+    identity: null,
+  }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--check') out.check = true
     else if (a === '--force') out.force = true
+    else if (a === '--include-env') out.includeEnv = true
+    else if (a === '--restore-env') out.restoreEnv = true
+    else if (a === '--insecure-plaintext-env') out.insecurePlaintextEnv = true
+    else if (a === '--yes' || a === '-y') out.yes = true
     else if (a.startsWith('--dir=')) {
       const v = a.slice('--dir='.length)
       if (v === '') die('--dir requires a path (e.g. --dir /opt/cavecms)')
@@ -2237,6 +2283,26 @@ function parseSubArgv(argv, sub) {
       // would silently target cwd / swallow the next flag).
       if (v === undefined || v === '' || v.startsWith('--')) die('--dir requires a path (e.g. --dir /opt/cavecms)')
       out.dir = v
+    }
+    else if (a.startsWith('--archive=')) {
+      const v = a.slice('--archive='.length)
+      if (v === '') die('--archive requires a path to a .tar.gz backup file')
+      out.archive = v
+    }
+    else if (a === '--archive') {
+      const v = argv[++i]
+      if (v === undefined || v === '' || v.startsWith('--')) die('--archive requires a path to a .tar.gz backup file')
+      out.archive = v
+    }
+    else if (a.startsWith('--identity=')) {
+      const v = a.slice('--identity='.length)
+      if (v === '') die('--identity requires a path to an age identity file')
+      out.identity = v
+    }
+    else if (a === '--identity') {
+      const v = argv[++i]
+      if (v === undefined || v === '' || v.startsWith('--')) die('--identity requires a path to an age identity file')
+      out.identity = v
     }
     else if (a.startsWith('--version=')) {
       const v = a.slice('--version='.length)
@@ -2252,12 +2318,18 @@ function parseSubArgv(argv, sub) {
     else die(`Unexpected argument "${a}"${sub === 'update' ? ` — did you mean --version=${a}?` : ''}`)
   }
   // Reject flags a command doesn't honour, instead of silently no-op'ing,
-  // so a mistyped recovery command fails loudly. Only `update` reads
-  // check/force/version.
+  // so a mistyped recovery command fails loudly.
   if (sub && sub !== 'update') {
     if (out.check) die(`\`cavecms ${sub}\` does not take --check`)
     if (out.force) die(`\`cavecms ${sub}\` does not take --force`)
     if (out.version !== 'latest') die(`\`cavecms ${sub}\` does not take --version`)
+  }
+  if (sub && sub !== 'backup' && out.includeEnv) die(`\`cavecms ${sub}\` does not take --include-env`)
+  if (sub && sub !== 'restore' && (out.restoreEnv || out.archive || out.identity)) {
+    die(`\`cavecms ${sub}\` does not take restore flags`)
+  }
+  if (sub === 'update' && (out.includeEnv || out.restoreEnv || out.archive || out.identity)) {
+    die('`cavecms update` does not take backup/restore flags')
   }
   return out
 }
@@ -2804,7 +2876,160 @@ async function runSubcommand(sub, argv) {
   if (sub === 'rollback') return commandRollback(argv)
   if (sub === 'version') return commandVersion(argv)
   if (sub === 'status') return commandStatus(argv)
+  if (sub === 'backup') return commandBackup(argv)
+  if (sub === 'restore') return commandRestore(argv)
+  if (sub === 'backups') return commandListBackups(argv)
   die(`Unknown command: ${sub}`)
+}
+
+// Build the narrow child env a backup/restore orchestrator needs — same
+// allowlist + surface detection as runOrchestrator, plus the backup-specific
+// paths. Returns { childEnv, surface, scriptPath, sharedLockPath }.
+function buildBackupChildEnv({ dir, envPath, env, script, statusFilename, statusEnvVar }) {
+  const scriptPath = join(dir, 'scripts', script)
+  if (!existsSync(scriptPath)) {
+    die(
+      `Backup engine missing at ${scriptPath}.\n` +
+        `  The install tree looks incomplete. Reinstall: npx create-cavecms@latest --dir ${dir}`,
+    )
+  }
+  const surface = detectInstallSurface(dir, env)
+  const childEnv = {}
+  for (const k of ORCHESTRATOR_ENV_ALLOWLIST) {
+    if (typeof process.env[k] === 'string') childEnv[k] = process.env[k]
+    if (typeof env[k] === 'string') childEnv[k] = env[k]
+  }
+  childEnv.CAVECMS_REPO_DIR = dir
+  childEnv.CAVECMS_ENV_FILE = envPath
+  if (typeof env.UPLOADS_ROOT === 'string') childEnv.UPLOADS_ROOT = env.UPLOADS_ROOT
+  if (typeof env.CAVECMS_BACKUP_DIR === 'string') childEnv.CAVECMS_BACKUP_DIR = env.CAVECMS_BACKUP_DIR
+  else childEnv.CAVECMS_BACKUP_DIR = join(dir, 'backups')
+  const port = env.PORT || '3040'
+  childEnv.CAVECMS_HEALTHZ_URL = `http://127.0.0.1:${port}/healthz`
+  childEnv.CAVECMS_RESTART_MODE = surface === 'vps' ? 'systemd' : surface
+  if (surface === 'vps') childEnv.CAVECMS_SYSTEMD_UNIT = 'cavecms.service'
+  if (surface === 'pm2') {
+    const { pm2AppName, pm2Home } = readPm2Config(dir)
+    if (pm2AppName) childEnv.CAVECMS_PM2_APP_NAME = pm2AppName
+    if (pm2Home) childEnv.PM2_HOME = pm2Home
+  }
+  const stateDir = env.CAVECMS_STATE_DIR || join(dir, '.cavecms-state')
+  if (!childEnv.CAVECMS_STATE_DIR) childEnv.CAVECMS_STATE_DIR = stateDir
+  childEnv[statusEnvVar] = join(stateDir, statusFilename)
+  // Shared op lock = the updater's lock, so backup/update/restore are mutually
+  // exclusive on one install.
+  const sharedLockPath = `${join(stateDir, 'update-status.json')}.lock`
+  return { childEnv, surface, scriptPath, sharedLockPath }
+}
+
+function spawnBackupEngine({ dir, scriptPath, childEnv, args, mode }) {
+  const r = spawnSync('bash', [scriptPath, ...args], {
+    cwd: dir,
+    stdio: 'inherit',
+    env: childEnv,
+    timeout: 60 * 60 * 1000,
+    killSignal: 'SIGTERM',
+  })
+  if (r.error) die(`Couldn't run the ${mode} engine: ${r.error.message}`)
+  if (r.signal) {
+    die(
+      `The ${mode} engine was stopped by ${r.signal} (often the out-of-memory killer or an external stop). ` +
+        (mode === 'restore'
+          ? "Your site may be in maintenance mode and partially restored — re-run `cavecms restore` (it rolls back on failure), then check `cavecms status`."
+          : 'No backup was written.'),
+    )
+  }
+  process.exit(r.status ?? 1)
+}
+
+async function commandBackup(argv) {
+  const opts = parseSubArgv(argv, 'backup')
+  const { dir, envPath, env } = resolveInstallDir(opts)
+  log.header('CaveCMS backup')
+  const { childEnv, scriptPath } = buildBackupChildEnv({
+    dir,
+    envPath,
+    env,
+    script: 'cavecms-backup.sh',
+    statusFilename: 'backup-status.json',
+    statusEnvVar: 'CAVECMS_BACKUP_STATUS_PATH',
+  })
+  if (opts.includeEnv) {
+    const hasAge =
+      spawnSync('command', ['-v', 'age'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
+    if (!hasAge && !opts.insecurePlaintextEnv) {
+      die(
+        '--include-env writes your secrets (incl. the encryption + session keys) into the backup.\n' +
+          "  'age' isn't installed, so the archive would be UNENCRYPTED. Install age to encrypt it,\n" +
+          '  or re-run with --insecure-plaintext-env if you understand the risk and will keep the file safe.',
+      )
+    }
+    childEnv.CAVECMS_BACKUP_INCLUDE_ENV = '1'
+  }
+  spawnBackupEngine({ dir, scriptPath, childEnv, args: [], mode: 'backup' })
+}
+
+async function commandRestore(argv) {
+  const opts = parseSubArgv(argv, 'restore')
+  const { dir, envPath, env } = resolveInstallDir(opts)
+  if (!opts.archive) die('restore needs a backup file: cavecms restore --archive /path/to/cavecms-backup-*.tar.gz')
+  const archive = resolve(opts.archive)
+  if (!existsSync(archive)) die(`Backup file not found: ${archive}`)
+  log.header('CaveCMS restore')
+  log.warn('Restore REPLACES this site’s content + media with the backup’s contents.')
+  log.gray('  A safety snapshot is taken first; on any failure the restore rolls back automatically.')
+  if (!opts.yes) {
+    const ok = await withReadline(async (rl) =>
+      ask(rl, 'Type "restore" to proceed', {
+        validate: (v) => (v === 'restore' ? null : 'Type the word restore to confirm, or Ctrl-C to cancel.'),
+      }),
+    )
+    if (ok !== 'restore') die('Cancelled.')
+  }
+  const { childEnv, scriptPath } = buildBackupChildEnv({
+    dir,
+    envPath,
+    env,
+    script: 'cavecms-restore.sh',
+    statusFilename: 'restore-status.json',
+    statusEnvVar: 'CAVECMS_RESTORE_STATUS_PATH',
+  })
+  childEnv.CAVECMS_RESTORE_ARCHIVE = archive
+  if (opts.identity) childEnv.CAVECMS_RESTORE_IDENTITY = resolve(opts.identity)
+  if (opts.restoreEnv) childEnv.CAVECMS_RESTORE_ENV = '1'
+  spawnBackupEngine({ dir, scriptPath, childEnv, args: [], mode: 'restore' })
+}
+
+async function commandListBackups(argv) {
+  const opts = parseSubArgv(argv, 'backups')
+  const { dir, env } = resolveInstallDir(opts)
+  const backupDir = env.CAVECMS_BACKUP_DIR || join(dir, 'backups')
+  log.header('CaveCMS backups')
+  if (!existsSync(backupDir)) {
+    log.info('No backups yet.')
+    return
+  }
+  const files = readdirSync(backupDir)
+    .filter((f) => /^cavecms-backup-.*\.tar\.gz(\.age)?$/.test(f))
+    .map((f) => ({ f, mtime: statSync(join(backupDir, f)).mtimeMs, size: statSync(join(backupDir, f)).size }))
+    .sort((a, b) => b.mtime - a.mtime)
+  if (files.length === 0) {
+    log.info('No backups yet.')
+    return
+  }
+  for (const { f, size } of files) {
+    const enc = f.endsWith('.age') ? ' (encrypted)' : ''
+    let ver = ''
+    if (!f.endsWith('.age')) {
+      try {
+        const out = spawnSync('tar', ['-xzO', '-f', join(backupDir, f), 'manifest.json'], { encoding: 'utf8' })
+        if (out.status === 0) ver = ` v${JSON.parse(out.stdout).cavecms?.version ?? '?'}`
+      } catch { /* unreadable manifest — skip version */ }
+    }
+    const mb = (size / (1024 * 1024)).toFixed(1)
+    log.gray(`  ${f}${ver}  (${mb} MB)${enc}`)
+  }
+  log.info(`Restore one with:  cavecms restore --archive ${join(backupDir, files[0].f)}`)
 }
 
 // Install the `cavecms` recovery shim into the install dir + (best
@@ -2839,6 +3064,21 @@ function installCavecmsShim({ targetDir, stateDir }) {
       log.warn(`Couldn't bundle the offline recovery engine: ${err instanceof Error ? err.message : String(err)} (rollback will require npm)`)
     }
   }
+  // Bundle the zero-dep backup-archive validator into the state dir too, so
+  // offline `cavecms restore` can validate an archive (manifest + checksum +
+  // zip-slip + compat) even when the app build tree is corrupt. The restore
+  // orchestrator prefers <stateDir>/backup-lib.mjs, then <repo>/scripts/backup.
+  if (stateDir) {
+    try {
+      const srcLib = join(targetDir, 'scripts', 'backup', 'backup-lib.mjs')
+      if (existsSync(srcLib)) {
+        cpSync(srcLib, join(stateDir, 'backup-lib.mjs'))
+        chmodSync(join(stateDir, 'backup-lib.mjs'), 0o755)
+      }
+    } catch (err) {
+      log.warn(`Couldn't bundle the offline backup validator: ${err instanceof Error ? err.message : String(err)} (restore will use the in-tree copy)`)
+    }
+  }
   const localEngineLine = localEngine
     ? `LOCAL_ENGINE="${localEngine}"`
     : `LOCAL_ENGINE=""`
@@ -2846,6 +3086,9 @@ function installCavecmsShim({ targetDir, stateDir }) {
 # CaveCMS recovery CLI shim.
 #   cavecms update [--check] [--force] [--version=X.Y.Z]   pull + apply a release
 #   cavecms rollback                     restore the previous version (works offline)
+#   cavecms backup [--include-env]       make a backup of content + media (+ optional secrets)
+#   cavecms backups                      list local backups
+#   cavecms restore --archive <file> [--identity <age-key>] [--restore-env] [--yes]
 #   cavecms status | version | help
 #
 # Prefer the BUNDLED engine (a self-contained zero-dep copy in the state dir,
