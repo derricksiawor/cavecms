@@ -294,7 +294,11 @@ export function LeadsTable({
       label: 'Email',
       sortable: true,
       sortAccessor: (l) => (l.email ?? '').toLowerCase(),
-      cell: (l) => <span className="text-xs">{l.email ?? '—'}</span>,
+      cell: (l) => (
+        <span className="text-xs">
+          {l.email ? <CfSafeMailto email={l.email} linked={false} /> : '—'}
+        </span>
+      ),
       hideOnMobile: true,
     },
     {

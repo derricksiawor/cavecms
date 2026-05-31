@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2, ShieldOff, ShieldCheck } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PasswordPromptModal } from '@/components/admin/PasswordPromptModal'
@@ -222,7 +223,7 @@ export function UsersTable({
       sortAccessor: (r) => r.email.toLowerCase(),
       cell: (r) => (
         <span className="text-xs font-medium text-near-black">
-          {r.email}
+          <CfSafeMailto email={r.email} linked={false} />
           {r.id === selfId && (
             <span className="ml-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-copper-600">
               you

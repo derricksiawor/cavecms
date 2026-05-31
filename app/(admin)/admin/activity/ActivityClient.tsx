@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { csrfFetch } from '@/lib/client/csrf'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 import {
   humaniseAuditAction,
   humaniseResourceType,
@@ -440,7 +441,11 @@ export function ActivityClient({
                             .replace('T', ' ')}
                         </td>
                         <td className="px-5 py-4 text-xs text-near-black">
-                          {r.user_email ?? '—'}
+                          {r.user_email ? (
+                            <CfSafeMailto email={r.user_email} linked={false} />
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="px-5 py-4 text-xs font-medium">
                           {humaniseAuditAction(r.action)}

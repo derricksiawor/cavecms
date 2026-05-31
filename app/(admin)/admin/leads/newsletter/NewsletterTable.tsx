@@ -275,7 +275,9 @@ export function NewsletterTable({
       sortable: true,
       sortAccessor: (s) => s.email.toLowerCase(),
       cell: (s) => (
-        <span className="text-xs font-medium text-near-black">{s.email}</span>
+        <span className="text-xs font-medium text-near-black">
+          <CfSafeMailto email={s.email} linked={false} />
+        </span>
       ),
     },
     {

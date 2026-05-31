@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import type { Role } from '@/lib/auth/requireRole'
 import { PillButton } from '@/components/admin/PillButton'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { ToastProvider, useToast } from '@/components/inline-edit/Toast'
 import { csrfFetch } from '@/lib/client/csrf'
 import { adminRoutes } from '@/lib/admin-bar/adminRoutes'
@@ -444,11 +445,8 @@ function OutlineTogglePill() {
 function Identity({ email, role }: { email: string; role: Role }) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span
-        className="max-w-[14rem] truncate text-[11px] font-medium text-cream-50/85"
-        title={email}
-      >
-        {email}
+      <span className="max-w-[14rem] truncate text-[11px] font-medium text-cream-50/85">
+        <CfSafeMailto email={email} linked={false} />
       </span>
       <span aria-hidden className="text-cream-50/30">
         ·

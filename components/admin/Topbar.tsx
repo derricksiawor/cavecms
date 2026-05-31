@@ -2,13 +2,14 @@ import type { Role } from '@/lib/auth/requireRole'
 import { LogoutButton } from './LogoutButton'
 import { AdminMobileNav } from './MobileNav'
 import { CommandPaletteTrigger } from './CommandPalette'
+import { CfSafeMailto } from '@/components/CfSafeMailto'
 
 export function AdminTopbar({ email, role }: { email: string; role: Role }) {
   return (
     <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-warm-stone/15 bg-cream/85 px-6 py-4 backdrop-blur-md sm:px-10 lg:px-12">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <p className="truncate text-sm font-semibold text-near-black">
-          {email}
+          <CfSafeMailto email={email} linked={false} />
         </p>
         <span
           aria-hidden="true"

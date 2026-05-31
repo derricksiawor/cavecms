@@ -28,10 +28,20 @@ export function CfSafeMailto({
   email,
   className,
   ariaLabel,
+  linked = true,
 }: {
   email: string
   className?: string
   ariaLabel?: string
+  /**
+   * When false, render the email as plain client-only TEXT (no mailto
+   * anchor). Use for informational email displays — e.g. the admin
+   * topbar's logged-in user, the Users table, the Activity actor — where
+   * a mailto link is unwanted but CF EAO still rewrites the raw email
+   * text (same CSP/#418 fallout). Default true keeps the actionable
+   * mailto for contact surfaces (footer, leads).
+   */
+  linked?: boolean
 }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
@@ -43,6 +53,13 @@ export function CfSafeMailto({
         className={className}
         aria-label={ariaLabel ?? 'Email address'}
       />
+    )
+  }
+  if (!linked) {
+    return (
+      <span className={className} aria-label={ariaLabel}>
+        {email}
+      </span>
     )
   }
   return (
