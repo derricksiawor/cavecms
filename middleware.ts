@@ -206,8 +206,14 @@ async function authGate(req: NextRequest): Promise<NextResponse | null> {
       headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
     })
   }
-  const url = req.nextUrl.clone()
-  url.pathname = '/'
+  // Build the redirect from the FORWARDED host, not req.nextUrl — behind a
+  // reverse proxy req.nextUrl carries the BOUND listener address (e.g.
+  // `https://localhost:8201`), which would leak into the Location header and
+  // send the browser to an unreachable loopback URL. Same fix the /install
+  // redirect + page rewrites below apply.
+  const fwdHost = req.headers.get('host') ?? req.nextUrl.host
+  const fwdProto = req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(/:$/, '')
+  const url = new URL(`${fwdProto}://${fwdHost}/`)
   const r = NextResponse.redirect(url, 307)
   r.headers.set('cache-control', 'private, no-store')
   return r
