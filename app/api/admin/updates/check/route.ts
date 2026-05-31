@@ -4,6 +4,8 @@ import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
+import { findValidStaged } from '@/lib/updates/releaseCache'
+import { getSetting } from '@/lib/cms/getSettings'
 
 // POST /api/admin/updates/check — operator-triggered version check
 // against the static release manifest at cavecms-updates.derricksiawor.com/updates/latest.json
@@ -49,6 +51,25 @@ interface CheckResponse {
   // where `available` is null but the operator still needs known-good
   // tarball coords to recover from a broken local state.
   currentRelease: { downloadUrl: string; sha256: string; signature: string | null } | null
+  // Background pre-stage state for the relevant target (the available
+  // upgrade, when there is one). `staged` is non-null ONLY when the
+  // verified artifact is present on disk RIGHT NOW (findValidStaged) — so a
+  // GC'd / evicted artifact never shows as ready. `stageState` carries the
+  // coarse machine state (downloading / staged / failed / ineligible) so
+  // the UI can render a "downloading in the background…" hint while bytes
+  // are still arriving. Both null when nothing is being staged for this
+  // target (or auto-download is off).
+  staged: { sha: string; sha256: string; version: string; stagedAt: string } | null
+  stageState: 'downloading' | 'staged' | 'failed' | 'ineligible' | null
+}
+
+// Length-aware prefix match (12-char short SHA ↔ full 40-char) for matching
+// the durable stagedSha against the relevant target.
+function shaMatches(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false
+  if (a.length < 7 || b.length < 7) return false
+  const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a]
+  return longer.startsWith(shorter)
 }
 
 export const POST = withError(async (req: Request) => {
@@ -92,6 +113,40 @@ export const POST = withError(async (req: Request) => {
   // once deployed — useful for screenshots + demos.
   const upToDate = current.sha !== 'dev' && latest.sha.startsWith(current.sha)
 
+  // Background pre-stage surfacing. The relevant target is the available
+  // upgrade (or the running version when up-to-date — where nothing is
+  // normally staged). `staged` requires the verified artifact to exist on
+  // disk RIGHT NOW; `stageState` reflects the durable record but only when
+  // it pertains to this target (so a stale "downloading" for a superseded
+  // release doesn't leak into the UI).
+  const stagedTargetSha = upToDate ? current.sha : latest.sha
+  let stagedBlock: CheckResponse['staged'] = null
+  let stageStateOut: CheckResponse['stageState'] = null
+  try {
+    const updatesState = await getSetting('updates_state')
+    const pertains = shaMatches(updatesState.stagedSha, stagedTargetSha)
+    if (pertains && updatesState.stageState) {
+      stageStateOut = updatesState.stageState
+    }
+    const stagedPath = findValidStaged({
+      targetSha: stagedTargetSha,
+      sha256: latest.sha256,
+    })
+    if (stagedPath) {
+      stagedBlock = {
+        sha: stagedTargetSha,
+        sha256: latest.sha256,
+        version: updatesState.stagedVersion ?? latest.version,
+        stagedAt: updatesState.stagedAt ?? '',
+      }
+      // Disk-truth wins: if the artifact is present, the state IS staged
+      // regardless of a lagging durable record.
+      stageStateOut = 'staged'
+    }
+  } catch {
+    // Best-effort — a settings read failure must not break the check.
+  }
+
   const payload: CheckResponse = {
     current,
     available: upToDate
@@ -114,6 +169,8 @@ export const POST = withError(async (req: Request) => {
           signature: latest.signature ?? null,
         }
       : null,
+    staged: stagedBlock,
+    stageState: stageStateOut,
   }
 
   return new Response(JSON.stringify(payload), {

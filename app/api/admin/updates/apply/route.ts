@@ -22,6 +22,9 @@ import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
+import { findValidStaged } from '@/lib/updates/releaseCache'
+import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
+import { meetsMinPrevious } from '@/lib/updates/semver'
 import {
   readStatus,
   writeStatus,
@@ -169,6 +172,13 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
   // attacker-controlled host, chose. lib/updates/releasePubkey.ts is
   // the single source of truth.
   'CAVECMS_RELEASE_PUBKEY_PEM',
+  // Path to a background-prestaged, already-verified release artifact
+  // (lib/updates/releaseCache.ts). Set ONLY when findValidStaged confirms a
+  // valid stage exists for this exact target+sha256. The orchestrator
+  // re-verifies (sha256 + Ed25519) before extract and falls through to a
+  // fresh download if anything's wrong — so this is a fast-path hint, not a
+  // trust boundary. It's a path, not a secret; the one new allowlist entry.
+  'CAVECMS_UPDATE_STAGED_PATH',
   'CAVECMS_REPO_DIR',
   'CAVECMS_HEALTHZ_URL',
   'CAVECMS_RELEASE_PROBE_URL',
@@ -271,6 +281,17 @@ function buildScriptEnv(
   out.CAVECMS_UPDATE_TARBALL_URL = opts.downloadUrl
   out.CAVECMS_UPDATE_TARBALL_SHA256 = opts.sha256
   out.CAVECMS_UPDATE_TARBALL_SIGNATURE = opts.signature
+  // Background pre-stage fast path. If a prior prestage already downloaded +
+  // verified this EXACT target+sha256 into the release cache, hand the
+  // orchestrator the artifact path so it can skip the (slow, bandwidth-bound)
+  // download and re-verify the local bytes instead. The download coords above
+  // stay set so the orchestrator falls back to an inline download if the
+  // staged artifact is missing / fails its re-verify. Keyed on the
+  // operator-approved sha256 — a stage for any other release is never picked.
+  const staged = findValidStaged({ targetSha: target, sha256: opts.sha256 })
+  if (staged) {
+    out.CAVECMS_UPDATE_STAGED_PATH = staged
+  }
   // Forward the bundled public key(s) so the orchestrator can verify
   // signatures using the value the apply route, not the release host,
   // controls. lib/updates/releasePubkey.ts is the single source of
@@ -488,6 +509,33 @@ export const POST = withError(async (req: Request) => {
   })()
   if (isSameSha && !force) {
     throw new HttpError(409, 'already_on_target_version')
+  }
+
+  // minPreviousVersion eligibility gate. If the manifest marks the target as
+  // requiring a newer floor than what's running, the operator must step
+  // through manually — refuse rather than run a migration chain the release
+  // can't safely apply in one hop. Re-derived SERVER-SIDE (don't trust a
+  // client-supplied floor), keyed on the target matching the latest release.
+  // Skipped for a same-SHA re-run (force) — re-installing the current version
+  // is trivially eligible. LENIENT on a check failure: the operator already
+  // approved this target, so a transient release-host blip must not block a
+  // legitimate apply (the orchestrator's own verify still gates correctness).
+  if (!isSameSha) {
+    try {
+      const latest = await checkLatestRelease()
+      const targetIsLatest =
+        latest.sha.startsWith(target) || target.startsWith(latest.sha)
+      if (
+        targetIsLatest &&
+        latest.minPreviousVersion &&
+        !meetsMinPrevious(current.version, latest.minPreviousVersion)
+      ) {
+        throw new HttpError(409, 'ineligible_jump')
+      }
+    } catch (err) {
+      if (err instanceof HttpError) throw err
+      // Release-host unreachable / manifest error — proceed leniently.
+    }
   }
 
   // (1) Acquire the cross-process lock before reading status — closes

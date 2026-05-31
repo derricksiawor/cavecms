@@ -451,6 +451,12 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
   updates: [
     {
       kind: 'boolean',
+      key: 'autoDownload',
+      label: 'Download updates in the background',
+      help: 'When a new version is found, download and verify it ahead of time so installing is near-instant when you click Update. Nothing installs on its own. Turn off if your server is on a metered or restricted connection.',
+    },
+    {
+      kind: 'boolean',
       key: 'autoApplySecurityPatches',
       label: 'Apply security patches automatically',
       help: 'When a release is flagged as a security fix, install it on the next check without asking. Feature updates always require a click.',

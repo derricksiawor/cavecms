@@ -82,6 +82,8 @@ id_ed25519*
 /public/uploads*
 /uploads/
 /.test-uploads/
+# contributor-local backup/restore verification staging (CAVECMS_BACKUP_DIR)
+/.test-backups/
 
 # logs
 npm-debug.log*
@@ -169,3 +171,11 @@ next-env.d.ts
 
 # Local operator notes — never tracked.
 /instructions.md
+
+# Per-install runtime state — the update + backup engines write the live
+# status files, locks, snapshots, logs, and the background-prestaged release
+# cache here (lib/backups/statusPath.ts getInstallStateDir falls back to
+# <cwd>/.cavecms-state when CAVECMS_STATE_DIR is unset, e.g. a contributor dev
+# box configured to exercise the updater). Pure runtime artifacts — including
+# multi-MB cached release tarballs — that must NEVER be committed.
+/.cavecms-state/

@@ -7,6 +7,8 @@ import { tag } from '@/lib/cache/tags'
 import { getCurrentVersion } from './getCurrentVersion'
 import { checkLatestRelease } from './checkLatestRelease'
 import { notifyUpdateAvailable } from './notifyUpdateAvailable'
+import { prestageRelease } from './prestageRelease'
+import { findValidStaged } from './releaseCache'
 
 // Background scheduler for the Updates feature. Pulled into its own
 // module so the nodemailer + DB transitive imports never reach the
@@ -86,6 +88,51 @@ export async function runUpdateCheck(args: RunArgs = {}): Promise<{
   // New release. Email if configured (notifyUpdateAvailable handles
   // the "no email configured" + "already notified" guards itself).
   const result = await notifyUpdateAvailable(latest)
+
+  // Background pre-stage: download + verify the release artifact NOW so a
+  // later "Update now" click skips the slow download. Auto-DOWNLOAD only —
+  // NEVER auto-apply (the scheduler never spawns the orchestrator forward
+  // path). Gated on settings.updates.autoDownload (default on). Fire-and-
+  // forget so the check tick returns promptly; prestageRelease self-guards
+  // (O_EXCL lock, eligibility, sha keying) and logs its own outcome. We
+  // kick it AFTER notify so notify's lastNotifiedSha write lands first
+  // (prestage's durable updates_state write read-merges on top of it).
+  //
+  // The guard below is a disk-truth short-circuit: skip if this exact
+  // release is already staged. Both the in-process scheduler AND the
+  // systemd-timer path funnel through here, so this same branch dedups
+  // either trigger.
+  try {
+    const updatesCfg = await getSetting('updates')
+    if (updatesCfg.autoDownload !== false) {
+      const already = findValidStaged({
+        targetSha: latest.sha,
+        sha256: latest.sha256,
+      })
+      if (!already) {
+        void prestageRelease(latest).catch((err) => {
+          console.error(
+            JSON.stringify({
+              level: 'error',
+              msg: 'prestage_kickoff_failed',
+              err: err instanceof Error ? err.message.slice(0, 200) : String(err),
+            }),
+          )
+        })
+      }
+    }
+  } catch (err) {
+    // A failure to read the autoDownload flag must NEVER break the check/
+    // notify path — log + continue. Apply still downloads inline.
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'prestage_gate_failed',
+        err: err instanceof Error ? err.message.slice(0, 200) : String(err),
+      }),
+    )
+  }
+
   return {
     current: current.sha,
     available: latest.sha,

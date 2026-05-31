@@ -62,3 +62,37 @@ export const WATCHDOG_DURATION_MS = 60 * 60 * 1000
  *  enough that a real crash gets caught quickly, long enough that
  *  one transient blip can't rollback a healthy install. */
 export const WATCHDOG_FAIL_THRESHOLD = 3
+
+// ─── Background pre-staged downloads ────────────────────────────────
+// The prestage step (lib/updates/prestageRelease.ts) downloads + verifies
+// a release artifact in the background after a check finds a new version,
+// so a later "Update now" skips the slow download. Its own status file +
+// lock keep it from ever colliding with the apply orchestrator.
+
+/** 30 minutes — a prestage whose status `updatedAt` exceeds this (with no
+ *  live PID holding the lock) is treated as a crashed download; the next
+ *  scheduler tick re-stages. Deliberately LONGER than UPDATE_STALE_AFTER_MS
+ *  (15 min) because a legitimately slow link can take far longer to pull a
+ *  release than an apply takes to run. */
+export const PRESTAGE_STALE_AFTER_MS = 30 * 60 * 1000
+
+/** Keep at most this many verified artifacts in the release cache. 2 covers
+ *  "current target + the one it's about to supersede" without letting a
+ *  long-lived install accumulate release tarballs (matters most on
+ *  disk-quota'd cPanel hosts). */
+export const PRESTAGE_CACHE_KEEP = 2
+
+/** Per-operation wget timeout (seconds) for the prestage download. Matches
+ *  the orchestrator's inline tarball download. wget retries (--tries=3)
+ *  within this per-attempt budget. */
+export const PRESTAGE_WGET_TIMEOUT_SEC = 300
+
+/** Total ceiling (ms) on the prestage wget invocation — the execFile
+ *  timeout. Generous (30 min) so a very slow connection can finish a
+ *  background download that would never fit inside a foreground apply. */
+export const PRESTAGE_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000
+
+/** Minimum free bytes required in the cache filesystem before a prestage
+ *  download starts. Mirrors the orchestrator's preflight disk floor
+ *  (500 MB) since we can't know the artifact size before downloading. */
+export const PRESTAGE_MIN_FREE_BYTES = 500 * 1024 * 1024

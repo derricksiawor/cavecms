@@ -187,6 +187,31 @@ if ! ( touch "$LOG_DIR/.cavecms-write-probe" 2>/dev/null && rm -f "$LOG_DIR/.cav
   LOG_DIR=/tmp
 fi
 
+# CAVECMS_UPDATE_STAGED_PATH — an OPTIONAL background-prestaged, already-
+# verified release artifact (lib/updates/releaseCache.ts), set by the apply
+# route's findValidStaged when a valid stage exists for this exact target.
+# Path-safety: validate it lands under the SAME allowlist as STATUS_PATH
+# before the tarball step trusts it — a hostile value (e.g. a planted file
+# under /etc) is dropped to empty so the fast path is skipped and we download
+# normally. The artifact is ALSO re-verified (sha256 + Ed25519) immediately
+# before extract; this allowlist just stops the path itself being abused.
+if [ -n "${CAVECMS_UPDATE_STAGED_PATH:-}" ]; then
+  staged_allowed=0
+  case "$CAVECMS_UPDATE_STAGED_PATH" in
+    /var/lib/cavecms/*|/tmp/*|/var/folders/*) staged_allowed=1 ;;
+    */.cavecms-state/*) staged_allowed=1 ;;
+  esac
+  if [ "$staged_allowed" = "0" ] && [ -n "${CAVECMS_STATE_DIR:-}" ]; then
+    case "$CAVECMS_UPDATE_STAGED_PATH" in
+      "$CAVECMS_STATE_DIR"/*) staged_allowed=1 ;;
+    esac
+  fi
+  if [ "$staged_allowed" = "0" ]; then
+    echo "[cavecms-update] ignoring CAVECMS_UPDATE_STAGED_PATH outside allowed prefix: $CAVECMS_UPDATE_STAGED_PATH" >&2
+    CAVECMS_UPDATE_STAGED_PATH=""
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Shared helpers — write_status, snapshot_current_tree,
 # restore_from_snapshot, prune_old_snapshots, post_maintenance_toggle,
@@ -666,6 +691,64 @@ extract_tarball_atomic() {
 }
 
 # ---------------------------------------------------------------------------
+# Artifact verify cores — sha256 + Ed25519. Extracted so BOTH the normal
+# download path (step 2) AND the pre-staged fast path re-verify identical
+# bytes through identical code. Each returns 0 on success / non-zero on
+# failure; NEITHER writes status or exits — the caller owns the failure
+# handling (so the download path can fail loud while the staged pre-check
+# falls through to a fresh download).
+# ---------------------------------------------------------------------------
+# verify_tarball_sha256 <file> <expected-hex>
+verify_tarball_sha256() {
+  local file="$1" expected="$2"
+  expected=$(echo "$expected" | tr 'A-F' 'a-f')
+  [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || return 1
+  local actual=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$file" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$file" | awk '{print $1}')
+  fi
+  [ -n "$actual" ] && [ "$actual" = "$expected" ]
+}
+
+# verify_tarball_signature <file>
+# Ed25519-verifies the file's bytes against CAVECMS_UPDATE_TARBALL_SIGNATURE
+# using ANY of the trusted keys in CAVECMS_RELEASE_PUBKEY_PEM (dual-key
+# rotation-safe). Both env vars are forwarded by the apply route from
+# lib/updates/releasePubkey.ts — the attacker-controlled release host can't
+# influence which key we trust.
+verify_tarball_signature() {
+  local file="$1"
+  [ -n "${CAVECMS_UPDATE_TARBALL_SIGNATURE:-}" ] || return 1
+  [ -n "${CAVECMS_RELEASE_PUBKEY_PEM:-}" ] || return 1
+  node -e '
+    const fs = require("node:fs");
+    const { createPublicKey, verify } = require("node:crypto");
+    try {
+      const blob = process.env.CAVECMS_RELEASE_PUBKEY_PEM || "";
+      const pems = blob.match(/-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----/g) || [];
+      if (pems.length === 0) { console.error("no trusted pubkey provided"); process.exit(2); }
+      const sig = Buffer.from(process.env.CAVECMS_UPDATE_TARBALL_SIGNATURE, "base64");
+      const payload = fs.readFileSync(process.argv[1]);
+      let ok = false;
+      for (const pem of pems) {
+        try {
+          const pubkey = createPublicKey({ key: pem, format: "pem" });
+          if (pubkey.asymmetricKeyType !== "ed25519") continue;
+          if (verify(null, payload, pubkey, sig)) { ok = true; break; }
+        } catch (e) { /* malformed key — try the next */ }
+      }
+      if (!ok) { console.error("ed25519 verify returned false for all trusted keys"); process.exit(1); }
+      process.exit(0);
+    } catch (err) {
+      console.error("ed25519 verify threw:", err && err.message ? err.message : String(err));
+      process.exit(3);
+    }
+  ' "$file"
+}
+
+# ---------------------------------------------------------------------------
 # DRY RUN — used by Playwright + manual demos. Walks states on a timer.
 # Skipped for rollback mode, which has its own dry-run branch below — an
 # explicit `rollback` request must never be reported as a successful UPDATE.
@@ -1046,29 +1129,63 @@ fi
 if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
   # ──────── Tarball mode ────────
   TARBALL_TMP="${LOG_DIR}/release-${TARGET_SHA:0:12}.tar.gz.tmp.$(rand_suffix)"
-  # Download via wget, NOT curl: the release host sits behind Cloudflare Bot
-  # Fight Mode (Free plan — can't be scoped via WAF rules), which fingerprints
-  # curl + node-fetch by their TLS handshake and 403s them from datacenter IPs
-  # regardless of User-Agent. Only wget's fingerprint + a browser UA clears the
-  # challenge (verified from an AWS VPS: wget+UA → 200, curl → 403). The
-  # X-CaveCMS-Client header (ignored by CF's bot check) keeps the request
-  # identifiable in origin logs.
-  CAVECMS_RELEASE_UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  if ! wget -nv --tries=3 --timeout=300 --user-agent="$CAVECMS_RELEASE_UA" --header="X-CaveCMS-Client: CaveCMS-Updater" -O "$TARBALL_TMP" "$CAVECMS_UPDATE_TARBALL_URL" 2>>"${LOG_DIR}/tarball-download.log"; then
-    rm -f "$TARBALL_TMP"
-    write_status "failed" 2 "Couldn't download the new version" "We tried to fetch the release archive but the download failed. Check your server's internet access." ""
-    post_audit_terminal failed "tarball_download_failed"
-    exit 1
+  STAGED_USED=0
+  # ── Pre-staged fast path ──
+  # If a background prestage already downloaded + verified this exact
+  # artifact (CAVECMS_UPDATE_STAGED_PATH, set by the apply route's
+  # findValidStaged), re-verify it here (sha256 + Ed25519) and, on success,
+  # COPY it to TARBALL_TMP and SKIP the wget. The copied file then flows
+  # through the SAME sha256 + Ed25519 + traversal checks below — a
+  # deliberate re-affirm immediately before extract (closes the TOCTOU
+  # window where a cached file could be tampered between stage and apply).
+  # On ANY staged-path problem (missing, empty, sha/sig mismatch, copy
+  # failure) we fall through to a normal download — a bad stage NEVER
+  # fails the apply (graceful degradation).
+  if [ -n "${CAVECMS_UPDATE_STAGED_PATH:-}" ] && [ -s "${CAVECMS_UPDATE_STAGED_PATH}" ] \
+     && [ -n "${CAVECMS_UPDATE_TARBALL_SHA256:-}" ]; then
+    if verify_tarball_sha256 "$CAVECMS_UPDATE_STAGED_PATH" "$CAVECMS_UPDATE_TARBALL_SHA256" \
+       && verify_tarball_signature "$CAVECMS_UPDATE_STAGED_PATH"; then
+      if cp -f "$CAVECMS_UPDATE_STAGED_PATH" "$TARBALL_TMP" 2>>"${LOG_DIR}/tarball-download.log"; then
+        STAGED_USED=1
+        # Step-2 sub-label tells the modal "no download needed". The slow
+        # part already happened in the background, so this step flies.
+        write_status "updating" 2 "Applying the downloaded version" "" ""
+        echo "[cavecms-update] $(now_iso) using pre-staged artifact: $CAVECMS_UPDATE_STAGED_PATH" >> "${LOG_DIR}/tarball-download.log"
+      else
+        rm -f "$TARBALL_TMP"
+        echo "[cavecms-update] $(now_iso) staged artifact copy failed; downloading fresh" >> "${LOG_DIR}/tarball-download.log"
+      fi
+    else
+      echo "[cavecms-update] $(now_iso) staged artifact failed re-verify; downloading fresh" >> "${LOG_DIR}/tarball-download.log"
+    fi
   fi
-  # Empty/zero-byte response — wget can exit 0 yet leave an unusable
-  # zero-byte file. Refuse explicitly.
-  if [ ! -s "$TARBALL_TMP" ]; then
-    rm -f "$TARBALL_TMP"
-    write_status "failed" 2 "The downloaded version is empty" "Something is wrong with the release server. Try again in a few minutes." ""
-    post_audit_terminal failed "tarball_empty"
-    exit 1
+  if [ "$STAGED_USED" != "1" ]; then
+    # ── Download (no valid pre-stage) ──
+    # Download via wget, NOT curl: the release host sits behind Cloudflare Bot
+    # Fight Mode (Free plan — can't be scoped via WAF rules), which fingerprints
+    # curl + node-fetch by their TLS handshake and 403s them from datacenter IPs
+    # regardless of User-Agent. Only wget's fingerprint + a browser UA clears the
+    # challenge (verified from an AWS VPS: wget+UA → 200, curl → 403). The
+    # X-CaveCMS-Client header (ignored by CF's bot check) keeps the request
+    # identifiable in origin logs.
+    CAVECMS_RELEASE_UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    if ! wget -nv --tries=3 --timeout=300 --user-agent="$CAVECMS_RELEASE_UA" --header="X-CaveCMS-Client: CaveCMS-Updater" -O "$TARBALL_TMP" "$CAVECMS_UPDATE_TARBALL_URL" 2>>"${LOG_DIR}/tarball-download.log"; then
+      rm -f "$TARBALL_TMP"
+      write_status "failed" 2 "Couldn't download the new version" "We tried to fetch the release archive but the download failed. Check your server's internet access." ""
+      post_audit_terminal failed "tarball_download_failed"
+      exit 1
+    fi
+    # Empty/zero-byte response — wget can exit 0 yet leave an unusable
+    # zero-byte file. Refuse explicitly.
+    if [ ! -s "$TARBALL_TMP" ]; then
+      rm -f "$TARBALL_TMP"
+      write_status "failed" 2 "The downloaded version is empty" "Something is wrong with the release server. Try again in a few minutes." ""
+      post_audit_terminal failed "tarball_empty"
+      exit 1
+    fi
   fi
-  # SHA256 verification (only when the operator provided an expected hash).
+  # SHA256 verification. Runs for BOTH the downloaded AND the staged path
+  # (re-affirm before extract). verify_tarball_sha256 is the shared core.
   if [ -n "${CAVECMS_UPDATE_TARBALL_SHA256:-}" ]; then
     expected_sha256=$(echo "$CAVECMS_UPDATE_TARBALL_SHA256" | tr 'A-F' 'a-f')
     if [[ ! "$expected_sha256" =~ ^[a-f0-9]{64}$ ]]; then
@@ -1077,13 +1194,7 @@ if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
       post_audit_terminal failed "tarball_sha256_malformed"
       exit 1
     fi
-    actual_sha256=""
-    if command -v sha256sum >/dev/null 2>&1; then
-      actual_sha256=$(sha256sum "$TARBALL_TMP" | awk '{print $1}')
-    elif command -v shasum >/dev/null 2>&1; then
-      actual_sha256=$(shasum -a 256 "$TARBALL_TMP" | awk '{print $1}')
-    fi
-    if [ -z "$actual_sha256" ] || [ "$actual_sha256" != "$expected_sha256" ]; then
+    if ! verify_tarball_sha256 "$TARBALL_TMP" "$expected_sha256"; then
       rm -f "$TARBALL_TMP"
       write_status "failed" 2 "Couldn't verify the new version's signature" "The downloaded archive doesn't match the expected fingerprint. Contact support — this could indicate a tampered download." ""
       post_audit_terminal failed "tarball_sha256_mismatch"
@@ -1101,46 +1212,11 @@ if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
   # route.ts) — the pubkey comes from lib/updates/releasePubkey.ts so
   # the attacker-controlled host CANNOT influence which key we trust.
   # node is guaranteed available (we're inside the CaveCMS install
-  # whose Node process spawned this script).
+  # whose Node process spawned this script). verify_tarball_signature is
+  # the shared core (dual-key, tries every trusted PEM).
   if [ -n "${CAVECMS_UPDATE_TARBALL_SIGNATURE:-}" ] \
      && [ -n "${CAVECMS_RELEASE_PUBKEY_PEM:-}" ]; then
-    if ! node -e '
-      const fs = require("node:fs");
-      const { createPublicKey, verify } = require("node:crypto");
-      try {
-        // CAVECMS_RELEASE_PUBKEY_PEM may carry MORE THAN ONE trusted
-        // Ed25519 key, concatenated (each self-delimited by its
-        // BEGIN/END markers). The apply route forwards the full
-        // trusted-key list (lib/updates/releasePubkey.ts) so a future
-        // key rotation can be verified by installs that trust both the
-        // old and new key. Today it holds exactly one key. We try each
-        // and pass if ANY verifies.
-        const blob = process.env.CAVECMS_RELEASE_PUBKEY_PEM || "";
-        const pems = blob.match(/-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----/g) || [];
-        if (pems.length === 0) {
-          console.error("no trusted pubkey provided");
-          process.exit(2);
-        }
-        const sig = Buffer.from(process.env.CAVECMS_UPDATE_TARBALL_SIGNATURE, "base64");
-        const payload = fs.readFileSync(process.argv[1]);
-        let ok = false;
-        for (const pem of pems) {
-          try {
-            const pubkey = createPublicKey({ key: pem, format: "pem" });
-            if (pubkey.asymmetricKeyType !== "ed25519") continue;
-            if (verify(null, payload, pubkey, sig)) { ok = true; break; }
-          } catch (e) { /* malformed key — try the next */ }
-        }
-        if (!ok) {
-          console.error("ed25519 verify returned false for all trusted keys");
-          process.exit(1);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("ed25519 verify threw:", err && err.message ? err.message : String(err));
-        process.exit(3);
-      }
-    ' "$TARBALL_TMP"; then
+    if ! verify_tarball_signature "$TARBALL_TMP"; then
       rm -f "$TARBALL_TMP"
       write_status "failed" 2 "Couldn't verify the new version's signature" "The release archive is not signed by the expected publisher. Refusing to install. Contact support — this could indicate a tampered download." ""
       post_audit_terminal failed "tarball_signature_invalid"

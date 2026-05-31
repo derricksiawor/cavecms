@@ -28,6 +28,7 @@ import {
   statSync,
   openSync,
   closeSync,
+  writeSync,
   constants as fsConstants,
 } from 'node:fs'
 import { dirname } from 'node:path'
@@ -39,6 +40,7 @@ import {
   UPDATE_STALE_AFTER_MS,
   UPDATE_TERMINAL_TTL_MS,
   UPDATE_TOTAL_STEPS,
+  PRESTAGE_STALE_AFTER_MS,
 } from './constants'
 
 export type UpdateState =
@@ -404,4 +406,217 @@ export function lockIsStale(): boolean {
   const t = Date.parse(status.updatedAt)
   if (Number.isNaN(t)) return true
   return Date.now() - t > UPDATE_STALE_AFTER_MS
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Prestage status file + lock — a SEPARATE file/lock from the apply
+// status above, so a background download and a manual apply never contend.
+// The apply modal polls update-status.json (untouched by prestage); the
+// check route + UI status line read prestage-status.json. The prestage
+// machine states (prestage_*) deliberately do NOT enter UpdateState /
+// TERMINAL_STATES, keeping the apply modal's 6-step contract intact.
+// ───────────────────────────────────────────────────────────────────────
+
+export type PrestageState =
+  | 'prestage_idle'
+  | 'prestage_downloading'
+  | 'prestage_staged'
+  | 'prestage_failed'
+  | 'prestage_ineligible'
+
+export interface PrestageStatus {
+  state: PrestageState
+  version: string
+  sha: string
+  sha256: string
+  /** Best-effort byte totals — wget -nv gives coarse signal; null until known. */
+  bytesTotal: number | null
+  bytesDone: number | null
+  startedAt: string
+  updatedAt: string
+  error?: string
+  stagedPath?: string
+}
+
+const PRESTAGE_SYSTEM_DEFAULT_PATH = '/var/lib/cavecms/prestage-status.json'
+
+let prestageStatusPathOverride: string | null = null
+
+/** Test-only path override (bypasses the allowlist — test/dev callers only). */
+export function __setPrestageStatusPathForTests(path: string | null): void {
+  prestageStatusPathOverride = path
+}
+
+export function getPrestageStatusPath(): string {
+  if (prestageStatusPathOverride !== null) return prestageStatusPathOverride
+  const fromEnv = process.env.CAVECMS_PRESTAGE_STATUS_PATH
+  if (fromEnv) return ensureAllowedPath(fromEnv)
+  const stateDir = getInstallStateDir()
+  if (stateDir) {
+    return ensureAllowedPath(`${stateDir}/prestage-status.json`)
+  }
+  return ensureAllowedPath(PRESTAGE_SYSTEM_DEFAULT_PATH)
+}
+
+function safeParsePrestage(raw: string): PrestageStatus | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    typeof (parsed as { state?: unknown }).state !== 'string' ||
+    typeof (parsed as { updatedAt?: unknown }).updatedAt !== 'string'
+  ) {
+    return null
+  }
+  return parsed as PrestageStatus
+}
+
+export function readPrestageStatus(): PrestageStatus | null {
+  let raw: string
+  try {
+    raw = readFileSync(getPrestageStatusPath(), 'utf8')
+  } catch (err) {
+    const errno = (err as NodeJS.ErrnoException).code
+    if (errno !== 'ENOENT') {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: 'updates_read_prestage_status_failed',
+          code: errno ?? 'UNKNOWN',
+          err: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    }
+    return null
+  }
+  return safeParsePrestage(raw)
+}
+
+export function writePrestageStatus(
+  partial: Partial<PrestageStatus>,
+): PrestageStatus {
+  const path = getPrestageStatusPath()
+  const existing = readPrestageStatus()
+  const now = new Date().toISOString()
+  const merged: PrestageStatus = {
+    state: 'prestage_idle',
+    version: '',
+    sha: '',
+    sha256: '',
+    bytesTotal: null,
+    bytesDone: null,
+    startedAt: now,
+    ...(existing ?? {}),
+    ...partial,
+    updatedAt: now,
+  }
+  mkdirSync(dirname(path), { recursive: true })
+  const tmp = `${path}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`
+  writeFileSync(tmp, JSON.stringify(merged, null, 2), {
+    encoding: 'utf8',
+    mode: 0o600,
+    flag: 'wx',
+  })
+  renameSync(tmp, path)
+  return merged
+}
+
+export function clearPrestageStatus(): void {
+  try {
+    unlinkSync(getPrestageStatusPath())
+  } catch {
+    /* ENOENT is fine */
+  }
+}
+
+export function getPrestageLockPath(): string {
+  return `${getPrestageStatusPath()}.lock`
+}
+
+/**
+ * Acquire the prestage lock (O_EXCL). Unlike the apply lock — which a
+ * detached shell orchestrator stamps + owns — the prestage runner is
+ * IN-PROCESS, so we stamp this process's PID immediately so
+ * prestageLockIsStale's liveness check works after a crash + restart.
+ * Throws EEXIST when held. Caller releases on every exit path.
+ */
+export function acquirePrestageLock(): number {
+  const path = getPrestageLockPath()
+  mkdirSync(dirname(path), { recursive: true })
+  const fd = openSync(
+    path,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL,
+    0o600,
+  )
+  try {
+    writeSync(fd, `${process.pid}\n`)
+  } catch {
+    /* PID stamp is best-effort; staleness falls back to the status mtime */
+  }
+  return fd
+}
+
+export function releasePrestageLock(fd: number | null): void {
+  if (fd !== null) {
+    try {
+      closeSync(fd)
+    } catch {
+      /* already closed */
+    }
+  }
+  try {
+    unlinkSync(getPrestageLockPath())
+  } catch {
+    /* already gone */
+  }
+}
+
+function readPrestageLockPid(): number | null {
+  try {
+    const raw = readFileSync(getPrestageLockPath(), 'utf8').trim()
+    const n = Number.parseInt(raw, 10)
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Is the prestage lock stale (orphaned by a crashed download)? The lock
+ * holder is THIS app's Node process, not a spawned script — so liveness
+ * is a straight PID check:
+ *   - PID dead (ESRCH)                  → stale (crashed mid-download)
+ *   - PID === this process              → live (we hold it) → NOT stale
+ *   - PID alive but a different process  → PID recycled after a crash;
+ *                                          decide via the status mtime
+ *   - no PID / no /proc                  → status mtime fallback
+ */
+export function prestageLockIsStale(): boolean {
+  try {
+    statSync(getPrestageLockPath())
+  } catch {
+    return false // no lock → nothing stale
+  }
+  const pid = readPrestageLockPid()
+  if (pid !== null) {
+    if (pid === process.pid) return false
+    try {
+      process.kill(pid, 0)
+      // Alive but a different PID — recycled after our crash. Fall through
+      // to the time-based check rather than trust an unrelated process.
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ESRCH') return true
+      // EPERM (cross-user) / unknown — fall through to the time check.
+    }
+  }
+  const s = readPrestageStatus()
+  if (!s) return true
+  const t = Date.parse(s.updatedAt)
+  if (Number.isNaN(t)) return true
+  return Date.now() - t > PRESTAGE_STALE_AFTER_MS
 }

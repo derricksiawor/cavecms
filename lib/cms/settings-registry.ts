@@ -594,6 +594,12 @@ const sessionConfig = z.object({
 // (which gets rejected by the email refinement).
 const updates = z.object({
   autoApplySecurityPatches: z.boolean().default(true),
+  // Download (NOT apply) new releases in the background after a check finds
+  // one, so a later "Update now" installs in seconds instead of waiting on
+  // the download. Verified (sha256 + Ed25519) before caching. Never
+  // auto-applies. Default on; operators on metered/locked-down links can
+  // turn it off (apply then downloads inline, as before).
+  autoDownload: z.boolean().default(true),
   checkFrequencyHours: z.number().int().min(1).max(168).default(12),
   notificationEmail: z
     .string()
@@ -621,6 +627,22 @@ const updatesState = z.object({
   lastNotifiedSha: z.string().max(64).optional(),
   lastNotifiedAt: z.string().max(40).optional(),
   lastCheckedAt: z.string().max(40).optional(),
+  // Background pre-stage bookkeeping. The durable system-of-record (across
+  // process restarts) for what the prestage runner has downloaded +
+  // verified — the in-memory checkLatestRelease cache is per-process / 5-min
+  // and can't serve as one. findValidStaged (disk truth) remains the
+  // authoritative "is it really staged" signal; these fields drive the
+  // scheduler's re-entrancy guard + the UI status line.
+  stagedSha: z.string().max(64).optional(),
+  stagedSha256: z.string().max(64).optional(),
+  stagedVersion: z.string().max(64).optional(),
+  stagedPath: z.string().max(1024).optional(),
+  stagedAt: z.string().max(40).optional(),
+  stagedBytes: z.number().nonnegative().optional(),
+  stageState: z
+    .enum(['staged', 'downloading', 'failed', 'ineligible'])
+    .optional(),
+  stageError: z.string().max(500).optional(),
 })
 
 // SMTP configuration. Moved from .env.local so operators can configure
@@ -1024,6 +1046,7 @@ export const registry = {
     schema: updates,
     default: {
       autoApplySecurityPatches: true,
+      autoDownload: true,
       checkFrequencyHours: 12,
     } satisfies z.infer<typeof updates>,
   },

@@ -72,6 +72,12 @@ interface CheckResponse {
   // so Re-run install has known-good coords even without an upgrade
   // available.
   currentRelease: { downloadUrl: string; sha256: string; signature: string | null } | null
+  // Background pre-stage state for the relevant target. `staged` non-null
+  // means the verified artifact is on disk RIGHT NOW (installs in seconds);
+  // `stageState === 'downloading'` means bytes are still arriving in the
+  // background.
+  staged: { sha: string; sha256: string; version: string; stagedAt: string } | null
+  stageState: 'downloading' | 'staged' | 'failed' | 'ineligible' | null
 }
 
 // Lowercase relative-date formatter for inline-after-verb usage
@@ -102,6 +108,12 @@ export function UpdatesClient({
   const [current, setCurrent] = useState<CurrentVersion>(currentVersion)
   const [modalOpen, setModalOpen] = useState(false)
   const [applying, setApplying] = useState(false)
+  // Background pre-stage signals — drive the subtle "downloading in the
+  // background / downloaded and ready" indicator + the Update-now subline.
+  const [stagedReady, setStagedReady] = useState(false)
+  const [stageState, setStageState] = useState<
+    'downloading' | 'staged' | 'failed' | 'ineligible' | null
+  >(null)
 
   const initialForm = useMemo(
     () =>
@@ -157,6 +169,9 @@ export function UpdatesClient({
       const j = (await r.json()) as CheckResponse
       setCurrent(j.current)
       setCheckedAt(new Date().toISOString())
+      // Background pre-stage signals (target-gated server-side).
+      setStagedReady(j.staged !== null)
+      setStageState(j.stageState)
       if (!j.available) {
         setRelease(null)
         setAvailableShaPrivate(null)
@@ -202,6 +217,18 @@ export function UpdatesClient({
         body: JSON.stringify(payload),
       })
       if (r.status === 409) {
+        let body: { error?: string } | null = null
+        try {
+          body = (await r.json()) as { error?: string }
+        } catch {
+          /* body may not be JSON */
+        }
+        if (body?.error === 'ineligible_jump') {
+          toast.error(
+            'This update is too big a jump to install in one step. Update to an in-between version first, or re-install with the CLI.',
+          )
+          return
+        }
         toast.error('An update is already in progress.')
         setModalOpen(true)
         return
@@ -345,6 +372,20 @@ export function UpdatesClient({
               {relativeDays(new Date(checkedAt))}.
             </p>
           ) : null}
+          {/* Background pre-stage indicator — the only always-visible
+              footprint of the auto-download feature. Subtle, non-alarming:
+              copper while downloading, emerald when ready. */}
+          {stagedReady ? (
+            <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Update downloaded — ready to install
+            </p>
+          ) : stageState === 'downloading' ? (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-copper-600">
+              <Download className="h-3.5 w-3.5 animate-cavecms-pulse-copper" />
+              Downloading the update in the background…
+            </p>
+          ) : null}
         </header>
       </article>
 
@@ -388,6 +429,13 @@ export function UpdatesClient({
               <p className="mt-2 text-xs text-warm-stone">
                 {release.versionLabel} · {release.releasedAbsolute}
               </p>
+              {/* Pre-staged → installing skips the download entirely. */}
+              {stagedReady && (
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Downloaded and ready — installs in seconds
+                </p>
+              )}
             </div>
             <Button
               type="button"

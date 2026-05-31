@@ -232,7 +232,11 @@ else
   UPLOAD_FILECOUNT=$(find "${UPLOAD_SUBDIRS[@]/#/${UPLOADS_ROOT}/}" -type f -not -path '*/.tmp/*' 2>/dev/null | wc -l | tr -d ' ')
   [ -z "$UPLOAD_FILECOUNT" ] && UPLOAD_FILECOUNT=0
 fi
-assert_disk_ok "$CAVECMS_BACKUP_DIR" || { bstatus failed 3 "Backup failed" "Ran out of disk space while saving media."; post_backup_audit_terminal backup_failed unknown "disk full mid-uploads"; exit 1; }
+# Mid-stream guard: a hard FREE-BYTES floor (catches a concurrent disk fill /
+# an under-estimate), NOT the percent gate — the step-1 byte estimate already
+# authorised the whole operation, and a near-full-but-large disk with ample
+# free bytes must not be refused here just for being >90% used.
+assert_disk_for "$CAVECMS_BACKUP_DIR" 51200 || { bstatus failed 3 "Backup failed" "Ran out of disk space while saving media."; post_backup_audit_terminal backup_failed unknown "disk full mid-uploads"; exit 1; }
 
 # Optional env.production inclusion (--include-env).
 ENV_INCLUDED=false
