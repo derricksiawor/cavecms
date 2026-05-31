@@ -1,0 +1,93 @@
+import { z } from 'zod'
+import { db } from '@/db/client'
+import { auditLog } from '@/db/schema'
+import { withError } from '@/lib/api/withError'
+import { readJsonBody } from '@/lib/api/jsonBody'
+import { requireRole } from '@/lib/auth/requireRole'
+import { requireCsrf } from '@/lib/auth/requireCsrf'
+import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { auditMetaFromRequest } from '@/lib/api/auditMeta'
+import {
+  readBackupStatus,
+  writeBackupStatus,
+  isBackupStale,
+  getBackupStatusPath,
+  readRestoreStatus,
+  isRestoreStale,
+} from '@/lib/backups/statusFile'
+import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
+import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
+
+// POST /api/admin/backups/create — kick off a detached backup. Returns 202.
+// The Settings page polls /api/admin/backups/status?kind=backup.
+
+export const dynamic = 'force-dynamic'
+
+const Body = z.object({ includeEnv: z.boolean().optional() }).strict()
+
+function activeError(): Response | null {
+  const b = readBackupStatus()
+  if (b && b.state === 'running' && !isBackupStale(b)) return conflict('backup_in_progress')
+  const r = readRestoreStatus()
+  if (r && (r.state === 'validating' || r.state === 'restoring' || r.state === 'restarting') && !isRestoreStale(r))
+    return conflict('restore_in_progress')
+  return null
+}
+function conflict(error: string): Response {
+  return new Response(JSON.stringify({ error }), {
+    status: 409,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  })
+}
+
+export const POST = withError(async (req: Request) => {
+  const ctx = await requireRole(['admin'])
+  await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
+  checkMutationRate(ctx.userId)
+  const body = Body.parse(await readJsonBody(req))
+
+  const active = activeError()
+  if (active) return active
+
+  // Seed status so the modal shows progress immediately.
+  writeBackupStatus({
+    state: 'running',
+    step: 0,
+    totalSteps: BACKUP_TOTAL_STEPS,
+    stepLabel: 'Getting ready',
+    error: undefined,
+    log: undefined,
+  })
+
+  const env: Record<string, string> = { CAVECMS_BACKUP_STATUS_PATH: getBackupStatusPath() }
+  if (body.includeEnv) env.CAVECMS_BACKUP_INCLUDE_ENV = '1'
+
+  let pid: number | null = null
+  try {
+    pid = spawnBackupEngine({ script: 'cavecms-backup.sh', env })
+  } catch (err) {
+    writeBackupStatus({ state: 'failed', error: 'engine_unavailable' })
+    throw err
+  }
+
+  const meta = auditMetaFromRequest(req)
+  try {
+    await db.insert(auditLog).values({
+      userId: ctx.userId,
+      action: 'backup',
+      resourceType: 'backups',
+      resourceId: 'pending',
+      diff: { includeEnv: body.includeEnv === true },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      requestId: meta.requestId,
+    })
+  } catch (err) {
+    console.error(JSON.stringify({ level: 'error', msg: 'backup_audit_insert_failed', err: err instanceof Error ? err.message : String(err) }))
+  }
+
+  return new Response(JSON.stringify({ accepted: true, pid }), {
+    status: 202,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  })
+})
