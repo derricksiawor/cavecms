@@ -1340,12 +1340,34 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# Default would be /var/lib/cavecms/snapshots — requires the cavecmsstate`,
     `# supplementary group which a stale PM2 daemon doesn't have.`,
     `CAVECMS_SNAPSHOT_ROOT=${stateDir}/snapshots`,
+    `# Per-install log directory for the in-app updater's spawn log + the`,
+    `# orchestrator's step logs. Owned by the runtime user → writable without`,
+    `# root. The updater's default is /var/log/cavecms, which doesn't exist and`,
+    `# can't be created without root on a non-root (laptop / shared-host)`,
+    `# install — pointing it here keeps the dashboard updater working there.`,
+    `CAVECMS_LOG_DIR=${stateDir}/logs`,
     `# How the in-app updater restarts this install after a successful build.`,
     `# systemd | cpanel | pm2 | laptop. A laptop/dev install can't self-restart`,
     `# (bare node, no service manager) — the updater installs the new version`,
     `# then asks you to restart the process. Hosted surfaces restart`,
     `# automatically. When unset (legacy installs) the updater defaults to pm2.`,
     `CAVECMS_RESTART_MODE=${restartMode}`,
+    // Laptop installs start via bare `node --env-file=env.production` with NO
+    // service manager (systemd unit / pm2 ecosystem) to inject the
+    // installer-pinned vars. On VPS/PM2 those configs set CAVECMS_ENV_FILE +
+    // CAVECMS_REPO_DIR; the laptop surface has nowhere else to put them, so
+    // they live here. Without CAVECMS_ENV_FILE the in-app updater's migrate +
+    // env-stamp steps fall back to /etc/cavecms/env.production (the bare-metal
+    // default), which doesn't exist on a laptop install → step 3 fails +
+    // rolls back. (On VPS/PM2 we deliberately DON'T add these — the service
+    // config is authoritative there.)
+    ...(surface === 'laptop'
+      ? [
+          `# Installer-pinned paths (laptop surface has no service manager to inject them).`,
+          `CAVECMS_ENV_FILE=${envPath}`,
+          `CAVECMS_REPO_DIR=${targetDir}`,
+        ]
+      : []),
     `# Release bookkeeping — re-stamped on every in-app update.`,
     `# CAVECMS_COMMIT is the short (12-char) git SHA the release was built`,
     `# from. The in-app updater compares this against the latest manifest's`,

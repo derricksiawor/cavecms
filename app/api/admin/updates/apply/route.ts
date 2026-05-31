@@ -6,8 +6,10 @@ import {
   mkdirSync,
   existsSync,
   appendFileSync,
+  accessSync,
   constants as fsConstants,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path, { resolve } from 'node:path'
 import { z } from 'zod'
 import { db } from '@/db/client'
@@ -255,6 +257,13 @@ function buildScriptEnv(
     const port = process.env.PORT ?? '3040'
     out.CAVECMS_HEALTHZ_URL = `http://127.0.0.1:${port}/healthz`
   }
+  // Force the orchestrator's LOG_DIR to the same writable dir the spawn log
+  // uses. Without this, a CLI install whose env.production predates
+  // CAVECMS_LOG_DIR falls through to the script's own /var/log/cavecms default
+  // — unwritable on a non-root macOS/laptop install — and the orchestrator's
+  // LOG_DIR write-probe would degrade or fail. Always overriding keeps the
+  // spawn log and the script logs co-located on every surface.
+  out.CAVECMS_LOG_DIR = resolveWritableLogDir()
   // Tarball coords from the static manifest — the orchestrator's step 2
   // switches to tarball mode (curl + sha256 verify + atomic extract)
   // when these are present, so CLI-installed (no-git) instances can
@@ -345,15 +354,46 @@ function resolveScriptPath(): string {
   return scriptPath
 }
 
+// Resolve a WRITABLE directory for update logs. The historical default
+// (`/var/log/cavecms`) requires root and does not exist on a non-root
+// macOS/laptop install — mkdirSync there throws, which previously killed
+// the whole spawn before the orchestrator ever started (the update got
+// stuck on the apply route's seed status forever). Try candidates in
+// order and return the first that mkdir + write-probe succeeds on:
+//   1. CAVECMS_LOG_DIR              — explicit operator/CLI override
+//   2. CAVECMS_STATE_DIR/logs       — per-install, runtime-user-owned (CLI installs)
+//   3. /var/log/cavecms             — bare-metal deploy.sh layout (root)
+//   4. <tmpdir>/cavecms             — always writable by the process owner
+// The chosen dir is also forwarded to the orchestrator (buildScriptEnv)
+// so the script's LOG_DIR matches and stays writable on every surface.
+function resolveWritableLogDir(): string {
+  const candidates = [
+    process.env.CAVECMS_LOG_DIR,
+    process.env.CAVECMS_STATE_DIR
+      ? resolve(process.env.CAVECMS_STATE_DIR, 'logs')
+      : undefined,
+    process.env.NODE_ENV === 'production' ? '/var/log/cavecms' : undefined,
+    resolve(tmpdir(), 'cavecms'),
+  ].filter((d): d is string => typeof d === 'string' && d.length > 0)
+  for (const dir of candidates) {
+    try {
+      mkdirSync(dir, { recursive: true })
+      accessSync(dir, fsConstants.W_OK)
+      return dir
+    } catch {
+      // Not creatable/writable — fall through to the next candidate.
+    }
+  }
+  // Last resort: tmpdir() itself is writable by the process owner.
+  return tmpdir()
+}
+
 // Resolve the spawn-log path (without opening). The double-fork
 // orchestrator uses the path directly so nohup can re-open the file
 // independently of any fd Node holds — closing Node's fd doesn't
 // affect the orphaned child's file handle.
 function resolveSpawnLogPath(): string {
-  const dir =
-    process.env.CAVECMS_LOG_DIR ??
-    (process.env.NODE_ENV === 'production' ? '/var/log/cavecms' : '/tmp')
-  mkdirSync(dir, { recursive: true })
+  const dir = resolveWritableLogDir()
   const logPath = resolve(dir, 'cavecms-update-spawn.log')
   // The path will be interpolated into a `bash -c` command line.
   // Refuse anything that could carry shell metacharacters into that
@@ -366,10 +406,7 @@ function resolveSpawnLogPath(): string {
 // Open a spawn-log file safely. Returns an fd in append mode that
 // the child will write its stdout/stderr into.
 function openSpawnLog(): number {
-  const dir =
-    process.env.CAVECMS_LOG_DIR ??
-    (process.env.NODE_ENV === 'production' ? '/var/log/cavecms' : '/tmp')
-  mkdirSync(dir, { recursive: true })
+  const dir = resolveWritableLogDir()
   const logPath = resolve(dir, 'cavecms-update-spawn.log')
   // O_APPEND | O_CREAT | O_WRONLY | O_NOFOLLOW where supported. On
   // macOS, fs.constants.O_NOFOLLOW exists; on Linux too. If the file
