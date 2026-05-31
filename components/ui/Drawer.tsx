@@ -28,6 +28,7 @@ export function Drawer({
   tone = 'light',
   resizable = false,
   resizeStorageKey,
+  dockBelowAdminBar = false,
 }: {
   open: boolean
   onClose: () => void
@@ -37,6 +38,13 @@ export function Drawer({
   tone?: 'light' | 'dark'
   resizable?: boolean
   resizeStorageKey?: string
+  // When the public admin bar (fixed, top:0, z-60) is on screen — i.e.
+  // the inline editor — the desktop drawer should dock BELOW it rather
+  // than slide underneath. Offsets `top` by the bar's height var (the
+  // same `--admin-bar-h[-md]` the SiteHeader offset uses) and trims the
+  // height to match. No effect on the <sm bottom-sheet (it's anchored to
+  // the viewport bottom, never overlaps the top bar).
+  dockBelowAdminBar?: boolean
 }) {
   // Mirror onClose in a ref so the open-bound effect doesn't re-run
   // (and churn the scroll-lock counter + keydown listener) every time
@@ -68,20 +76,20 @@ export function Drawer({
 
   // Saved width is clamped on read so a stale entry from a wider
   // bucket (operator switched a drawer's `width` prop in code) can't
-  // exceed the new max. SSR returns the MIN for resizable drawers
-  // (the narrowest comfortable state — operator pulls wider when
-  // they need the room) and the MAX for non-resizable ones (the
-  // pre-resize default). The post-mount effect below hydrates the
-  // operator's saved preference without a hydration-mismatch flash.
-  // `currentWidth` holds the OPERATOR'S intended width — bounded only
-  // by [MIN, maxWidth]. The viewport-narrow clamp is applied at the
-  // render site (not stored in state) so the operator's preference
-  // survives a temporary viewport shrink: narrow chrome → drawer
-  // renders smaller; re-widen → drawer expands back to the preferred
-  // width. Post-agent-review R2 (Chunk K).
-  const [currentWidth, setCurrentWidth] = useState<number>(
-    resizable ? MIN_DRAWER_WIDTH : maxWidth,
-  )
+  // exceed the new max. The default for BOTH resizable and
+  // non-resizable drawers is the MAX (the comfortable `width`-prop
+  // bucket) — opening a resizable drawer at MIN_DRAWER_WIDTH made the
+  // EditDrawer's form content (background-image card, padding selects)
+  // overflow horizontally and read as cramped; the operator pulls the
+  // handle NARROWER toward MIN when they want more canvas. The
+  // post-mount effect below hydrates the operator's saved preference
+  // without a hydration-mismatch flash. `currentWidth` holds the
+  // OPERATOR'S intended width — bounded only by [MIN, maxWidth]. The
+  // viewport-narrow clamp is applied at the render site (not stored in
+  // state) so the operator's preference survives a temporary viewport
+  // shrink: narrow chrome → drawer renders smaller; re-widen → drawer
+  // expands back to the preferred width.
+  const [currentWidth, setCurrentWidth] = useState<number>(maxWidth)
   useEffect(() => {
     if (!resizable) return
     const saved = safeStorage.get(storageKey)
@@ -300,7 +308,7 @@ export function Drawer({
   // aside as absolutely-positioned so it doesn't compete with the
   // sticky header/footer's z-index inside the scroll region.
   const handleSideClass =
-    side === 'right' ? '-left-px top-0' : '-right-px top-0'
+    side === 'right' ? 'left-0 top-0' : 'right-0 top-0'
   return (
     <>
       {/* Scrim has NO backdrop-blur — the operator needs to see the
@@ -326,26 +334,17 @@ export function Drawer({
         style={asideStyle}
         className={
           isDesktop
-            ? `fixed top-0 z-50 h-full ${widthClass} ${side === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_24px_60px_-12px_rgba(5,5,5,0.45)] overflow-auto animate-cavecms-drawer-in motion-reduce:animate-none`
-            : `fixed inset-x-0 bottom-0 z-50 h-[85vh] max-h-[85vh] w-full rounded-t-3xl border-t ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_-24px_60px_-12px_rgba(5,5,5,0.45)] overflow-auto animate-cavecms-slide-up motion-reduce:animate-none`
+            ? `fixed z-50 ${dockBelowAdminBar ? 'top-[var(--admin-bar-h)] h-[calc(100dvh-var(--admin-bar-h))] md:top-[var(--admin-bar-h-md)] md:h-[calc(100dvh-var(--admin-bar-h-md))]' : 'top-0 h-full'} ${widthClass} ${side === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_24px_60px_-12px_rgba(5,5,5,0.45)] overflow-hidden animate-cavecms-drawer-in motion-reduce:animate-none`
+            : `fixed inset-x-0 bottom-0 z-50 h-[85vh] max-h-[85vh] w-full rounded-t-3xl border-t ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_-24px_60px_-12px_rgba(5,5,5,0.45)] overflow-hidden animate-cavecms-slide-up motion-reduce:animate-none`
         }
         role="dialog"
         aria-modal="true"
       >
-        {!isDesktop && (
-          /* Drag-grip pill at the top of the mobile sheet — phone-
-             native affordance signalling "this can be dismissed by
-             swiping down" (even though we don't currently wire the
-             swipe — the visual contract still reads correctly). */
-          <div
-            aria-hidden="true"
-            className="sticky top-0 z-10 flex w-full items-center justify-center pt-2 pb-1"
-          >
-            <span
-              className={`block h-1 w-10 rounded-full ${tone === 'dark' ? 'bg-cream-50/25' : 'bg-warm-stone/35'}`}
-            />
-          </div>
-        )}
+        {/* Resize handle — a sibling of the scroll region (NOT inside it),
+           absolutely positioned on the fixed aside so it stays anchored to
+           the inner edge at full height instead of scrolling away with the
+           form, and isn't clipped (it sits at the edge, not 1px outside).
+           Only desktop + resizable. */}
         {resizable && isDesktop && (
           <div
             // Hit area is 8px wide for comfortable mouse targeting;
@@ -373,7 +372,29 @@ export function Drawer({
             />
           </div>
         )}
-        {children}
+        {/* Scroll region. `overflow-x-hidden` kills the horizontal
+           scrollbar the cramped default width used to produce;
+           `overflow-y-auto` owns vertical scrolling (the aside itself is
+           now `overflow-hidden` so the resize handle above can't be
+           clipped). Sticky header/footer inside `children` anchor to this
+           container exactly as they did when the aside was the scroller. */}
+        <div className="h-full overflow-y-auto overflow-x-hidden overscroll-contain">
+          {!isDesktop && (
+            /* Drag-grip pill at the top of the mobile sheet — phone-
+               native affordance signalling "this can be dismissed by
+               swiping down" (even though we don't currently wire the
+               swipe — the visual contract still reads correctly). */
+            <div
+              aria-hidden="true"
+              className="sticky top-0 z-10 flex w-full items-center justify-center pt-2 pb-1"
+            >
+              <span
+                className={`block h-1 w-10 rounded-full ${tone === 'dark' ? 'bg-cream-50/25' : 'bg-warm-stone/35'}`}
+              />
+            </div>
+          )}
+          {children}
+        </div>
       </aside>
     </>
   )

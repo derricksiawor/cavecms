@@ -996,6 +996,10 @@ export function EditDrawer({
       tone="dark"
       resizable
       resizeStorageKey="cavecms:drawer-width:edit"
+      // The inline editor always renders the public admin bar (fixed,
+      // top:0, z-60); dock the drawer below it so the operator can still
+      // reach the bar's Sign out / nav instead of the drawer sliding behind.
+      dockBelowAdminBar
     >
       {/* Header — bold, copper eyebrow + serif title + block-type pill.
          Dark-tone restyle: cream/near-black flipped, copper accent
