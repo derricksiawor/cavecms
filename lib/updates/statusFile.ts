@@ -30,8 +30,11 @@ import {
   closeSync,
   constants as fsConstants,
 } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import { dirname } from 'node:path'
+import {
+  ensureAllowedStatusPath as ensureAllowedPath,
+  getInstallStateDir,
+} from '@/lib/backups/statusPath'
 import {
   UPDATE_STALE_AFTER_MS,
   UPDATE_TERMINAL_TTL_MS,
@@ -85,7 +88,6 @@ const TERMINAL_STATES: ReadonlySet<UpdateState> = new Set<UpdateState>([
 ])
 
 const SYSTEM_DEFAULT_PATH = '/var/lib/cavecms/update-status.json'
-const ALLOWED_SYSTEM_DIR_PREFIXES: readonly string[] = ['/var/lib/cavecms/']
 
 let statusPathOverride: string | null = null
 
@@ -97,69 +99,9 @@ export function __setStatusPathForTests(path: string | null): void {
   statusPathOverride = path
 }
 
-/**
- * Per-install state directory. Set by the CLI (`create-cavecms` writes
- * `CAVECMS_STATE_DIR=<install dir>/.cavecms-state` into env.production),
- * provisioned at install time as the same user that owns the install.
- * This avoids the chicken-and-egg where /var/lib/cavecms/ requires a
- * pm2-daemon-wide restart for the supplementary `cavecmsstate` group
- * to take effect — instead we keep the status file inside the install
- * dir, which the running app user already owns.
- *
- * Legacy installs (upgraded in place from pre-0.1.27 releases) won't
- * have CAVECMS_STATE_DIR stamped. For those we derive a sibling
- * `.cavecms-state` next to the standalone `process.cwd()` — that
- * directory is by-definition owned by the runtime user (otherwise the
- * Node listener couldn't have booted there), so writes will never
- * EACCES. The derived path is added to the runtime-allowlist below.
- *
- * Returns null only in dev/test contexts where neither env var nor a
- * usable cwd is available — callers then fall back to the system path.
- */
-function getInstallStateDir(): string | null {
-  const raw = process.env.CAVECMS_STATE_DIR
-  if (raw) return resolve(raw)
-  // Legacy-install fallback. process.cwd() in a Next.js standalone
-  // build is `<install>/.next/standalone`; the runtime user owns it.
-  // We stash state in `<cwd>/.cavecms-state/` so the on-demand mkdir
-  // below never EACCES on the system path.
-  try {
-    const cwd = process.cwd()
-    if (cwd && cwd !== '/') return resolve(`${cwd}/.cavecms-state`)
-  } catch {
-    /* very-restricted runtimes (some test harnesses) — null fallback */
-  }
-  return null
-}
-
-function ensureAllowedPath(candidate: string): string {
-  const resolved = resolve(candidate)
-  const isProd = process.env.NODE_ENV === 'production'
-  // /tmp + os.tmpdir() are ALLOWED in dev/test only. On production
-  // /tmp is world-writable and prone to symlink-precreate attacks —
-  // an attacker (or another low-priv process) can create the status
-  // file as a symlink to /etc/cron.d/cavecms.cron before we open it.
-  // Our atomic-rename via writeFileSync would then follow the symlink
-  // and stomp the target. In production we lock the allowlist to
-  // /var/lib/cavecms/* (system path) OR <CAVECMS_STATE_DIR>/* (the
-  // per-install path the CLI provisioned).
-  if (!isProd) {
-    if (resolved.startsWith(resolve(tmpdir()) + '/')) return resolved
-    if (resolved.startsWith('/tmp/')) return resolved
-  }
-  for (const prefix of ALLOWED_SYSTEM_DIR_PREFIXES) {
-    if (resolved === prefix.replace(/\/$/, '') || resolved.startsWith(prefix)) {
-      return resolved
-    }
-  }
-  const stateDir = getInstallStateDir()
-  if (stateDir) {
-    if (resolved === stateDir || resolved.startsWith(stateDir + '/')) {
-      return resolved
-    }
-  }
-  throw new Error(`status path not allowed: ${candidate}`)
-}
+// `getInstallStateDir` + `ensureAllowedPath` live in lib/backups/statusPath.ts
+// (shared with the backup/restore status modules). Imported at the top of this
+// file; `ensureAllowedPath` is the local alias for `ensureAllowedStatusPath`.
 
 export function getStatusPath(): string {
   if (statusPathOverride !== null) return statusPathOverride
