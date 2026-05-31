@@ -210,9 +210,15 @@ if [ "${#UPLOAD_SUBDIRS[@]}" -eq 0 ]; then
   rm -rf "$_emptyup"
   UPLOAD_FILECOUNT=0
 else
-  if ! tar -C "$UPLOADS_ROOT" \
-        --exclude='.tmp' --sort=name \
-        --warning=no-file-changed --warning=no-file-removed \
+  # --sort=name + --warning=* are GNU-tar extensions (deterministic ordering +
+  # race-noise suppression) that bsdtar (macOS / the laptop surface) rejects
+  # outright. Gate them on a real GNU tar; --exclude is portable and stays.
+  TAR_GNU_FLAGS=()
+  if tar --version 2>/dev/null | grep -qi 'GNU tar'; then
+    TAR_GNU_FLAGS=(--sort=name --warning=no-file-changed --warning=no-file-removed)
+  fi
+  if ! tar -C "$UPLOADS_ROOT" --exclude='.tmp' \
+        ${TAR_GNU_FLAGS[@]+"${TAR_GNU_FLAGS[@]}"} \
         -czf "${STAGING}/uploads.tar.gz" "${UPLOAD_SUBDIRS[@]}" 2>>"${LOG_DIR}/backup-uploads.log"; then
     bstatus failed 3 "Backup failed" "We couldn't save your media files."
     post_backup_audit_terminal backup_failed unknown "uploads tar failed"

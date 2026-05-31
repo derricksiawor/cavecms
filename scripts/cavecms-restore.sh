@@ -186,12 +186,14 @@ on_term() {
     # Data is fully restored; only the restart/verify was interrupted. Clear
     # maintenance and ask for a manual restart — do NOT undo a good restore.
     [ "$MAINT_ON" = "1" ] && post_maintenance_toggle false || true
+    MAINT_ON=0
     rstatus restart_required 7 "Restore complete — restart your CaveCMS process to finish"
     post_backup_audit_terminal restore_completed "$ARCHIVE_ID"
   elif [ "$MUTATION_STARTED" = "1" ]; then
     fail_and_rollback "$CURRENT_STEP" "Restore interrupted" "The restore was interrupted; your previous data was put back."
   else
     [ "$MAINT_ON" = "1" ] && post_maintenance_toggle false || true
+    MAINT_ON=0
     rstatus failed "$CURRENT_STEP" "Restore interrupted" "The restore was interrupted before any changes were made."
     post_backup_audit_terminal restore_failed "$ARCHIVE_ID" "interrupted"
   fi
@@ -317,6 +319,10 @@ fi
 # ===========================================================================
 CURRENT_STEP=2
 rstatus restoring 2 "Safeguarding current data" "" "$COMPAT_WARN"
+
+# Sweep stale uploads-root trash from a prior hard-crashed restore (the backup
+# engine's prune only touches CAVECMS_BACKUP_DIR, not UPLOADS_ROOT).
+find "$UPLOADS_ROOT" -maxdepth 1 -type d -name '.trash-*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 
 # Disk pre-check on the UPLOADS filesystem: the safety uploads tar + the restored
 # uploads extraction both land near UPLOADS_ROOT. Estimate ~2× current uploads
