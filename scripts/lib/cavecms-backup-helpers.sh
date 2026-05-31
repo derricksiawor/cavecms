@@ -257,3 +257,66 @@ except Exception:
     "$url" >/dev/null 2>>"${LOG_DIR:-/tmp}/backups-audit.log" || \
     echo "[backup] audit-terminal POST ($action) failed (non-fatal)" >&2
 }
+
+# ---------------------------------------------------------------------------
+# restart_app — surface-aware app restart, used by the RESTORE engine after
+# data is restored. Self-contained copy of cavecms-update.sh's restart_app so
+# the restore orchestrator doesn't depend on the updater's internals. Reads
+# CAVECMS_RESTART_MODE (systemd|cpanel|pm2|laptop; default pm2), REPO_DIR,
+# LOG_DIR, CAVECMS_SYSTEMD_UNIT, CAVECMS_PM2_APP_NAME, PM2_HOME.
+# ---------------------------------------------------------------------------
+restart_app() {
+  mkdir -p "${LOG_DIR:-/tmp}" 2>/dev/null || true
+  local mode="${CAVECMS_RESTART_MODE:-pm2}"
+  _restart_log() { cat >> "${LOG_DIR:-/tmp}/restore-restart.log" 2>/dev/null || cat >/dev/null; }
+  case "$mode" in
+    systemd)
+      local unit="${CAVECMS_SYSTEMD_UNIT:-cavecms.service}"
+      if [ "$(id -u)" = "0" ]; then
+        { echo "[cavecms-restore] restarting via systemd unit ${unit}"; systemctl restart "$unit" 2>&1 || echo "[cavecms-restore] systemctl restart exit non-zero — verifying via healthz"; } | _restart_log || true
+      else
+        { echo "[cavecms-restore] restarting via systemd unit ${unit} (sudo)"; sudo -n systemctl restart "$unit" 2>&1 || echo "[cavecms-restore] sudo systemctl restart failed — verifying via healthz"; } | _restart_log || true
+      fi
+      ;;
+    cpanel)
+      mkdir -p "${REPO_DIR}/tmp" 2>/dev/null || true
+      touch "${REPO_DIR}/tmp/restart.txt" 2>/dev/null \
+        && echo "[cavecms-restore] restarted via Passenger (tmp/restart.txt)" | _restart_log || true
+      ;;
+    laptop)
+      echo "[cavecms-restore] laptop/dev surface — manual restart required." | _restart_log || true
+      ;;
+    pm2|*)
+      local target="${CAVECMS_PM2_APP_NAME:-ecosystem.config.cjs}"
+      { (cd "${REPO_DIR}" && pm2 reload "$target" --update-env 2>&1) || echo "[cavecms-restore] pm2 reload exit non-zero — verifying via healthz"; } | _restart_log || true
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# verify_healthz <consecutive> <deadline_secs>
+# Poll HEALTHZ_URL until <consecutive> back-to-back "status":"ok" responses,
+# or the deadline elapses. Restore does NOT change code, so there is no
+# commit to match — a status:ok streak is the "app came back up" signal.
+# Returns 0 on success, 1 on timeout.
+# ---------------------------------------------------------------------------
+verify_healthz() {
+  local need="${1:-2}"
+  local deadline_secs="${2:-90}"
+  local url="${HEALTHZ_URL:-${CAVECMS_HEALTHZ_URL:-http://127.0.0.1:3040/healthz}}"
+  local args=()
+  [ -n "${HEALTHZ_TOKEN:-}" ] && args=(-H "Authorization: Bearer ${HEALTHZ_TOKEN}")
+  local ok=0 start now
+  start=$(date +%s)
+  while :; do
+    if curl -fsS --max-time 5 ${args[@]+"${args[@]}"} "$url" 2>/dev/null | grep -q '"status":"ok"'; then
+      ok=$((ok + 1))
+    else
+      ok=0
+    fi
+    [ "$ok" -ge "$need" ] && return 0
+    now=$(date +%s)
+    [ $((now - start)) -ge "$deadline_secs" ] && return 1
+    sleep 2
+  done
+}
