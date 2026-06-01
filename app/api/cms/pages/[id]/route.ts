@@ -46,10 +46,22 @@ type EditorField = (typeof EDITOR_FIELDS)[number]
 
 interface BlockListRow {
   id: number
+  // parent_id + kind expose the section -> column -> widget hierarchy so
+  // a consumer can rebuild the tree (the rows arrive position-flat).
+  // Sections are parent_id NULL / kind 'section'; columns point at their
+  // section; widgets point at their column.
+  parent_id: number | null
+  kind: 'section' | 'column' | 'widget'
   block_key: string | null
   block_type: string
   position: number
   data: string
+  // Per-block meta JSON — section background/padding, column width +
+  // background + cardLink, widget spacing/visibility. Needed alongside
+  // `data` for full structural fidelity when a consumer rebuilds or
+  // edits the tree (column cardLink + section/column presentation live
+  // here, not in `data`). Null for legacy rows with no meta.
+  meta: string | null
   version: number
 }
 
@@ -80,7 +92,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   // FOR UPDATE so a mutation never lands on a stale view.
 
   const [blockRows] = (await db.execute(sql`
-    SELECT id, block_key, block_type, position, data, version
+    SELECT id, parent_id, kind, block_key, block_type, position, data, version
     FROM content_blocks
     WHERE page_id = ${id} AND deleted_at IS NULL
     ORDER BY position
