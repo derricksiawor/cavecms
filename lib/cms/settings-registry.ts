@@ -154,21 +154,28 @@ const footer = z.object({
   tagline: z.string().max(220),
   // Visual theme — see footerTheme above.
   theme: footerTheme,
-  columns: z
-    .array(
-      z.object({
-        label: z.string().max(60),
-        links: z
-          .array(
-            z.object({
-              text: z.string().max(60),
-              href: siteLink,
-            }),
-          )
-          .max(20),
-      }),
-    )
-    .max(6),
+  // Same blank-seeding MenuBuilder as the header → prune unlabeled columns +
+  // links before validation so an abandoned "Add column"/"Add link" row never
+  // persists and renders as an empty heading / dead link in the public footer.
+  // Footer link label key is `text`; the column label is `label`.
+  columns: z.preprocess(
+    makeMenuPrune('links', 'text'),
+    z
+      .array(
+        z.object({
+          label: z.string().max(60),
+          links: z
+            .array(
+              z.object({
+                text: z.string().max(60),
+                href: siteLink,
+              }),
+            )
+            .max(20),
+        }),
+      )
+      .max(6),
+  ),
   // Optional footer logo override. When null, the footer falls back
   // to the header logo (or brand text). Lets the operator use a
   // lighter wordmark on the dark footer if the dark logo doesn't read
@@ -225,38 +232,43 @@ const themePalette = z.object({
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
 })
 
-// Drop abandoned blank rows BEFORE item validation. The shared MenuBuilder
-// seeds a fully-empty row on "Add link"/"Add sub-link"; an operator who saves
-// while one is still blank would otherwise trip the label .min(1) rule and get
-// the ENTIRE site_header save rejected with an opaque 400. A row with ANY
-// content — a label, an href, or (for a parent) any non-blank child — is kept
-// and validated normally. Runs on every write path (admin form + /api/cms/nav).
-function pruneBlankNavItems(v: unknown): unknown {
-  if (!Array.isArray(v)) return v
+// Prune unlabeled rows BEFORE item validation, on every write path (admin form
+// + /api/cms/nav), for BOTH menus (header navItems + footer columns) which now
+// share the same blank-seeding MenuBuilder. The rule is keyed to what actually
+// breaks downstream: a row whose REQUIRED label is blank can never satisfy the
+// header's `label.min(1)` (it would reject the whole save with an opaque 400)
+// AND renders as an empty `<h4>` heading / dead `<a href="">` link on the
+// footer. So: drop any child whose label is blank, then drop any parent/column
+// whose label is blank (regardless of remaining children — a label-less parent
+// can't validate or render either). A row with a real label is kept + validated
+// normally. `childLabelKey` differs by surface (header children use 'label',
+// footer links use 'text'); the parent/column label is always 'label'.
+function makeMenuPrune(childrenKey: string, childLabelKey: string) {
   const blankLeaf = (c: unknown): boolean => {
     if (!c || typeof c !== 'object') return true
     const o = c as Record<string, unknown>
-    const label = typeof o.label === 'string' ? o.label.trim() : ''
-    const href = typeof o.href === 'string' ? o.href.trim() : ''
-    return label === '' && href === ''
+    const label = typeof o[childLabelKey] === 'string' ? (o[childLabelKey] as string).trim() : ''
+    return label === ''
   }
-  return v
-    .map((it) => {
-      if (!it || typeof it !== 'object') return it
-      const o = it as Record<string, unknown>
-      if (Array.isArray(o.children)) {
-        return { ...o, children: o.children.filter((c) => !blankLeaf(c)) }
-      }
-      return o
-    })
-    .filter((it) => {
-      if (!it || typeof it !== 'object') return false
-      const o = it as Record<string, unknown>
-      const label = typeof o.label === 'string' ? o.label.trim() : ''
-      const href = typeof o.href === 'string' ? o.href.trim() : ''
-      const kids = Array.isArray(o.children) ? o.children : []
-      return label !== '' || href !== '' || kids.length > 0
-    })
+  return (v: unknown): unknown => {
+    if (!Array.isArray(v)) return v
+    return v
+      .map((it) => {
+        if (!it || typeof it !== 'object') return it
+        const o = it as Record<string, unknown>
+        const kids = o[childrenKey]
+        if (Array.isArray(kids)) {
+          return { ...o, [childrenKey]: kids.filter((c) => !blankLeaf(c)) }
+        }
+        return o
+      })
+      .filter((it) => {
+        if (!it || typeof it !== 'object') return false
+        const o = it as Record<string, unknown>
+        const label = typeof o.label === 'string' ? o.label.trim() : ''
+        return label !== ''
+      })
+  }
 }
 
 const siteHeader = z.object({
@@ -277,7 +289,7 @@ const siteHeader = z.object({
   // operator request — keeps the bar from wrapping and forces editorial
   // discipline.
   navItems: z.preprocess(
-    pruneBlankNavItems,
+    makeMenuPrune('children', 'label'),
     z
       .array(
         z.object({

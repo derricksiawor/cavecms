@@ -56,17 +56,20 @@ describe('site_header navItems with children', () => {
     expect('children' in child).toBe(false)
   })
 
-  it('prunes a fully-blank parent row (abandoned "Add link") instead of rejecting the whole save', () => {
+  it('prunes any unlabeled parent row (abandoned "Add link", even with a typed href or children)', () => {
     const parsed = schema.parse(
       base([
         { label: 'About', href: '/about' },
-        { __id: 'new', label: '', href: '' },
+        { __id: 'a', label: '', href: '' }, // fully blank
+        { __id: 'b', label: '', href: '/typed-url-no-label' }, // href but no label
+        { __id: 'c', label: '', children: [{ label: 'Orphan', href: '/o' }] }, // children but no label
       ]),
-    ) as { navItems: unknown[] }
+    ) as { navItems: Array<{ label: string }> }
     expect(parsed.navItems).toHaveLength(1)
+    expect(parsed.navItems[0]!.label).toBe('About')
   })
 
-  it('prunes a fully-blank child row but keeps the labeled ones', () => {
+  it('prunes any unlabeled child row but keeps the labeled ones', () => {
     const parsed = schema.parse(
       base([
         {
@@ -74,7 +77,8 @@ describe('site_header navItems with children', () => {
           href: '/about',
           children: [
             { label: 'Team', href: '/team' },
-            { __id: 'x', label: '', href: '' },
+            { __id: 'x', label: '', href: '' }, // fully blank
+            { __id: 'y', label: '', href: '/url-no-label' }, // href but no label
           ],
         },
       ]),
@@ -93,5 +97,33 @@ describe('site_header navItems with children', () => {
   it('rejects more than 12 children', () => {
     const kids = Array.from({ length: 13 }, (_, i) => ({ label: `c${i}`, href: `/c${i}` }))
     expect(() => schema.parse(base([{ label: 'About', href: '/about', children: kids }]))).toThrow()
+  })
+})
+
+const footerSchema = registry['footer'].schema
+
+function footerBase(columns: unknown) {
+  return { tagline: 'x', theme: 'obsidian', columns }
+}
+
+describe('footer columns prune (same MenuBuilder, same blank-row defense)', () => {
+  it('prunes unlabeled columns and unlabeled links', () => {
+    const parsed = footerSchema.parse(
+      footerBase([
+        {
+          label: 'Company',
+          links: [
+            { text: 'Careers', href: '/careers' },
+            { __id: 'x', text: '', href: '' }, // blank link → dropped
+            { __id: 'y', text: '', href: '/url-no-text' }, // text blank → dropped
+          ],
+        },
+        { __id: 'c', label: '', links: [{ text: 'Orphan', href: '/o' }] }, // blank column → dropped
+        { __id: 'd', label: '', links: [] }, // fully blank column → dropped
+      ]),
+    ) as { columns: Array<{ label: string; links: unknown[] }> }
+    expect(parsed.columns).toHaveLength(1)
+    expect(parsed.columns[0]!.label).toBe('Company')
+    expect(parsed.columns[0]!.links).toHaveLength(1)
   })
 })
