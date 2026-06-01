@@ -19,12 +19,24 @@ export function InquiryForm({
   projectId,
   projectName,
   previewMode = false,
+  fieldStyle = 'bordered',
 }: {
   csrf: string
   projectId: number
   projectName: string
   previewMode?: boolean
+  // Input treatment. 'bordered' (default) is the original look; 'filled'
+  // swaps the visible border for a tinted fill so the inquiry form can
+  // be aligned with the brochure form via section data.
+  fieldStyle?: 'bordered' | 'filled'
 }) {
+  // Shared input/textarea classes. Bordered === original. Filled uses a
+  // tinted surface with a transparent border (border kept for layout
+  // stability + the focus ring).
+  const fieldClass =
+    fieldStyle === 'filled'
+      ? 'mt-1 w-full rounded-lg border border-warm-stone/20 bg-warm-stone/15 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500'
+      : 'mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500'
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState<'idle' | 'ok' | 'expired' | 'error'>(
     'idle',
@@ -107,7 +119,7 @@ export function InquiryForm({
             required
             maxLength={180}
             autoComplete="name"
-            className="mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500"
+            className={fieldClass}
           />
         </label>
         <label className="block">
@@ -119,7 +131,7 @@ export function InquiryForm({
             maxLength={180}
             autoComplete="email"
             inputMode="email"
-            className="mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500"
+            className={fieldClass}
           />
         </label>
       </div>
@@ -131,7 +143,7 @@ export function InquiryForm({
           maxLength={40}
           autoComplete="tel"
           inputMode="tel"
-          className="mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500"
+          className={fieldClass}
         />
       </label>
       <label className="block">
@@ -141,7 +153,7 @@ export function InquiryForm({
           required
           maxLength={4000}
           rows={4}
-          className="mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500"
+          className={fieldClass}
         />
       </label>
       <recaptcha.Widget />

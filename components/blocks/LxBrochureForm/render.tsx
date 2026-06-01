@@ -32,6 +32,10 @@ export function LxBrochureForm({
     // projects.brochure_pdf_id. alt is unused on this surface.
     pdf: { media_id: project.brochure_pdf_id, alt: '' },
     gate_message_richtext: data.gate_message_richtext,
+    // Presentation controls flow through to BrochureSection, which
+    // honours them (absent === current behavior).
+    card_surface: data.card_surface,
+    field_style: data.field_style,
   }
   return (
     <ProjectFullBleed>

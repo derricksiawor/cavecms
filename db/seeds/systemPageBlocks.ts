@@ -103,10 +103,10 @@ export const HOME_SECTIONS: SectionSpec[] = [
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Welcome', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_heading', data: { text: `You're running CaveCMS.`, level: 'h1', size: 'display-2xl', alignment: 'left', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
-      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>This entire page is built from CMS blocks. Sign in to your admin URL to start editing — drag, drop, type, save.</p>', size: 'body-lg', alignment: 'left', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
-      { kind: 'widget', blockType: 'lx_action', data: { label: 'Read the docs', href: 'https://cavecms.derricksiawor.com', openInNew: true, variant: 'primary-gold', size: 'lg', alignment: 'left', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Welcome', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: `You're running CaveCMS.`, level: 'h1', size: 'display-2xl', alignment: 'center', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>This entire page is built from CMS blocks. Sign in to your admin URL to start editing — drag, drop, type, save.</p>', size: 'body-lg', alignment: 'center', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_action', data: { label: 'Read the docs', href: 'https://cavecms.derricksiawor.com', openInNew: true, variant: 'primary-gold', size: 'lg', alignment: 'center', animation: 'fade-in' }, meta: { marginTop: 'md' } },
     ] }],
   },
 
@@ -136,8 +136,8 @@ export const HOME_SECTIONS: SectionSpec[] = [
     kind: 'section',
     meta: { columns: 1, background: 'ivory', padding: 'md' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Get started', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Make this site yours', level: 'h2', size: 'display-md', alignment: 'left', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Get started', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Make this site yours', level: 'h2', size: 'display-md', alignment: 'center', tone: 'obsidian', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
       { kind: 'widget', blockType: 'lx_text', data: {
         body_richtext:
           '<p>Three steps to take this from a fresh install to a real site:</p>' +
@@ -147,7 +147,7 @@ export const HOME_SECTIONS: SectionSpec[] = [
             '<li><strong>Configure</strong> your site name, contact info, SMTP, and integrations under Admin → Settings.</li>' +
           '</ol>' +
           '<p>If you want a different starter template, run the install wizard’s template chooser (coming soon) or just replace this page block-by-block.</p>',
-        size: 'body-md', alignment: 'left', tone: 'obsidian', maxWidth: 'medium', animation: 'fade-in',
+        size: 'body-md', alignment: 'center', tone: 'obsidian', maxWidth: 'medium', animation: 'fade-in',
       }, meta: { marginTop: 'md' } },
     ] }],
   },

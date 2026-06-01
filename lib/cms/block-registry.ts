@@ -1,6 +1,11 @@
 import 'server-only'
 import { z } from 'zod'
 import { TEXT_MAX } from './limits'
+// CTA href safety (allow-list regex + unsafe-char gate + the
+// required/optional zod helpers) lives in ./safeHref so the client
+// value-layer (blockMeta.ts) can reuse the SAME validation without
+// pulling this server-only registry into the browser bundle.
+import { safeCtaHref, safeCtaHrefOptional } from './safeHref'
 // parseVideoEmbedUrl is unused after the legacy purge — the lx_video
 // schema uses its own isValidVideoUrl gate. Kept removed (no import).
 import { parseStrictHttpsUrl } from './url-guard'
@@ -89,20 +94,6 @@ const MediaRef = z.object({
   alt: z.string().max(TEXT_MAX.short),
 })
 
-// CTA hrefs are rendered raw by the page renderer — not inside body_richtext
-// — so DOMPurify never sees them. URI allow-list at the parse boundary is
-// the ONLY defense. Matches sanitize.ts ALLOWED_URI_REGEXP plus same-origin
-// paths (e.g. /contact). Rejected:
-//   - bare '/' or '/<no-second-char>'  (open redirect when relative-resolved)
-//   - '//evil.com'  (protocol-relative — the second '/' anchors cross-origin)
-//   - '/\evil.com'  (backslash — WHATWG URL spec § 4.4.3 normalises backslash
-//                    to forward slash in special-scheme URLs, so /\evil.com
-//                    resolves to https://evil.com on the public site)
-//   - 'https:foo'   (missing '//' — some browsers treat this as path-absolute
-//                    while others treat as same-origin — ambiguous, reject)
-//   - 'javascript:', 'data:', 'vbscript:', 'file:', 'ftp:' (scheme not in
-//                    the explicit allowlist)
-const CTA_HREF_RE = /^(?:https?:\/\/|mailto:|tel:|\/[^/\\])/i
 
 // ─── Display-text safety helpers ────────────────────────────────────
 // Reject Unicode bidi-control + zero-width characters in operator-
@@ -120,61 +111,6 @@ const safeText = (max: number) =>
   z.string().max(max).refine(isSafeDisplayText, 'bidi_chars_forbidden')
 const safeRequiredText = (min: number, max: number) =>
   z.string().min(min).max(max).refine(isSafeDisplayText, 'bidi_chars_forbidden')
-
-// ─── CTA href safety helpers ────────────────────────────────────────
-// Reject control characters (U+0000-U+001F, U+007F) + backslash + any
-// leading/trailing whitespace. WHATWG URL spec strips TAB/LF/CR from
-// hrefs before parsing, so `/<TAB>/evil.com` passes the CTA_HREF_RE
-// regex (TAB satisfies `[^/\\]`) but the browser resolves it as
-// `//evil.com` → cross-origin redirect. Pre-checking via this refine
-// closes that bypass class entirely. Trim equality also rejects
-// leading/trailing spaces operators may paste from copied URLs.
-const HREF_UNSAFE_CHAR_RE = /[\u0000-\u001F\u007F\\]/
-function isSafeCtaHref(s: string): boolean {
-  // Step 1 — char-class gate: control chars + DEL + backslash.
-  if (HREF_UNSAFE_CHAR_RE.test(s)) return false
-  // Step 2 — trim equality rejects leading/trailing whitespace.
-  if (s !== s.trim()) return false
-  // Step 3 — reject embedded spaces (WHATWG URL parses them as
-  // %20-in-host or fails, neither legitimate for an editorial CTA).
-  if (s.includes(' ')) return false
-  // Step 4 — for http(s) schemes, parse the URL and reject userinfo.
-  // `https://attacker@trusted-looking.com` reads as trusted but
-  // navigates to attacker. The legacy SocialIcons gate
-  // (parseStrictHttpsUrl) already enforces this; CTA hrefs now match.
-  if (/^https?:\/\//i.test(s)) {
-    try {
-      const u = new URL(s)
-      if (u.username || u.password) return false
-    } catch {
-      return false
-    }
-  }
-  return true
-}
-// Chain order matters: .regex returns ZodString (still chainable),
-// .refine returns ZodEffects (no .regex method). So .regex comes
-// BEFORE .refine. Result type infers to `string` either way.
-//
-// `safeCtaHref` is for required href fields (.min(1)).
-// `safeCtaHrefOptional` is for fields wrapped in .optional() at the
-// caller — it OMITS .min(1) so the helper schema accepts whatever
-// the regex demands (non-empty). Empty string still fails the regex,
-// so the only "optional" behaviour comes from the caller's .optional()
-// (treats missing/undefined as valid; never accepts '').
-const safeCtaHref = (max: number) =>
-  z
-    .string()
-    .min(1)
-    .max(max)
-    .regex(CTA_HREF_RE, 'href_scheme_not_allowed')
-    .refine(isSafeCtaHref, 'href_contains_unsafe_chars')
-const safeCtaHrefOptional = (max: number) =>
-  z
-    .string()
-    .max(max)
-    .regex(CTA_HREF_RE, 'href_scheme_not_allowed')
-    .refine(isSafeCtaHref, 'href_contains_unsafe_chars')
 
 // SocialIcons URL gate. Stricter than CTA_HREF_RE because social
 // profile URLs are always external HTTPS - they're never relative
@@ -633,6 +569,10 @@ export const blockSchemas = {
       duration_ms: z.number().int().min(0).max(10000).default(1800),
       decimals: z.number().int().min(0).max(4).default(0),
       alignment: z.enum(['left', 'center', 'right']).default('center'),
+      // Layout of the number relative to its label. 'vertical' (default,
+      // current) stacks the number above the label; 'horizontal' puts
+      // them on one line — useful for a compact bed/bath/sqft facts row.
+      orientation: z.enum(['vertical', 'horizontal']).default('vertical'),
       tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_stat).default('obsidian'),
       family: fontFamilyToken,
       weight: fontWeightToken,
@@ -960,6 +900,13 @@ export const blockSchemas = {
   lx_inquiry_form: z.object({
     heading: z.string().max(220).optional(),
     body_richtext: z.string().max(2000).optional(),
+    // Form presentation (absent === current: cream panel card, bordered
+    // inputs). Passed straight through to InquirySection, which honours
+    // them. card_surface 'transparent' drops the card so the form can be
+    // aligned with the brochure form; field_style 'filled' swaps the
+    // bordered inputs for a tinted fill.
+    card_surface: z.enum(['panel', 'transparent']).optional(),
+    field_style: z.enum(['bordered', 'filled']).optional(),
   }),
 
   // Project brochure form — lead-gated PDF download to
@@ -969,6 +916,12 @@ export const blockSchemas = {
   // RenderContext.project, returns null when absent, emits id="brochure".
   lx_brochure_form: z.object({
     gate_message_richtext: z.string().max(2000).optional(),
+    // Form presentation (absent === current: no card surface, bordered
+    // inputs). Threaded into BrochureSection by the block renderer.
+    // card_surface 'panel' wraps the form in a cream card matching the
+    // inquiry form; field_style 'filled' swaps the bordered inputs.
+    card_surface: z.enum(['panel', 'transparent']).optional(),
+    field_style: z.enum(['bordered', 'filled']).optional(),
   }),
 } as const
 

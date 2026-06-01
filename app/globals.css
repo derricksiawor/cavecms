@@ -757,3 +757,58 @@
 [data-drawer-tone="dark"] [class*="border-dashed"] p.text-sm.font-medium {
   color: var(--color-cream-50);
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Whole-card link (column `cardLink`).
+
+   Makes an entire CMS column one clickable target via a stretched-link
+   OVERLAY anchor (`.cms-card-link__overlay`), NOT by wrapping the
+   column's children in a parent <a>. Wrapping would nest interactive
+   content — an inner lx_action renders its own <a>, and an <a> inside
+   an <a> is invalid HTML that browsers auto-close, silently breaking
+   the card click. The overlay covers the whole column to capture clicks
+   on its non-interactive areas, while genuinely interactive descendants
+   (the operator's own buttons / links / form controls) are raised above
+   it so they stay independently clickable. Pattern per Inclusive
+   Components "Cards" + the stretched-link technique.
+
+   `isolation: isolate` makes the column its own stacking context so the
+   overlay (z-index 5) and the raised interactive controls (z-index 6)
+   order deterministically regardless of the hover transform (which
+   would otherwise create a context only on hover) and never leak above
+   a sibling column. */
+.cms-card-link {
+  position: relative;
+  isolation: isolate;
+  cursor: pointer;
+  transition: transform var(--duration-standard, 0.3s) var(--ease-standard, ease),
+    box-shadow var(--duration-standard, 0.3s) var(--ease-standard, ease);
+}
+.cms-card-link:hover {
+  transform: translateY(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cms-card-link { transition: none; }
+  .cms-card-link:hover { transform: none; }
+}
+.cms-card-link__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+}
+.cms-card-link__overlay:focus-visible {
+  outline: 2px solid var(--color-copper-400);
+  outline-offset: 3px;
+}
+.cms-card-link a:not(.cms-card-link__overlay),
+.cms-card-link button,
+.cms-card-link [role="button"],
+.cms-card-link input,
+.cms-card-link select,
+.cms-card-link textarea,
+.cms-card-link label,
+.cms-card-link [tabindex]:not([tabindex="-1"]) {
+  position: relative;
+  z-index: 6;
+}

@@ -1,10 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { BookmarkPlus, Loader2, Search, Trash2, X } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
+import { subscribeSavedBlocksChanged } from '@/lib/cms/savedBlocksBus'
 import { useToast } from './Toast'
+import { ConfirmModal } from './ConfirmModal'
 import { useInsertBlock, type InsertableBlockType } from './InlineEditContext'
 import type {
   SavedBlockDetail,
@@ -22,9 +25,13 @@ import type {
 //      pills + slash command use — same audit, same undo wiring, same
 //      revalidate.
 //   3. Inline search filter (substring against name + blockType).
-//   4. Delete via DELETE /[id] with confirm prompt (window.confirm to
-//      stay self-contained; the canvas-side ConfirmModal lives in the
-//      ContextMenuProvider and isn't reachable from inside the picker).
+//   4. Delete via DELETE /[id], gated by a branded ConfirmModal (same
+//      component the canvas uses) rendered locally in this panel — never
+//      window.confirm, which leaks raw browser dialog chrome into the
+//      editor.
+//   5. Live-refreshes via the savedBlocksBus when a block is saved from
+//      the canvas right-click, so a newly-saved block appears here
+//      immediately instead of only after a tab round-trip.
 //
 // Empty state copy points operators at the source verb ("right-click any
 // widget → Save as block"). Error states fall back to a retry pill so
@@ -64,13 +71,22 @@ export function SavedBlocksPanel({ pageId }: Props) {
   const [query, setQuery] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  // The saved block pending a delete confirmation. Drives a branded
+  // ConfirmModal (replaces window.confirm — the editor must never show
+  // raw browser dialog chrome).
+  const [confirmRemove, setConfirmRemove] = useState<SavedBlockListItem | null>(
+    null,
+  )
   // In-flight ref so a fast double-click on the same card doesn't
   // double-instantiate. The button's disabled prop covers the UI but
   // an enter-key replay during the same tick can still slip past.
   const inFlightRef = useRef(false)
 
   const fetchList = useCallback(async () => {
-    setState({ kind: 'loading' })
+    // Keep an already-loaded list on screen while refetching (e.g. the
+    // savedBlocksBus live-refresh after a save) so it doesn't flash to a
+    // spinner. Only the initial load / error-retry shows the spinner.
+    setState((prev) => (prev.kind === 'ready' ? prev : { kind: 'loading' }))
     try {
       const res = await fetch('/api/cms/saved-blocks', {
         method: 'GET',
@@ -101,6 +117,13 @@ export function SavedBlocksPanel({ pageId }: Props) {
   useEffect(() => {
     void fetchList()
   }, [fetchList])
+
+  // Refetch when a block is saved elsewhere (the canvas right-click
+  // "Save as block"). Without this, an already-mounted Saved tab shows a
+  // stale list until the operator switches tabs away and back.
+  useEffect(() => subscribeSavedBlocksChanged(() => void fetchList()), [
+    fetchList,
+  ])
 
   // Filter — substring against name + blockType. Empty query returns
   // the full list. Locale-insensitive lowercase keeps things simple;
@@ -178,21 +201,15 @@ export function SavedBlocksPanel({ pageId }: Props) {
     [fetchList, insertBlock, pageId, toast],
   )
 
-  const removeSaved = useCallback(
+  // Open the branded confirm modal. The actual delete runs in
+  // performRemove once the operator confirms — no window.confirm (the
+  // editor must never surface raw browser dialog chrome).
+  const removeSaved = useCallback((item: SavedBlockListItem) => {
+    setConfirmRemove(item)
+  }, [])
+
+  const performRemove = useCallback(
     async (item: SavedBlockListItem) => {
-      // Self-contained confirm — the canvas-side ConfirmModal lives in
-      // ContextMenuProvider and isn't reachable from inside the picker
-      // panel. window.confirm is the lightest path for an in-panel
-      // destructive verb (no portal, no focus dance) and the gesture
-      // is reversible at the source (operator can re-save).
-      if (
-        typeof window !== 'undefined' &&
-        !window.confirm(
-          `Remove "${item.name}" from your saved blocks? You can save it again from the source.`,
-        )
-      ) {
-        return
-      }
       setDeletingId(item.id)
       try {
         const res = await csrfFetch(`/api/cms/saved-blocks/${item.id}`, {
@@ -356,6 +373,44 @@ export function SavedBlocksPanel({ pageId }: Props) {
           )
         })}
       </ul>
+
+      {confirmRemove !== null &&
+        typeof document !== 'undefined' &&
+        // Portal to <body>: this panel lives inside the WidgetPicker
+        // <aside>, which has `backdrop-blur` + `overflow-hidden`. A
+        // backdrop-filter ancestor becomes the containing block for
+        // `position: fixed` descendants, so a non-portaled modal would be
+        // clipped inside the ~288px picker column instead of covering the
+        // viewport. The canvas modals don't hit this because they render
+        // at the provider root.
+        createPortal(
+          <ConfirmModal
+            ariaLabel="Remove saved block"
+            title="Remove this saved block?"
+            description={
+              <>
+                <span className="font-semibold text-near-black">
+                  {confirmRemove.name}
+                </span>{' '}
+                will be removed from your library. You can save it again from
+                the source any time.
+              </>
+            }
+            confirmLabel="Remove"
+            cancelLabel="Keep"
+            destructive
+            busy={deletingId === confirmRemove.id}
+            onCancel={() => {
+              if (deletingId !== null) return
+              setConfirmRemove(null)
+            }}
+            onConfirm={() => {
+              const item = confirmRemove
+              void performRemove(item).then(() => setConfirmRemove(null))
+            }}
+          />,
+          document.body,
+        )}
     </div>
   )
 }

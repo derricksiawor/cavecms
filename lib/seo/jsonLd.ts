@@ -1,6 +1,7 @@
 import 'server-only'
 import { getSetting } from '@/lib/cms/getSettings'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
+import { resolveMedia } from '@/lib/cms/resolveMedia'
 
 // JSON-LD builders. Every public route emits at least one
 // <script type="application/ld+json">. The shapes here mirror
@@ -14,23 +15,44 @@ import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 // being given a wrong canonical.
 
 export async function organizationLd(): Promise<Record<string, unknown>> {
-  // Both settings + site origin are independent; await in parallel.
-  // Sequential awaits added one DB round-trip per public CMS render.
-  const [org, contact, siteOrigin] = await Promise.all([
+  // Settings + site origin are independent; await in parallel. The
+  // header is fetched too so the Organization logo can fall back to the
+  // site-header logo when the operator hasn't set a dedicated one.
+  const [org, contact, header, siteOrigin] = await Promise.all([
     getSetting('organization_json_ld'),
     getSetting('contact_info'),
+    getSetting('site_header'),
     getSiteOrigin(),
   ])
+
+  // Logo resolution (no operator URL-typing — see organization_json_ld
+  // schema): the dedicated Google logo upload wins; otherwise reuse the
+  // site-header logo; otherwise omit `logo` entirely. resolveMedia
+  // returns a same-origin variant path, which we make absolute with the
+  // site origin (schema.org prefers an absolute logo URL). A media row
+  // that's missing or still processing degrades to "no logo".
+  const logoMediaId = org.logo?.media_id ?? header.logo?.media_id ?? null
+  let logoUrl: string | undefined
+  if (logoMediaId != null) {
+    const media = await resolveMedia(logoMediaId)
+    const path = media?.md ?? media?.lg ?? media?.og ?? media?.thumb ?? null
+    if (path) {
+      logoUrl = path.startsWith('http')
+        ? path
+        : siteOrigin
+          ? `${siteOrigin}${path}`
+          : path
+    }
+  }
+
   return {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: org.name,
     alternateName: org.altName,
-    logo: org.logoUrl.startsWith('http')
-      ? org.logoUrl
-      : siteOrigin
-        ? `${siteOrigin}${org.logoUrl}`
-        : org.logoUrl,
+    // Omitted (undefined → dropped by JSON.stringify) when no logo is
+    // configured anywhere — a missing logo beats a broken one.
+    logo: logoUrl,
     address: {
       '@type': 'PostalAddress',
       streetAddress: contact.address,

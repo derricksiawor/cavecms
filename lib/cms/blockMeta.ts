@@ -19,6 +19,8 @@ import {
 } from './spacingTokens'
 import type { SpacingMeta } from './spacingClasses'
 import { BLOCK_TONE_ENUMS } from './blockTones'
+import { TEXT_MAX } from './limits'
+import { CTA_HREF_RE, isSafeCtaHref, safeCtaHref } from './safeHref'
 
 // Single source of truth for the kind discriminator. The literal
 // union appears in API bodies, hydrate types, the renderer partition,
@@ -166,6 +168,22 @@ export interface ColumnMeta extends SpacingMeta, IdentityMeta {
   // CSS grid self-alignment for the column within its row.
   // 'center' vertically centers a short text column next to a tall image.
   verticalAlign?: 'center' | 'start' | 'end'
+  // Optional whole-card link. When set, the entire column becomes a
+  // single clickable target via a stretched-link OVERLAY anchor — NOT
+  // by wrapping the children in a parent <a>. Wrapping would nest
+  // interactive content (an inner lx_action renders its own <a>; an
+  // <a> inside an <a> is invalid HTML and browsers auto-close the
+  // outer link, silently breaking the card click). The overlay pattern
+  // keeps the markup valid AND lets inner buttons/links stay
+  // independently clickable — they're raised above the overlay by the
+  // `.cms-card-link` rules in globals.css. See ColumnFrame in
+  // renderShell.tsx.
+  cardLink?: { href: string; openInNew?: boolean }
+  // Accessible name for the whole-card link (rendered as aria-label on
+  // the overlay anchor). An overlay link has no text content, so it
+  // would have no accessible name (WCAG 2.4.4 / 4.1.2) — the operator
+  // names where the card leads, e.g. "View the Riverside project".
+  cardLinkLabel?: string
 }
 
 // Chunk E: widgets gain per-side spacing meta. Pre-Chunk-E widget
@@ -553,6 +571,31 @@ export function parseColumnMeta(raw: unknown): ColumnMeta {
   if (va === 'center' || va === 'start' || va === 'end') {
     out.verticalAlign = va
   }
+  // Whole-card link — tolerant read. Re-runs the same CTA href gate the
+  // write boundary uses (allow-list scheme regex + unsafe-char/userinfo
+  // refine), so a hand-edited or stale blob with an unsafe href renders
+  // as a plain (non-linked) column rather than emitting a dangerous
+  // anchor.
+  const cl = r['cardLink']
+  if (cl && typeof cl === 'object' && !Array.isArray(cl)) {
+    const href = (cl as Record<string, unknown>)['href']
+    if (
+      typeof href === 'string' &&
+      href.trim() !== '' &&
+      CTA_HREF_RE.test(href) &&
+      isSafeCtaHref(href)
+    ) {
+      const link: { href: string; openInNew?: boolean } = { href }
+      if ((cl as Record<string, unknown>)['openInNew'] === true) {
+        link.openInNew = true
+      }
+      out.cardLink = link
+    }
+  }
+  const clLabel = r['cardLinkLabel']
+  if (typeof clLabel === 'string' && clLabel.trim() !== '') {
+    out.cardLinkLabel = clLabel.slice(0, 120)
+  }
   Object.assign(out, readSpacingMeta(r))
   Object.assign(out, readIdentityMeta(r))
   return out
@@ -914,6 +957,21 @@ export const ColumnMetaSchema = z
     minHeight: z
       .enum(['none', 'sm', 'md', 'lg', 'xl', 'screen'])
       .optional(),
+    // Whole-card link (stretched-link overlay — see ColumnMeta +
+    // ColumnFrame). The LinkField edit-drawer control sends either
+    // `undefined` (no link) or `{ href, openInNew? }` with a NON-empty
+    // href, so no empty-string coercion is needed here. The href runs
+    // the full CTA gate shared with every lx_* href (anti
+    // javascript:/data:, anti //evil.com, anti embedded userinfo).
+    cardLink: z
+      .object({
+        href: safeCtaHref(TEXT_MAX.url),
+        openInNew: z.boolean().optional(),
+      })
+      .optional(),
+    // Accessible name for the card link (aria-label on the overlay
+    // anchor). 120-char cap mirrors the brand-text / nav-label caps.
+    cardLinkLabel: z.string().max(120).optional(),
     ...SpacingFields,
     ...IdentityFields,
   })

@@ -28,6 +28,15 @@ const ALIGN_CLASS: Record<BlockData<'lx_stat'>['alignment'], string> = {
   right: 'text-right items-end',
 }
 
+// Horizontal orientation: number + label sit on one line. Alignment maps
+// to main-axis justification (+ text-align for the label) since the
+// cross-axis is now the baseline row.
+const HORIZONTAL_ALIGN_CLASS: Record<BlockData<'lx_stat'>['alignment'], string> = {
+  left: 'justify-start text-left',
+  center: 'justify-center text-center',
+  right: 'justify-end text-right',
+}
+
 const TONE_VALUE_CLASS: Record<string, string> = {
   obsidian: 'text-obsidian',
   ivory: 'text-ivory',
@@ -87,21 +96,35 @@ export function LxStat({
     ? fontWeightClass(overrideWeight)
     : 'font-bold'
 
+  // Default 'vertical' reproduces the original stacked layout exactly.
+  const isHorizontal = data.orientation === 'horizontal'
+
   return (
     <div
       className={clsx(
-        'flex flex-col gap-3',
-        ALIGN_CLASS[data.alignment],
+        'flex gap-3',
+        isHorizontal
+          ? 'flex-row flex-wrap items-baseline'
+          : 'flex-col',
+        isHorizontal
+          ? HORIZONTAL_ALIGN_CLASS[data.alignment]
+          : ALIGN_CLASS[data.alignment],
         outerClass,
       )}
     >
       {/* Glow + number stack — the radial blur sits absolutely
          behind the number element. The relative wrapper anchors
-         the absolute children to the number's own box. */}
+         the absolute children to the number's own box. In horizontal
+         mode the number drops from the hero scale to a compact size
+         (and the glow tightens) so it reads as a "3 Bedrooms" facts
+         pair rather than a billboard numeral beside a speck of text. */}
       <div className="relative inline-flex">
         <div
           aria-hidden="true"
-          className="lx-glow-champagne absolute -inset-8"
+          className={clsx(
+            'lx-glow-champagne absolute',
+            isHorizontal ? '-inset-3' : '-inset-8',
+          )}
         />
         <span
           ref={ref}
@@ -110,7 +133,9 @@ export function LxStat({
             familyClass,
             weightClass,
             'tracking-tight leading-none',
-            'text-6xl sm:text-7xl md:text-8xl',
+            isHorizontal
+              ? 'text-3xl sm:text-4xl'
+              : 'text-6xl sm:text-7xl md:text-8xl',
             valueToneClass,
           )}
           style={valueStyle}
@@ -126,7 +151,15 @@ export function LxStat({
         // until a save lands and the parent re-renders with the new
         // data — same propagation contract as every other inline-edit
         // path.
-        <span className="inline-flex items-center gap-3 text-[10px] font-mono text-warm-stone">
+        <span
+          className={clsx(
+            'inline-flex items-center gap-3 text-[10px] font-mono text-warm-stone',
+            // In horizontal mode the outer is a baseline flex-row; force
+            // this editor-only prefix/suffix row onto its own line so it
+            // doesn't shove the label to a wrapped second line.
+            isHorizontal && 'basis-full',
+          )}
+        >
           <span>
             prefix:{' '}
             <InlineEditable

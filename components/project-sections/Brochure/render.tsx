@@ -24,6 +24,16 @@ export function BrochureSection({
 }): ReactNode {
   if (!data.pdf) return null
 
+  // Form presentation (default = current: no card surface, bordered
+  // inputs). 'panel' wraps the form in a cream card matching the
+  // inquiry form so the two can be aligned via section data.
+  const cardSurface = data.card_surface ?? 'transparent'
+  const fieldStyle = data.field_style ?? 'bordered'
+  const formWrapClass =
+    cardSurface === 'panel'
+      ? 'mt-8 rounded-2xl border border-near-black/8 bg-cream-50 p-6 sm:p-8 shadow-lg shadow-near-black/5'
+      : 'mt-8'
+
   return (
     <RevealOnView
       as="section"
@@ -100,12 +110,13 @@ export function BrochureSection({
             </p>
           )}
 
-          <div className="mt-8">
+          <div className={formWrapClass}>
             <BrochureForm
               csrf={ctx.preCsrf}
               projectId={ctx.projectId}
               projectName={ctx.projectName}
               previewMode={ctx.previewMode}
+              fieldStyle={fieldStyle}
             />
           </div>
         </div>

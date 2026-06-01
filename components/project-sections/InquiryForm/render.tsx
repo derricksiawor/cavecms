@@ -19,6 +19,15 @@ export function InquirySection({
   ctx: ProjectPublicContext
 }): ReactNode {
   const heading = data.heading?.trim() || `Reach out about ${ctx.projectName}`
+  // Form presentation (default = current: cream panel card, bordered
+  // inputs). 'transparent' drops the card so the form sits on the
+  // section — lets it be aligned with the brochure form.
+  const cardSurface = data.card_surface ?? 'panel'
+  const fieldStyle = data.field_style ?? 'bordered'
+  const cardClass =
+    cardSurface === 'panel'
+      ? 'mx-auto mt-12 max-w-2xl rounded-2xl border border-near-black/8 bg-cream-50 p-6 sm:p-10 shadow-lg shadow-near-black/5'
+      : 'mx-auto mt-12 max-w-2xl'
   return (
     <RevealOnView
       as="section"
@@ -67,12 +76,13 @@ export function InquirySection({
           ))}
         </ul>
 
-        <div className="mx-auto mt-12 max-w-2xl rounded-2xl border border-near-black/8 bg-cream-50 p-6 sm:p-10 shadow-lg shadow-near-black/5">
+        <div className={cardClass}>
           <InquiryForm
             csrf={ctx.preCsrf}
             projectId={ctx.projectId}
             projectName={ctx.projectName}
             previewMode={ctx.previewMode}
+            fieldStyle={fieldStyle}
           />
         </div>
       </div>

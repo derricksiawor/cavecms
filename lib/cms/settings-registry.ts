@@ -96,6 +96,20 @@ const defaultSeo = z.object({
       (u) => u == null || /^(?:https?:\/\/|\/[^/])/i.test(u),
       'must_be_https_or_same_origin_path',
     ),
+  // Operator-uploaded favicon (browser-tab / bookmark / home-screen
+  // icon). Stored as a media reference like the header logo; the root
+  // layout resolves it to <link rel="icon"> in generateMetadata. When
+  // null, Next's file convention serves the bundled app/favicon.ico.
+  // Inline media shape rather than the shared `mediaRef` because
+  // mediaRef is declared AFTER defaultSeo in this module — referencing
+  // it here would hit the const temporal-dead-zone at module load.
+  favicon: z
+    .object({
+      media_id: z.number().int().positive(),
+      alt: z.string().max(180),
+    })
+    .nullable()
+    .optional(),
 })
 
 // Reusable media-ref shape for fields that point at an uploaded asset.
@@ -515,16 +529,13 @@ const mobileCta = z.object({
 const organizationJsonLd = z.object({
   name: z.string().max(180),
   altName: z.string().max(180).optional(),
-  // logoUrl accepts same-origin path (default '/brand/logo.svg') or
-  // an https URL. organizationLd() rewrites same-origin paths to
-  // absolute by prefixing SITE_ORIGIN at emit time.
-  logoUrl: z
-    .string()
-    .max(500)
-    .refine(
-      (u) => /^(?:https?:\/\/|\/[^/])/i.test(u),
-      'must_be_https_or_same_origin_path',
-    ),
+  // Optional uploaded logo for Google branded-search results
+  // (schema.org Organization.logo). Stored as a media reference like
+  // the header logo / favicon — the operator picks a file, never types
+  // a URL. When null, organizationLd() falls back to the site-header
+  // logo automatically; if neither is set the `logo` field is omitted
+  // from the JSON-LD (a missing logo beats a broken one for indexers).
+  logo: mediaRef.nullable().optional(),
   foundingDate: z.string().max(40).optional(),
   sameAs: z.array(HttpsUrl).max(20).optional(),
 })
@@ -873,6 +884,7 @@ export const registry = {
       title: '',
       description: '',
       ogImagePath: null,
+      favicon: null,
     } satisfies z.infer<typeof defaultSeo>,
   },
   footer: {
@@ -923,7 +935,7 @@ export const registry = {
     schema: organizationJsonLd,
     default: {
       name: '',
-      logoUrl: '/brand/logo.svg',
+      logo: null,
       sameAs: [],
     } satisfies z.infer<typeof organizationJsonLd>,
   },

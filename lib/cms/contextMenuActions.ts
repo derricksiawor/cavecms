@@ -96,6 +96,7 @@ import {
 
 import { csrfFetch } from '@/lib/client/csrf'
 import { sanitizeSavedBlockName } from './savedBlocks'
+import { emitSavedBlocksChanged } from './savedBlocksBus'
 import {
   CLIPBOARD_SCHEMA_VERSION,
   canPaste,
@@ -192,6 +193,17 @@ export interface MenuContext {
     description: string
     confirmLabel?: string
   }) => Promise<boolean>
+  /** Branded single-line text prompt (replaces window.prompt). Resolves
+   *  to the entered string, or null if the operator cancels. */
+  promptName: (opts: {
+    title: string
+    description?: string
+    label?: string
+    defaultValue?: string
+    placeholder?: string
+    confirmLabel?: string
+    maxLength?: number
+  }) => Promise<string | null>
 
   // ── UI callbacks provided by the Editable* component at right-click time ──
   /** Opens this block's EditDrawer. The optional initialTab routes to
@@ -347,15 +359,16 @@ async function duplicateBlockApi(ctx: MenuContext): Promise<void> {
 // the saved-blocks library. Widget-only — sections/columns are a
 // future tier (saved_blocks.kind ENUM has one entry today).
 //
-// window.prompt is the lightest path for an in-menu name capture (no
-// portal, no focus-trap, no provider plumbing required). It's the same
-// pattern MarkdownEditor uses for its link-paste affordance. A richer
-// inline modal can land later without touching the API surface — the
-// network shape stays identical.
+// Name capture is a BRANDED PromptModal (ctx.promptName), not
+// window.prompt — the native dialog renders the off-brand
+// "localhost says" chrome inside an otherwise polished editor. The
+// network shape is unchanged.
 //
 // Toast surfaces success with a pointer at where to find the library
-// ("Saved tab in the picker"). Errors map known server codes to user-
-// friendly copy; unknown codes fall through to a generic retry message.
+// ("Saved tab in the picker"); a savedBlocksBus event also refreshes an
+// already-open Saved tab so the new block appears immediately. Errors
+// map known server codes to user-friendly copy; unknown codes fall
+// through to a generic retry message.
 async function saveWidgetAsBlock(ctx: MenuContext): Promise<void> {
   if (typeof window === 'undefined') return
   // Default name suggestion — the widget's block_type with underscores
@@ -365,10 +378,15 @@ async function saveWidgetAsBlock(ctx: MenuContext): Promise<void> {
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .slice(0, 64)
-  const raw = window.prompt(
-    'Name this saved block (you can find it in the Saved tab of the widget picker):',
-    defaultName,
-  )
+  const raw = await ctx.promptName({
+    title: 'Save as block',
+    description:
+      'Find it later in the Saved tab of the widget picker, ready to drop onto any page.',
+    label: 'Block name',
+    defaultValue: defaultName,
+    confirmLabel: 'Save block',
+    maxLength: 64,
+  })
   if (raw === null) return // operator hit Cancel
   const cleaned = sanitizeSavedBlockName(raw)
   if (cleaned === '') {
@@ -403,6 +421,9 @@ async function saveWidgetAsBlock(ctx: MenuContext): Promise<void> {
       return
     }
     ctx.toast.success('Saved to your library. Find it in the Saved tab.')
+    // Refresh an already-mounted Saved tab so the new block shows up
+    // without the operator having to switch tabs away and back.
+    emitSavedBlocksChanged()
   } catch (e) {
     toastNetworkError(ctx.toast, e)
   }

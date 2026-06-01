@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation'
 import { useToast } from './Toast'
 import { ContextMenu } from './ContextMenu'
 import { ConfirmModal } from './ConfirmModal'
+import { PromptModal } from './PromptModal'
 import {
   MENU_ITEMS_BY_KIND,
   type EditDrawerTab,
@@ -135,6 +136,19 @@ interface ConfirmModalState {
   resolve: (ok: boolean) => void
 }
 
+interface PromptModalState {
+  opts: {
+    title: string
+    description?: string
+    label?: string
+    defaultValue?: string
+    placeholder?: string
+    confirmLabel?: string
+    maxLength?: number
+  }
+  resolve: (value: string | null) => void
+}
+
 export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const toast = useToast()
@@ -165,6 +179,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(
     null,
   )
+  const [promptModal, setPromptModal] = useState<PromptModalState | null>(null)
 
   // Track the trigger element for focus restore. The active state
   // already carries it but we mirror in a ref so the close handler
@@ -261,6 +276,19 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const promptName = useCallback(
+    (opts: PromptModalState['opts']): Promise<string | null> => {
+      // Same focus-restore suppression as confirmDelete: the menu
+      // handler closes the menu first, then awaits this prompt, so the
+      // modal's own input focus must not be yanked back to the trigger.
+      skipNextFocusRestoreRef.current = true
+      return new Promise((resolve) => {
+        setPromptModal({ opts, resolve })
+      })
+    },
+    [],
+  )
+
   // Resolve any in-flight confirmDelete with `false` on unmount so a
   // pending `await ctx.confirmDelete(...)` doesn't hang silently when
   // the provider unmounts mid-prompt (page navigation, dev hot-reload,
@@ -274,6 +302,16 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [confirmModal])
+
+  // Same unmount safety for the name prompt — resolve to null (cancel)
+  // so a pending `await ctx.promptName(...)` never hangs.
+  useEffect(() => {
+    return () => {
+      if (promptModal !== null) {
+        promptModal.resolve(null)
+      }
+    }
+  }, [promptModal])
 
   const showFor = useCallback((params: ShowForParams) => {
     triggerElRef.current = params.triggerElement
@@ -370,6 +408,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       refresh,
       toast,
       confirmDelete,
+      promptName,
       openEditDrawer: active.openEditDrawer,
       openSpacingToolbar: active.openSpacingToolbar,
       openAddWidget: active.openAddWidget,
@@ -388,6 +427,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
     refresh,
     toast,
     confirmDelete,
+    promptName,
     recordCommand,
     runUndo,
   ])
@@ -418,6 +458,26 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           onConfirm={() => {
             confirmModal.resolve(true)
             setConfirmModal(null)
+          }}
+        />
+      )}
+      {promptModal !== null && (
+        <PromptModal
+          ariaLabel={promptModal.opts.title}
+          title={promptModal.opts.title}
+          description={promptModal.opts.description}
+          label={promptModal.opts.label}
+          defaultValue={promptModal.opts.defaultValue}
+          placeholder={promptModal.opts.placeholder}
+          confirmLabel={promptModal.opts.confirmLabel}
+          maxLength={promptModal.opts.maxLength}
+          onCancel={() => {
+            promptModal.resolve(null)
+            setPromptModal(null)
+          }}
+          onConfirm={(value) => {
+            promptModal.resolve(value)
+            setPromptModal(null)
           }}
         />
       )}

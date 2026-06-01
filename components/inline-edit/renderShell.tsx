@@ -258,6 +258,25 @@ export function ColumnFrame({
   const minHeight = parsed.minHeight ?? 'none'
   const hasCoverImage = bgImage !== undefined && bgSrc !== null
 
+  // Whole-card link. Rendered as a stretched-link OVERLAY anchor (see
+  // `.cms-card-link` in globals.css + the ColumnMeta.cardLink comment),
+  // NOT a wrapping <a> — wrapping would nest interactive content (an
+  // inner lx_action is its own <a>) and break the card click. The
+  // overlay covers the whole column; inner interactive controls are
+  // raised above it in CSS so they stay independently clickable.
+  const cardLink = parsed.cardLink
+  const hasCardLink = !!cardLink?.href
+  const cardLinkOverlay = hasCardLink ? (
+    <a
+      href={cardLink!.href}
+      aria-label={parsed.cardLinkLabel || undefined}
+      className="cms-card-link__overlay"
+      {...(cardLink!.openInNew
+        ? { target: '_blank', rel: 'noopener noreferrer' }
+        : {})}
+    />
+  ) : null
+
   return (
     <div
       data-column-id={exposeId ? columnId : undefined}
@@ -277,6 +296,9 @@ export function ColumnFrame({
         // Cover-image columns need overflow-hidden so object-cover
         // crops cleanly + relative anchor for the absolute <img>.
         hasCoverImage && 'relative overflow-hidden rounded-2xl',
+        // Whole-card link: positions + isolates the stretched-link
+        // overlay and enables the hover lift (see globals.css).
+        hasCardLink && 'cms-card-link',
         SECTION_MIN_HEIGHT_CLASS[minHeight],
         parsed.verticalAlign === 'center' && 'self-center',
         parsed.verticalAlign === 'start' && 'self-start',
@@ -310,11 +332,22 @@ export function ColumnFrame({
           )}
           {/* Inner padding so widgets don't hug the rounded corner of
               the column when a bg image is set. Same horizontal floor
-              the section uses for its grid container. */}
-          <div className="relative z-10 space-y-6 p-6 sm:p-8">{children}</div>
+              the section uses for its grid container. The explicit z-10
+              is DROPPED when a card link is present so the stretched-link
+              overlay can sit above the content background; layering is
+              handled by `.cms-card-link` in globals.css instead. */}
+          <div
+            className={clsx(
+              'relative space-y-6 p-6 sm:p-8',
+              !hasCardLink && 'z-10',
+            )}
+          >
+            {children}
+          </div>
         </>
       )}
       {!hasCoverImage && children}
+      {cardLinkOverlay}
     </div>
   )
 }

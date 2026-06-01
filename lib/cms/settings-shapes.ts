@@ -77,6 +77,12 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       placeholder: '/uploads/og-default.jpg  or  https://…',
       help: 'The preview image that shows up when someone shares your site on Facebook, X, LinkedIn, WhatsApp, or in iMessage. Paste a full https link, or upload an image to Media and paste its path here.',
     },
+    {
+      kind: 'media',
+      key: 'favicon',
+      label: 'Favicon (browser-tab icon)',
+      help: 'The little icon shown in the browser tab, bookmarks, and when the site is saved to a phone home screen. Upload a SQUARE PNG (512×512 works best). Leave empty to use the default CaveCMS icon.',
+    },
   ],
 
   footer: [
@@ -300,12 +306,10 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       placeholder: 'e.g. BWP',
     },
     {
-      kind: 'string',
-      key: 'logoUrl',
-      label: 'Logo URL',
-      maxLength: 500,
-      placeholder: '/brand/logo.svg  or  https://…',
-      help: 'Path to your logo on this site, or a full https:// link. Google uses this in branded search results.',
+      kind: 'media',
+      key: 'logo',
+      label: 'Logo for Google',
+      help: 'Upload the logo Google shows beside your site in branded search results. Leave this empty and we’ll use your site-header logo automatically — most sites never need to touch this.',
     },
     {
       kind: 'string',

@@ -94,6 +94,10 @@ export interface LocationData {
 export interface BrochureData {
   pdf: MediaRef | null
   gate_message_richtext?: string
+  // Form presentation (absent === current: no card surface, bordered
+  // inputs).
+  card_surface?: 'panel' | 'transparent'
+  field_style?: 'bordered' | 'filled'
 }
 
 export interface TimelineData {
@@ -112,4 +116,8 @@ export interface TestimonialsData {
 export interface InquiryData {
   heading?: string
   body_richtext?: string
+  // Form presentation (absent === current: cream panel card, bordered
+  // inputs).
+  card_surface?: 'panel' | 'transparent'
+  field_style?: 'bordered' | 'filled'
 }

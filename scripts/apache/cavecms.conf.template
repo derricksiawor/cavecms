@@ -66,11 +66,25 @@
     Protocols h2 http/1.1
 
     # ─── Security headers ─────────────────────────────────────────────
-    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set X-Frame-Options "DENY"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    # For PROXIED responses the Node app is the single source of truth —
+    # next.config.ts emits X-Content-Type-Options, X-Frame-Options,
+    # Referrer-Policy, Permissions-Policy, COOP + CORP on every response,
+    # and middleware.ts emits the CSP + a host-gated HSTS (on for real
+    # public domains, off for localhost / LAN / laptop installs so Safari
+    # isn't pinned to HTTPS on a plain-HTTP box — cf. CLAUDE.md #0.19).
+    # Those pass through this proxy untouched, so re-setting them at the
+    # vhost level here would only DUPLICATE each one (`Header always set`
+    # appends to the proxied response). We therefore set NO content
+    # security headers at the vhost level — only strip server-identifying
+    # ones.
+    #
+    # IMPORTANT: /_next/static/ and /uploads/ are served DIRECTLY from
+    # disk via Alias (ProxyPass ... !) and never reach Node — so those
+    # responses get NO headers from the app. The required headers
+    # (nosniff in particular — anti-MIME-sniff on operator/lead-uploaded
+    # media) are re-applied on each Alias <Directory> below, mirroring
+    # the nginx asset-headers snippet (scripts/nginx/snippets/
+    # cavecms-asset-headers.conf).
     Header unset X-Powered-By
     Header unset Server
 
@@ -85,17 +99,38 @@
         Header set Cache-Control "public, max-age=31536000, immutable"
         ExpiresActive On
         ExpiresDefault "access plus 1 year"
+        # Disk-served path — Node never sets headers here. Mirror the
+        # app's baseline (see the Security-headers note above).
+        Header always set X-Content-Type-Options "nosniff"
+        Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
     </Directory>
 
-    # Operator-uploaded media (sharp variants + originals).
-    Alias /uploads/ /opt/cavecms/uploads/
-    <Directory /opt/cavecms/uploads/>
+    # Operator-uploaded media (sharp variants + originals). UPLOADS_ROOT
+    # is surface-dependent — the CLI puts it at <install>/uploads on
+    # cPanel / laptop installs (the Apache surface) and at
+    # /opt/cavecms/uploads on the VPS surface, where __DOC_ROOT__ is the
+    # same /opt/cavecms install root. __DOC_ROOT__/uploads/ resolves
+    # correctly for both; never hardcode an absolute path here.
+    Alias /uploads/ __DOC_ROOT__/uploads/
+    <Directory __DOC_ROOT__/uploads/>
         Options -Indexes +FollowSymLinks
         AllowOverride None
         Require all granted
         Header set Cache-Control "public, max-age=2592000"
-        # Refuse PHP / executable extensions ever served from uploads.
-        <FilesMatch "\.(php|phtml|cgi|pl|sh|exe)$">
+        # Disk-served path — Node never sets headers here. nosniff is the
+        # key one: operator/lead-uploaded media is same-origin, so without
+        # it a file with a benign extension but HTML/JS bytes could be
+        # MIME-sniffed and executed in-origin (stored XSS → admin-session
+        # compromise). HSTS keeps the public-domain guarantee consistent.
+        Header always set X-Content-Type-Options "nosniff"
+        Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        # Refuse executable AND browser-scriptable extensions from uploads
+        # (matches the nginx template's return-404 list). nosniff alone
+        # stops sniffing of mislabeled files; this also refuses correctly-
+        # labeled .svg/.html/.xml/.js that would execute in-origin if ever
+        # opened top-level. Operator media is only ever raster (jpeg/png/
+        # webp/avif) + gated PDFs, so none of these are legitimate here.
+        <FilesMatch "\.(php|phtml|cgi|pl|sh|exe|svg|html?|xhtml|xml|js|mjs)$">
             Require all denied
         </FilesMatch>
     </Directory>
@@ -104,6 +139,16 @@
     # These LocationMatch blocks take effect at request-routing time so
     # they fire BEFORE ProxyPass / kicks in. Refuse direct access to
     # secret files even though Node would 404 them — defence in depth.
+    #
+    # Lead-gated brochure PDFs live under uploads/brochures-private/ and
+    # must be served ONLY via /api/brochure/<token> (single-use, lead-
+    # capture gated, cache-control: private). The Alias above disk-serves
+    # the whole uploads/ tree, so without this deny a direct GET of
+    # /uploads/brochures-private/<file>.pdf would bypass the lead gate.
+    # Mirrors the nginx template's `return 404` for this path.
+    <LocationMatch "^/uploads/brochures-private(/|$)">
+        Require all denied
+    </LocationMatch>
     <LocationMatch "^/(env\.production|\.env|package(-lock)?\.json|pnpm-lock\.yaml|drizzle\.config\..*)$">
         Require all denied
     </LocationMatch>

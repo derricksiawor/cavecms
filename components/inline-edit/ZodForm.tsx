@@ -1359,6 +1359,21 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'screen', label: 'Full viewport (100vh)' },
       ],
     },
+    // Whole-card link. Makes the ENTIRE column one clickable target
+    // (stretched-link overlay) while any button or link the operator
+    // drops inside still works on its own — so you can build a custom
+    // card (image + heading + text + your own styled button) AND make
+    // the whole thing a link. Leave the target empty for no card link.
+    {
+      kind: 'link', key: 'cardLink', label: 'Link this whole card to…',
+      help: 'Optional. Makes the entire column clickable. /relative paths, https://, mailto:, tel:. Buttons inside the card keep working independently.',
+    },
+    {
+      kind: 'string', key: 'cardLinkLabel', label: 'Card link description',
+      maxLength: 120,
+      placeholder: 'e.g. View the Riverside project',
+      help: 'Read by screen readers when the whole card is a link. Describe where it goes. Recommended whenever a card link is set.',
+    },
   ],
 
   // ════════════════════════════════════════════════════════════════
@@ -1850,6 +1865,14 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       ],
     },
     {
+      kind: 'select', key: 'orientation', label: 'Number & label layout',
+      options: [
+        { value: 'vertical', label: 'Stacked — number above label (current)' },
+        { value: 'horizontal', label: 'Inline — number beside label' },
+      ],
+      help: 'Stacked is the current look. Inline puts the number and label on one line — handy for a compact bed / bath / size facts row.',
+    },
+    {
       kind: 'color',
       key: 'tone',
       label: 'Tone',
@@ -1940,12 +1963,75 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
   lx_inquiry_form: [
     { kind: 'string', key: 'heading', label: 'Heading', maxLength: 220, placeholder: 'Reach out about this project' },
     { kind: 'richtext', key: 'body_richtext', label: 'Intro copy', maxLength: 2000 },
+    {
+      kind: 'select', key: 'card_surface', label: 'Form card background',
+      options: [
+        { value: 'panel', label: 'Cream card (current)' },
+        { value: 'transparent', label: 'None — sits on the section' },
+      ],
+      help: 'Keep the cream card, or let the form sit directly on the section to match the brochure form.',
+    },
+    {
+      kind: 'select', key: 'field_style', label: 'Input style',
+      options: [
+        { value: 'bordered', label: 'Bordered (current)' },
+        { value: 'filled', label: 'Filled' },
+      ],
+      help: 'How the form inputs look. Match this to the brochure form for a consistent pair.',
+    },
   ],
 
   lx_brochure_form: [
     {
       kind: 'richtext', key: 'gate_message_richtext', label: 'Gate message', maxLength: 2000,
       help: 'Shown beside the brochure request form. The PDF itself is set under Projects → Brochure.',
+    },
+    {
+      kind: 'select', key: 'card_surface', label: 'Form card background',
+      options: [
+        { value: 'transparent', label: 'None — sits on the section (current)' },
+        { value: 'panel', label: 'Cream card — matches the inquiry form' },
+      ],
+      help: 'Wrap the brochure form in a cream card, or let it sit directly on the section.',
+    },
+    {
+      kind: 'select', key: 'field_style', label: 'Input style',
+      options: [
+        { value: 'bordered', label: 'Bordered (current)' },
+        { value: 'filled', label: 'Filled' },
+      ],
+      help: 'How the form inputs look. Match this to the inquiry form for a consistent pair.',
+    },
+  ],
+
+  lx_gallery: [
+    {
+      kind: 'select', key: 'columns', label: 'Columns (desktop)',
+      valueAsNumber: true,
+      options: [
+        { value: '2', label: '2 columns' },
+        { value: '3', label: '3 columns (current)' },
+        { value: '4', label: '4 columns' },
+      ],
+      help: 'How many columns the gallery uses on wide screens. 3 is the current layout.',
+    },
+    {
+      kind: 'select', key: 'ratio', label: 'Image shape',
+      options: [
+        { value: '1:1', label: 'Square (1:1) (current)' },
+        { value: '4:5', label: 'Portrait (4:5)' },
+        { value: '4:3', label: 'Landscape (4:3)' },
+        { value: '3:2', label: 'Wide (3:2)' },
+      ],
+      help: 'The aspect ratio each image is cropped to.',
+    },
+    {
+      kind: 'select', key: 'animation', label: 'Entrance animation',
+      options: [
+        { value: 'none', label: 'None (current)' },
+        { value: 'fade-in', label: 'Fade in' },
+        { value: 'slide-up', label: 'Slide up' },
+      ],
     },
   ],
 }

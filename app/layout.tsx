@@ -1,8 +1,10 @@
+import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { Montserrat, Marcellus } from 'next/font/google'
 import { organizationLd } from '@/lib/seo/jsonLd'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { getSetting } from '@/lib/cms/getSettings'
+import { resolveMedia } from '@/lib/cms/resolveMedia'
 import { brandVarsCss } from '@/lib/cms/themeCss'
 import { SiteFooter } from '@/components/SiteFooter'
 import { SiteHeader } from '@/components/SiteHeader'
@@ -30,9 +32,39 @@ const marcellus = Marcellus({
 // Montserrat (sans) for body copy, UI elements, buttons, eyebrows.
 // Matches the client's original brand identity.
 
-export const metadata = {
-  title: 'CaveCMS',
-  description: 'A CaveCMS-powered site.',
+// Root metadata. title/description stay neutral defaults (real pages
+// override them via their own generateMetadata). The favicon is
+// operator-configurable under Settings → SEO (default_seo.favicon):
+// when set we emit a <link rel="icon"> pointing at the uploaded image's
+// processed variant; when null we emit nothing here and Next's file
+// convention serves the bundled app/favicon.ico.
+export async function generateMetadata(): Promise<Metadata> {
+  const base: Metadata = {
+    title: 'CaveCMS',
+    description: 'A CaveCMS-powered site.',
+  }
+  try {
+    const seo = await getSetting('default_seo')
+    const fav = seo?.favicon
+    if (fav?.media_id) {
+      const media = await resolveMedia(fav.media_id)
+      const url = media?.md ?? media?.thumb ?? media?.lg ?? null
+      if (url) {
+        // webp variants from the media pipeline — supported by every
+        // current browser. Operators are guided to upload a square
+        // source so the tab icon isn't letterboxed.
+        base.icons = {
+          icon: [{ url, type: 'image/webp' }],
+          apple: [{ url }],
+          shortcut: [{ url }],
+        }
+      }
+    }
+  } catch {
+    // Settings/media read hiccup — degrade to the bundled favicon
+    // convention rather than break document <head> rendering.
+  }
+  return base
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
