@@ -13,6 +13,7 @@ import { TagInput } from './TagInput'
 import { RichTextEditor } from './RichTextEditor'
 import { DatePicker } from './DatePicker'
 import { SortableList, DragHandle } from './SortableList'
+import { MenuBuilder } from './MenuBuilder'
 import { SocialLinkRow, type SocialLinkValue } from './SocialLinkRow'
 import { TEXT_MAX } from '@/lib/cms/limits'
 import {
@@ -132,6 +133,24 @@ export type FieldShape =
       max?: number
       fallback?: number
       help?: string
+    }
+  // Shared drag-and-drop menu builder for one-level menus (header nav with
+  // dropdowns; footer columns with links). Config keys decouple the builder
+  // from the raw value shape — see lib/cms/menuTree.ts MenuConfig.
+  | {
+      kind: 'menu_builder'
+      key: string
+      label: string
+      help?: string
+      parentLabelKey: string
+      parentHrefKey?: string
+      childrenKey: string
+      childLabelKey: string
+      childHrefKey: string
+      maxItems: number
+      maxChildren: number
+      parentNoun: string
+      childNoun: string
     }
 
 export function ZodForm({
@@ -516,6 +535,15 @@ function FieldRenderer({
           onChange={onChange}
         />
       )
+    case 'menu_builder':
+      return (
+        <MenuBuilder
+          shape={shape}
+          value={value as Array<Record<string, unknown>> | undefined}
+          onChange={onChange}
+        />
+      )
+
     default:
       // Exhaustiveness gate — a new FieldShape variant lands as a TS
       // error here so the form picker can't silently skip a new kind.
