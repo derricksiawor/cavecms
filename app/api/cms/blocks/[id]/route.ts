@@ -166,6 +166,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         const { blockVersion, pageVersion } = await saveBlock({
           blockId: id,
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           ip,
           userAgent,
           requestId,
@@ -192,6 +193,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const { blockVersion, pageVersion } = await saveBlockMeta({
         blockId: id,
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         ip,
         userAgent,
         requestId,
@@ -228,6 +230,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
     const { blockVersion, pageVersion } = await saveBlockMeta({
       blockId: id,
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       ip,
       userAgent,
       requestId,
