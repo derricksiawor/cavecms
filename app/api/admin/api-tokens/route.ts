@@ -10,6 +10,7 @@ import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { requireFreshReauth } from '@/lib/auth/reauth'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { generateApiToken, listApiTokens } from '@/lib/auth/apiToken'
+import { parseScopes } from '@/lib/auth/apiTokenScope'
 import { isDuplicateKey } from '@/lib/db/errors'
 
 // List all API tokens (metadata only — the secret is never recoverable).
@@ -30,11 +31,14 @@ export const GET = withError(async () => {
 const Create = z
   .object({
     name: z.string().min(1).max(120),
-    // Capped to admin|editor — no viewer (read-only API tokens add no
-    // value today) and no path above admin (see the reauth/middleware cap).
-    role: z.enum(['admin', 'editor']),
+    // viewer = read-only token; editor/admin per the role ceiling (never
+    // above admin — reauth/middleware caps still apply to admin tokens).
+    role: z.enum(['admin', 'editor', 'viewer']),
     // Optional hard expiry, 1 day … 10 years. Omitted = never expires.
     expiresInDays: z.number().int().min(1).max(3650).optional(),
+    // Optional per-resource grants ("<resource>:<action>"). Omitted/empty =
+    // unrestricted within role. parseScopes drops anything invalid.
+    scopes: z.array(z.string().max(40)).max(40).optional(),
   })
   .strict()
 
@@ -61,6 +65,10 @@ export const POST = withError(async (req) => {
   const expiresAt = body.expiresInDays
     ? new Date(Date.now() + body.expiresInDays * 86_400_000)
     : null
+  // Normalise to a clean grant array or null (unrestricted within role).
+  // Stored as JSON text; null when omitted or after dropping all garbage.
+  const scopes = body.scopes ? parseScopes(body.scopes) : null
+  const scopesJson = scopes === null ? null : JSON.stringify(scopes)
 
   // Mint + audit in ONE transaction so the schema's documented "mutation and
   // its audit row commit together, or neither does" invariant holds (an
@@ -71,18 +79,18 @@ export const POST = withError(async (req) => {
     id = await db.transaction(async (tx) => {
       const [insertArr] = (await tx.execute(sql`
         INSERT INTO api_tokens
-          (name, token_hash, token_prefix, role, created_by, expires_at)
+          (name, token_hash, token_prefix, role, created_by, expires_at, scopes)
         VALUES
-          (${body.name}, ${hash}, ${prefix}, ${body.role}, ${ctx.userId}, ${expiresAt})
+          (${body.name}, ${hash}, ${prefix}, ${body.role}, ${ctx.userId}, ${expiresAt}, ${scopesJson})
       `)) as unknown as [InsertResult]
       const newId = Number(insertArr.insertId)
-      // Audit row never stores the token or its hash — name + role only.
+      // Audit row never stores the token or its hash — name + role + scopes.
       await tx.insert(auditLog).values({
         userId: ctx.userId,
         action: 'api_token_create',
         resourceType: 'api_token',
         resourceId: String(newId),
-        diff: { name: body.name, role: body.role } as unknown as object,
+        diff: { name: body.name, role: body.role, scopes } as unknown as object,
         ip: meta.ip,
         userAgent: meta.userAgent,
         requestId: meta.requestId,
@@ -96,11 +104,14 @@ export const POST = withError(async (req) => {
   }
 
   // `token` is shown to the operator once and never again.
-  return new Response(JSON.stringify({ id, token, prefix, role: body.role }), {
-    status: 201,
-    headers: {
-      'content-type': 'application/json',
-      'cache-control': 'private, no-store',
+  return new Response(
+    JSON.stringify({ id, token, prefix, role: body.role, scopes }),
+    {
+      status: 201,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'private, no-store',
+      },
     },
-  })
+  )
 })
