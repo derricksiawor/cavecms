@@ -1,6 +1,6 @@
 'use client'
-import { useCallback, useRef, useState } from 'react'
-import { Archive, DatabaseBackup, Upload, Download, Trash2, RotateCcw, ShieldCheck, Clock } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Archive, DatabaseBackup, Upload, Download, Trash2, RotateCcw, ShieldCheck, Clock, Cloud } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/inline-edit/Toast'
@@ -15,6 +15,22 @@ export interface BackupRow {
   encrypted: boolean
   version: string | null
   includeEnv: boolean | null
+}
+
+export interface DestinationsSummary {
+  active: 'local' | 'gdrive' | 'onedrive'
+  gdrive: { connected: boolean; accountEmail: string | null; configured: boolean }
+  onedrive: { connected: boolean; accountEmail: string | null; configured: boolean }
+}
+
+type CloudProvider = 'gdrive' | 'onedrive'
+const PROVIDER_LABEL: Record<CloudProvider, string> = {
+  gdrive: 'Google Drive',
+  onedrive: 'OneDrive',
+}
+const PROVIDER_ICON: Record<CloudProvider, string> = {
+  gdrive: '/icons/google-drive.svg',
+  onedrive: '/icons/onedrive.svg',
 }
 
 function humanSize(bytes: number): string {
@@ -34,7 +50,13 @@ function humanWhen(iso: string): string {
   }
 }
 
-export function BackupsClient({ initialBackups }: { initialBackups: BackupRow[] }) {
+export function BackupsClient({
+  initialBackups,
+  destinations,
+}: {
+  initialBackups: BackupRow[]
+  destinations: DestinationsSummary
+}) {
   const toast = useToast()
   const [backups, setBackups] = useState<BackupRow[]>(initialBackups)
   const [includeEnv, setIncludeEnv] = useState(false)
@@ -44,6 +66,146 @@ export function BackupsClient({ initialBackups }: { initialBackups: BackupRow[] 
   const [confirmDelete, setConfirmDelete] = useState<BackupRow | null>(null)
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // ── Cloud destinations (device-flow connect/disconnect) ──
+  const [dest, setDest] = useState<DestinationsSummary>(destinations)
+  const [connecting, setConnecting] = useState<CloudProvider | null>(null)
+  const [deviceFlow, setDeviceFlow] = useState<{
+    provider: CloudProvider
+    userCode: string
+    verificationUrl: string
+    expiresAt: string
+  } | null>(null)
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollTimer.current) {
+      clearTimeout(pollTimer.current)
+      pollTimer.current = null
+    }
+  }, [])
+
+  const pollOnce = useCallback(
+    async (provider: CloudProvider, intervalMs: number) => {
+      try {
+        const r = await csrfFetch('/api/admin/backups/destinations/connect/poll', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider }),
+        })
+        const j = (await r.json()) as {
+          status: 'pending' | 'slow_down' | 'success' | 'denied' | 'expired'
+          accountEmail?: string | null
+          intervalSec?: number
+        }
+        if (j.status === 'success') {
+          stopPolling()
+          setDeviceFlow(null)
+          setConnecting(null)
+          setDest((d) => ({
+            ...d,
+            [provider]: { ...d[provider], connected: true, accountEmail: j.accountEmail ?? null },
+          }))
+          toast.success(`${PROVIDER_LABEL[provider]} connected.`)
+          return
+        }
+        if (j.status === 'denied' || j.status === 'expired') {
+          stopPolling()
+          setDeviceFlow(null)
+          setConnecting(null)
+          toast.error(
+            j.status === 'denied'
+              ? `${PROVIDER_LABEL[provider]} access was declined.`
+              : `The code expired — try connecting again.`,
+          )
+          return
+        }
+        // pending / slow_down → keep polling (back off on slow_down).
+        const next = j.status === 'slow_down' ? intervalMs + 5000 : intervalMs
+        pollTimer.current = setTimeout(() => void pollOnce(provider, next), next)
+      } catch {
+        // Network blip — keep trying at the same cadence.
+        pollTimer.current = setTimeout(() => void pollOnce(provider, intervalMs), intervalMs)
+      }
+    },
+    [stopPolling, toast],
+  )
+
+  const connect = useCallback(
+    async (provider: CloudProvider) => {
+      setConnecting(provider)
+      try {
+        const r = await csrfFetch('/api/admin/backups/destinations/connect', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider }),
+        })
+        if (r.status === 503) {
+          toast.error(`${PROVIDER_LABEL[provider]} isn't available on this install yet.`)
+          setConnecting(null)
+          return
+        }
+        if (!r.ok) {
+          toast.error(`Couldn't reach ${PROVIDER_LABEL[provider]} — try again.`)
+          setConnecting(null)
+          return
+        }
+        const j = (await r.json()) as {
+          userCode: string
+          verificationUrl: string
+          expiresAt: string
+          intervalSec: number
+        }
+        setDeviceFlow({
+          provider,
+          userCode: j.userCode,
+          verificationUrl: j.verificationUrl,
+          expiresAt: j.expiresAt,
+        })
+        pollTimer.current = setTimeout(
+          () => void pollOnce(provider, j.intervalSec * 1000),
+          j.intervalSec * 1000,
+        )
+      } catch {
+        toast.error(`Couldn't reach ${PROVIDER_LABEL[provider]} — try again.`)
+        setConnecting(null)
+      }
+    },
+    [pollOnce, toast],
+  )
+
+  const cancelConnect = useCallback(() => {
+    stopPolling()
+    setDeviceFlow(null)
+    setConnecting(null)
+  }, [stopPolling])
+
+  const disconnect = useCallback(
+    async (provider: CloudProvider) => {
+      try {
+        const r = await csrfFetch('/api/admin/backups/destinations/disconnect', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider }),
+        })
+        if (!r.ok) {
+          toast.error(`Couldn't disconnect ${PROVIDER_LABEL[provider]} — try again.`)
+          return
+        }
+        setDest((d) => ({
+          ...d,
+          active: d.active === provider ? 'local' : d.active,
+          [provider]: { ...d[provider], connected: false, accountEmail: null },
+        }))
+        toast.success(`${PROVIDER_LABEL[provider]} disconnected.`)
+      } catch {
+        toast.error(`Couldn't disconnect ${PROVIDER_LABEL[provider]} — try again.`)
+      }
+    },
+    [toast],
+  )
+
+  useEffect(() => () => stopPolling(), [stopPolling])
 
   const refreshList = useCallback(async () => {
     try {
@@ -169,6 +331,89 @@ export function BackupsClient({ initialBackups }: { initialBackups: BackupRow[] 
           are read-only — your site stays live while one is made.
         </p>
       </header>
+
+      {/* Cloud destinations */}
+      <section className="mb-8 rounded-2xl border border-warm-stone/20 bg-cream-50 p-6">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-copper-50 text-copper-600">
+            <Cloud className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-near-black">Where backups are stored</h2>
+            <p className="text-sm text-warm-stone">
+              Backups are always written to this server. Connect your own Google Drive or OneDrive to
+              keep an off-site copy that survives a server failure.
+            </p>
+          </div>
+        </div>
+
+        <ul className="mt-5 space-y-3">
+          <li className="flex items-center justify-between rounded-xl border border-warm-stone/20 bg-white/40 px-4 py-3">
+            <span className="font-medium text-near-black">This server (always on)</span>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-warm-stone/70">
+              Local
+            </span>
+          </li>
+
+          {(['gdrive', 'onedrive'] as CloudProvider[]).map((provider) => {
+            const c = dest[provider]
+            return (
+              <li
+                key={provider}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warm-stone/20 bg-white/40 px-4 py-3"
+              >
+                <span className="flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={PROVIDER_ICON[provider]} alt="" className="h-6 w-6" />
+                  <span className="font-medium text-near-black">{PROVIDER_LABEL[provider]}</span>
+                  {c.connected && c.accountEmail ? (
+                    <span className="text-sm text-warm-stone">· {c.accountEmail}</span>
+                  ) : null}
+                </span>
+                {c.connected ? (
+                  <Button type="button" variant="ghost" onClick={() => void disconnect(provider)}>
+                    Disconnect
+                  </Button>
+                ) : !c.configured ? (
+                  <span className="text-xs text-warm-stone/70">Not available on this install</span>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={connecting !== null}
+                    onClick={() => void connect(provider)}
+                  >
+                    {connecting === provider ? 'Connecting…' : 'Connect'}
+                  </Button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+
+        {deviceFlow ? (
+          <div className="mt-5 rounded-xl border border-copper-400 bg-copper-50/60 p-5">
+            <p className="text-sm text-near-black">
+              To connect {PROVIDER_LABEL[deviceFlow.provider]}, open this link and enter the code:
+            </p>
+            <a
+              href={deviceFlow.verificationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-block font-medium text-copper-700 underline"
+            >
+              {deviceFlow.verificationUrl}
+            </a>
+            <div className="mt-3 select-all rounded-lg bg-white px-4 py-3 text-center font-mono text-2xl tracking-[0.3em] text-near-black">
+              {deviceFlow.userCode}
+            </div>
+            <p className="mt-3 text-sm text-warm-stone">Waiting for you to approve…</p>
+            <Button type="button" variant="ghost" className="mt-2" onClick={cancelConnect}>
+              Cancel
+            </Button>
+          </div>
+        ) : null}
+      </section>
 
       {/* Create + upload actions */}
       <section className="mb-8 grid gap-4 sm:grid-cols-2">
