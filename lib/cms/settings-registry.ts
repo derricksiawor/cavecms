@@ -246,7 +246,21 @@ const siteHeader = z.object({
     .array(
       z.object({
         label: z.string().min(1).max(60),
+        // '' allowed (siteLink permits empty) → a parent with children and
+        // an empty href is a dropdown-only toggle on the public header.
         href: siteLink,
+        // One level of submenu only — a child has no `children`, so the
+        // tree can never exceed depth 1. Optional → stored flat menus parse
+        // unchanged (settings JSON is validated on read; no migration).
+        children: z
+          .array(
+            z.object({
+              label: z.string().min(1).max(60),
+              href: siteLink,
+            }),
+          )
+          .max(12)
+          .optional(),
       }),
     )
     .max(6),
