@@ -2,10 +2,11 @@
 
 import { forwardRef, useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Loader2, Columns3 } from 'lucide-react'
+import { Plus, Loader2, Columns3, ImageIcon } from 'lucide-react'
 import clsx from 'clsx'
 import { csrfFetch } from '@/lib/client/csrf'
 import { useToast } from './Toast'
+import { type MediaRef, useMediaPicker } from './MediaPickerProvider'
 
 // Page-level "+ Add section" affordance. Sits between every pair of
 // top-level entries in BlockTreeRenderer (and before the first / after
@@ -61,8 +62,9 @@ export function InsertSectionHere({
 }: Props) {
   const router = useRouter()
   const toast = useToast()
+  const mediaPicker = useMediaPicker()
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState<Shape | null>(null)
+  const [busy, setBusy] = useState<Shape | 'cover' | null>(null)
   const [, startTransition] = useTransition()
   const ref = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -99,17 +101,20 @@ export function InsertSectionHere({
     wasOpenRef.current = open
   }, [open])
 
-  const add = async (shape: Shape) => {
+  const postSection = async (
+    meta: Record<string, unknown>,
+    withColumns: number,
+    busyKey: Shape | 'cover',
+    successMsg: string,
+  ) => {
     if (busy) return
-    setBusy(shape)
+    setBusy(busyKey)
     try {
       const body: Record<string, unknown> = {
         pageId,
         kind: 'section',
-        // Default tone + padding — operator tweaks via the section
-        // settings drawer (SHAPES_FOR_BLOCK['section']).
-        meta: { columns: shape, background: 'cream', padding: 'md' },
-        withColumns: shape,
+        meta,
+        withColumns,
       }
       if (typeof afterBlockId === 'number') body['afterBlockId'] = afterBlockId
       if (typeof beforeBlockId === 'number') body['beforeBlockId'] = beforeBlockId
@@ -130,7 +135,7 @@ export function InsertSectionHere({
         return
       }
       setOpen(false)
-      toast.success('Section added.')
+      toast.success(successMsg)
       startTransition(() => router.refresh())
     } catch (e) {
       toast.error(
@@ -139,6 +144,43 @@ export function InsertSectionHere({
     } finally {
       setBusy(null)
     }
+  }
+
+  // Plain section preset — tone + padding default to cream/md; operator
+  // tweaks via the section settings drawer (SHAPES_FOR_BLOCK['section']).
+  const add = (shape: Shape) =>
+    postSection({ columns: shape, background: 'cream', padding: 'md' }, shape, shape, 'Section added.')
+
+  // Cover preset — a full-bleed photo band. The operator picks the image
+  // first; we land a single-column section with the photo as the section
+  // background + cover-friendly defaults (tall min-height, a legibility
+  // overlay, dark fallback tone so overlaid text reads before the image
+  // paints). Content composes ON TOP via the column (add more columns /
+  // widgets from the section + column toolbars). The background image +
+  // overlay + fit + height stay fully editable from the section settings.
+  const addCover = (media: MediaRef) =>
+    postSection(
+      {
+        columns: 1,
+        background: 'obsidian',
+        padding: 'xl',
+        minHeight: 'lg',
+        backgroundImage: media,
+        backgroundOverlay: 'gradient-bottom',
+        backgroundFit: 'cover',
+      },
+      1,
+      'cover',
+      'Cover section added.',
+    )
+
+  const pickCover = () => {
+    if (busy) return
+    // Reuse the shared media picker; on selection, insert the cover
+    // section with that image baked into the section meta.
+    mediaPicker.open(undefined, (m) => {
+      void addCover(m)
+    })
   }
 
   return (
@@ -194,6 +236,39 @@ export function InsertSectionHere({
               </li>
             ))}
           </ul>
+
+          {/* Cover preset — a full-bleed photo band with content over it.
+             Picks the image first, then lands a cover-configured section. */}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy !== null && busy !== 'cover'}
+            aria-busy={busy === 'cover'}
+            aria-disabled={busy !== null && busy !== 'cover'}
+            onClick={pickCover}
+            className="group/cover mt-2 flex w-full items-center gap-3 rounded-xl border border-warm-stone/15 bg-cream px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-copper-400 hover:shadow-[0_14px_30px_-18px_rgba(5,5,5,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+          >
+            <span
+              aria-hidden="true"
+              className="grid h-8 w-12 shrink-0 place-items-center rounded-md bg-near-black/80 text-cream-50 ring-1 ring-copper-500/40 transition-colors group-hover/cover:bg-near-black"
+            >
+              {busy === 'cover' ? (
+                <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
+              ) : (
+                <ImageIcon size={12} strokeWidth={2.2} />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-serif text-sm font-bold tracking-tight text-near-black">
+                Cover image
+              </span>
+              <span className="block text-[10px] leading-relaxed text-warm-stone">
+                Pick a photo for a full-bleed band — headings, text, and
+                buttons compose on top. Add columns over it from the section.
+              </span>
+            </span>
+          </button>
+
           <p className="mt-3 px-1 text-[10px] text-warm-stone">
             Background and padding are tunable from the section
             settings — click the section after it lands.
