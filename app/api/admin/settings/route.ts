@@ -548,6 +548,7 @@ export const PATCH = withError(async (req: Request) => {
       `)
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'setting',
         resourceId: body.key,
@@ -586,6 +587,7 @@ export const PATCH = withError(async (req: Request) => {
     }
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'update',
       resourceType: 'setting',
       resourceId: body.key,
