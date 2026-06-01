@@ -1316,6 +1316,11 @@ export const blockSchemas = {
     // bordered inputs for a tinted fill.
     card_surface: z.enum(['panel', 'transparent']).optional(),
     field_style: z.enum(['bordered', 'filled']).optional(),
+    // Section background, drawn from the brand theme palette. Drives the
+    // WHOLE section's tone (surface + headings + body + accents + card +
+    // inputs) so a dark tone stays legible. Absent === 'cream' (the
+    // current light look, now brand-linked). See lib/cms/sectionTone.
+    background: z.enum(['cream', 'obsidian', 'ivory', 'champagne', 'bone']).optional(),
   }),
 
   // Project brochure form — lead-gated PDF download to
@@ -1331,6 +1336,9 @@ export const blockSchemas = {
     // inquiry form; field_style 'filled' swaps the bordered inputs.
     card_surface: z.enum(['panel', 'transparent']).optional(),
     field_style: z.enum(['bordered', 'filled']).optional(),
+    // Section background from the brand theme palette (see lx_inquiry_form
+    // + lib/cms/sectionTone). Absent === 'cream'.
+    background: z.enum(['cream', 'obsidian', 'ivory', 'champagne', 'bone']).optional(),
   }),
 } as const
 

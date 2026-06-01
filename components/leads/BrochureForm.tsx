@@ -23,6 +23,7 @@ export function BrochureForm({
   projectName,
   previewMode = false,
   fieldStyle = 'bordered',
+  fieldClassName,
 }: {
   csrf: string
   projectId: number
@@ -32,12 +33,16 @@ export function BrochureForm({
   // swaps the visible border for a tinted fill. Lets the brochure form
   // be aligned with the inquiry form via section data.
   fieldStyle?: 'bordered' | 'filled'
+  // Optional full override for the input class — a themed (e.g. dark)
+  // section passes a legible field treatment. Unset → light default.
+  fieldClassName?: string
 }) {
   // Shared input classes — mirrors InquiryForm so the two can match.
   const fieldClass =
-    fieldStyle === 'filled'
+    fieldClassName ??
+    (fieldStyle === 'filled'
       ? 'mt-1 w-full rounded-lg border border-warm-stone/20 bg-warm-stone/15 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500'
-      : 'mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500'
+      : 'mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500')
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState<'idle' | 'ok' | 'expired' | 'error'>(
     'idle',

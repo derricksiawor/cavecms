@@ -98,6 +98,8 @@ export interface BrochureData {
   // inputs).
   card_surface?: 'panel' | 'transparent'
   field_style?: 'bordered' | 'filled'
+  // Section background from the brand theme palette (absent === 'cream').
+  background?: 'cream' | 'obsidian' | 'ivory' | 'champagne' | 'bone'
 }
 
 export interface TimelineData {
@@ -120,4 +122,6 @@ export interface InquiryData {
   // inputs).
   card_surface?: 'panel' | 'transparent'
   field_style?: 'bordered' | 'filled'
+  // Section background from the brand theme palette (absent === 'cream').
+  background?: 'cream' | 'obsidian' | 'ivory' | 'champagne' | 'bone'
 }

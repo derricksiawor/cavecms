@@ -36,6 +36,7 @@ export function LxBrochureForm({
     // honours them (absent === current behavior).
     card_surface: data.card_surface,
     field_style: data.field_style,
+    background: data.background,
   }
   return (
     <ProjectFullBleed>

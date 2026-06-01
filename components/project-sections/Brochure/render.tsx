@@ -2,6 +2,10 @@ import type { ReactNode } from 'react'
 import { FileText, Download } from 'lucide-react'
 import { BrochureForm } from '@/components/leads/BrochureForm'
 import { RevealOnView } from '../_shared/RevealOnView'
+import {
+  resolveSectionTone,
+  DARK_FIELD_CLASS,
+} from '@/lib/cms/sectionTone'
 import type { BrochureData, ProjectPublicContext } from '../_shared/types'
 
 // Lead-gated PDF download. The PDF itself is NEVER served from a
@@ -24,14 +28,20 @@ export function BrochureSection({
 }): ReactNode {
   if (!data.pdf) return null
 
+  // Section tone (default = cream — the original look) drives the
+  // section surface, eyebrow/icon accent, heading, body, and the form
+  // card + input treatment. The stylised PDF-preview card stays light
+  // deliberately: it's a paper-document metaphor that reads as a
+  // floating brochure on any tone (incl. dark).
+  const tone = resolveSectionTone(data.background)
   // Form presentation (default = current: no card surface, bordered
-  // inputs). 'panel' wraps the form in a cream card matching the
-  // inquiry form so the two can be aligned via section data.
+  // inputs). 'panel' wraps the form in a card matching the inquiry
+  // form so the two can be aligned via section data.
   const cardSurface = data.card_surface ?? 'transparent'
   const fieldStyle = data.field_style ?? 'bordered'
   const formWrapClass =
     cardSurface === 'panel'
-      ? 'mt-8 rounded-2xl border border-near-black/8 bg-cream-50 p-6 sm:p-8 shadow-lg shadow-near-black/5'
+      ? `mt-8 rounded-2xl ${tone.panel} p-6 sm:p-8 shadow-lg shadow-near-black/5`
       : 'mt-8'
 
   return (
@@ -39,7 +49,7 @@ export function BrochureSection({
       as="section"
       id="brochure"
       animation="slide-up"
-      className="bg-cream-200 py-20 sm:py-28"
+      className={`${tone.surface} py-20 sm:py-28`}
     >
       <div className="mx-auto grid max-w-6xl gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:items-center lg:gap-20">
         {/* Visual side — brochure preview card. We don't have a PDF
@@ -88,22 +98,26 @@ export function BrochureSection({
 
         {/* Form side */}
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
+          <p
+            className={`text-[11px] font-semibold uppercase tracking-[0.32em] ${tone.accent}`}
+          >
             <span className="inline-flex items-center gap-2">
               <Download className="h-3.5 w-3.5" strokeWidth={2} />
               Get the brochure
             </span>
           </p>
-          <h2 className="mt-4 font-serif text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-near-black">
+          <h2
+            className={`mt-4 font-serif text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight ${tone.heading}`}
+          >
             The complete dossier, sent to your inbox
           </h2>
           {data.gate_message_richtext?.trim() ? (
             <div
-              className="prose prose-lg mt-5 max-w-none prose-p:text-warm-stone prose-p:leading-relaxed"
+              className={`${tone.proseBody} mt-5 max-w-none`}
               dangerouslySetInnerHTML={{ __html: data.gate_message_richtext }}
             />
           ) : (
-            <p className="mt-5 text-base sm:text-lg text-warm-stone leading-relaxed">
+            <p className={`mt-5 text-base sm:text-lg ${tone.muted} leading-relaxed`}>
               We&rsquo;ll email you a single-use download link with the full
               brochure, including pricing, plans, and the neighbourhood guide.
               The link works once and expires in seven days.
@@ -117,6 +131,7 @@ export function BrochureSection({
               projectName={ctx.projectName}
               previewMode={ctx.previewMode}
               fieldStyle={fieldStyle}
+              fieldClassName={tone.isDark ? DARK_FIELD_CLASS : undefined}
             />
           </div>
         </div>

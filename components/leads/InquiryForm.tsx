@@ -20,6 +20,7 @@ export function InquiryForm({
   projectName,
   previewMode = false,
   fieldStyle = 'bordered',
+  fieldClassName,
 }: {
   csrf: string
   projectId: number
@@ -29,14 +30,18 @@ export function InquiryForm({
   // swaps the visible border for a tinted fill so the inquiry form can
   // be aligned with the brochure form via section data.
   fieldStyle?: 'bordered' | 'filled'
+  // Optional full override for the input class — used by a themed
+  // section (e.g. a dark tone) to make the inputs legible on its
+  // surface. When unset, the light bordered/filled default is used.
+  fieldClassName?: string
 }) {
-  // Shared input/textarea classes. Bordered === original. Filled uses a
-  // tinted surface with a transparent border (border kept for layout
-  // stability + the focus ring).
+  // Shared input/textarea classes. An explicit `fieldClassName` (themed
+  // section) wins; otherwise bordered === original, filled === tinted.
   const fieldClass =
-    fieldStyle === 'filled'
+    fieldClassName ??
+    (fieldStyle === 'filled'
       ? 'mt-1 w-full rounded-lg border border-warm-stone/20 bg-warm-stone/15 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500'
-      : 'mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500'
+      : 'mt-1 w-full border border-warm-stone/30 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-copper-500')
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState<'idle' | 'ok' | 'expired' | 'error'>(
     'idle',

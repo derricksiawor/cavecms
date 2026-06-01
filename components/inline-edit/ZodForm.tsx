@@ -2520,12 +2520,23 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     { kind: 'string', key: 'heading', label: 'Heading', maxLength: 220, placeholder: 'Reach out about this project' },
     { kind: 'richtext', key: 'body_richtext', label: 'Intro copy', maxLength: 2000 },
     {
+      kind: 'select', key: 'background', label: 'Section background (theme)',
+      options: [
+        { value: 'cream', label: 'Cream (current)' },
+        { value: 'ivory', label: 'Ivory' },
+        { value: 'bone', label: 'Bone' },
+        { value: 'champagne', label: 'Champagne — gold' },
+        { value: 'obsidian', label: 'Obsidian — dark' },
+      ],
+      help: 'The whole section’s colour, from your theme palette — headings, text, and the form adapt to stay legible. Obsidian is dark.',
+    },
+    {
       kind: 'select', key: 'card_surface', label: 'Form card background',
       options: [
-        { value: 'panel', label: 'Cream card (current)' },
+        { value: 'panel', label: 'Card panel (current)' },
         { value: 'transparent', label: 'None — sits on the section' },
       ],
-      help: 'Keep the cream card, or let the form sit directly on the section to match the brochure form.',
+      help: 'Keep the form on a raised card (tinted to match the section theme), or let it sit directly on the section to match the brochure form.',
     },
     {
       kind: 'select', key: 'field_style', label: 'Input style',
@@ -2543,12 +2554,23 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       help: 'Shown beside the brochure request form. The PDF itself is set under Projects → Brochure.',
     },
     {
+      kind: 'select', key: 'background', label: 'Section background (theme)',
+      options: [
+        { value: 'cream', label: 'Cream (current)' },
+        { value: 'ivory', label: 'Ivory' },
+        { value: 'bone', label: 'Bone' },
+        { value: 'champagne', label: 'Champagne — gold' },
+        { value: 'obsidian', label: 'Obsidian — dark' },
+      ],
+      help: 'The whole section’s colour, from your theme palette — headings, text, and the form adapt to stay legible. Obsidian is dark.',
+    },
+    {
       kind: 'select', key: 'card_surface', label: 'Form card background',
       options: [
         { value: 'transparent', label: 'None — sits on the section (current)' },
-        { value: 'panel', label: 'Cream card — matches the inquiry form' },
+        { value: 'panel', label: 'Card panel — matches the inquiry form' },
       ],
-      help: 'Wrap the brochure form in a cream card, or let it sit directly on the section.',
+      help: 'Wrap the brochure form in a raised card (tinted to match the section theme), or let it sit directly on the section.',
     },
     {
       kind: 'select', key: 'field_style', label: 'Input style',
