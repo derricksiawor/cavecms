@@ -1,4 +1,6 @@
 import Link from 'next/link'
+import { headers } from 'next/headers'
+import { recordNotFound } from '@/lib/cms/notFoundLog'
 
 // Themed 404 page — matches the error.tsx aesthetic. Triggered by
 // `notFound()` calls in route handlers (e.g. project/[slug] when a
@@ -12,7 +14,20 @@ export const metadata = {
   robots: { index: false, follow: false },
 }
 
-export default function NotFound() {
+// Reading headers() opts this into dynamic rendering — required so we can
+// see the original requested path and record the 404.
+export const dynamic = 'force-dynamic'
+
+export default async function NotFound() {
+  // Middleware sets x-pathname to the ORIGINAL requested path on every
+  // request (middleware.ts), surviving the CMS rewrite. Record the 404
+  // for the operator's 404 log (best-effort, never blocks the page).
+  const h = await headers()
+  const path = h.get('x-pathname')
+  if (path) {
+    await recordNotFound(path, h.get('referer'))
+  }
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-cream">
       <div
