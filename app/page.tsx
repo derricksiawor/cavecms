@@ -201,7 +201,7 @@ async function renderHome(
     )
   }
 
-  const { blocks, media, projects } = hydrated
+  const { blocks, media, projects, posts } = hydrated
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
   const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
   const ld = jsonLdForPage({ page, baseUrl: (await getSiteOrigin()) ?? '' })
@@ -213,6 +213,7 @@ async function renderHome(
       blocks={blocks}
       media={media}
       projects={projects}
+      posts={posts}
       session={session}
       editable={editable}
       preview={opts.preview}

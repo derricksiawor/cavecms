@@ -1535,6 +1535,562 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     },
   ],
 
+  // ════════════════════════════════════════════════════════════════
+  // ELEMENTOR-PARITY BLOCKS — field shapes for the new widgets.
+  // ════════════════════════════════════════════════════════════════
+
+  lx_carousel: [
+    {
+      kind: 'object_array', key: 'slides', label: 'Slides', addLabel: 'Add slide', itemNoun: 'slide', maxItems: 20,
+      itemFields: [
+        { kind: 'media', key: 'image', label: 'Image', accept: 'image' },
+        { kind: 'string', key: 'caption', label: 'Caption', maxLength: TEXT_MAX.short },
+        { kind: 'string', key: 'href', label: 'Link (optional)', maxLength: TEXT_MAX.url, placeholder: '/page or https://…' },
+      ],
+    },
+    {
+      kind: 'select', key: 'ratio', label: 'Aspect ratio',
+      options: [
+        { value: '21:9', label: 'Cinematic 21:9' },
+        { value: '16:9', label: 'Widescreen 16:9' },
+        { value: '4:3', label: 'Classic 4:3' },
+        { value: '4:5', label: 'Portrait 4:5' },
+        { value: '1:1', label: 'Square 1:1' },
+      ],
+    },
+    { kind: 'boolean', key: 'autoplay', label: 'Autoplay', help: 'Disabled automatically for visitors who prefer reduced motion.' },
+    { kind: 'number', key: 'intervalMs', label: 'Autoplay interval (ms)', min: 2000, max: 12000, step: 500 },
+    { kind: 'boolean', key: 'loop', label: 'Loop' },
+    { kind: 'boolean', key: 'showArrows', label: 'Show arrows' },
+    { kind: 'boolean', key: 'showDots', label: 'Show dots' },
+    { kind: 'color', key: 'tone', label: 'Arrow tone', tokens: ['obsidian', 'ivory'], allowCustom: false },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_testimonial_carousel: [
+    {
+      kind: 'object_array', key: 'items', label: 'Testimonials', addLabel: 'Add testimonial', itemNoun: 'testimonial', maxItems: 12,
+      itemFields: [
+        { kind: 'string', key: 'quote', label: 'Quote', maxLength: TEXT_MAX.body, multiline: true },
+        { kind: 'string', key: 'attribution', label: 'Name', maxLength: TEXT_MAX.caption },
+        { kind: 'string', key: 'attribution_title', label: 'Role / title', maxLength: TEXT_MAX.caption },
+        { kind: 'media', key: 'portrait', label: 'Portrait (optional)', accept: 'image' },
+      ],
+    },
+    { kind: 'boolean', key: 'autoplay', label: 'Autoplay', help: 'Disabled automatically for visitors who prefer reduced motion.' },
+    { kind: 'number', key: 'intervalMs', label: 'Autoplay interval (ms)', min: 2000, max: 12000, step: 500 },
+    { kind: 'boolean', key: 'loop', label: 'Loop' },
+    { kind: 'boolean', key: 'showArrows', label: 'Show arrows' },
+    { kind: 'boolean', key: 'showDots', label: 'Show dots' },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_star_rating: [
+    { kind: 'number', key: 'value', label: 'Rating', min: 0, max: 10, step: 0.5 },
+    { kind: 'number', key: 'max', label: 'Out of', min: 1, max: 10, step: 1 },
+    { kind: 'boolean', key: 'showValue', label: 'Show numeric value' },
+    {
+      kind: 'select', key: 'size', label: 'Size',
+      options: [
+        { value: 'sm', label: 'Small' },
+        { value: 'md', label: 'Medium' },
+        { value: 'lg', label: 'Large' },
+      ],
+    },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+        { value: 'right', label: 'Right' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Value tone', tokens: ['champagne', 'obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+      ],
+    },
+  ],
+
+  lx_pricing_table: [
+    { kind: 'string', key: 'planName', label: 'Plan name', maxLength: TEXT_MAX.caption, placeholder: 'Professional' },
+    { kind: 'string', key: 'price', label: 'Price', maxLength: TEXT_MAX.caption, placeholder: '$49' },
+    { kind: 'string', key: 'period', label: 'Period', maxLength: TEXT_MAX.caption, placeholder: '/month' },
+    { kind: 'string', key: 'description', label: 'Description', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'string_array', key: 'features', label: 'Features', placeholder: 'Type a feature, press Enter', maxItems: 20 },
+    { kind: 'string', key: 'ctaLabel', label: 'Button label', maxLength: TEXT_MAX.ctaText, placeholder: 'Get started' },
+    { kind: 'string', key: 'ctaHref', label: 'Button link', maxLength: TEXT_MAX.url, placeholder: '/contact' },
+    { kind: 'boolean', key: 'ctaOpenInNew', label: 'Open button in a new tab' },
+    { kind: 'boolean', key: 'featured', label: 'Featured (highlighted) plan' },
+    { kind: 'string', key: 'featuredLabel', label: 'Featured badge text', maxLength: TEXT_MAX.caption, placeholder: 'Most popular' },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_pricing_list: [
+    {
+      kind: 'object_array', key: 'items', label: 'Items', addLabel: 'Add item', itemNoun: 'item', maxItems: 40,
+      itemFields: [
+        { kind: 'string', key: 'title', label: 'Title', maxLength: TEXT_MAX.caption },
+        { kind: 'string', key: 'description', label: 'Description', maxLength: TEXT_MAX.body, multiline: true },
+        { kind: 'string', key: 'price', label: 'Price', maxLength: TEXT_MAX.caption },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_reviews: [
+    {
+      kind: 'object_array', key: 'items', label: 'Reviews', addLabel: 'Add review', itemNoun: 'review', maxItems: 24,
+      itemFields: [
+        { kind: 'string', key: 'author', label: 'Author', maxLength: TEXT_MAX.caption },
+        { kind: 'number', key: 'rating', label: 'Rating (0–5)', min: 0, max: 5, step: 0.5 },
+        { kind: 'string', key: 'text', label: 'Review', maxLength: TEXT_MAX.body, multiline: true },
+        { kind: 'string', key: 'role', label: 'Role / company', maxLength: TEXT_MAX.caption },
+        { kind: 'media', key: 'avatar', label: 'Avatar (optional)', accept: 'image' },
+      ],
+    },
+    {
+      kind: 'select', key: 'columns', label: 'Columns', valueAsNumber: true,
+      options: [
+        { value: '1', label: '1' },
+        { value: '2', label: '2' },
+        { value: '3', label: '3' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_progress_tracker: [
+    {
+      kind: 'object_array', key: 'steps', label: 'Steps', addLabel: 'Add step', itemNoun: 'step', maxItems: 12,
+      itemFields: [
+        { kind: 'string', key: 'title', label: 'Title', maxLength: TEXT_MAX.caption },
+        { kind: 'string', key: 'description', label: 'Description', maxLength: TEXT_MAX.body, multiline: true },
+        {
+          kind: 'select', key: 'state', label: 'State',
+          options: [
+            { value: 'done', label: 'Done' },
+            { value: 'current', label: 'Current' },
+            { value: 'upcoming', label: 'Upcoming' },
+          ],
+        },
+      ],
+    },
+    {
+      kind: 'select', key: 'orientation', label: 'Orientation',
+      options: [
+        { value: 'vertical', label: 'Vertical' },
+        { value: 'horizontal', label: 'Horizontal' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_animated_headline: [
+    { kind: 'string', key: 'prefix', label: 'Prefix (static)', maxLength: TEXT_MAX.title, placeholder: 'We build' },
+    { kind: 'string_array', key: 'words', label: 'Rotating words', placeholder: 'Add a word, press Enter', maxItems: 8 },
+    { kind: 'string', key: 'suffix', label: 'Suffix (static)', maxLength: TEXT_MAX.title, placeholder: 'that lasts' },
+    {
+      kind: 'select', key: 'effect', label: 'Effect',
+      options: [
+        { value: 'rotate', label: 'Rotate (slide up)' },
+        { value: 'fade', label: 'Fade' },
+        { value: 'type', label: 'Typewriter' },
+      ],
+    },
+    {
+      kind: 'select', key: 'level', label: 'Semantic level',
+      options: [
+        { value: 'h1', label: 'H1' }, { value: 'h2', label: 'H2' }, { value: 'h3', label: 'H3' },
+        { value: 'h4', label: 'H4' }, { value: 'h5', label: 'H5' }, { value: 'h6', label: 'H6' },
+      ],
+    },
+    {
+      kind: 'select', key: 'size', label: 'Visual size',
+      options: [
+        { value: 'display-2xl', label: 'Display 2XL' },
+        { value: 'display-xl', label: 'Display XL' },
+        { value: 'display-lg', label: 'Display LG' },
+        { value: 'display-md', label: 'Display MD' },
+        { value: 'display-sm', label: 'Display SM' },
+      ],
+    },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' },
+      ],
+    },
+    { kind: 'number', key: 'intervalMs', label: 'Word interval (ms)', min: 1000, max: 8000, step: 100 },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory', 'champagne'], allowCustom: true },
+    { kind: 'font_family', key: 'family', label: 'Font family' },
+    { kind: 'font_weight', key: 'weight', label: 'Font weight', familyKey: 'family' },
+  ],
+
+  lx_countdown: [
+    {
+      kind: 'string', key: 'target', label: 'Target date & time',
+      maxLength: 40, placeholder: '2026-12-31T23:59',
+      help: 'ISO format — e.g. 2026-12-31T23:59 (year-month-day, then T, then hour:minute).',
+    },
+    { kind: 'boolean', key: 'showDays', label: 'Show days' },
+    { kind: 'boolean', key: 'showHours', label: 'Show hours' },
+    { kind: 'boolean', key: 'showMinutes', label: 'Show minutes' },
+    { kind: 'boolean', key: 'showSeconds', label: 'Show seconds' },
+    { kind: 'string', key: 'expiredText', label: 'Expired message', maxLength: TEXT_MAX.caption, placeholder: 'This offer has ended.' },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+      ],
+    },
+  ],
+
+  lx_flip_box: [
+    { kind: 'icon', key: 'frontIcon', label: 'Front icon (optional)' },
+    { kind: 'media', key: 'frontImage', label: 'Front background image (optional)', accept: 'image' },
+    { kind: 'string', key: 'frontHeadline', label: 'Front headline', maxLength: TEXT_MAX.title },
+    { kind: 'string', key: 'frontBody', label: 'Front body', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'string', key: 'backHeadline', label: 'Back headline', maxLength: TEXT_MAX.title },
+    { kind: 'string', key: 'backBody', label: 'Back body', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'string', key: 'backCtaLabel', label: 'Back button label', maxLength: TEXT_MAX.ctaText },
+    { kind: 'string', key: 'backCtaHref', label: 'Back button link', maxLength: TEXT_MAX.url, placeholder: '/contact' },
+    {
+      kind: 'select', key: 'trigger', label: 'Flip on',
+      options: [
+        { value: 'hover', label: 'Hover / focus' },
+        { value: 'tap', label: 'Tap / click' },
+      ],
+    },
+    {
+      kind: 'select', key: 'height', label: 'Height',
+      options: [
+        { value: 'sm', label: 'Small' }, { value: 'md', label: 'Medium' }, { value: 'lg', label: 'Large' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: false },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+      ],
+    },
+  ],
+
+  lx_hotspot: [
+    { kind: 'media', key: 'image', label: 'Image', accept: 'image' },
+    {
+      kind: 'object_array', key: 'markers', label: 'Markers', addLabel: 'Add marker', itemNoun: 'marker', maxItems: 12,
+      itemFields: [
+        { kind: 'number', key: 'x', label: 'X position (%)', min: 0, max: 100, step: 1 },
+        { kind: 'number', key: 'y', label: 'Y position (%)', min: 0, max: 100, step: 1 },
+        { kind: 'string', key: 'label', label: 'Label', maxLength: TEXT_MAX.caption },
+        { kind: 'string', key: 'body', label: 'Detail', maxLength: TEXT_MAX.body, multiline: true },
+      ],
+    },
+    {
+      kind: 'select', key: 'ratio', label: 'Aspect ratio',
+      options: [
+        { value: '21:9', label: 'Cinematic 21:9' },
+        { value: '16:9', label: 'Widescreen 16:9' },
+        { value: '4:3', label: 'Classic 4:3' },
+        { value: '1:1', label: 'Square 1:1' },
+        { value: 'auto', label: 'Original' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: false },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+      ],
+    },
+  ],
+
+  lx_progress: [
+    {
+      kind: 'object_array', key: 'items', label: 'Bars', addLabel: 'Add bar', itemNoun: 'bar', maxItems: 20,
+      itemFields: [
+        { kind: 'string', key: 'label', label: 'Label', maxLength: TEXT_MAX.caption },
+        { kind: 'number', key: 'value', label: 'Value (%)', min: 0, max: 100, step: 1 },
+      ],
+    },
+    { kind: 'boolean', key: 'showValue', label: 'Show percentage' },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+  ],
+
+  lx_menu_anchor: [
+    {
+      kind: 'string', key: 'anchorId', label: 'Anchor id', maxLength: 64,
+      placeholder: 'pricing', pattern: HTML_ID_PATTERN, patternError: HTML_ID_HELPER,
+      help: 'Link to this from a nav item or button with "#" + your id.',
+    },
+  ],
+
+  lx_toc: [
+    { kind: 'string', key: 'title', label: 'Title (optional)', maxLength: TEXT_MAX.caption, placeholder: 'On this page' },
+    {
+      kind: 'object_array', key: 'items', label: 'Links', addLabel: 'Add link', itemNoun: 'link', maxItems: 30,
+      itemFields: [
+        { kind: 'string', key: 'label', label: 'Label', maxLength: TEXT_MAX.caption },
+        {
+          kind: 'string', key: 'anchor', label: 'Anchor id', maxLength: 64,
+          placeholder: 'pricing', pattern: HTML_ID_PATTERN, patternError: HTML_ID_HELPER,
+          help: 'The HTML id of the target block (set in its Advanced tab) or a Menu anchor.',
+        },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_share: [
+    { kind: 'string', key: 'label', label: 'Label (optional)', maxLength: TEXT_MAX.caption, placeholder: 'Share' },
+    { kind: 'boolean', key: 'shareX', label: 'X (Twitter)' },
+    { kind: 'boolean', key: 'shareLinkedin', label: 'LinkedIn' },
+    { kind: 'boolean', key: 'shareFacebook', label: 'Facebook' },
+    { kind: 'boolean', key: 'shareEmail', label: 'Email' },
+    { kind: 'boolean', key: 'shareCopy', label: 'Copy link' },
+    {
+      kind: 'select', key: 'size', label: 'Size',
+      options: [
+        { value: 'sm', label: 'Small' }, { value: 'md', label: 'Medium' }, { value: 'lg', label: 'Large' },
+      ],
+    },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory', 'warm-stone'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+      ],
+    },
+  ],
+
+  lx_posts: [
+    { kind: 'string', key: 'heading', label: 'Heading (optional)', maxLength: TEXT_MAX.title, placeholder: 'From the journal' },
+    { kind: 'number', key: 'limit', label: 'Number of posts', min: 1, max: 12, step: 1 },
+    {
+      kind: 'select', key: 'layout', label: 'Layout',
+      options: [
+        { value: 'grid', label: 'Grid' },
+        { value: 'list', label: 'List' },
+      ],
+    },
+    {
+      kind: 'select', key: 'columns', label: 'Columns', valueAsNumber: true,
+      options: [
+        { value: '2', label: '2' },
+        { value: '3', label: '3' },
+      ],
+    },
+    { kind: 'boolean', key: 'showExcerpt', label: 'Show excerpt' },
+    { kind: 'boolean', key: 'showDate', label: 'Show date' },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_embed: [
+    {
+      kind: 'string', key: 'embedUrl', label: 'Embed URL', maxLength: TEXT_MAX.url,
+      placeholder: 'https://www.youtube.com/watch?v=…',
+      help: 'Paste a share URL from YouTube, Vimeo, Spotify, CodePen, SoundCloud, or CodeSandbox.',
+    },
+    {
+      kind: 'select', key: 'ratio', label: 'Aspect ratio',
+      options: [
+        { value: '21:9', label: 'Cinematic 21:9' },
+        { value: '16:9', label: 'Widescreen 16:9' },
+        { value: '4:3', label: 'Classic 4:3' },
+        { value: '1:1', label: 'Square 1:1' },
+        { value: 'auto', label: 'Tall (audio / embeds)' },
+      ],
+    },
+    { kind: 'string', key: 'title', label: 'Accessible title', maxLength: TEXT_MAX.caption, placeholder: 'What this embed shows' },
+  ],
+
+  lx_code: [
+    { kind: 'string', key: 'code', label: 'Code', maxLength: 8000, multiline: true, placeholder: 'Paste your code here' },
+    {
+      kind: 'select', key: 'language', label: 'Language',
+      options: [
+        { value: 'text', label: 'Plain text' },
+        { value: 'ts', label: 'TypeScript' }, { value: 'tsx', label: 'TSX' },
+        { value: 'js', label: 'JavaScript' }, { value: 'jsx', label: 'JSX' },
+        { value: 'json', label: 'JSON' }, { value: 'html', label: 'HTML' },
+        { value: 'css', label: 'CSS' }, { value: 'bash', label: 'Bash / shell' },
+        { value: 'python', label: 'Python' }, { value: 'go', label: 'Go' },
+        { value: 'rust', label: 'Rust' }, { value: 'sql', label: 'SQL' },
+        { value: 'yaml', label: 'YAML' }, { value: 'markdown', label: 'Markdown' },
+        { value: 'php', label: 'PHP' }, { value: 'java', label: 'Java' },
+        { value: 'ruby', label: 'Ruby' }, { value: 'c', label: 'C' },
+        { value: 'cpp', label: 'C++' }, { value: 'diff', label: 'Diff' },
+      ],
+    },
+    { kind: 'boolean', key: 'showLineNumbers', label: 'Show line numbers' },
+    { kind: 'string', key: 'filename', label: 'Filename (optional)', maxLength: TEXT_MAX.caption, placeholder: 'example.ts' },
+  ],
+
+  lx_marquee: [
+    {
+      kind: 'select', key: 'mode', label: 'Mode',
+      options: [
+        { value: 'text', label: 'Scrolling text' },
+        { value: 'logos', label: 'Logo strip' },
+      ],
+    },
+    { kind: 'string', key: 'text', label: 'Text', maxLength: TEXT_MAX.title, placeholder: 'Trusted by teams everywhere' },
+    { kind: 'media_array', key: 'logos', label: 'Logos', help: 'Used when Mode is Logo strip.' },
+    {
+      kind: 'select', key: 'speed', label: 'Speed',
+      options: [
+        { value: 'slow', label: 'Slow' }, { value: 'medium', label: 'Medium' }, { value: 'fast', label: 'Fast' },
+      ],
+    },
+    {
+      kind: 'select', key: 'direction', label: 'Direction',
+      options: [
+        { value: 'left', label: 'Left' }, { value: 'right', label: 'Right' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+  ],
+
+  lx_before_after: [
+    { kind: 'media', key: 'before', label: 'Before image', accept: 'image' },
+    { kind: 'media', key: 'after', label: 'After image', accept: 'image' },
+    { kind: 'string', key: 'beforeLabel', label: 'Before label', maxLength: TEXT_MAX.caption, placeholder: 'Before' },
+    { kind: 'string', key: 'afterLabel', label: 'After label', maxLength: TEXT_MAX.caption, placeholder: 'After' },
+    {
+      kind: 'select', key: 'ratio', label: 'Aspect ratio',
+      options: [
+        { value: '16:9', label: 'Widescreen 16:9' },
+        { value: '4:3', label: 'Classic 4:3' },
+        { value: '3:2', label: 'Photo 3:2' },
+        { value: '1:1', label: 'Square 1:1' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: false },
+  ],
+
+  lx_comparison_table: [
+    { kind: 'string_array', key: 'columns', label: 'Plan columns (2–4)', placeholder: 'Add a plan, press Enter', maxItems: 4 },
+    {
+      kind: 'object_array', key: 'rows', label: 'Rows', addLabel: 'Add row', itemNoun: 'row', maxItems: 40,
+      itemFields: [
+        { kind: 'string', key: 'feature', label: 'Feature', maxLength: TEXT_MAX.caption },
+        { kind: 'string', key: 'c1', label: 'Column 1', maxLength: TEXT_MAX.caption, placeholder: 'yes / no / text' },
+        { kind: 'string', key: 'c2', label: 'Column 2', maxLength: TEXT_MAX.caption, placeholder: 'yes / no / text' },
+        { kind: 'string', key: 'c3', label: 'Column 3', maxLength: TEXT_MAX.caption, placeholder: 'yes / no / text' },
+        { kind: 'string', key: 'c4', label: 'Column 4', maxLength: TEXT_MAX.caption, placeholder: 'yes / no / text' },
+      ],
+    },
+    { kind: 'number', key: 'highlightColumn', label: 'Highlight column (0-based, optional)', min: 0, max: 3, step: 1 },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_timeline: [
+    {
+      kind: 'object_array', key: 'events', label: 'Events', addLabel: 'Add event', itemNoun: 'event', maxItems: 24,
+      itemFields: [
+        { kind: 'string', key: 'date', label: 'Date', maxLength: TEXT_MAX.caption, placeholder: '2024' },
+        { kind: 'string', key: 'title', label: 'Title', maxLength: TEXT_MAX.title },
+        { kind: 'string', key: 'body', label: 'Description', maxLength: TEXT_MAX.body, multiline: true },
+        { kind: 'media', key: 'image', label: 'Image (optional)', accept: 'image' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
   lx_action: [
     { kind: 'string', key: 'label', label: 'Action label', maxLength: TEXT_MAX.ctaText, placeholder: 'e.g. Schedule a viewing' },
     {

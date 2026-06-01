@@ -155,7 +155,7 @@ export async function renderCmsPage(
   // public route, so we don't duplicate it here. Per-entity LD
   // (Residence, BlogPosting) lives on the route that knows about
   // the entity.
-  const { blocks, media, projects } = hydrated
+  const { blocks, media, projects, posts } = hydrated
 
   const csrf = await mintPublicPreCsrfForBlocks(blocks, slug)
 
@@ -183,6 +183,7 @@ export async function renderCmsPage(
       blocks={blocks}
       media={media}
       projects={projects}
+      posts={posts}
       session={session}
       editable={editable}
       showEmptyState={false}

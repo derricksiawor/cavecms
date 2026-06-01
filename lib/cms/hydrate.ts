@@ -85,6 +85,18 @@ export interface HydratedProject {
   og_image_id: number | null
 }
 
+// Recent published posts — populated only when the page has an
+// lx_posts block. Mirrors the /blog index query (latest published,
+// not soft-deleted). Keyed by id; iteration order is published_at DESC.
+export interface HydratedPost {
+  id: number
+  slug: string
+  title: string
+  excerpt: string | null
+  published_at: Date | string | null
+  hero_image_id: number | null
+}
+
 export interface HydratedPage {
   blocks: HydratedBlock[]
   media: Map<number, HydratedMedia>
@@ -92,6 +104,9 @@ export interface HydratedPage {
   // populated only when the page has an lx_featured_projects block.
   // Keyed by id for React keys; iteration order is the featured order.
   projects: Map<number, HydratedProject>
+  // Recent posts — populated only when the page has an lx_posts block.
+  // Iteration order is published_at DESC (newest first).
+  posts: Map<number, HydratedPost>
 }
 
 /** Defensively parse a media row's `variants` JSON cell.
@@ -324,6 +339,25 @@ export async function hydratePage(
     if (p.og_image_id) mediaIds.add(p.og_image_id)
   }
 
+  // lx_posts auto-renders the latest published posts (no per-block
+  // selection). Fetch ONLY when such a block is on the page. A page can
+  // hold several lx_posts blocks with different `limit`s — fetch MAX
+  // once (capped at 12), each renderer slices to its own data.limit.
+  const postsBlocks = blocks.filter((b) => b.blockType === 'lx_posts')
+  let posts: HydratedPost[] = []
+  if (postsBlocks.length > 0) {
+    const maxLimit = postsBlocks.reduce((m, b) => {
+      // b.blockType === 'lx_posts' here (filtered above), so b.data is
+      // the lx_posts shape; `limit` is a Zod-validated 1..12 int.
+      const lim = (b.data as BlockData<'lx_posts'>).limit
+      return typeof lim === 'number' && lim > m ? lim : m
+    }, 1)
+    posts = await fetchRecentPostsSafely(Math.min(12, Math.max(1, maxLimit)))
+    for (const p of posts) {
+      if (p.hero_image_id) mediaIds.add(p.hero_image_id)
+    }
+  }
+
   let mediaRows: Array<{ id: number; alt_text: string; variants: Record<string, string> | null; width: number | null; height: number | null }> = []
   if (mediaIds.size) {
     const ids = [...mediaIds]
@@ -376,6 +410,7 @@ export async function hydratePage(
     blocks,
     media: new Map(mediaRows.map((r) => [r.id, r])),
     projects: new Map(projects.map((p) => [p.id, p])),
+    posts: new Map(posts.map((p) => [p.id, p])),
   }
 }
 
@@ -395,6 +430,27 @@ async function fetchFeaturedProjectsSafely(): Promise<HydratedProject[]> {
       ORDER BY featured_order
       LIMIT 12
     `)) as unknown as [HydratedProject[]]
+    return rows
+  } catch (err) {
+    if (isMissingTable(err)) return []
+    throw err
+  }
+}
+
+/** Fetches the latest published, not-soft-deleted posts (newest first),
+ *  capped at `limit` — the data source for the lx_posts block. Mirrors
+ *  the /blog index query. Missing-table-safe like the projects fetch. */
+async function fetchRecentPostsSafely(limit: number): Promise<HydratedPost[]> {
+  const cap = Math.min(12, Math.max(1, Math.floor(limit)))
+  try {
+    const [rows] = (await db.execute(sql`
+      SELECT id, slug, title, excerpt, published_at, hero_image_id
+      FROM posts
+      WHERE published = TRUE
+        AND deleted_at IS NULL
+      ORDER BY published_at DESC, id DESC
+      LIMIT ${cap}
+    `)) as unknown as [HydratedPost[]]
     return rows
   } catch (err) {
     if (isMissingTable(err)) return []

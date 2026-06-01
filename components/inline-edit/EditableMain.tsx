@@ -14,6 +14,7 @@ import type {
   HydratedBlock,
   HydratedMedia,
   HydratedProject,
+  HydratedPost,
 } from '@/lib/cms/hydrate'
 import type { RenderContext } from '@/components/blocks'
 import { getEditorAiSnapshot } from '@/lib/cms/getEditorAiSnapshot'
@@ -116,6 +117,7 @@ interface Props {
   blocks: HydratedBlock[]
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
+  posts: Map<number, HydratedPost>
   session: AdminSession | null
   editable: boolean
   // Optional preview-mode marker — emits `data-preview="1"` on `<main>`
@@ -164,6 +166,7 @@ export async function EditableMain(p: Props) {
       pageId={p.pageId}
       media={p.media}
       projects={p.projects}
+      posts={p.posts}
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}
@@ -173,6 +176,7 @@ export async function EditableMain(p: Props) {
       blocks={p.blocks}
       media={p.media}
       projects={p.projects}
+      posts={p.posts}
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}

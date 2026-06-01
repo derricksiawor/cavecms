@@ -7,6 +7,8 @@ import { ChevronRight, LayoutGrid, Plus, Search, X } from 'lucide-react'
 import {
   SEED_ENTRIES,
   isPaletteVisible,
+  BLOCK_CATEGORIES,
+  categoryForEntry,
   type SeedBlockType,
   type SeedEntry,
 } from '@/lib/cms/blockSeeds'
@@ -417,42 +419,76 @@ function WidgetTab({
            stays click-only — it opens a multi-block gallery, not a
            single-block insert, so dragging it has no meaningful
            destination semantics. */}
-        <div className="flex flex-wrap gap-1.5">
-            {/* "Start from template" pill — opens the section-template
-               gallery. Shown only when the search query is empty so a
-               text filter doesn't dilute the result set with a
-               non-widget action. */}
-            {query === '' && (
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => templateGallery.open()}
-                className="inline-flex items-center gap-1.5 rounded-full bg-champagne px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-obsidian transition-all hover:bg-antique-gold hover:text-ivory disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus size={10} strokeWidth={2.4} />
-                Templates
-              </button>
-            )}
-            {filtered.length === 0 && (
-              <p className="px-1 py-2 text-[11px] font-medium text-ivory/50">
-                No widgets match{' '}
-                <span className="font-semibold text-ivory/80">
-                  &ldquo;{query}&rdquo;
-                </span>
-                .
-              </p>
-            )}
+        {/* "Start from template" pill — opens the section-template
+           gallery. Shown only when the search query is empty so a
+           text filter doesn't dilute the result set with a
+           non-widget action. */}
+        {query === '' && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => templateGallery.open()}
+              className="inline-flex items-center gap-1.5 rounded-full bg-champagne px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-obsidian transition-all hover:bg-antique-gold hover:text-ivory disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={10} strokeWidth={2.4} />
+              Templates
+            </button>
+          </div>
+        )}
+        {filtered.length === 0 && (
+          <p className="px-1 py-2 text-[11px] font-medium text-ivory/50">
+            No widgets match{' '}
+            <span className="font-semibold text-ivory/80">
+              &ldquo;{query}&rdquo;
+            </span>
+            .
+          </p>
+        )}
+        {/* Empty query → group by category with headings (operator
+           browsing). Active query → flat ranked list (keyboard-nav +
+           focus highlight), since a filtered search shouldn't re-impose
+           category headers. */}
+        {query === '' ? (
+          <div className="flex flex-col gap-6">
+            {BLOCK_CATEGORIES.map((cat) => {
+              const inCat = filtered.filter((e) => categoryForEntry(e) === cat.key)
+              if (inCat.length === 0) return null
+              return (
+                <div key={cat.key} className="[&:first-child]:pt-2 [&:last-child]:pb-3 [&:not(:first-child)]:border-t [&:not(:first-child)]:border-ivory/10 [&:not(:first-child)]:pt-5">
+                  <p className="mb-2 px-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-ivory/40">
+                    {cat.label}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {inCat.map((entry) => (
+                      <DraggablePill
+                        key={entry.label}
+                        entry={entry}
+                        isBusy={busy === entry.label}
+                        isFocused={false}
+                        disabled={busy !== null}
+                        onClick={() => add(entry.type, entry.data, entry.label)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
             {filtered.map((entry, idx) => (
               <DraggablePill
                 key={entry.label}
                 entry={entry}
                 isBusy={busy === entry.label}
-                isFocused={idx === focusIndex && query !== ''}
+                isFocused={idx === focusIndex}
                 disabled={busy !== null}
                 onClick={() => add(entry.type, entry.data, entry.label)}
               />
             ))}
-        </div>
+          </div>
+        )}
     </>
   )
 }

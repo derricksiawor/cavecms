@@ -6,6 +6,7 @@ import { TEXT_MAX } from './limits'
 import { parseStrictHttpsUrl } from './url-guard'
 import { HEX_COLOR_RE } from './designTokens'
 import { BLOCK_TONE_ENUMS } from './blockTones'
+import { isAllowedEmbedUrl } from './embedHosts'
 
 // ─── Picker-aware colour schema helper ──────────────────────────────
 // Block tone/color fields used to accept a strict enum of design-system
@@ -936,6 +937,414 @@ export const blockSchemas = {
     // No `tone` — the renderer auto-contrasts the ancestor section's
     // surface (light text on dark sections, dark on light), so there's no
     // per-block colour to mismatch the background.
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // ════════════════════════════════════════════════════════════════
+  // ELEMENTOR-PARITY BLOCKS — content/marketing widgets that close the
+  // gap with Elementor's widget catalogue. Every one is composed from
+  // the same primitives (MediaRef, safeText, colorTokenOrHex, iconName)
+  // and stores entirely in content_blocks.data JSON — no migrations.
+  // ════════════════════════════════════════════════════════════════
+
+  // ── Embla wave ──────────────────────────────────────────────────
+
+  // Image/media carousel (Elementor: Image Carousel + Slides). Embla-
+  // driven swipe/drag with optional autoplay + loop. Each slide is a
+  // MediaRef + optional caption + optional per-slide link. intervalMs
+  // bounded 2–12s so an operator can't set a seizure-fast autoplay.
+  lx_carousel: z.object({
+    slides: z
+      .array(
+        z.object({
+          image: MediaRef,
+          caption: safeText(TEXT_MAX.short).optional(),
+          href: safeCtaHrefOptional(TEXT_MAX.url).optional(),
+        }),
+      )
+      .min(1)
+      .max(20),
+    ratio: z.enum(['21:9', '16:9', '4:3', '4:5', '1:1']).default('16:9'),
+    autoplay: z.boolean().default(false),
+    intervalMs: z.number().int().min(2000).max(12000).default(5000),
+    loop: z.boolean().default(true),
+    showArrows: z.boolean().default(true),
+    showDots: z.boolean().default(true),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_carousel).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Testimonial carousel (Elementor: Testimonial Carousel). One centered
+  // pull-quote per slide. `quote` is in RICHTEXT_FIELDS (parse.ts) so it
+  // is DOMPurify'd — harmless on the plain text this field carries.
+  lx_testimonial_carousel: z.object({
+    items: z
+      .array(
+        z.object({
+          quote: safeRequiredText(1, TEXT_MAX.body),
+          attribution: safeRequiredText(1, TEXT_MAX.caption),
+          attribution_title: safeText(TEXT_MAX.caption).optional(),
+          portrait: MediaRef.optional(),
+        }),
+      )
+      .min(1)
+      .max(12),
+    autoplay: z.boolean().default(false),
+    intervalMs: z.number().int().min(2000).max(12000).default(6000),
+    loop: z.boolean().default(true),
+    showArrows: z.boolean().default(true),
+    showDots: z.boolean().default(true),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_testimonial_carousel).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // ── Repeater-card wave ──────────────────────────────────────────
+
+  // Star rating (Elementor: Star Rating). value supports fractions
+  // (4.5); the renderer clips a champagne fill to value/max width.
+  lx_star_rating: z.object({
+    value: z.number().min(0).max(10),
+    max: z.number().int().min(1).max(10).default(5),
+    showValue: z.boolean().default(false),
+    size: z.enum(['sm', 'md', 'lg']).default('md'),
+    alignment: z.enum(['left', 'center', 'right']).default('left'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_star_rating).default('champagne'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // Pricing table (Elementor: Price Table). price/period are strings so
+  // "$49" / "/mo" / "Free" / "Contact" all work. CTA is flat optional
+  // fields (label+href) — rendered only when both are present, which
+  // sidesteps a nullable-object validation cliff. Compose three in a
+  // section's columns for a 3-up.
+  lx_pricing_table: z.object({
+    planName: safeRequiredText(1, TEXT_MAX.caption),
+    price: safeRequiredText(1, TEXT_MAX.caption),
+    period: safeText(TEXT_MAX.caption).optional(),
+    description: safeText(TEXT_MAX.body).optional(),
+    features: z.array(safeText(TEXT_MAX.body)).min(1).max(20),
+    ctaLabel: safeText(TEXT_MAX.ctaText).optional(),
+    ctaHref: safeCtaHrefOptional(TEXT_MAX.url).optional(),
+    ctaOpenInNew: z.boolean().default(false),
+    featured: z.boolean().default(false),
+    featuredLabel: safeText(TEXT_MAX.caption).optional(),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_pricing_table).default('ivory'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Price list (Elementor: Price List) — menu-style rows with a dotted
+  // leader between title and price.
+  lx_pricing_list: z.object({
+    items: z
+      .array(
+        z.object({
+          title: safeRequiredText(1, TEXT_MAX.caption),
+          description: safeText(TEXT_MAX.body).optional(),
+          price: safeRequiredText(1, TEXT_MAX.caption),
+        }),
+      )
+      .min(1)
+      .max(40),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_pricing_list).default('ivory'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Reviews (Elementor: Reviews) — card grid of author + star rating +
+  // text + optional avatar. rating supports fractions.
+  lx_reviews: z.object({
+    items: z
+      .array(
+        z.object({
+          author: safeRequiredText(1, TEXT_MAX.caption),
+          rating: z.number().min(0).max(5),
+          text: safeRequiredText(1, TEXT_MAX.body),
+          role: safeText(TEXT_MAX.caption).optional(),
+          avatar: MediaRef.optional(),
+        }),
+      )
+      .min(1)
+      .max(24),
+    columns: z.union([z.literal(1), z.literal(2), z.literal(3)]).default(2),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_reviews).default('ivory'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Progress tracker / stepper (Elementor: Progress Tracker). Ordered
+  // steps with done / current / upcoming states; vertical or horizontal.
+  lx_progress_tracker: z.object({
+    steps: z
+      .array(
+        z.object({
+          title: safeRequiredText(1, TEXT_MAX.caption),
+          description: safeText(TEXT_MAX.body).optional(),
+          state: z.enum(['done', 'current', 'upcoming']).default('upcoming'),
+        }),
+      )
+      .min(1)
+      .max(12),
+    orientation: z.enum(['vertical', 'horizontal']).default('vertical'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_progress_tracker).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // ── Client motion / interactive wave ────────────────────────────
+
+  // Animated headline (Elementor: Animated Headline). Static prefix +
+  // rotating/typed words. Hydration-safe (renderer cycles in useEffect).
+  lx_animated_headline: refineFamilyWeight(
+    z.object({
+      prefix: safeText(TEXT_MAX.title).optional(),
+      words: z.array(safeText(TEXT_MAX.caption)).min(1).max(8),
+      suffix: safeText(TEXT_MAX.title).optional(),
+      effect: z.enum(['rotate', 'fade', 'type']).default('rotate'),
+      level: z.enum(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']).default('h2'),
+      size: z
+        .enum(['display-2xl', 'display-xl', 'display-lg', 'display-md', 'display-sm'])
+        .default('display-lg'),
+      alignment: z.enum(['left', 'center', 'right']).default('center'),
+      intervalMs: z.number().int().min(1000).max(8000).default(2600),
+      tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_animated_headline).default('obsidian'),
+      family: fontFamilyToken,
+      weight: fontWeightToken,
+    }),
+  ),
+
+  // Countdown (Elementor: Countdown). target is an ISO datetime string;
+  // the renderer ticks every second (hydration-safe snapshot + effect).
+  lx_countdown: z.object({
+    target: z
+      .string()
+      .min(1)
+      .max(40)
+      .refine((s) => !Number.isNaN(Date.parse(s)), 'invalid_datetime'),
+    showDays: z.boolean().default(true),
+    showHours: z.boolean().default(true),
+    showMinutes: z.boolean().default(true),
+    showSeconds: z.boolean().default(true),
+    expiredText: safeText(TEXT_MAX.caption).optional(),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_countdown).default('obsidian'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // Flip box (Elementor: Flip Box). Front + back faces; flips on hover
+  // or tap. CTA is flat optional fields. Keys are flattened (frontX /
+  // backX) because the FieldShape DSL has no nested-object kind.
+  lx_flip_box: z.object({
+    frontIcon: iconName.optional(),
+    frontImage: MediaRef.optional(),
+    frontHeadline: safeRequiredText(1, TEXT_MAX.title),
+    frontBody: safeText(TEXT_MAX.body).optional(),
+    backHeadline: safeRequiredText(1, TEXT_MAX.title),
+    backBody: safeText(TEXT_MAX.body).optional(),
+    backCtaLabel: safeText(TEXT_MAX.ctaText).optional(),
+    backCtaHref: safeCtaHrefOptional(TEXT_MAX.url).optional(),
+    trigger: z.enum(['hover', 'tap']).default('hover'),
+    height: z.enum(['sm', 'md', 'lg']).default('md'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_flip_box).default('obsidian'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // Image hotspots (Elementor: Hotspot). Markers positioned by x/y
+  // percent, each opening an accessible popover.
+  lx_hotspot: z.object({
+    image: MediaRef,
+    markers: z
+      .array(
+        z.object({
+          x: z.number().min(0).max(100),
+          y: z.number().min(0).max(100),
+          label: safeRequiredText(1, TEXT_MAX.caption),
+          body: safeText(TEXT_MAX.body).optional(),
+        }),
+      )
+      .min(1)
+      .max(12),
+    ratio: z.enum(['21:9', '16:9', '4:3', '1:1', 'auto']).default('16:9'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_hotspot).default('obsidian'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // Progress bars / skill meters (Elementor: Progress Bar). Each bar
+  // fills on scroll-into-view; role=progressbar for a11y.
+  lx_progress: z.object({
+    items: z
+      .array(
+        z.object({
+          label: safeRequiredText(1, TEXT_MAX.caption),
+          value: z.number().int().min(0).max(100),
+        }),
+      )
+      .min(1)
+      .max(20),
+    showValue: z.boolean().default(true),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_progress).default('obsidian'),
+    // No `animation` field — the block's signature motion is the per-bar
+    // fill-on-scroll (IntersectionObserver in the renderer). A second
+    // section-entrance animation would double up and fight the ref.
+  }),
+
+  // ── Nav / utility wave ──────────────────────────────────────────
+
+  // Menu anchor (Elementor: Menu Anchor) — an invisible in-page jump
+  // target. anchorId must be a valid HTML id (letter-leading).
+  lx_menu_anchor: z.object({
+    anchorId: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/, 'invalid_anchor_id'),
+  }),
+
+  // Table of contents (Elementor: Table of Contents) — manual anchor
+  // list. Each anchor references a block's HTML id (set in Advanced) or
+  // an lx_menu_anchor. 'auto' heading-scan is a documented future add.
+  lx_toc: z.object({
+    title: safeText(TEXT_MAX.caption).optional(),
+    items: z
+      .array(
+        z.object({
+          label: safeRequiredText(1, TEXT_MAX.caption),
+          anchor: z
+            .string()
+            .min(1)
+            .max(64)
+            .regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/, 'invalid_anchor'),
+        }),
+      )
+      .min(1)
+      .max(30),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_toc).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Share buttons (Elementor: Share Buttons). Five fixed networks as
+  // booleans (render order is fixed). Share intents are built from the
+  // current page URL at click time — no operator URL, no injection.
+  lx_share: z.object({
+    shareX: z.boolean().default(true),
+    shareLinkedin: z.boolean().default(true),
+    shareFacebook: z.boolean().default(true),
+    shareEmail: z.boolean().default(true),
+    shareCopy: z.boolean().default(true),
+    label: safeText(TEXT_MAX.caption).optional(),
+    size: z.enum(['sm', 'md', 'lg']).default('md'),
+    alignment: z.enum(['left', 'center', 'right']).default('left'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_share).default('warm-stone'),
+    animation: z.enum(['none', 'fade-in']).default('none'),
+  }),
+
+  // ── Dynamic wave ────────────────────────────────────────────────
+
+  // Posts loop (Elementor: Posts / Loop Grid). Auto-renders the latest
+  // published posts — no per-block selection, the same model as
+  // lx_featured_projects. hydrate.ts bulk-fetches them; the renderer
+  // never queries the DB. No tone (auto-contrasts the ancestor surface).
+  // 'by tag/category' is a documented future add (needs a posts-tags
+  // migration the schema doesn't have yet).
+  lx_posts: z.object({
+    heading: safeText(TEXT_MAX.title).optional(),
+    limit: z.number().int().min(1).max(12).default(3),
+    layout: z.enum(['grid', 'list']).default('grid'),
+    columns: z.union([z.literal(2), z.literal(3)]).default(3),
+    showExcerpt: z.boolean().default(true),
+    showDate: z.boolean().default(true),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('fade-in'),
+  }),
+
+  // ── Security wave ───────────────────────────────────────────────
+
+  // Embed (Elementor: HTML / oEmbed). Tier-1: a curated host allowlist
+  // (lib/cms/embedHosts.ts), normalised to a sandboxed iframe. The
+  // refine rejects any non-allowlisted URL at the write boundary so the
+  // renderer never frames an arbitrary source. Each allowlisted host is
+  // mirrored in frame-src (lib/security/buildCsp.ts). title is REQUIRED
+  // for iframe a11y. Raw-HTML srcdoc is a documented Tier-2 future add.
+  lx_embed: z.object({
+    embedUrl: z
+      .string()
+      .min(1)
+      .max(TEXT_MAX.url)
+      .refine(isAllowedEmbedUrl, 'invalid_embed_url'),
+    ratio: z.enum(['21:9', '16:9', '4:3', '1:1', 'auto']).default('16:9'),
+    title: safeRequiredText(1, TEXT_MAX.caption),
+  }),
+
+  // Code highlight (Elementor: Code Highlight). `code` is PLAIN TEXT —
+  // NOT in parse.ts RICHTEXT_FIELDS — escaped + highlighted by Shiki at
+  // the server (zero client JS, no injection path). language is a
+  // bounded enum so a pathological grammar can't be requested.
+  lx_code: z.object({
+    code: z.string().min(1).max(8000),
+    language: z
+      .enum([
+        'text', 'ts', 'tsx', 'js', 'jsx', 'json', 'html', 'css', 'bash',
+        'python', 'go', 'rust', 'sql', 'yaml', 'markdown', 'php', 'java',
+        'ruby', 'c', 'cpp', 'diff',
+      ])
+      .default('text'),
+    showLineNumbers: z.boolean().default(false),
+    filename: safeText(TEXT_MAX.caption).optional(),
+  }),
+
+  // ── Stretch wave ("even better than Elementor") ─────────────────
+
+  // Marquee — logo / text ticker. Pure-CSS scroll, reduced-motion safe.
+  lx_marquee: z.object({
+    mode: z.enum(['text', 'logos']).default('text'),
+    text: safeText(TEXT_MAX.title).optional(),
+    logos: z.array(MediaRef).max(24).default([]),
+    speed: z.enum(['slow', 'medium', 'fast']).default('medium'),
+    direction: z.enum(['left', 'right']).default('left'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_marquee).default('obsidian'),
+  }),
+
+  // Before/after image comparison slider. Range-input driven (keyboard
+  // accessible); clip-path reveals the "after" image.
+  lx_before_after: z.object({
+    before: MediaRef,
+    after: MediaRef,
+    beforeLabel: safeText(TEXT_MAX.caption).optional(),
+    afterLabel: safeText(TEXT_MAX.caption).optional(),
+    ratio: z.enum(['16:9', '4:3', '3:2', '1:1']).default('4:3'),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_before_after).default('obsidian'),
+  }),
+
+  // Comparison / feature matrix. Up to 4 plan columns; each row cell
+  // (c1..c4) is a string — "yes"/"no" render as check/dash, else text.
+  // Flat cell keys because the FieldShape DSL has no nested-array kind.
+  lx_comparison_table: z.object({
+    columns: z.array(safeText(TEXT_MAX.caption)).min(2).max(4),
+    rows: z
+      .array(
+        z.object({
+          feature: safeRequiredText(1, TEXT_MAX.caption),
+          c1: safeText(TEXT_MAX.caption).optional(),
+          c2: safeText(TEXT_MAX.caption).optional(),
+          c3: safeText(TEXT_MAX.caption).optional(),
+          c4: safeText(TEXT_MAX.caption).optional(),
+        }),
+      )
+      .min(1)
+      .max(40),
+    highlightColumn: z.number().int().min(0).max(3).optional(),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_comparison_table).default('obsidian'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
+  // Timeline — dated vertical event sequence on a champagne rail.
+  lx_timeline: z.object({
+    events: z
+      .array(
+        z.object({
+          date: safeText(TEXT_MAX.caption),
+          title: safeRequiredText(1, TEXT_MAX.title),
+          body: safeText(TEXT_MAX.body).optional(),
+          image: MediaRef.optional(),
+        }),
+      )
+      .min(1)
+      .max(24),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_timeline).default('obsidian'),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
   }),
 

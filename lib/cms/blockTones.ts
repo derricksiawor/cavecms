@@ -56,6 +56,26 @@ export const BLOCK_TONE_ENUMS = {
   lx_gallery: ['obsidian', 'ivory'],
   // lx_featured_projects has NO tone — its renderer auto-contrasts the
   // ancestor section surface, so there's no per-block colour token.
+
+  // ─── Elementor-parity blocks ────────────────────────────────────
+  lx_carousel: ['obsidian', 'ivory'],
+  lx_testimonial_carousel: ['obsidian', 'ivory'],
+  lx_pricing_table: ['obsidian', 'ivory'],
+  lx_pricing_list: ['obsidian', 'ivory'],
+  lx_reviews: ['obsidian', 'ivory'],
+  lx_star_rating: ['champagne', 'obsidian', 'ivory'],
+  lx_progress_tracker: ['obsidian', 'ivory'],
+  lx_animated_headline: ['obsidian', 'ivory', 'champagne'],
+  lx_countdown: ['obsidian', 'ivory'],
+  lx_flip_box: ['obsidian', 'ivory'],
+  lx_hotspot: ['obsidian', 'ivory'],
+  lx_progress: ['obsidian', 'ivory'],
+  lx_toc: ['obsidian', 'ivory'],
+  lx_share: ['obsidian', 'ivory', 'warm-stone'],
+  lx_marquee: ['obsidian', 'ivory'],
+  lx_before_after: ['obsidian', 'ivory'],
+  lx_comparison_table: ['obsidian', 'ivory'],
+  lx_timeline: ['obsidian', 'ivory'],
 } as const satisfies Record<string, readonly [string, ...string[]]>
 
 export type ToneAwareBlockType = keyof typeof BLOCK_TONE_ENUMS
