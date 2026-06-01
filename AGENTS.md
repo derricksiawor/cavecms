@@ -126,6 +126,66 @@ GET /api/admin/pages/[id]/blocks             # full block tree
 
 ---
 
+## Connecting to the running instance
+
+The install you're in may be **live** — a CaveCMS instance already serving
+a real site. Before you build anything, locate it and confirm you can
+reach it. Don't probe ports blindly.
+
+### Find the running app
+
+CaveCMS runs as a **Next.js standalone server bound to `127.0.0.1`** on a
+local port. That port is recorded in **`env.production`** as `PORT=`. Read
+that one value to learn where the app listens — don't guess or port-scan:
+
+```
+grep '^PORT=' env.production        # e.g. PORT=3000 → http://127.0.0.1:3000
+```
+
+Cheap reachability check (no auth required):
+
+- The public site answers **`200`** at `/` when the app is up.
+- Any `/api/admin/*` route answers **`401`** when up-but-unauthenticated.
+
+A `401` from an admin route is the *good* signal: the server is running
+and auth is enforced, exactly as expected. That's a healthy live instance.
+
+### Authenticate
+
+Every `/api/admin/*` call needs admin auth — one of:
+
+1. A **programmatic API token** the operator generates at
+   **Settings → Integrations → API Tokens**, sent on the documented auth
+   header; or
+2. A **session cookie** from logging in at the install's hidden login path
+   (`LOGIN_PATH` in `env.production` — a random, unguessable route).
+
+**Ask the operator for an API token** (or to log you in). Do **not** read,
+copy, or exfiltrate secrets from `env.production` — it holds the database
+password, the JWT/CSRF secrets, and the install bootstrap token, none of
+which are yours to touch. The only thing you ever read out of it is the
+non-secret `PORT=` (and, if the operator points you to it, `LOGIN_PATH`).
+When in doubt, ask; never scrape.
+
+### Confirm auth before mutating
+
+Prove your credentials work with a **read-only** discovery call before any
+write:
+
+```
+GET /api/admin/blocks/registry      # 200 + block registry → auth is good
+GET /api/admin/pages                # 200 + page list       → auth is good
+```
+
+A `200` means you're authenticated and ready to build via the admin API
+(Rule #2). A `401` means your token or cookie is missing/wrong — stop and
+ask the operator; don't retry blindly. This admin HTTP API, driven with
+the operator's own credentials, is the **only** legitimate way to reach a
+running instance. It lets you build the *site*; it grants no license to
+modify the *engine* — Rule #1 still holds.
+
+---
+
 ## #3 RULE — WHEN IN DOUBT, ASK BEFORE ACTING.
 
 If the operator says "add a Pricing page", you have a clear path:
