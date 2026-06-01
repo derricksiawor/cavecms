@@ -26,10 +26,21 @@ export function isMissingTable(err: unknown): boolean {
 const ER_DUP_ENTRY = 'ER_DUP_ENTRY'
 
 export function isDuplicateKey(err: unknown): boolean {
+  // Drizzle 0.36+ wraps the driver error in a DrizzleQueryError ("Failed
+  // query: …") whose original mysql2 error — the one carrying
+  // `code: 'ER_DUP_ENTRY'` — sits on `.cause`. Check the top level (an
+  // unwrapped throw) AND `.cause` (the wrapped case) so a duplicate-key
+  // violation surfaces as a clean 409 no matter how it propagated.
+  const hasDupCode = (e: unknown): boolean =>
+    typeof e === 'object' &&
+    e !== null &&
+    'code' in e &&
+    (e as { code: unknown }).code === ER_DUP_ENTRY
+  if (hasDupCode(err)) return true
   return (
     typeof err === 'object' &&
     err !== null &&
-    'code' in err &&
-    (err as { code: unknown }).code === ER_DUP_ENTRY
+    'cause' in err &&
+    hasDupCode((err as { cause: unknown }).cause)
   )
 }

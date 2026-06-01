@@ -7,7 +7,7 @@ import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
@@ -181,6 +181,37 @@ function buildSets(
 
   return { setSql: sql.join(parts, sql`, `), applied }
 }
+
+// ─── GET /api/cms/posts/[id] — single post for editor load ──────────
+// Read-modify-write surface. The list endpoint returns only the card
+// fields (no body_md / seo / hero), so without this an agent or editor
+// could PATCH a post's body but never read the current value to base a
+// safe optimistic-lock update on. Returns every column a PATCH can
+// write. Trashed rows are admin + editor only (viewer → 404, no oracle
+// for "a trashed post exists at this id"), mirroring the pages GET.
+export const GET = withError<RouteCtx>(async (req, { params }) => {
+  const { id: rawId } = await params
+  const id = parseId(rawId)
+  const ctx = await requireRole(['admin', 'editor', 'viewer'])
+  checkReadRate(ctx.userId)
+
+  const [rows] = (await db.execute(sql`
+    SELECT * FROM posts WHERE id = ${id}
+  `)) as unknown as [Array<PostRow & { deleted_at: string | null }>]
+  const post = rows[0]
+  if (!post) throw new HttpError(404, 'not_found')
+  if (post.deleted_at !== null && ctx.role === 'viewer') {
+    throw new HttpError(404, 'not_found')
+  }
+
+  return new Response(JSON.stringify({ post }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': 'private, no-store',
+    },
+  })
+})
 
 export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   const { id: rawId } = await params

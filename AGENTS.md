@@ -86,16 +86,19 @@ Content lives under `/api/cms/*`; content-level config under
 | Goal | Endpoint |
 |---|---|
 | List pages | `GET /api/cms/pages` |
-| Read a page + its blocks | `GET /api/cms/pages/{id}` |
+| Read a page + its block tree (each block carries `data`, `meta`, `version`) | `GET /api/cms/pages/{id}` |
+| Read a single post / project before editing | `GET /api/cms/posts/{id}`, `GET /api/cms/projects/{id}` |
 | Create a page | `POST /api/cms/pages` |
 | Update page metadata / publish (admin) | `PATCH /api/cms/pages/{id}` |
-| Insert a block | `POST /api/cms/blocks` |
-| Update a block's data | `PATCH /api/cms/blocks/{id}` |
+| **Batch many edits in ONE call (FAST — preferred for agents)** | `POST /api/cms/pages/{id}/batch` |
+| Insert a single block | `POST /api/cms/blocks` |
+| Update a single block's data / meta | `PATCH /api/cms/blocks/{id}` |
 | Reorder / move blocks | `POST /api/cms/blocks/reorder` |
 | Duplicate a block | `POST /api/cms/blocks/{id}/duplicate` |
 | Restore a soft-deleted block | `POST /api/cms/blocks/{id}/restore` |
 | Soft-delete a block | `DELETE /api/cms/blocks/{id}` |
 | Create / edit a blog post | `POST /api/cms/posts`, `PATCH /api/cms/posts/{id}` |
+| Edit a project | `PATCH /api/cms/projects/{id}` |
 | Upload media | `POST /api/cms/media` |
 | Read settings | `GET /api/admin/settings` |
 | Write a content/branding setting | `PATCH /api/admin/settings` |
@@ -104,6 +107,59 @@ A token authenticates all of these with just the `Authorization: Bearer`
 header. A session cookie additionally needs an `x-csrf-token` on every
 POST/PATCH/DELETE (token requests skip CSRF entirely).
 
+### Fast path — batch many edits in ONE call (PREFER THIS)
+
+Editing block-by-block is slow: every per-block `PATCH` bumps the page's
+shared `version`, so you must read the tree, then fire writes **one at a
+time in sequence** (each needs the new `pageVersion` the last one
+returned), and a section's `meta` is a full replace. For anything beyond a
+single tweak, use the batch endpoint instead — it is as fast as editing the
+database directly, but fully validated and audited:
+
+```
+POST /api/cms/pages/{id}/batch
+{
+  "pageVersion": 7,            // OPTIONAL — omit for last-write-wins (like a direct UPDATE)
+  "ops": [
+    { "op": "patchMeta",  "blockId": 101, "metaPatch": { "background": "obsidian" } },
+    { "op": "patchData",  "blockId": 205, "dataPatch": { "text": "New headline" } },
+    { "op": "create", "tempId": "sec1", "kind": "section",
+      "meta": { "columns": 2, "background": "ivory", "padding": "lg" } },
+    { "op": "create", "tempId": "col1", "kind": "column", "parent": { "ref": "sec1" } },
+    { "op": "create", "kind": "widget", "blockType": "lx_heading",
+      "parent": { "ref": "col1" }, "data": { "text": "Hello", "alignment": "center" } },
+    { "op": "delete", "blockId": 309 },
+    { "op": "reorderChildren", "parent": 108, "orderedBlockIds": [205, 206, 207] }
+  ]
+}
+```
+
+Key properties:
+
+- **One request → one transaction → one page-version bump → one cache
+  revalidate.** Everything commits together or nothing does (any op error
+  rolls the whole batch back).
+- **Versions are OPTIONAL.** Omit `pageVersion` / per-op `expectedVersion`
+  for last-write-wins (the fast default); pass them to opt into the same
+  optimistic lock the dashboard uses.
+- **Partial-merge ops avoid read-modify-write.** `metaPatch` /`dataPatch`
+  merge the keys you send into the current value — change a section's
+  `background` without re-sending `columns` + `padding`. (`meta` / `data`
+  without the `Patch` suffix are FULL replaces.)
+- **Build whole trees with `tempId`.** A `create` op may carry a `tempId`;
+  later ops reference it as `"parent": { "ref": "<tempId>" }` — so a
+  section, its columns, and their widgets are created in one call.
+- **Ops:** `create`, `patchData` (widgets), `patchMeta` (section / column /
+  widget), `delete` (cascades to a container's descendants), and
+  `reorderChildren` (pass a parent's COMPLETE child set in the new order).
+- Up to **50 ops** per batch. Errors come back as `op[<i>]:<code>` so you
+  know exactly which op failed. Roles: admin or editor (same as every
+  content route).
+
+To read a section's CURRENT background before changing it, `GET
+/api/cms/pages/{id}` — each block now returns its `meta` (where a section's
+`background`, `padding`, and `columns` live).
+
 ### The mental model
 
 Think of yourself as a power-user dragging widgets onto a Webflow canvas
@@ -111,10 +167,15 @@ Think of yourself as a power-user dragging widgets onto a Webflow canvas
 
 - Create a new landing page from a brief: enumerate the sections the
   operator described, find the right block types from the registry (see
-  below), and POST them in order
-- Edit existing copy: GET the block, mutate its `data` JSON, PATCH it back
-- Reorder a hero + features + CTA: POST `/api/cms/blocks/reorder`
-- Upload a hero image, then PATCH a `MediaBlock` to reference it
+  below), and build the whole tree in ONE `POST /api/cms/pages/{id}/batch`
+  using `create` ops with `tempId` parent refs (preferred), or POST blocks
+  one at a time
+- Edit existing copy: read the page, then `patchData` / `patchMeta` the
+  blocks you're changing — batch them together rather than one PATCH at a
+  time
+- Reorder a hero + features + CTA: a `reorderChildren` op in the batch (or
+  `POST /api/cms/blocks/reorder`)
+- Upload a hero image, then reference it from a block's `data`
 
 You CANNOT:
 

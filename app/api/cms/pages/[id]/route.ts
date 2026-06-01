@@ -92,7 +92,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   // FOR UPDATE so a mutation never lands on a stale view.
 
   const [blockRows] = (await db.execute(sql`
-    SELECT id, parent_id, kind, block_key, block_type, position, data, version
+    SELECT id, parent_id, kind, block_key, block_type, position, data, meta, version
     FROM content_blocks
     WHERE page_id = ${id} AND deleted_at IS NULL
     ORDER BY position
