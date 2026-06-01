@@ -34,12 +34,23 @@ export function SiteHeaderNav({
   navItems,
   theme,
   projects,
+  initialPathname,
 }: {
   navItems: NavItem[]
   theme: HeaderThemeClasses
   projects: Project[]
+  // Server-resolved path (x-pathname header). Used for SSR + the first
+  // client render so the active-link class/aria-current match exactly;
+  // usePathname() takes over after mount to stay reactive on soft navs.
+  // Without this, usePathname() is empty during SSR (this lives in the
+  // cached root layout) → the active link renders inactive on the
+  // server, active on the client → hydration mismatch.
+  initialPathname: string
 }) {
-  const pathname = usePathname() ?? ''
+  const livePathname = usePathname()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const pathname = mounted ? (livePathname ?? '') : initialPathname
   return (
     <nav className="ml-auto hidden items-center gap-8 lg:flex">
       {navItems.map((item) => {

@@ -175,6 +175,7 @@ export async function SiteHeader() {
           navItems={header.navItems}
           theme={theme}
           projects={projectsList}
+          initialPathname={pathname}
         />
 
         {hasCta && (
