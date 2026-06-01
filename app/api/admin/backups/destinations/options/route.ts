@@ -25,6 +25,9 @@ const Body = z
     keepLocalCopy: z.boolean(),
     passphraseEnabled: z.boolean(),
     passphrase: z.string().max(400).optional(),
+    schedule: z.enum(['off', 'daily', 'weekly']),
+    scheduleHour: z.number().int().min(0).max(23),
+    scheduleWeekday: z.number().int().min(0).max(6),
   })
   .strict()
 
@@ -60,6 +63,9 @@ export const POST = withError(async (req: Request) => {
         destination: body.destination,
         remoteRetention: body.remoteRetention,
         keepLocalCopy: body.keepLocalCopy,
+        schedule: body.schedule,
+        scheduleHour: body.scheduleHour,
+        scheduleWeekday: body.scheduleWeekday,
         encryption,
       }
     },

@@ -41,6 +41,9 @@ export default async function BackupsSettingsPage() {
       remoteRetention: cfg.remoteRetention,
       keepLocalCopy: cfg.keepLocalCopy,
       passphraseEnabled: cfg.encryption.passphraseEnabled,
+      schedule: cfg.schedule,
+      scheduleHour: cfg.scheduleHour,
+      scheduleWeekday: cfg.scheduleWeekday,
     },
   }
   return <BackupsClient initialBackups={initial} destinations={destinations} />

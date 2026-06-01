@@ -21,7 +21,14 @@ export interface DestinationsSummary {
   active: 'local' | 'gdrive' | 'onedrive'
   gdrive: { connected: boolean; accountEmail: string | null; configured: boolean }
   onedrive: { connected: boolean; accountEmail: string | null; configured: boolean }
-  options: { remoteRetention: number; keepLocalCopy: boolean; passphraseEnabled: boolean }
+  options: {
+    remoteRetention: number
+    keepLocalCopy: boolean
+    passphraseEnabled: boolean
+    schedule: 'off' | 'daily' | 'weekly'
+    scheduleHour: number
+    scheduleWeekday: number
+  }
 }
 
 type CloudProvider = 'gdrive' | 'onedrive'
@@ -214,6 +221,9 @@ export function BackupsClient({
   const [keepLocal, setKeepLocal] = useState(destinations.options.keepLocalCopy)
   const [passphraseEnabled, setPassphraseEnabled] = useState(destinations.options.passphraseEnabled)
   const [passphrase, setPassphrase] = useState('')
+  const [schedule, setSchedule] = useState(destinations.options.schedule)
+  const [scheduleHour, setScheduleHour] = useState(destinations.options.scheduleHour)
+  const [scheduleWeekday, setScheduleWeekday] = useState(destinations.options.scheduleWeekday)
   const [savingOpts, setSavingOpts] = useState(false)
 
   const anyConnected = dest.gdrive.connected || dest.onedrive.connected
@@ -238,6 +248,9 @@ export function BackupsClient({
           keepLocalCopy: keepLocal,
           passphraseEnabled,
           passphrase: passphrase || undefined,
+          schedule,
+          scheduleHour,
+          scheduleWeekday,
         }),
       })
       if (r.status === 400) {
@@ -263,7 +276,7 @@ export function BackupsClient({
     } finally {
       setSavingOpts(false)
     }
-  }, [activeDest, retention, keepLocal, passphraseEnabled, passphrase, toast])
+  }, [activeDest, retention, keepLocal, passphraseEnabled, passphrase, schedule, scheduleHour, scheduleWeekday, toast])
 
   // ── Restore from cloud ──
   interface RemoteRow {
@@ -611,6 +624,60 @@ export function BackupsClient({
               Keep your passphrase safe — it’s the only way to restore an encrypted cloud backup if this
               server is ever lost.
             </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <label className="block">
+                <span className="text-sm font-medium text-near-black">Automatic backups</span>
+                <select
+                  value={schedule}
+                  onChange={(e) => setSchedule(e.target.value as 'off' | 'daily' | 'weekly')}
+                  className="mt-1 w-full rounded-lg border border-warm-stone/30 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="off">Off</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </label>
+              {schedule !== 'off' ? (
+                <label className="block">
+                  <span className="text-sm font-medium text-near-black">At hour</span>
+                  <select
+                    value={scheduleHour}
+                    onChange={(e) => setScheduleHour(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-warm-stone/30 bg-white px-3 py-2 text-sm"
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, '0')}:00
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {schedule === 'weekly' ? (
+                <label className="block">
+                  <span className="text-sm font-medium text-near-black">On</span>
+                  <select
+                    value={scheduleWeekday}
+                    onChange={(e) => setScheduleWeekday(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-warm-stone/30 bg-white px-3 py-2 text-sm"
+                  >
+                    {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map(
+                      (d, i) => (
+                        <option key={d} value={i}>
+                          {d}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+            {schedule !== 'off' ? (
+              <p className="mt-2 text-xs text-warm-stone">
+                Times use this server’s clock, to the nearest hour.
+              </p>
+            ) : null}
 
             <div className="mt-4">
               <Button type="button" disabled={savingOpts} onClick={() => void saveOptions()}>
