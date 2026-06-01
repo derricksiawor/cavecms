@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { CSRF_COOKIE } from './cookies'
 import { verifyCsrf } from './csrf'
 import { HttpError } from './requireRole'
+import { isApiTokenJti } from './apiTokenScope'
 
 /**
  * Double-submit + HMAC CSRF check for mutating endpoints.
@@ -21,6 +22,12 @@ export async function requireCsrf(
   req: Request,
   ctx: { jti: string; userId: number },
 ): Promise<void> {
+  // API-token (Bearer) requests carry no cookie and are not sent
+  // automatically by a browser, so they are not a CSRF vector — the
+  // token IS the credential. The synthetic `apitoken:<id>` jti marks
+  // these requests; skip the double-submit check for them. (The token
+  // was already verified by requireRole/_loadAuthState before this runs.)
+  if (isApiTokenJti(ctx.jti)) return
   const header = req.headers.get('x-csrf-token') ?? ''
   const cookieJar = await cookies()
   const cookie = cookieJar.get(CSRF_COOKIE)?.value ?? ''

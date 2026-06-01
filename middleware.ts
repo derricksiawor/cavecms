@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { verifySessionJwt } from '@/lib/auth/jwt'
 import { SESSION_COOKIE } from '@/lib/auth/cookies'
+import { isBearerApiToken, tokenAllowedPath } from '@/lib/auth/apiTokenScope'
 import { SLUG_MAX, SLUG_MIN, SLUG_RE } from '@/lib/cms/slug'
 import { RESERVED } from '@/lib/cms/page-slug'
 import { escapeHtml } from '@/lib/security/escapeHtml'
@@ -193,6 +194,15 @@ function adminPath(p: string): boolean {
   return p === '/admin' || p.startsWith('/admin/') || p.startsWith('/api/admin/') || p.startsWith('/api/cms/')
 }
 
+// `tokenAllowedPath` (the surfaces a bearer token may reach) lives in the
+// edge-safe lib/auth/apiTokenScope module so middleware AND _loadAuthState
+// share one definition. The cap is enforced in BOTH places: here at the
+// edge, and structurally in _loadAuthState (which refuses to mint a token
+// session for any other path). The settings route adds a further per-KEY
+// content/branding allowlist. Edge can't hit MySQL to verify the token, so
+// an allowed path with a bogus bearer is simply forwarded to a route
+// handler that 401s after the DB check.
+
 async function authGate(req: NextRequest): Promise<NextResponse | null> {
   const p = req.nextUrl.pathname
   const needsAuth = adminPath(p) || p === '/api/auth/logout'
@@ -200,6 +210,15 @@ async function authGate(req: NextRequest): Promise<NextResponse | null> {
   const token = req.cookies.get(SESSION_COOKIE)?.value
   const ok = token ? await verifySessionJwt(token).then(() => true).catch(() => false) : false
   if (ok) return null
+  // No valid session cookie. If the request carries an API-token bearer
+  // header AND targets a token-allowed surface, forward it to the route
+  // handler for DB-backed verification (Edge can't reach MySQL here).
+  // Any other path with a bearer — or no bearer at all — falls through to
+  // the 401 / redirect below.
+  const authz = req.headers.get('authorization')
+  if (isBearerApiToken(authz) && tokenAllowedPath(p)) {
+    return null
+  }
   if (p.startsWith('/api/')) {
     return new NextResponse(JSON.stringify({ error: 'unauthenticated' }), {
       status: 401,
@@ -499,11 +518,20 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   //    IP_ALLOWLIST env (read by the internal endpoint, surfaced via
   //    cfg.disableIpAllowlist) short-circuits — break-glass after a
   //    botched allowlist save.
+  //    EXEMPTION: API-token bearer requests to token-allowed surfaces skip
+  //    this gate. The allowlist exists to restrict the BROWSER admin to known
+  //    IPs; programmatic clients (AI assistants, CI) legitimately call from
+  //    arbitrary cloud IPs and have their own credential (a DB-verified,
+  //    revocable, role-capped token checked downstream). Without this, every
+  //    token request from outside the allowlist would 404. The token is still
+  //    verified in the route handler, so a bogus bearer gains nothing beyond
+  //    reaching a 401.
   if (
     cfg?.ipAllowlist?.enabled &&
     cfg.ipAllowlist.cidrs.length > 0 &&
     !cfg.disableIpAllowlist &&
-    adminPath(pathname)
+    adminPath(pathname) &&
+    !(isBearerApiToken(req.headers.get('authorization')) && tokenAllowedPath(pathname))
   ) {
     if (!cidrListMatch(ip, cfg.ipAllowlist.cidrs)) return notFoundResponse()
   }

@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers'
 import { HttpError } from './requireRole'
 import { REAUTH_COOKIE_NAME } from './cookie-names'
 import { cookieFlags, isSecureFromHeaders } from './cookies'
+import { isApiTokenJti } from './apiTokenScope'
 
 // Step-up reauth lifetime. 5 minutes is enough for an operator to
 // chain a small batch of sensitive ops (create user → set role →
@@ -73,6 +74,13 @@ export async function clearReauthCookie(): Promise<void> {
 // drift between the app server that set the cookie and the one
 // reading it on the next request.
 export async function requireFreshReauth(jti: string): Promise<void> {
+  // API-token (Bearer) sessions can never satisfy step-up reauth: there
+  // is no interactive password entry and no reauth cookie. Reject them
+  // explicitly with 403 so token-authed calls to user-management /
+  // security-settings / secret surfaces fail closed with a clear code
+  // instead of a misleading "reauth_required" prompt. This is the
+  // structural cap that keeps API tokens below full-admin power.
+  if (isApiTokenJti(jti)) throw new HttpError(403, 'forbidden')
   const c = await cookies()
   const raw = c.get(REAUTH_COOKIE_NAME)?.value
   if (!raw) throw new HttpError(401, 'reauth_required')

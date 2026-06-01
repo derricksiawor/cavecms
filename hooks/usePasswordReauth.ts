@@ -90,11 +90,24 @@ export function usePasswordReauth(title?: string): UsePasswordReauth {
       const pw = await askPassword()
       if (pw == null) return false
       setBusy(true)
-      const r = await csrfFetch('/api/auth/reauth', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ password: pw }),
-      })
+      let r: Response
+      try {
+        r = await csrfFetch('/api/auth/reauth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        })
+      } catch {
+        // Network / timeout / CSRF-refresh failure. Settle the hook's OWN
+        // state — leaving open=true + busy=true would wedge the modal open
+        // with a dead Confirm button. Surface the 'http' fatal (consumers'
+        // useEffect turns it into a "couldn't verify your password" toast)
+        // and return false so the consumer's `if (!reauthed) return` no-ops.
+        setFatal('http')
+        setOpen(false)
+        setBusy(false)
+        return false
+      }
       // If the operator dismissed the modal while the network was
       // in-flight, respect their cancellation even on success — the
       // server may have set the reauth cookie, but they don't want

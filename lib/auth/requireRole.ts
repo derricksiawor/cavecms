@@ -27,6 +27,14 @@ export interface AuthContext {
    *  this state because it leaks the rotation-required code as a generic API
    *  error to anything wrapped by withError. */
   pwp: boolean
+  /** True when this request authenticated via an API token (Bearer) rather
+   *  than the session cookie. Consumed by the /api/admin/settings PATCH
+   *  handler to enforce the per-key content/branding write allowlist (a
+   *  token must not write session/security/integration/operational keys).
+   *  Complements the structural caps: the token path-allowlist in
+   *  middleware + _loadAuthState, and requireFreshReauth refusing token jtis
+   *  outright on reauth-gated surfaces. */
+  viaApiToken: boolean
 }
 
 // Both adapters consume the shared pipeline in getSession.ts. The
@@ -44,6 +52,7 @@ export async function requireAuth(): Promise<AuthContext> {
     oat: s.payload.oat,
     iat: s.payload.iat,
     pwp: s.payload.pwp,
+    viaApiToken: !!s.apiTokenId,
   }
 }
 

@@ -21,9 +21,10 @@ INSIDE the CMS, not to modify the CMS itself.
 
 The following paths are **read-only for AI assistants**:
 
-- `app/` (except `app/_pages/*.tsx` if the operator explicitly asks for a
-  page-route stub, and even then only by registering a page row in the
-  DB — see "Building sites" below)
+- `app/` (every route — including `app/cms-render/[slug]/page.tsx`, the
+  CMS shim that renders pages straight from the DB; there is nothing
+  page-specific for you to write there — you create pages as DB rows via
+  the API, see "Building sites" below)
 - `components/` (block renderers, admin chrome, UI primitives)
 - `lib/` (auth, CMS engine, email, updates, install, SEO, cache)
 - `db/schema/` (Drizzle schema)
@@ -57,28 +58,51 @@ Every public page on a CaveCMS site is a row in the `pages` table plus a
 tree of rows in the `content_blocks` table (section → column → widget).
 That's the surface you operate on.
 
-To build pages programmatically, use the admin HTTP API — the same one
-the dashboard uses. There is no other legitimate path.
+To build pages programmatically, use the CMS HTTP API — the same one the
+dashboard uses. There is no other legitimate path.
 
-### Admin API endpoints you may use
+### Authenticating — prefer an API token
 
-All require admin auth — a **session cookie** from logging in as an admin
-(see "Connecting to the running instance" below). There is no API-token
-surface; the session cookie is the only programmatic credential.
+Two ways to authenticate (full how-to under "Connecting to the running
+instance" below); **prefer the API token**:
+
+1. **API token (preferred).** The operator generates one in
+   **Settings → API Tokens** and gives it to you. Send it as
+   `Authorization: Bearer cave_…` on every request — **no cookie, no CSRF
+   token, no login dance**. It is scoped (editor or admin) and capped to
+   content + branding (it can never touch user accounts, security
+   settings, or secrets).
+2. **Admin email + password (fallback).** If the operator can't issue a
+   token, ask for their admin login, establish a session cookie via one
+   real browser login, then script with the cookie + an `x-csrf-token`.
+   Slower and fiddlier — use only when there's no token.
+
+### CMS API endpoints you may use
+
+Content lives under `/api/cms/*`; content-level config under
+`/api/admin/settings`. (Older notes mentioned `/api/admin/pages` and
+`/api/admin/blocks` — those paths do **not** exist; use the table below.)
 
 | Goal | Endpoint |
 |---|---|
-| Create a page | `POST /api/admin/pages` |
-| Update a page's metadata | `PATCH /api/admin/pages/[id]` |
-| Insert a block | `POST /api/admin/blocks` |
-| Update a block's data | `PATCH /api/admin/blocks/[id]` |
-| Reorder blocks | `PATCH /api/admin/blocks/reorder` |
-| Duplicate a block | `POST /api/admin/blocks/[id]/duplicate` |
-| Soft-delete a block | `DELETE /api/admin/blocks/[id]` |
-| Upload media | `POST /api/admin/media` |
-| Create a blog post | `POST /api/admin/posts` |
+| List pages | `GET /api/cms/pages` |
+| Read a page + its blocks | `GET /api/cms/pages/{id}` |
+| Create a page | `POST /api/cms/pages` |
+| Update page metadata / publish (admin) | `PATCH /api/cms/pages/{id}` |
+| Insert a block | `POST /api/cms/blocks` |
+| Update a block's data | `PATCH /api/cms/blocks/{id}` |
+| Reorder / move blocks | `POST /api/cms/blocks/reorder` |
+| Duplicate a block | `POST /api/cms/blocks/{id}/duplicate` |
+| Restore a soft-deleted block | `POST /api/cms/blocks/{id}/restore` |
+| Soft-delete a block | `DELETE /api/cms/blocks/{id}` |
+| Create / edit a blog post | `POST /api/cms/posts`, `PATCH /api/cms/posts/{id}` |
+| Upload media | `POST /api/cms/media` |
 | Read settings | `GET /api/admin/settings` |
-| Write a setting | `PATCH /api/admin/settings` |
+| Write a content/branding setting | `PATCH /api/admin/settings` |
+
+A token authenticates all of these with just the `Authorization: Bearer`
+header. A session cookie additionally needs an `x-csrf-token` on every
+POST/PATCH/DELETE (token requests skip CSRF entirely).
 
 ### The mental model
 
@@ -96,8 +120,8 @@ You CANNOT:
 
 - Write new React components
 - Add new block types (that's an upstream change — file an issue)
-- Edit page route handlers (`app/_pages/[slug]/page.tsx` is the CMS shim;
-  it reads the `pages` row and renders its blocks — there's nothing
+- Edit page route handlers (`app/cms-render/[slug]/page.tsx` is the CMS
+  shim; it reads the `pages` row and renders its blocks — there's nothing
   page-specific to write)
 - Touch the DB schema
 - Write SQL migrations
@@ -105,24 +129,28 @@ You CANNOT:
 
 ### Discovering available block types
 
-The block registry is the source of truth for what blocks exist and what
-data they accept. Read it before composing pages:
+There is **no HTTP registry endpoint**. The block registry is a source
+file in this very clone — read it (reading is fine; Rule #1 only forbids
+EDITING `lib/`):
 
-```
-GET /api/admin/blocks/registry
-```
+- `lib/cms/block-registry.ts` — the Zod schema for every block type's
+  `data` (the source of truth for the fields each block accepts).
+- `lib/cms/blockSeeds.ts` — each block's palette label + default `data`.
 
-Returns the list of registered block types, their Zod schemas, default
-data, and field metadata. Use this to know that, e.g., `lx_heading`
-takes `{ level, text, eyebrow?, alignment? }`, that `contact_form` takes
-`{ heading, fields, submitLabel, ... }`, etc.
+So you learn that, e.g., `lx_heading` takes
+`{ text, level?, size?, alignment?, tone?, … }` and `contact_form` takes
+`{ heading, intro?, submit_label, success_headline?, … }`. If you only
+have a token to a remote install (no source on disk), GET an existing
+page (below) and copy the `data` shape of a block already of the type you
+want.
 
 ### Discovering existing pages and structure
 
 ```
-GET /api/admin/pages
-GET /api/admin/pages/[id]                    # page metadata
-GET /api/admin/pages/[id]/blocks             # full block tree
+GET /api/cms/pages           # the list of pages
+GET /api/cms/pages/{id}      # the page row + its blocks (each carries a
+                             # `version` you echo back on optimistic-
+                             # locked writes)
 ```
 
 ---
@@ -151,40 +179,53 @@ Cheap reachability check (no auth required):
 A `401` from an admin route is the *good* signal: the server is running
 and auth is enforced, exactly as expected. That's a healthy live instance.
 
-### Authenticate — get a session cookie, then script
+### Authenticate — prefer an API token; fall back to a session cookie
 
-Admin auth is a **session cookie**. There is no API-token surface; the
-cookie is the only programmatic credential.
+**Preferred: an API token.** Ask the operator to generate one in
+**Settings → API Tokens** (admin only) and paste it to you. Then send it
+on every request:
 
-You get it by logging in as an admin at the install's hidden login path
-(`LOGIN_PATH` in `env.production` — a random, unguessable route; the form
-posts to `POST /api/auth/login`). That login is deliberately anti-bot
-guarded — a pre-CSRF token, a honeypot field, and optional reCAPTCHA — so a
-blind `curl` login is unreliable. Instead, **ask the operator** to either:
+```
+curl -s -H "Authorization: Bearer cave_YOUR_TOKEN" $BASE/api/cms/pages
+```
+
+No cookie, no CSRF, no login flow — the token **is** the credential, and a
+browser never sends it automatically, so there's nothing to forge. A token
+carries one role (editor or admin) and is **capped to content + branding**:
+it can edit pages, posts, blocks, media, and theme/branding settings, and
+can NEVER reach user accounts, security/auth settings, secrets, or the
+updater. Generate, paste, build. This is the fast path — use it.
+
+**Fallback: admin email + password → session cookie.** If the operator
+can't or won't issue a token, log in as an admin. The login at the hidden
+path (`LOGIN_PATH` in `env.production`; the form posts `POST /api/auth/login`)
+is deliberately anti-bot guarded — a pre-CSRF token, a honeypot, optional
+reCAPTCHA — so a blind `curl` login is unreliable. Instead, **ask the
+operator** to either:
 
 - paste you the session cookie from a browser they're already logged into, or
 - give you their admin email + password so you can log in once through a
   real browser (Playwright) just to establish the cookie.
 
-Then **drive everything else with scripts** (`curl` / `fetch`) carrying that
-cookie — this is the fast path, and the one you should use. Do NOT click
-through the admin UI with Playwright to build pages; visual automation is
-slow and pointless when the same admin HTTP API is one scripted request
-away. Use the browser only for the one-time login (if you must), never for
-the building.
-
-For mutations (POST / PATCH / DELETE), CaveCMS requires a CSRF token. With
-the session cookie set, `GET /api/csrf` returns `{ "csrf": "…" }`; send that
-value on the **`x-csrf-token`** header of every state-changing request.
-Read-only `GET`s need only the cookie. A typical scripted flow:
+With a cookie (unlike a token) every mutation also needs a CSRF token:
+`GET /api/csrf` returns `{ "csrf": "…" }`; send it on the **`x-csrf-token`**
+header of each POST/PATCH/DELETE. Either way, **drive the building with
+scripts** (`curl` / `fetch`) — do NOT click through the admin UI with
+Playwright to build pages; visual automation is slow and pointless when the
+same HTTP API is one scripted request away. Use the browser only for the
+one-time cookie login (if you must), never for the building.
 
 ```
-# session cookie is in cookies.txt (from the operator's browser login)
-curl -s -b cookies.txt $BASE/api/admin/blocks/registry            # explore
-csrf=$(curl -s -b cookies.txt $BASE/api/csrf | jq -r .csrf)        # token
+# token path (preferred) — one header, no CSRF:
+curl -s -H "Authorization: Bearer cave_YOUR_TOKEN" \
+     -H 'content-type: application/json' \
+     -d '{"...":"..."}' $BASE/api/cms/blocks
+
+# cookie path (fallback) — cookie + CSRF:
+csrf=$(curl -s -b cookies.txt $BASE/api/csrf | jq -r .csrf)
 curl -s -b cookies.txt -H "x-csrf-token: $csrf" \
      -H 'content-type: application/json' \
-     -d '{"...":"..."}' $BASE/api/admin/blocks                     # build
+     -d '{"...":"..."}' $BASE/api/cms/blocks
 ```
 
 Never read, copy, or exfiltrate secrets from `env.production` — it holds the
@@ -194,19 +235,18 @@ operator points you to it) `LOGIN_PATH`. When in doubt, ask; never scrape.
 
 ### Confirm auth before mutating
 
-Prove the cookie works with a **read-only** discovery call before any write:
+Prove your credential works with a **read-only** call before any write:
 
 ```
-GET /api/admin/blocks/registry      # 200 + block registry → auth is good
-GET /api/admin/pages                # 200 + page list       → auth is good
+GET /api/cms/pages          # 200 + page list → auth is good; 401 → not
 ```
 
-A `200` means you're authenticated and ready to build via the admin API
-(Rule #2). A `401` means your session cookie is missing or expired — stop
-and ask the operator to re-issue it; don't retry blindly. This admin HTTP
-API, driven with the operator's own credentials, is the **only** legitimate
-way to reach a running instance. It lets you build the *site*; it grants no
-license to modify the *engine* — Rule #1 still holds.
+A `200` means you're authenticated and ready to build via the API
+(Rule #2). A `401` means your token or cookie is missing, expired, or
+revoked — stop and ask the operator to re-issue it; don't retry blindly.
+This HTTP API, driven with the operator's own credential, is the **only**
+legitimate way to reach a running instance. It lets you build the *site*;
+it grants no license to modify the *engine* — Rule #1 still holds.
 
 ---
 

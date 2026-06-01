@@ -169,6 +169,13 @@
       "when": 1780060000000,
       "tag": "0025_fix_nullable_timestamp_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1780280000000,
+      "tag": "0026_api_tokens",
+      "breakpoints": true
     }
   ]
 }

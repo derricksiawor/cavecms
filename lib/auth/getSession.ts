@@ -1,11 +1,17 @@
 import 'server-only'
 import { cache } from 'react'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import type { Role } from '@/lib/auth/types'
 import type { SessionPayload } from '@/lib/auth/jwt'
 import type { CachedUser } from '@/lib/auth/userCache'
 import { verifySessionJwt } from '@/lib/auth/jwt'
 import { getUser } from '@/lib/auth/userCache'
+import { verifyApiToken } from '@/lib/auth/apiToken'
+import {
+  isBearerApiToken,
+  makeApiTokenJti,
+  tokenAllowedPath,
+} from '@/lib/auth/apiTokenScope'
 import {
   SESSION_COOKIE,
   CSRF_COOKIE,
@@ -62,11 +68,82 @@ function tryClearRevocationCookies(c: Awaited<ReturnType<typeof cookies>>): void
 interface AuthState {
   user: CachedUser
   payload: SessionPayload
+  // Set when the request authenticated via an API token (Bearer) rather
+  // than the session cookie. requireCsrf + requireFreshReauth branch on
+  // the synthetic `apitoken:<id>` jti; requireAuth surfaces this as
+  // `viaApiToken` so handlers can defend sensitive surfaces explicitly.
+  apiTokenId?: number
 }
 
 // Intentionally not exported as part of the public API — adapters in
 // this file and in requireRole.ts are the supported callers.
 export const _loadAuthState = cache(async (): Promise<AuthState | null> => {
+  // API-token bearer auth: programmatic clients (AI assistants, scripts,
+  // CI) send `Authorization: Bearer cave_…` with NO cookie and NO CSRF.
+  // verifyApiToken does the DB-backed hash lookup (Node-only — this module
+  // is never bundled into the Edge middleware). The token is honoured ONLY
+  // when it is valid AND the request targets a token-allowed surface
+  // (defense-in-depth path cap: middleware blocks others at the edge, this
+  // makes the cap STRUCTURAL so a middleware regression can't widen it).
+  // If the bearer is unusable for any AUTH reason (invalid/revoked/expired
+  // token, disallowed path, or an inactive/over-privileged creator) we FALL
+  // THROUGH to the cookie path rather than returning null, so a stray
+  // Authorization header can never shadow a valid session cookie. A
+  // transient DB error inside verifyApiToken is swallowed to null (fail-
+  // closed → falls through); a DB error inside getUser propagates as a 500,
+  // identical to the cookie path below — also fail-closed.
+  const h = await headers()
+  const authz = h.get('authorization')
+  if (isBearerApiToken(authz)) {
+    // Check the (free, in-memory) path gate BEFORE the DB lookup so a stray
+    // Authorization header on a public-page SSR render (uncacheable,
+    // unthrottled) can't force an api_tokens SELECT — the token can never be
+    // honoured there anyway. x-pathname is set by middleware on every
+    // matched request.
+    const pathname = h.get('x-pathname') ?? ''
+    if (tokenAllowedPath(pathname)) {
+      const tok = await verifyApiToken(authz)
+      if (tok) {
+        // Attribute writes to the minting user (real FK target for
+        // content_blocks.updated_by). NOTE: a token therefore shares the
+        // minting admin's per-user CMS rate-limit bucket (the same one that
+        // admin's own browser tabs use) — intentional, matching the
+        // documented per-user limiter design (cmsRateLimit.ts).
+        // Clamp the EFFECTIVE role to the creator's CURRENT role so demoting
+        // the minting admin strips an over-privileged token: an admin token
+        // wielded by a now-editor creator acts as editor; a now-viewer or
+        // deactivated creator can't wield a write token at all. Role/active
+        // are read via getUser's ~30s cache, so demotion/deactivation take
+        // effect within that TTL — the SAME window as the cookie-session
+        // path. (Token REVOCATION and creator DELETION are immediate:
+        // verifyApiToken does an uncached per-request lookup, and the FK
+        // cascade drops the row on delete.) Fail-closed throughout; the jti
+        // marks this a token request so requireCsrf skips the double-submit
+        // check and requireFreshReauth refuses outright.
+        const user = await getUser(tok.userId)
+        if (user && user.active) {
+          const RANK = { viewer: 0, editor: 1, admin: 2 } as const
+          const effectiveRole: Role =
+            RANK[user.role] < RANK[tok.role] ? user.role : tok.role
+          const nowSec = Math.floor(Date.now() / 1000)
+          return {
+            user: { ...user, role: effectiveRole },
+            payload: {
+              sub: String(tok.userId),
+              jti: makeApiTokenJti(tok.tokenId),
+              oat: nowSec,
+              iat: nowSec,
+              exp: nowSec + 60,
+              pwp: false,
+            },
+            apiTokenId: tok.tokenId,
+          }
+        }
+      }
+    }
+    // Unusable bearer — fall through to the cookie path below.
+  }
+
   const c = await cookies()
   const token = c.get(SESSION_COOKIE)?.value
   // No token at all — nothing to clear; fast-path null.

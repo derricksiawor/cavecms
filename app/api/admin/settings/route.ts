@@ -101,6 +101,33 @@ function redactSettingsRow(row: SettingRow): SettingRow {
   }
 }
 
+// API tokens (Bearer) may READ/WRITE ONLY these content/branding/SEO/contact
+// keys via /api/admin/settings. Everything else — session_config, updates,
+// install_state/updates_state, every integrations_* (the GTM/GA4/Ads/Hotjar
+// keys inject third-party script onto every public page → stored-XSS reach),
+// all security_* (security_login_path is the hidden admin login URL!),
+// smtp_config, ai_config — is DENIED to tokens regardless of reauth state.
+// Explicit allowlist so any newly-added settings key is token-denied by
+// default until reviewed. Single source for BOTH the GET read filter and the
+// PATCH write guard so the two cannot drift.
+const TOKEN_WRITABLE_SETTINGS = new Set<string>([
+  'contact_info',
+  'social_links',
+  'default_seo',
+  'footer',
+  'site_header',
+  'organization_json_ld',
+  'theme_palette',
+  // NOTE: site_general is deliberately NOT here — its `siteUrl` sets the
+  // origin of outbound tokenized email links (newsletter confirm/unsubscribe,
+  // brochure) and the canonical host, so a token writing it could harvest
+  // per-recipient tokens / hijack the canonical host. siteUrl changes stay
+  // interactive-admin + reauth only.
+  'mobile_cta',
+  // `satisfies SettingsKey[]` makes the build FAIL if any literal stops being
+  // a real registry key (rename/typo), so the cap can't silently drift open.
+] satisfies SettingsKey[])
+
 export const GET = withError(async () => {
   const ctx = await requireRole(['admin'])
   checkReadRate(ctx.userId)
@@ -109,7 +136,14 @@ export const GET = withError(async () => {
     FROM settings
     ORDER BY \`key\`
   `)) as unknown as [SettingRow[]]
-  const redacted = rows.map(redactSettingsRow)
+  // API-token read cap, symmetric to the write guard: a token must never
+  // read security/auth/secret/operational keys (e.g. security_login_path
+  // leaks the hidden admin login URL). Filter BEFORE redaction so those keys
+  // never reach a token client at all.
+  const visible = ctx.viaApiToken
+    ? rows.filter((r) => TOKEN_WRITABLE_SETTINGS.has(r.key))
+    : rows
+  const redacted = visible.map(redactSettingsRow)
   return new Response(JSON.stringify({ items: redacted }), {
     status: 200,
     headers: {
@@ -145,6 +179,16 @@ export const PATCH = withError(async (req: Request) => {
   const body = Body.parse(await readJsonBody(req))
   const entry = (registry as Record<string, { schema: z.ZodTypeAny }>)[body.key]
   if (!entry) throw new HttpError(400, 'unknown_setting')
+
+  // API-token write cap — tokens write CONTENT + BRANDING only. A bearer
+  // token reaches this route (middleware allows /api/admin/settings) but is
+  // refused on any non-allowlisted key. This is the gate that actually
+  // enforces the cap for tokens: the reauth gate below covers only a subset
+  // (security_* + the credential keys), while several token-dangerous keys
+  // (session_config, updates, analytics integrations_*) aren't reauth-gated.
+  if (ctx.viaApiToken && !TOKEN_WRITABLE_SETTINGS.has(body.key)) {
+    throw new HttpError(403, 'forbidden')
+  }
 
   // Step-up reauth gate is scoped to security-sensitive setting keys
   // (login_path, recaptcha config, IP allow/deny lists, maintenance
