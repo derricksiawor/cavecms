@@ -176,6 +176,27 @@
       "when": 1780280000000,
       "tag": "0026_api_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "5",
+      "when": 1780324816908,
+      "tag": "0027_sync_stage",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1780324900000,
+      "tag": "0028_sync_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1780324950000,
+      "tag": "0029_sync_stage_baseline",
+      "breakpoints": true
     }
   ]
 }

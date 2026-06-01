@@ -104,6 +104,8 @@ const Env = z.object({
   DB_POOL_LIMIT: z.coerce.number().int().default(15),
   DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().default(10000),
   HANDLER_TIMEOUT_MS: z.coerce.number().int().default(15000),
+  // How many content-sync revert snapshots to retain (oldest pruned).
+  CAVECMS_SYNC_BACKUP_KEEP: z.coerce.number().int().positive().default(10),
   // Optional bearer for /healthz verbose mode. Without it, verbose mode is
   // disabled in production. Generate with: openssl rand -hex 32
   HEALTHZ_TOKEN: z.string().min(32).optional(),

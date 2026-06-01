@@ -55,6 +55,11 @@ export function getRequestId(req: Request): string | null {
 // to get typed params. The wrapper forwards ctx to the handler unchanged.
 export function withError<TCtx = unknown>(
   handler: (req: Request, ctx: TCtx) => Promise<Response>,
+  // Per-route overrides. `timeoutMs` raises the wall-clock budget for handlers
+  // that legitimately run long (e.g. the sync cutover: a content mysqldump +
+  // the swap transaction can exceed the 15s default on a large site). Defaults
+  // to env.HANDLER_TIMEOUT_MS for every existing route — opt-in only.
+  opts?: { timeoutMs?: number },
 ) {
   return async (req: Request, ctx: TCtx): Promise<Response> => {
     const requestId = randomUUID()
@@ -63,7 +68,7 @@ export function withError<TCtx = unknown>(
     const timeoutPromise = new Promise<Response>((_, reject) => {
       timer = setTimeout(
         () => reject(new HttpError(504, 'handler_timeout')),
-        env.HANDLER_TIMEOUT_MS,
+        opts?.timeoutMs ?? env.HANDLER_TIMEOUT_MS,
       )
       timer.unref()
     })

@@ -55,6 +55,8 @@ import { homedir, platform, tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
+import * as nodeHttps from 'node:https'
+import * as nodeHttp from 'node:http'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -325,6 +327,10 @@ function showHelp() {
     '                                     --yes skips the confirmation prompt',
     '  status                             Show the running version + whether an update is available',
     '  version                            Print the installed version',
+    '  pull --from <url> --token <tok>    Download a source install\'s content into a bundle dir (--out)',
+    '  push --to <url> --token <tok>      Publish content to a target install (atomic, drift-gated)',
+    '                                     --from <url> --from-token <tok> assembles from a source; or --bundle <dir>',
+    '                                     --dry-run validates against the target + writes nothing; --force overrides drift',
     '  help                               Show this message',
     c('gray', '  (these command names are reserved and cannot be used as a site name)'),
     '',
@@ -2412,6 +2418,8 @@ const RECOVERY_SUBCOMMANDS = new Set([
   'backup',
   'restore',
   'backups',
+  'pull',
+  'push',
 ])
 
 function parseSubArgv(argv, sub) {
@@ -3035,6 +3043,382 @@ async function commandStatus(argv) {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════
+// cavecms pull / push — local↔prod content sync (Promote-Snapshot model)
+// ════════════════════════════════════════════════════════════════════
+//
+// pull  : read-only. Builds a bundle dir from a source install's content +
+//         media + the source's content hash (the drift baseline).
+// push  : assemble a bundle (from --from, or use --bundle=<dir>) → upload to
+//         the target's /api/cms/sync/stage (validate + media) → /cutover
+//         (drift-gated, atomic). --dry-run validates only, writes nothing.
+//
+// Zero-dep: node:https/http, system `tar`. Auth is a Bearer API token created
+// in the target's /admin/settings/api-tokens (admin role). The push never
+// touches users, secrets, leads, analytics, or security settings — the token
+// scope + the server's cutover write-set enforce that.
+
+function parseSyncArgv(argv, sub) {
+  const o = { from: null, to: null, token: null, fromToken: null, out: null, bundle: null, dryRun: false, force: false, yes: false }
+  const take = (a, i, name) => {
+    const v = argv[i]
+    if (v === undefined || v === '' || v.startsWith('--')) die(`${name} requires a value`)
+    return v
+  }
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '--dry-run') o.dryRun = true
+    else if (a === '--force') o.force = true
+    else if (a === '--yes' || a === '-y') o.yes = true
+    else if (a.startsWith('--from=')) o.from = a.slice('--from='.length)
+    else if (a === '--from') o.from = take(a, ++i, '--from')
+    else if (a.startsWith('--to=')) o.to = a.slice('--to='.length)
+    else if (a === '--to') o.to = take(a, ++i, '--to')
+    else if (a.startsWith('--token=')) o.token = a.slice('--token='.length)
+    else if (a === '--token') o.token = take(a, ++i, '--token')
+    else if (a.startsWith('--from-token=')) o.fromToken = a.slice('--from-token='.length)
+    else if (a === '--from-token') o.fromToken = take(a, ++i, '--from-token')
+    else if (a.startsWith('--out=')) o.out = a.slice('--out='.length)
+    else if (a === '--out') o.out = take(a, ++i, '--out')
+    else if (a.startsWith('--bundle=')) o.bundle = a.slice('--bundle='.length)
+    else if (a === '--bundle') o.bundle = take(a, ++i, '--bundle')
+    else if (a.startsWith('--')) die(`Unknown flag for \`cavecms ${sub}\`: ${a}`)
+    else die(`Unexpected argument "${a}"`)
+  }
+  if (sub === 'pull' && (o.to || o.bundle || o.dryRun || o.force)) die('`cavecms pull` does not take --to/--bundle/--dry-run/--force')
+  return o
+}
+
+function syncRequest(method, urlStr, { token, headers = {}, body } = {}) {
+  return new Promise((resolve_, reject) => {
+    let u
+    try { u = new URL(urlStr) } catch { return reject(new Error(`Invalid URL: ${urlStr}`)) }
+    const lib = u.protocol === 'https:' ? nodeHttps : nodeHttp
+    const h = { 'user-agent': RELEASE_FETCH_UA, ...headers }
+    if (token) h.authorization = `Bearer ${token}`
+    const req = lib.request(
+      { method, hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, headers: h, timeout: 180000 },
+      (res) => {
+        const chunks = []
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () => resolve_({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }))
+      },
+    )
+    req.on('error', reject)
+    req.on('timeout', () => req.destroy(new Error('request timed out')))
+    if (body) req.write(body)
+    req.end()
+  })
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// A 5xx/429 is transient (CF blip, origin restart, rate-limit) — worth a retry.
+// A 4xx (auth/validation) is the operator's to fix — never retried.
+function isTransientStatus(status) {
+  return status === 429 || (status >= 500 && status <= 599)
+}
+
+// Retry wrapper for IDEMPOTENT requests (GET / media download). One slow or
+// transiently-failing request used to abort an entire 50+-file media pull over
+// Cloudflare; this retries network errors, timeouts, and 5xx/429 with capped
+// exponential backoff. NOT used for POST stage/cutover (those are not blindly
+// retry-safe — the push flow handles their failures explicitly).
+async function syncRequestRetry(method, urlStr, opts = {}, { retries = 3, label = '' } = {}) {
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      const backoff = Math.min(8000, 500 * 2 ** (attempt - 1))
+      log.warn(`retrying${label ? ` ${label}` : ''} (attempt ${attempt}/${retries}) after ${backoff}ms…`)
+      await sleep(backoff)
+    }
+    try {
+      const r = await syncRequest(method, urlStr, opts)
+      if (isTransientStatus(r.status)) {
+        lastErr = new Error(`HTTP ${r.status}`)
+        continue
+      }
+      return r
+    } catch (e) {
+      lastErr = e // network error / timeout — retry
+    }
+  }
+  throw lastErr ?? new Error('request failed after retries')
+}
+
+// Non-fatal target content-hash probe (retrying). Returns the hash string, or
+// null on any failure — NEVER die()s/throws to the caller. Used by the
+// interrupted-cutover recovery so a transient 5xx on the recovery probe can't
+// hard-exit and bypass the graceful re-check.
+async function probeTargetHash(toUrl, token) {
+  try {
+    const r = await syncRequestRetry(
+      'GET',
+      `${toUrl}/api/cms/sync/hash`,
+      { token, headers: { accept: 'application/json' } },
+      { retries: 2, label: 'target hash probe' },
+    )
+    if (r.status < 200 || r.status >= 300) return null
+    const j = tryJson(r.body)
+    return j && typeof j.contentHash === 'string' ? j.contentHash : null
+  } catch {
+    return null
+  }
+}
+
+function tryJson(buf) { try { return JSON.parse(buf.toString('utf8')) } catch { return null } }
+
+// Warn (loudly) when an API token would travel over plaintext http:// to a
+// non-local host. Local dev (localhost/127.0.0.1/::1) is fine; anything else
+// over http leaks the bearer token on the wire.
+function warnInsecureTransport(urlStr, label) {
+  try {
+    const u = new URL(urlStr)
+    const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
+    if (u.protocol === 'http:' && !local) {
+      log.warn(`${label} uses plaintext http:// (${u.hostname}) — your API token will be sent UNENCRYPTED. Use https:// for any non-local target.`)
+    }
+  } catch { /* invalid URL surfaces later */ }
+}
+
+async function syncGetJson(url, token) {
+  const r = await syncRequestRetry('GET', url, { token, headers: { accept: 'application/json' } }, { label: 'GET ' + url })
+  if (r.status < 200 || r.status >= 300) die(`GET ${url} → ${r.status}: ${r.body.toString('utf8').slice(0, 300)}`)
+  const j = tryJson(r.body)
+  if (j === null) die(`GET ${url} → non-JSON response (is this a CaveCMS install with the sync feature?)`)
+  return j
+}
+
+async function syncDownload(url, token, dest) {
+  const r = await syncRequestRetry('GET', url, { token, headers: { accept: 'image/*,application/pdf' } }, { label: 'download ' + url })
+  if (r.status < 200 || r.status >= 300) die(`download ${url} → ${r.status}`)
+  // A 200 with an HTML body is a CDN/proxy challenge or error page, not the
+  // media file — writing it would silently corrupt the bundle. Require an
+  // image/pdf content-type and a non-trivial body.
+  const ct = String(r.headers['content-type'] || '')
+  if (!/^(image\/|application\/pdf)/i.test(ct)) {
+    die(`download ${url} returned content-type "${ct || 'none'}" (expected image/* or application/pdf) — a proxy challenge or error page?`)
+  }
+  if (r.body.length < 4) die(`download ${url} returned an empty/truncated body (${r.body.length} bytes)`)
+  mkdirSync(dirname(dest), { recursive: true })
+  writeFileSync(dest, r.body)
+}
+
+async function syncPostJson(url, token, obj) {
+  const body = Buffer.from(JSON.stringify(obj))
+  const r = await syncRequest('POST', url, { token, headers: { 'content-type': 'application/json', accept: 'application/json', 'content-length': String(body.length) }, body })
+  return { status: r.status, json: tryJson(r.body) }
+}
+
+async function syncPostBundle(url, token, fileBuf) {
+  const boundary = '----cavecms' + randomBytes(16).toString('hex')
+  const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="bundle"; filename="bundle.tgz"\r\nContent-Type: application/gzip\r\n\r\n`)
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`)
+  const body = Buffer.concat([head, fileBuf, tail])
+  const r = await syncRequest('POST', url, { token, headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, accept: 'application/json', 'content-length': String(body.length) }, body })
+  return { status: r.status, json: tryJson(r.body) }
+}
+
+const SYNC_IMG_VARIANTS = [['thumb', 'webp'], ['md', 'webp'], ['lg', 'webp'], ['og', 'jpg']]
+
+// Build a bundle directory from a source install's export + media + hash.
+async function assembleSyncBundle({ fromUrl, fromToken, outDir }) {
+  const exp = await syncGetJson(`${fromUrl}/api/cms/sync/export`, fromToken)
+  const hashResp = await syncGetJson(`${fromUrl}/api/cms/sync/hash`, fromToken)
+  const content = exp.content
+  const mediaOut = []
+  for (const m of content.media) {
+    const files = {}
+    if (m.kind === 'pdf') {
+      if (m.files.pdf) {
+        const dest = `media/files/${m.bundleKey}.pdf`
+        await syncDownload(`${fromUrl}${m.files.pdf}`, fromToken, join(outDir, dest))
+        files.pdf = dest
+      }
+    } else {
+      for (const [variant, ext] of SYNC_IMG_VARIANTS) {
+        const src = m.files[variant]
+        if (!src) continue
+        const dest = `media/files/${m.bundleKey}-${variant}.${ext}`
+        await syncDownload(`${fromUrl}${src}`, fromToken, join(outDir, dest))
+        files[variant] = dest
+      }
+    }
+    mediaOut.push({ ...m, files })
+  }
+  const manifest = {
+    formatVersion: exp.formatVersion ?? 1,
+    createdAt: new Date().toISOString(),
+    sourceUrl: fromUrl,
+    baselineContentHash: hashResp.contentHash,
+    contentHash: exp.contentHash,
+    counts: { pages: content.pages.length, posts: content.posts.length, projects: content.projects.length, media: mediaOut.length, settings: Object.keys(content.settings).length },
+  }
+  mkdirSync(join(outDir, 'content'), { recursive: true })
+  mkdirSync(join(outDir, 'media'), { recursive: true })
+  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2))
+  writeFileSync(join(outDir, 'content', 'pages.json'), JSON.stringify(content.pages))
+  writeFileSync(join(outDir, 'content', 'posts.json'), JSON.stringify(content.posts))
+  writeFileSync(join(outDir, 'content', 'projects.json'), JSON.stringify(content.projects))
+  writeFileSync(join(outDir, 'content', 'settings.json'), JSON.stringify(content.settings))
+  writeFileSync(join(outDir, 'content', 'settings-media-refs.json'), JSON.stringify(content.settingsMediaRefs ?? {}))
+  writeFileSync(join(outDir, 'media', 'manifest.json'), JSON.stringify(mediaOut))
+  return manifest
+}
+
+async function commandPull(argv) {
+  const o = parseSyncArgv(argv, 'pull')
+  const fromUrl = (o.from || process.env.CAVECMS_SYNC_FROM || '').replace(/\/+$/, '')
+  const token = o.token || process.env.CAVECMS_SYNC_TOKEN
+  if (!fromUrl) die('`cavecms pull` requires --from=<url> (or CAVECMS_SYNC_FROM)')
+  if (!token) die('`cavecms pull` requires --token=<api-token> (or CAVECMS_SYNC_TOKEN)')
+  warnInsecureTransport(fromUrl, 'pull source')
+  const outDir = resolve(o.out || './cavecms-bundle')
+  rmSync(outDir, { recursive: true, force: true })
+  mkdirSync(outDir, { recursive: true })
+  log.info(`Pulling content from ${fromUrl} …`)
+  const m = await assembleSyncBundle({ fromUrl, fromToken: token, outDir })
+  log.ok(`Bundle written to ${outDir}`)
+  console.log(c('gray', `  content sha: ${m.contentHash}`))
+  console.log(c('gray', `  ${m.counts.pages} pages · ${m.counts.posts} posts · ${m.counts.projects} projects · ${m.counts.media} media · ${m.counts.settings} settings`))
+  console.log(c('gray', `  publish it elsewhere with: cavecms push --bundle=${outDir} --to=<target> --token=<token>`))
+}
+
+function printSyncStage(resp) {
+  const j = resp.json
+  if (j && j.ok) {
+    const s = j.summary
+    log.ok(`Valid: ${s.pages} pages · ${s.posts} posts · ${s.projects} projects · ${s.media} media · ${s.settings} settings`)
+    return true
+  }
+  log.err(`Bundle rejected (${resp.status}):`)
+  for (const e of (j && j.errors) || []) console.log(c('red', `  · [${e.scope}] ${e.ref || ''} ${e.reason}${e.detail ? ' — ' + e.detail : ''}`))
+  return false
+}
+
+async function commandPush(argv) {
+  const o = parseSyncArgv(argv, 'push')
+  const toUrl = (o.to || process.env.CAVECMS_SYNC_TO || '').replace(/\/+$/, '')
+  const token = o.token || process.env.CAVECMS_SYNC_TOKEN
+  if (!toUrl) die('`cavecms push` requires --to=<target-url> (or CAVECMS_SYNC_TO)')
+  if (!token) die('`cavecms push` requires --token=<api-token> (or CAVECMS_SYNC_TOKEN)')
+  warnInsecureTransport(toUrl, 'push target')
+
+  let bundleDir
+  let tmpDir = null
+  if (o.bundle) {
+    bundleDir = resolve(o.bundle)
+    if (!existsSync(join(bundleDir, 'manifest.json'))) die(`No manifest.json in --bundle dir ${bundleDir}`)
+  } else {
+    const fromUrl = (o.from || process.env.CAVECMS_SYNC_FROM || '').replace(/\/+$/, '')
+    const fromToken = o.fromToken || process.env.CAVECMS_SYNC_FROM_TOKEN || token
+    if (!fromUrl) die('`cavecms push` requires --from=<source-url> or --bundle=<dir>')
+    warnInsecureTransport(fromUrl, 'push source')
+    tmpDir = join(tmpdir(), 'cavecms-push-' + randomBytes(6).toString('hex'))
+    mkdirSync(tmpDir, { recursive: true })
+    // Reap the temp bundle dir on ANY exit — including a die()/process.exit from
+    // a failed media download inside assembleSyncBundle, which would bypass the
+    // try/catch + finally cleanup below and leak the dir into the OS tmpdir.
+    process.once('exit', () => {
+      try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* best-effort */ }
+    })
+    bundleDir = tmpDir
+    log.info(`Assembling bundle from ${fromUrl} …`)
+    try {
+      await assembleSyncBundle({ fromUrl, fromToken, outDir: bundleDir })
+    } catch (e) {
+      rmSync(tmpDir, { recursive: true, force: true }) // clean up on assemble failure
+      throw e
+    }
+  }
+
+  const tgz = join(tmpdir(), `cavecms-push-${randomBytes(6).toString('hex')}.tgz`)
+  process.once('exit', () => {
+    try { rmSync(tgz, { force: true }) } catch { /* best-effort */ }
+  })
+  try {
+    const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
+    const tar = spawnSync('tar', ['-czf', tgz, '-C', bundleDir, 'manifest.json', 'content', 'media'], { encoding: 'utf8' })
+    if (tar.status !== 0) die(`tar failed: ${tar.stderr || tar.status}`)
+    const tgzBuf = readFileSync(tgz)
+    const targetHash = (await syncGetJson(`${toUrl}/api/cms/sync/hash`, token)).contentHash
+
+    if (o.dryRun) {
+      log.info(`Dry run — validating against ${toUrl} (no writes) …`)
+      const resp = await syncPostBundle(`${toUrl}/api/cms/sync/stage?validateOnly=1`, token, tgzBuf)
+      const ok = printSyncStage(resp)
+      console.log(c('gray', `  bundle sha: ${manifest.contentHash}`))
+      console.log(c('gray', `  target sha: ${targetHash}${targetHash === manifest.contentHash ? ' (identical — nothing to push)' : ''}`))
+      if (!ok) process.exitCode = 1
+      log.ok('Dry run complete — nothing was written.')
+      return
+    }
+
+    log.info(`Staging to ${toUrl} …`)
+    const staged = await syncPostBundle(`${toUrl}/api/cms/sync/stage`, token, tgzBuf)
+    if (staged.status !== 200 || !staged.json || !staged.json.ok) {
+      printSyncStage(staged)
+      die(`Stage failed (${staged.status}).`)
+    }
+    const stageId = staged.json.stageId
+    log.ok(`Staged ${stageId.slice(0, 8)}… — cutting over …`)
+
+    // The drift baseline lives server-side (stored at stage time from the
+    // bundle manifest); we only send stageId + force. A bundle whose baseline
+    // doesn't match the live target (e.g. a fresh local→prod push) comes back
+    // drift_detected → the operator re-runs with --force to overwrite.
+    let cut
+    try {
+      cut = await syncPostJson(`${toUrl}/api/cms/sync/cutover`, token, { stageId, force: !!o.force })
+    } catch (err) {
+      // A timeout / connection drop does NOT abort the in-flight DB transaction
+      // — the swap may have committed (or still be committing). Decide from the
+      // PRE-PUSH baseline (`targetHash`), not the source manifest: a successfully
+      // applied target re-exports to a hash that can differ from the bundle's by
+      // sanitization / cross-version block-schema defaults, so matching only the
+      // manifest would falsely report "did not apply". Poll a few times (with a
+      // short delay) to let an in-flight swap finish, and use a NON-FATAL probe
+      // so a transient 5xx on the recovery check can't itself hard-exit.
+      log.warn(`Cutover request interrupted (${err.message}); re-checking the target…`)
+      let after = null
+      for (let i = 0; i < 5; i++) {
+        await sleep(i === 0 ? 1500 : 3000)
+        after = await probeTargetHash(toUrl, token)
+        if (after && after === manifest.contentHash) break
+        if (after && after !== targetHash) break // changed → applied; stop early
+      }
+      if (after && after === manifest.contentHash) {
+        log.ok(`Target now matches the pushed content (sha ${manifest.contentHash}). The cutover landed despite the interruption.`)
+        return
+      }
+      if (after && after !== targetHash) {
+        log.ok(
+          `The target content CHANGED (sha ${after.slice(0, 12)}…) — the cutover very likely applied ` +
+            `(its re-exported hash can differ from the source by sanitization defaults). Verify the live site; do NOT blindly re-push.`,
+        )
+        return
+      }
+      if (after === null) {
+        die(`Cutover interrupted and the target could not be re-probed. Check ${toUrl}, then re-run the push only if its content is unchanged.`)
+      }
+      die(`Cutover interrupted and the target is UNCHANGED (still sha ${targetHash.slice(0, 12)}…) — it did not apply. Re-run the push.`)
+    }
+    if (cut.status === 409 && cut.json && cut.json.reason === 'drift_detected') {
+      die(`Refused: ${toUrl} changed since this bundle was built (drift).\n  Re-pull/rebuild the bundle, or re-run with --force to overwrite.`)
+    }
+    if (cut.status !== 200 || !cut.json || !cut.json.ok) {
+      die(`Cutover failed (${cut.status}): ${cut.json ? cut.json.reason || JSON.stringify(cut.json) : 'no response'}`)
+    }
+    const s = cut.json.swapped
+    log.ok(`Published to ${toUrl}: ${s.pages} pages · ${s.posts} posts · ${s.projects} projects · ${s.settings} settings`)
+    console.log(c('gray', `  content sha: ${cut.json.contentHash}`))
+    console.log(c('gray', `  pre-cutover snapshot (manual restore): ${cut.json.backupArtifact}`))
+  } finally {
+    rmSync(tgz, { force: true })
+    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true })
+  }
+}
+
 async function runSubcommand(sub, argv) {
   if (sub === 'update') return commandUpdate(argv)
   if (sub === 'rollback') return commandRollback(argv)
@@ -3043,6 +3427,8 @@ async function runSubcommand(sub, argv) {
   if (sub === 'backup') return commandBackup(argv)
   if (sub === 'restore') return commandRestore(argv)
   if (sub === 'backups') return commandListBackups(argv)
+  if (sub === 'pull') return commandPull(argv)
+  if (sub === 'push') return commandPush(argv)
   die(`Unknown command: ${sub}`)
 }
 
@@ -3301,6 +3687,8 @@ function installCavecmsShim({ targetDir, stateDir }) {
 #   cavecms backup [--include-env]       make a backup of content + media (+ optional secrets)
 #   cavecms backups                      list local backups
 #   cavecms restore --archive <file> [--identity <age-key>] [--restore-env] [--yes]
+#   cavecms pull --from <url> --token <tok> [--out <dir>]   download content into a bundle
+#   cavecms push --to <url> --token <tok> [--from <url> --from-token <tok> | --bundle <dir>] [--dry-run] [--force]
 #   cavecms status | version | help
 #
 # Prefer the BUNDLED engine (a self-contained zero-dep copy in the state dir,

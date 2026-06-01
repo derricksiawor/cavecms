@@ -337,7 +337,12 @@ function pidIsCaveCmsScript(pid: number): boolean | null {
       joined.includes('cavecms-update.sh') ||
       joined.includes('cavecms-watchdog.sh') ||
       joined.includes('cavecms-backup.sh') ||
-      joined.includes('cavecms-restore.sh')
+      joined.includes('cavecms-restore.sh') ||
+      // The content-sync cutover holds this lock IN-PROCESS (no shell
+      // orchestrator) — recognise the CaveCMS standalone server entrypoint so a
+      // concurrent update/backup/restore does not treat a live cutover holder
+      // as a stale lock and steal it mid-swap.
+      joined.includes('start-standalone.mjs')
     )
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
