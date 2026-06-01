@@ -108,10 +108,11 @@ export const _loadAuthState = cache(async (): Promise<AuthState | null> => {
       const tok = await verifyApiToken(authz)
       if (tok) {
         // Attribute writes to the minting user (real FK target for
-        // content_blocks.updated_by). NOTE: a token therefore shares the
-        // minting admin's per-user CMS rate-limit bucket (the same one that
-        // admin's own browser tabs use) — intentional, matching the
-        // documented per-user limiter design (cmsRateLimit.ts).
+        // content_blocks.updated_by); the acting token id is surfaced
+        // separately (apiTokenId → AuthContext.tokenId) for audit
+        // attribution + the per-TOKEN CMS mutation rate bucket
+        // (checkCmsMutationRate in cmsRateLimit.ts), so a runaway agent
+        // does not starve the minting admin's own per-user bucket.
         // Clamp the EFFECTIVE role to the creator's CURRENT role so demoting
         // the minting admin strips an over-privileged token: an admin token
         // wielded by a now-editor creator acts as editor; a now-viewer or

@@ -71,6 +71,36 @@ export function checkMutationRate(userId: number): void {
   }
 }
 
+// Per-TOKEN mutation budget — keyed by token id so an automated agent
+// (MCP / script) cannot starve the human operator's per-user bucket. Higher
+// ceiling than the human bucket (300/min) because agents legitimately batch
+// fast; still a hard cap so a runaway client trips at a bounded rate.
+const limitTokenMutations = rateLimit('cms:mutation:token', {
+  limit: 600,
+  windowSec: 60,
+})
+
+export function checkMutationRateForToken(tokenId: number): void {
+  if (!limitTokenMutations(`t${tokenId}`)) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Single dispatcher every CMS mutation route calls. Token requests draw on
+// the per-token bucket; cookie sessions on the per-user bucket. This is the
+// drop-in replacement for `checkMutationRate(ctx.userId)` at mutation sites.
+export function checkCmsMutationRate(ctx: {
+  userId: number
+  viaApiToken: boolean
+  tokenId: number | null
+}): void {
+  if (ctx.viaApiToken && ctx.tokenId !== null) {
+    checkMutationRateForToken(ctx.tokenId)
+  } else {
+    checkMutationRate(ctx.userId)
+  }
+}
+
 export function checkUploadRate(userId: number): void {
   if (!limitUploads(String(userId))) {
     throw new HttpError(429, 'rate_limited')
