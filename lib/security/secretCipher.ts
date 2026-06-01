@@ -52,6 +52,15 @@ export interface EncryptedSecret {
 // Drift between encrypt and decrypt sites would cause silent operator
 // lockout from a perfectly valid stored key.
 export const AAD_AI_CONFIG_API_KEY = 'ai_config:apiKey' as const
+// Cloud backup destinations. Each encrypted-at-rest secret binds to its
+// storage location via a dedicated AAD so a refresh token can't be replayed
+// into a different field. The connect (encrypt) + poll/disconnect/engine
+// (decrypt) sites import the SAME constant — drift would silently break
+// restore.
+export const AAD_BACKUP_GDRIVE_REFRESH = 'backups:gdrive:refreshToken' as const
+export const AAD_BACKUP_ONEDRIVE_REFRESH = 'backups:onedrive:refreshToken' as const
+export const AAD_BACKUP_PENDING_DEVICE_CODE = 'backups:pending:deviceCode' as const
+export const AAD_BACKUP_PASSPHRASE = 'backups:encryption:passphrase' as const
 
 const ENVELOPE_VERSION = 1 as const
 const ALG = 'aes-256-gcm' as const

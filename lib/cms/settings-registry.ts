@@ -645,6 +645,68 @@ const updatesState = z.object({
   stageError: z.string().max(500).optional(),
 })
 
+// Cloud backup destinations (Google Drive / OneDrive). The refresh token is
+// stored as an encrypted envelope (AES-256-GCM via SECRETS_ENCRYPTION_KEY) —
+// never plaintext. folderId is resolved lazily on first upload, so it stays
+// undefined right after connect. clientFingerprint records which baked-in
+// public client minted the token so a future client rotation can prompt a
+// reconnect.
+const backupCloudConnection = z.object({
+  connected: z.boolean().default(false),
+  accountEmail: z.string().max(200).optional(),
+  folderId: z.string().max(200).optional(),
+  refreshToken: encryptedSecretSchema.nullable().optional(),
+  clientFingerprint: z.string().max(64).optional(),
+})
+
+// Optional passphrase encryption for cloud archives. The passphrase itself is
+// stored encrypted-at-rest (for one-click restore) AND known to the operator
+// (so a host loss doesn't strand the archive). saltB64 is the non-secret
+// scrypt salt, needed to re-derive the age identity on restore. Consumed in
+// Phase 2 — defined now to keep the shape stable.
+const backupEncryption = z.object({
+  passphraseEnabled: z.boolean().default(false),
+  passphrase: encryptedSecretSchema.nullable().optional(),
+  saltB64: z.string().max(64).optional(),
+})
+
+// Operator-facing backup configuration + per-provider connection state. Not
+// edited through the generic Settings PATCH form — the Backups page owns
+// dedicated connect/disconnect routes that write this key via writeSetting.
+const backups = z.object({
+  destination: z.enum(['local', 'gdrive', 'onedrive']).default('local'),
+  keepLocalCopy: z.boolean().default(true),
+  remoteRetention: z.number().int().min(1).max(100).default(7),
+  includeEnv: z.boolean().default(false),
+  encryption: backupEncryption.default({ passphraseEnabled: false }),
+  schedule: z.enum(['off', 'daily', 'weekly']).default('off'),
+  scheduleHour: z.number().int().min(0).max(23).default(3),
+  scheduleWeekday: z.number().int().min(0).max(6).default(0),
+  gdrive: backupCloudConnection.default({ connected: false }),
+  onedrive: backupCloudConnection.default({ connected: false }),
+})
+
+// Short-lived device-flow pending block, stashed between the connect request
+// and the poll completion. The device_code is encrypted at rest; the block is
+// cleared on success / denial / expiry.
+const backupPending = z.object({
+  deviceCode: encryptedSecretSchema,
+  userCode: z.string().max(64),
+  verificationUrl: z.string().max(300),
+  expiresAt: z.string().max(40),
+  intervalSec: z.number().int().min(1).max(60),
+})
+
+// Internal state for the Backups feature (device-flow pending + scheduler
+// bookkeeping). NOT operator-editable — no form shape.
+const backupsState = z.object({
+  gdrivePending: backupPending.optional(),
+  onedrivePending: backupPending.optional(),
+  lastScheduledBackupAt: z.string().max(40).optional(),
+  lastScheduledResult: z.enum(['ok', 'failed', 'skipped']).optional(),
+  lastScheduledError: z.string().max(300).optional(),
+})
+
 // SMTP configuration. Moved from .env.local so operators can configure
 // outbound email from the dashboard without SSH'ing the server.
 // Mirrors the env-var shape: host/port/secure/user/password/fromAddress/
@@ -1059,6 +1121,27 @@ export const registry = {
   updates_state: {
     schema: updatesState,
     default: {} satisfies z.infer<typeof updatesState>,
+  },
+  // ─── Backup destinations + schedule ───
+  backups: {
+    schema: backups,
+    default: {
+      destination: 'local',
+      keepLocalCopy: true,
+      remoteRetention: 7,
+      includeEnv: false,
+      encryption: { passphraseEnabled: false },
+      schedule: 'off',
+      scheduleHour: 3,
+      scheduleWeekday: 0,
+      gdrive: { connected: false },
+      onedrive: { connected: false },
+    } satisfies z.infer<typeof backups>,
+  },
+  // Internal Backups state — device-flow pending + scheduler bookkeeping.
+  backups_state: {
+    schema: backupsState,
+    default: {} satisfies z.infer<typeof backupsState>,
   },
   // ─── SMTP / outbound email ───
   smtp_config: {
