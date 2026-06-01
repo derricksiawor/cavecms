@@ -80,6 +80,11 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
 
   const [pendingRevoke, setPendingRevoke] = useState<TokenListItem | null>(null)
 
+  // Client-side pagination — keeps a long token list from running off the
+  // bottom of the page. Controls only appear past one page (PAGE_SIZE).
+  const PAGE_SIZE = 8
+  const [page, setPage] = useState(1)
+
   useEffect(() => {
     if (reauthCtl.fatal === 'rate_limited') {
       toast.error('Too many tries — wait a moment and try again.')
@@ -222,6 +227,10 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
     }
   }
 
+  const pageCount = Math.max(1, Math.ceil(initial.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount)
+  const pageItems = initial.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
   return (
     <section className="mt-10">
       {/* Create */}
@@ -229,40 +238,64 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
         <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-warm-stone">
           Create a token
         </p>
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-          <Input
-            placeholder="Name (e.g. “Content bot”)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={busy}
-            autoComplete="off"
-          />
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as 'admin' | 'editor')}
-            disabled={busy}
-            className="rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
-            aria-label="Role"
-          >
-            <option value="editor">Editor (edit content)</option>
-            <option value="admin">Admin (content + branding)</option>
-          </select>
-          <select
-            value={expiryIdx}
-            onChange={(e) => setExpiryIdx(Number(e.target.value))}
-            disabled={busy}
-            className="rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
-            aria-label="Expires"
-          >
-            {EXPIRY_OPTIONS.map((o, i) => (
-              <option key={o.label} value={i}>
-                Expires: {o.label}
-              </option>
-            ))}
-          </select>
-          <Button onClick={create} disabled={busy}>
-            Generate token
-          </Button>
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-near-black">
+              Name
+            </span>
+            <Input
+              placeholder="e.g. “Content bot”"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={busy}
+              autoComplete="off"
+              className="w-full"
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-near-black">
+                Role
+              </span>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as 'admin' | 'editor')}
+                disabled={busy}
+                className="w-full rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
+                aria-label="Role"
+              >
+                <option value="editor">Editor (edit content)</option>
+                <option value="admin">Admin (content + branding)</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-near-black">
+                Expires
+              </span>
+              <select
+                value={expiryIdx}
+                onChange={(e) => setExpiryIdx(Number(e.target.value))}
+                disabled={busy}
+                className="w-full rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
+                aria-label="Expires"
+              >
+                {EXPIRY_OPTIONS.map((o, i) => (
+                  <option key={o.label} value={i}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="flex">
+            <Button
+              onClick={create}
+              disabled={busy}
+              className="w-full sm:w-fit"
+            >
+              Generate token
+            </Button>
+          </div>
         </div>
         <p className="mt-3 text-xs text-warm-stone">
           The token is shown once, right after you create it. Store it
@@ -275,85 +308,194 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
       )}
 
       {/* List */}
-      <div className="mt-6 overflow-hidden rounded-2xl border border-warm-stone/20">
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="bg-cream-50/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-warm-stone">
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Token</th>
-              <th className="px-4 py-3">Role</th>
-              <th className="hidden px-4 py-3 md:table-cell">Last used</th>
-              <th className="hidden px-4 py-3 md:table-cell">Expires</th>
-              <th className="hidden px-4 py-3 lg:table-cell">Created by</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {initial.length === 0 && (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="px-4 py-8 text-center text-sm text-warm-stone"
-                >
-                  No tokens yet. Create one above to start editing via the API.
-                </td>
-              </tr>
-            )}
-            {initial.map((t) => {
+      {initial.length === 0 ? (
+        <div className="mt-6 rounded-2xl border border-warm-stone/20 bg-cream-50/40 px-4 py-12 text-center text-sm text-warm-stone">
+          No tokens yet. Create one above to start editing via the API.
+        </div>
+      ) : (
+        <>
+          {/* Desktop / tablet — full table (md and up) */}
+          <div className="mt-6 hidden overflow-hidden rounded-2xl border border-warm-stone/20 md:block">
+            <table className="w-full border-collapse text-left">
+              <thead>
+                <tr className="bg-cream-50/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-warm-stone">
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Token</th>
+                  <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">Last used</th>
+                  <th className="px-4 py-3">Expires</th>
+                  <th className="hidden px-4 py-3 lg:table-cell">Created by</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.map((t) => {
+                  const inactive = t.revoked_at !== null
+                  return (
+                    <tr
+                      key={t.id}
+                      className={`border-t border-warm-stone/15 text-xs ${
+                        inactive ? 'opacity-55' : ''
+                      }`}
+                    >
+                      <td className="px-4 py-3 font-medium text-near-black">
+                        {t.name}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-warm-stone">
+                        {t.token_prefix}&middot;&middot;&middot;&middot;
+                      </td>
+                      <td className="px-4 py-3 capitalize text-near-black">
+                        {t.role}
+                      </td>
+                      <td className="px-4 py-3 text-warm-stone">
+                        {t.last_used_at ? day(t.last_used_at) : 'Never'}
+                      </td>
+                      <td className="px-4 py-3 text-warm-stone">
+                        {t.expires_at ? day(t.expires_at) : 'Never'}
+                      </td>
+                      <td className="hidden px-4 py-3 text-warm-stone lg:table-cell">
+                        {t.created_by_email ? (
+                          <CfSafeMailto
+                            email={t.created_by_email}
+                            linked={false}
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={t.status} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {!inactive && (
+                          <button
+                            type="button"
+                            onClick={() => setPendingRevoke(t)}
+                            disabled={busy}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
+                            aria-label={`Revoke ${t.name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile — stacked cards (below md) so nothing is clipped or hidden */}
+          <div className="mt-6 space-y-3 md:hidden">
+            {pageItems.map((t) => {
               const inactive = t.revoked_at !== null
               return (
-                <tr
+                <div
                   key={t.id}
-                  className={`border-t border-warm-stone/15 text-xs ${
+                  className={`rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4 ${
                     inactive ? 'opacity-55' : ''
                   }`}
                 >
-                  <td className="px-4 py-3 font-medium text-near-black">
-                    {t.name}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-warm-stone">
-                    {t.token_prefix}&middot;&middot;&middot;&middot;
-                  </td>
-                  <td className="px-4 py-3 capitalize text-near-black">
-                    {t.role}
-                  </td>
-                  <td className="hidden px-4 py-3 text-warm-stone md:table-cell">
-                    {t.last_used_at ? day(t.last_used_at) : 'Never'}
-                  </td>
-                  <td className="hidden px-4 py-3 text-warm-stone md:table-cell">
-                    {t.expires_at ? day(t.expires_at) : 'Never'}
-                  </td>
-                  <td className="hidden px-4 py-3 text-warm-stone lg:table-cell">
-                    {t.created_by_email ? (
-                      <CfSafeMailto email={t.created_by_email} linked={false} />
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-near-black">
+                        {t.name}
+                      </p>
+                      <p className="mt-0.5 font-mono text-xs text-warm-stone">
+                        {t.token_prefix}&middot;&middot;&middot;&middot;
+                      </p>
+                    </div>
                     <StatusBadge status={t.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {!inactive && (
-                      <button
-                        type="button"
-                        onClick={() => setPendingRevoke(t)}
-                        disabled={busy}
-                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
-                        aria-label={`Revoke ${t.name}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-[0.14em] text-warm-stone">
+                        Role
+                      </dt>
+                      <dd className="mt-0.5 capitalize text-near-black">
+                        {t.role}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-[0.14em] text-warm-stone">
+                        Last used
+                      </dt>
+                      <dd className="mt-0.5 text-near-black">
+                        {t.last_used_at ? day(t.last_used_at) : 'Never'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] uppercase tracking-[0.14em] text-warm-stone">
+                        Expires
+                      </dt>
+                      <dd className="mt-0.5 text-near-black">
+                        {t.expires_at ? day(t.expires_at) : 'Never'}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-[10px] uppercase tracking-[0.14em] text-warm-stone">
+                        Created by
+                      </dt>
+                      <dd className="mt-0.5 truncate text-near-black">
+                        {t.created_by_email ? (
+                          <CfSafeMailto
+                            email={t.created_by_email}
+                            linked={false}
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                  {!inactive && (
+                    <button
+                      type="button"
+                      onClick={() => setPendingRevoke(t)}
+                      disabled={busy}
+                      className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-copper-300/60 px-3 py-1.5 text-xs font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
+                      aria-label={`Revoke ${t.name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Revoke
+                    </button>
+                  )}
+                </div>
               )
             })}
-          </tbody>
-        </table>
-      </div>
+          </div>
+
+          {/* Pagination — only past one page */}
+          {pageCount > 1 && (
+            <div className="mt-4 flex flex-col items-start gap-3 text-xs text-warm-stone sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                Page {safePage} of {pageCount} &middot; {initial.length} tokens
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="rounded-md border border-warm-stone/30 px-3 py-1.5 font-medium text-near-black transition-colors hover:bg-cream-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  disabled={safePage >= pageCount}
+                  className="rounded-md border border-warm-stone/30 px-3 py-1.5 font-medium text-near-black transition-colors hover:bg-cream-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* One-time token reveal */}
       {revealed && (
