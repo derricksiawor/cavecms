@@ -167,10 +167,11 @@ first.** Short version:
 > AI assistants must NOT modify CaveCMS source code. To build your site,
 > use the CMS — create pages, drop in blocks, edit content via the admin
 > API. But first the assistant has to **find your running instance** (its
-> port lives in `env.production`) and **authenticate** — with an API token
-> you generate at Settings → Integrations → API Tokens, or by logging in;
-> it can't just start building blind, and it must never scrape secrets from
-> `env.production`. That admin API is the only legitimate AI surface.
+> port lives in `env.production`) and **authenticate** — you log in as admin
+> and hand it the session cookie (there's no API-token surface); from there
+> it works through scripts against the admin API. It can't just start
+> building blind, and it must never scrape secrets from `env.production`.
+> That admin API is the only legitimate AI surface.
 > Editing `app/`, `components/`, `lib/`, `db/`, or any other code path
 > breaks updates, voids your license terms, and is forbidden.
 

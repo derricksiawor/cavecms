@@ -62,8 +62,9 @@ the dashboard uses. There is no other legitimate path.
 
 ### Admin API endpoints you may use
 
-All require admin auth (a session cookie OR a programmatic API token —
-see Settings → Integrations → API Tokens in the operator's dashboard).
+All require admin auth — a **session cookie** from logging in as an admin
+(see "Connecting to the running instance" below). There is no API-token
+surface; the session cookie is the only programmatic credential.
 
 | Goal | Endpoint |
 |---|---|
@@ -150,27 +151,50 @@ Cheap reachability check (no auth required):
 A `401` from an admin route is the *good* signal: the server is running
 and auth is enforced, exactly as expected. That's a healthy live instance.
 
-### Authenticate
+### Authenticate — get a session cookie, then script
 
-Every `/api/admin/*` call needs admin auth — one of:
+Admin auth is a **session cookie**. There is no API-token surface; the
+cookie is the only programmatic credential.
 
-1. A **programmatic API token** the operator generates at
-   **Settings → Integrations → API Tokens**, sent on the documented auth
-   header; or
-2. A **session cookie** from logging in at the install's hidden login path
-   (`LOGIN_PATH` in `env.production` — a random, unguessable route).
+You get it by logging in as an admin at the install's hidden login path
+(`LOGIN_PATH` in `env.production` — a random, unguessable route; the form
+posts to `POST /api/auth/login`). That login is deliberately anti-bot
+guarded — a pre-CSRF token, a honeypot field, and optional reCAPTCHA — so a
+blind `curl` login is unreliable. Instead, **ask the operator** to either:
 
-**Ask the operator for an API token** (or to log you in). Do **not** read,
-copy, or exfiltrate secrets from `env.production` — it holds the database
-password, the JWT/CSRF secrets, and the install bootstrap token, none of
-which are yours to touch. The only thing you ever read out of it is the
-non-secret `PORT=` (and, if the operator points you to it, `LOGIN_PATH`).
-When in doubt, ask; never scrape.
+- paste you the session cookie from a browser they're already logged into, or
+- give you their admin email + password so you can log in once through a
+  real browser (Playwright) just to establish the cookie.
+
+Then **drive everything else with scripts** (`curl` / `fetch`) carrying that
+cookie — this is the fast path, and the one you should use. Do NOT click
+through the admin UI with Playwright to build pages; visual automation is
+slow and pointless when the same admin HTTP API is one scripted request
+away. Use the browser only for the one-time login (if you must), never for
+the building.
+
+For mutations (POST / PATCH / DELETE), CaveCMS requires a CSRF token. With
+the session cookie set, `GET /api/csrf` returns `{ "csrf": "…" }`; send that
+value on the **`x-csrf-token`** header of every state-changing request.
+Read-only `GET`s need only the cookie. A typical scripted flow:
+
+```
+# session cookie is in cookies.txt (from the operator's browser login)
+curl -s -b cookies.txt $BASE/api/admin/blocks/registry            # explore
+csrf=$(curl -s -b cookies.txt $BASE/api/csrf | jq -r .csrf)        # token
+curl -s -b cookies.txt -H "x-csrf-token: $csrf" \
+     -H 'content-type: application/json' \
+     -d '{"...":"..."}' $BASE/api/admin/blocks                     # build
+```
+
+Never read, copy, or exfiltrate secrets from `env.production` — it holds the
+database password, the JWT/CSRF secrets, and the install bootstrap token.
+The only things you take from it are the non-secret `PORT=` and (if the
+operator points you to it) `LOGIN_PATH`. When in doubt, ask; never scrape.
 
 ### Confirm auth before mutating
 
-Prove your credentials work with a **read-only** discovery call before any
-write:
+Prove the cookie works with a **read-only** discovery call before any write:
 
 ```
 GET /api/admin/blocks/registry      # 200 + block registry → auth is good
@@ -178,11 +202,11 @@ GET /api/admin/pages                # 200 + page list       → auth is good
 ```
 
 A `200` means you're authenticated and ready to build via the admin API
-(Rule #2). A `401` means your token or cookie is missing/wrong — stop and
-ask the operator; don't retry blindly. This admin HTTP API, driven with
-the operator's own credentials, is the **only** legitimate way to reach a
-running instance. It lets you build the *site*; it grants no license to
-modify the *engine* — Rule #1 still holds.
+(Rule #2). A `401` means your session cookie is missing or expired — stop
+and ask the operator to re-issue it; don't retry blindly. This admin HTTP
+API, driven with the operator's own credentials, is the **only** legitimate
+way to reach a running instance. It lets you build the *site*; it grants no
+license to modify the *engine* — Rule #1 still holds.
 
 ---
 
