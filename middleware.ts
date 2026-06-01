@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest, type NextFetchEvent } from 'next/server'
 import { verifySessionJwt } from '@/lib/auth/jwt'
 import { SESSION_COOKIE } from '@/lib/auth/cookies'
 import { isBearerApiToken, tokenAllowedPath } from '@/lib/auth/apiTokenScope'
@@ -9,6 +9,12 @@ import { cidrListMatch, clientIpFromRequest } from '@/lib/security/ipMatch'
 import { classifySuspicious } from '@/lib/security/suspiciousRequest'
 import { buildCsp, type IntegrationsCspFlags } from '@/lib/security/buildCsp'
 import { isUnroutableForHsts } from '@/lib/security/hostKind'
+import {
+  compileRules,
+  matchRedirect,
+  type CompiledRuleset,
+  type RedirectRule,
+} from '@/lib/cms/redirects'
 
 // Middleware runs on the default Edge runtime. All imports above are
 // Edge-compatible:
@@ -62,6 +68,12 @@ interface SecurityConfig {
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
+
+// Redirects aren't security-sensitive — a slightly stale rule for up to
+// REDIRECTS_CACHE_TTL_MS is harmless, and a longer TTL keeps the 3s
+// security hot path lean. The compiled form is reused while the feed etag
+// is unchanged.
+const REDIRECTS_CACHE_TTL_MS = 30_000
 
 interface ConfigCache {
   ts: number
@@ -176,6 +188,61 @@ async function getSecurityConfig(_req: NextRequest, forceFresh = false): Promise
     globalThis.__cavecmsSecurityCfg = { ts: Date.now(), data: fallback }
     return fallback
   }
+}
+
+// Operator-managed redirects, pulled over the same loopback pattern as
+// the security config (bearer + loopback Host) but with a longer TTL and
+// an etag so the compiled matcher is reused while the ruleset is unchanged.
+declare global {
+  // eslint-disable-next-line no-var
+  var __cavecmsRedirects:
+    | { ts: number; etag: string; compiled: CompiledRuleset }
+    | undefined
+}
+
+async function getRedirectMatcher(): Promise<CompiledRuleset | null> {
+  const cached = globalThis.__cavecmsRedirects
+  if (cached && Date.now() - cached.ts < REDIRECTS_CACHE_TTL_MS) return cached.compiled
+  const secret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
+  if (!secret) return cached?.compiled ?? null
+  const port = process.env['PORT'] ?? '3040'
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/internal/redirects`, {
+      headers: { authorization: `Bearer ${secret}`, host: `127.0.0.1:${port}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!res.ok) return cached?.compiled ?? null
+    const data = (await res.json()) as { etag: string; rules: RedirectRule[] }
+    if (cached && cached.etag === data.etag) {
+      // Unchanged — refresh ts, reuse compiled form (skip recompile).
+      globalThis.__cavecmsRedirects = { ...cached, ts: Date.now() }
+      return cached.compiled
+    }
+    const compiled = compileRules(data.rules)
+    globalThis.__cavecmsRedirects = { ts: Date.now(), etag: data.etag, compiled }
+    return compiled
+  } catch {
+    // Last-known-good; a transient feed hiccup must never break navigation.
+    return cached?.compiled ?? null
+  }
+}
+
+// Paths that must never be redirect-matched (admin/api/internal/render/
+// static + the install + login surfaces are handled by their own gates).
+function redirectMatchEligible(pathname: string, method: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false
+  if (
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/install') ||
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/uploads/') ||
+    pathname.startsWith('/cms-render')
+  ) {
+    return false
+  }
+  return true
 }
 
 // 16 random bytes → 24-char base64 string. CSP3 § 6.6.3.1 requires a
@@ -435,7 +502,10 @@ function maybeRewriteToPageRoute(pathname: string, loginPathLower: string): stri
   return `${CMS_RENDER_PREFIX}/${captured}`
 }
 
-export async function middleware(req: NextRequest): Promise<NextResponse> {
+export async function middleware(
+  req: NextRequest,
+  event: NextFetchEvent,
+): Promise<NextResponse> {
   const pathname = req.nextUrl.pathname
 
   // Loopback security-config endpoint: bypass everything else so
@@ -584,6 +654,54 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     !cidrListMatch(ip, cfg.maintenance.bypassIps)
   ) {
     return maintenanceResponse(cfg.maintenance.message)
+  }
+
+  // 5b. Operator-managed redirects. Site-wide, after the maintenance gate
+  //     so a 503 still wins, before the CMS rewrite so /old.html etc.
+  //     redirect even when they'd otherwise 404. Skips admin/api/internal/
+  //     render/static + non-GET. Cached ruleset, fail-open on feed error.
+  if (redirectMatchEligible(pathname, req.method)) {
+    const matcher = await getRedirectMatcher()
+    if (matcher) {
+      const hit = matchRedirect(matcher, pathname, req.nextUrl.search)
+      if (hit) {
+        // Fire-and-forget hit bump — never delays the response.
+        const hitSecret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
+        if (hitSecret) {
+          const hitPort = process.env['PORT'] ?? '3040'
+          event.waitUntil(
+            fetch(`http://127.0.0.1:${hitPort}/api/internal/redirect-hit`, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${hitSecret}`,
+                host: `127.0.0.1:${hitPort}`,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({ id: hit.ruleId }),
+              cache: 'no-store',
+              signal: AbortSignal.timeout(2000),
+            }).catch(() => {}),
+          )
+        }
+        if (hit.kind === 'gone') {
+          return new NextResponse('410 Gone', {
+            status: 410,
+            headers: { 'content-type': 'text/plain; charset=utf-8' },
+          })
+        }
+        const loc = hit.location ?? '/'
+        if (/^https?:\/\//i.test(loc)) {
+          return NextResponse.redirect(loc, hit.status ?? 301)
+        }
+        // Resolve a relative target against the forwarded host so the
+        // Location header is the URL the visitor actually typed (mirrors
+        // the install-redirect host rebuild above).
+        const fwdHost = req.headers.get('host') ?? req.nextUrl.host
+        const fwdProto =
+          req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(/:$/, '')
+        return NextResponse.redirect(new URL(loc, `${fwdProto}://${fwdHost}`), hit.status ?? 301)
+      }
+    }
   }
 
   // 6. Block 1: refuse direct external hits to the internal
