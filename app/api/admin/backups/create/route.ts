@@ -20,6 +20,7 @@ import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
 import {
   prepareBackupCloudEnv,
+  discardCloudCreds,
   PassphraseRequiredError,
   CloudDestinationUnavailableError,
 } from '@/lib/backups/cloud/credsFile'
@@ -99,6 +100,8 @@ export const POST = withError(async (req: Request) => {
   try {
     pid = spawnBackupEngine({ script: 'cavecms-backup.sh', env })
   } catch (err) {
+    // Engine never started → wipe the plaintext creds file its trap would have.
+    if (cloudEnv) discardCloudCreds()
     writeBackupStatus({ state: 'failed', error: 'engine_unavailable' })
     throw err
   }

@@ -42,6 +42,22 @@ function credsDir(): string {
 function credsInPath(): string {
   return join(credsDir(), '.cavecms-cloud-creds-in.json')
 }
+
+// Remove the plaintext creds file. Call this when a spawn fails AFTER the file
+// was written but BEFORE the engine ran (so the engine's own cleanup never
+// fires). Best-effort.
+export function discardCloudCreds(): void {
+  try {
+    if (existsSync(credsInPath())) unlinkSync(credsInPath())
+  } catch {
+    /* ignore */
+  }
+}
+
+// A scheduled run's in-flight flag is considered stale after this long (longer
+// than the 3h engine wall-clock timeout + margin), so a flag left set by a
+// trap-bypassing kill is ignored rather than mislabelling a later backup.
+const SCHEDULED_INFLIGHT_STALE_MS = 4 * 60 * 60 * 1000
 function credsOutPath(): string {
   return join(credsDir(), '.cavecms-cloud-creds-out.json')
 }
@@ -147,16 +163,23 @@ export async function recordScheduledBackupOutcome(
 ): Promise<void> {
   const state = await getSetting('backups_state')
   if (!state.scheduledInFlight) return
+  // If the flag is stale (a scheduled engine was killed before its terminal
+  // callback, leaving the flag set), this terminal belongs to a DIFFERENT
+  // (manual) backup — clear the flag without recording its outcome as the
+  // scheduled result.
+  const stampMs = state.scheduledInFlightAt ? Date.parse(state.scheduledInFlightAt) : 0
+  const stale =
+    !Number.isFinite(stampMs) || stampMs === 0 || Date.now() - stampMs > SCHEDULED_INFLIGHT_STALE_MS
   await updateSettingValue(
     'backups_state',
     (cur) => {
-      const next = {
-        ...cur,
-        scheduledInFlight: false,
-        lastScheduledResult: completed ? ('ok' as const) : ('failed' as const),
+      const next = { ...cur, scheduledInFlight: false }
+      delete next.scheduledInFlightAt
+      if (!stale) {
+        next.lastScheduledResult = completed ? ('ok' as const) : ('failed' as const)
+        if (completed) delete next.lastScheduledError
+        else next.lastScheduledError = (errorMsg || 'The scheduled backup failed.').slice(0, 300)
       }
-      if (completed) delete next.lastScheduledError
-      else next.lastScheduledError = (errorMsg || 'The scheduled backup failed.').slice(0, 300)
       return next
     },
     null,

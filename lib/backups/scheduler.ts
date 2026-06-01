@@ -9,6 +9,7 @@ import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
 import {
   prepareBackupCloudEnv,
+  discardCloudCreds,
   PassphraseRequiredError,
   CloudDestinationUnavailableError,
 } from '@/lib/backups/cloud/credsFile'
@@ -48,7 +49,13 @@ async function triggerScheduledBackup(cfg: Backups): Promise<void> {
   const env: Record<string, string> = { CAVECMS_BACKUP_STATUS_PATH: getBackupStatusPath() }
   if (cfg.includeEnv) env.CAVECMS_BACKUP_INCLUDE_ENV = '1'
   if (cloudEnv) Object.assign(env, cloudEnv)
-  spawnBackupEngine({ script: 'cavecms-backup.sh', env })
+  try {
+    spawnBackupEngine({ script: 'cavecms-backup.sh', env })
+  } catch (err) {
+    // The engine never started → its trap can't wipe the plaintext creds file.
+    if (cloudEnv) discardCloudCreds()
+    throw err
+  }
 }
 
 // One scheduler tick: run a backup if the schedule says it's due AND no other
@@ -79,7 +86,12 @@ export async function runBackupTickIfDue(): Promise<void> {
   // endpoint records the REAL completion outcome.
   await updateSettingValue(
     'backups_state',
-    (cur) => ({ ...cur, lastScheduledBackupAt: now.toISOString(), scheduledInFlight: true }),
+    (cur) => ({
+      ...cur,
+      lastScheduledBackupAt: now.toISOString(),
+      scheduledInFlight: true,
+      scheduledInFlightAt: now.toISOString(),
+    }),
     null,
   )
 

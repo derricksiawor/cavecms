@@ -18,7 +18,7 @@ import {
 } from '@/lib/backups/statusFile'
 import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
-import { prepareRestoreCloudCreds } from '@/lib/backups/cloud/credsFile'
+import { prepareRestoreCloudCreds, discardCloudCreds } from '@/lib/backups/cloud/credsFile'
 
 // POST /api/admin/backups/restore-from-cloud — download a remote backup and
 // restore from it. cloud-pull (restore step 0) verifies sha256 + decrypts
@@ -89,6 +89,8 @@ export const POST = withError(async (req: Request) => {
   try {
     pid = spawnBackupEngine({ script: 'cavecms-restore.sh', env })
   } catch (err) {
+    // Engine never started → wipe the plaintext creds file its trap would have.
+    discardCloudCreds()
     writeRestoreStatus({ state: 'failed', error: 'engine_unavailable' })
     throw err
   }

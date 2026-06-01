@@ -707,8 +707,12 @@ const backupsState = z.object({
   lastScheduledError: z.string().max(300).optional(),
   // True between a scheduler-initiated spawn and its terminal audit callback, so
   // the audit-terminal endpoint can record the REAL outcome (a scheduled run's
-  // result reflects completion, not just that it was spawned).
+  // result reflects completion, not just that it was spawned). scheduledInFlightAt
+  // stamps the claim time so a flag left stale by a trap-bypassing kill
+  // (SIGKILL/OOM) can be detected + ignored instead of mislabelling a later
+  // manual backup's outcome as the scheduled result.
   scheduledInFlight: z.boolean().optional(),
+  scheduledInFlightAt: z.string().max(40).optional(),
 })
 
 // SMTP configuration. Moved from .env.local so operators can configure
