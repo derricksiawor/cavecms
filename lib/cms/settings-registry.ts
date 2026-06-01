@@ -83,10 +83,25 @@ const socialLinks = z
 const defaultSeo = z.object({
   title: z.string().max(180),
   description: z.string().max(320),
-  // Optional path served by next/image — null when no global OG image
-  // is configured (per-entity fallbacks live in projects.og_image_id /
-  // posts.og_image_id). Either a same-origin path (starts with /) or
-  // an https URL.
+  // Operator-picked default social-share (Open Graph) image — the
+  // preview card shown when the site is shared on social platforms.
+  // Stored as a media reference like the favicon / header logo; the
+  // SEO resolver (lib/seo/resolve.ts) turns it into an ABSOLUTE url
+  // using the configured site URL. Inline media shape (not the shared
+  // `mediaRef`) for the same temporal-dead-zone reason as `favicon`
+  // below — `mediaRef` is declared after `defaultSeo` in this module.
+  ogImage: z
+    .object({
+      media_id: z.number().int().positive(),
+      alt: z.string().max(180),
+    })
+    .nullable()
+    .optional(),
+  // LEGACY free-text OG image URL/path. Superseded by `ogImage` (the
+  // Media-library picker) — no longer surfaced in the admin form, but
+  // still read as a fallback so an install that configured it before
+  // the picker existed never loses its share image. Either a
+  // same-origin path (starts with /) or an https URL.
   ogImagePath: z
     .string()
     .max(500)
@@ -883,6 +898,7 @@ export const registry = {
     default: {
       title: '',
       description: '',
+      ogImage: null,
       ogImagePath: null,
       favicon: null,
     } satisfies z.infer<typeof defaultSeo>,

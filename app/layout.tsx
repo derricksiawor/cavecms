@@ -33,15 +33,29 @@ const marcellus = Marcellus({
 // Matches the client's original brand identity.
 
 // Root metadata. title/description stay neutral defaults (real pages
-// override them via their own generateMetadata). The favicon is
-// operator-configurable under Settings → SEO (default_seo.favicon):
-// when set we emit a <link rel="icon"> pointing at the uploaded image's
-// processed variant; when null we emit nothing here and Next's file
-// convention serves the bundled app/favicon.ico.
+// override them via their own generateMetadata).
+//
+// Favicon: operator-configurable under Settings → SEO
+// (default_seo.favicon). generateMetadata is the SINGLE source of
+// truth for the icon <link> — we ALWAYS emit exactly one set of icon
+// links here (the uploaded image when set, the bundled
+// /public/favicon.ico otherwise). The previous app/favicon.ico file
+// convention was moved to public/ precisely so Next no longer
+// auto-injects a SECOND, competing `<link rel="icon" sizes="any">`:
+// when a custom favicon was set, the browser saw both links and kept
+// the static .ico (it wins the tab when `sizes="any"` is present),
+// which read as the custom icon flashing for a moment and then being
+// replaced by the default. One link, no race.
+const DEFAULT_FAVICON = '/favicon.ico'
 export async function generateMetadata(): Promise<Metadata> {
   const base: Metadata = {
     title: 'CaveCMS',
     description: 'A CaveCMS-powered site.',
+    // Default tab icon — overridden below when the operator uploads one.
+    icons: {
+      icon: [{ url: DEFAULT_FAVICON, sizes: 'any' }],
+      shortcut: [{ url: DEFAULT_FAVICON }],
+    },
   }
   try {
     const seo = await getSetting('default_seo')
@@ -52,7 +66,8 @@ export async function generateMetadata(): Promise<Metadata> {
       if (url) {
         // webp variants from the media pipeline — supported by every
         // current browser. Operators are guided to upload a square
-        // source so the tab icon isn't letterboxed.
+        // source so the tab icon isn't letterboxed. This REPLACES the
+        // default icon links above (single source of truth).
         base.icons = {
           icon: [{ url, type: 'image/webp' }],
           apple: [{ url }],
@@ -61,8 +76,8 @@ export async function generateMetadata(): Promise<Metadata> {
       }
     }
   } catch {
-    // Settings/media read hiccup — degrade to the bundled favicon
-    // convention rather than break document <head> rendering.
+    // Settings/media read hiccup — keep the bundled-favicon default
+    // already set on `base` rather than break document <head> rendering.
   }
   return base
 }

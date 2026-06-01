@@ -70,12 +70,10 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       help: 'Search-result snippet when a page does not set its own. Keep under 160 characters for best display.',
     },
     {
-      kind: 'string',
-      key: 'ogImagePath',
+      kind: 'media',
+      key: 'ogImage',
       label: 'Default social-share image',
-      maxLength: 500,
-      placeholder: '/uploads/og-default.jpg  or  https://…',
-      help: 'The preview image that shows up when someone shares your site on Facebook, X, LinkedIn, WhatsApp, or in iMessage. Paste a full https link, or upload an image to Media and paste its path here.',
+      help: 'The preview image that shows up when someone shares your site on Facebook, X, LinkedIn, WhatsApp, or in iMessage. Upload a LANDSCAPE image — 1200×630 works best. Used whenever a page or project doesn’t set its own.',
     },
     {
       kind: 'media',
