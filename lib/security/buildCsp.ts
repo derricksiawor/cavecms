@@ -38,7 +38,27 @@ export function buildCsp(
     ? [`'nonce-${nonce}'`, "'strict-dynamic'"]
     : [`'nonce-${nonce}'`, "'strict-dynamic'", "'unsafe-eval'"]
   const connectSrc: string[] = ["'self'", 'https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net']
-  const frameSrc: string[] = ['https://www.google.com', 'https://maps.google.com', 'https://www.recaptcha.net']
+  const frameSrc: string[] = [
+    'https://www.google.com',
+    'https://maps.google.com',
+    'https://www.recaptcha.net',
+    // ─── lx_embed allowlist (Tier-1 oEmbed) ───
+    // The lx_embed block sandboxes a curated set of well-known embed
+    // hosts in an iframe. EACH host accepted by isAllowedEmbedUrl()
+    // (lib/cms/embedHosts.ts) MUST appear here or the iframe loads
+    // blank. These also cover lx_video's YouTube/Vimeo embeds. Framed
+    // third parties cannot reach our DOM/cookies (separate origin) and
+    // frame-ancestors 'none' blocks reverse-framing — so a tight,
+    // explicit allowlist of media/embed hosts is low-risk. Note: both
+    // lx_embed and lx_video normalise YouTube to the -nocookie embed
+    // host, so www.youtube.com is intentionally NOT listed.
+    'https://www.youtube-nocookie.com',
+    'https://player.vimeo.com',
+    'https://open.spotify.com',
+    'https://codepen.io',
+    'https://w.soundcloud.com',
+    'https://codesandbox.io',
+  ]
   const imgSrc: string[] = ["'self'", 'data:']
 
   const i = integrations

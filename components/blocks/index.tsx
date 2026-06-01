@@ -25,6 +25,29 @@ import { LxSocialIcons } from './LxSocialIcons/render'
 import { LxCtaBanner } from './LxCtaBanner/render'
 import { LxGallery } from './LxGallery/render'
 import { LxFeaturedProjects } from './LxFeaturedProjects/render'
+// ─── Elementor-parity blocks ────────────────────────────────────────
+import { LxCarousel } from './LxCarousel/render'
+import { LxTestimonialCarousel } from './LxTestimonialCarousel/render'
+import { LxStarRating } from './LxStarRating/render'
+import { LxPricingTable } from './LxPricingTable/render'
+import { LxPricingList } from './LxPricingList/render'
+import { LxReviews } from './LxReviews/render'
+import { LxProgressTracker } from './LxProgressTracker/render'
+import { LxAnimatedHeadline } from './LxAnimatedHeadline/render'
+import { LxCountdown } from './LxCountdown/render'
+import { LxFlipBox } from './LxFlipBox/render'
+import { LxHotspot } from './LxHotspot/render'
+import { LxProgress } from './LxProgress/render'
+import { LxMenuAnchor } from './LxMenuAnchor/render'
+import { LxToc } from './LxToc/render'
+import { LxShare } from './LxShare/render'
+import { LxPosts } from './LxPosts/render'
+import { LxEmbed } from './LxEmbed/render'
+import { LxCode } from './LxCode/render'
+import { LxMarquee } from './LxMarquee/render'
+import { LxBeforeAfter } from './LxBeforeAfter/render'
+import { LxComparisonTable } from './LxComparisonTable/render'
+import { LxTimeline } from './LxTimeline/render'
 // ─── Project lead-form blocks — the only project-specific blocks.
 //     Everything else on a project page is composed from primitives by
 //     lib/cms/projectTreeBuilder.ts. These read RenderContext.project +
@@ -38,6 +61,12 @@ import type { SectionMeta } from '@/lib/cms/blockMeta'
 export interface RenderContext {
   media: Map<number, { variants: Record<string, string> | null; alt_text: string; width: number | null; height: number | null }>
   projects: Map<number, { slug: string; name: string; tagline: string | null; hero_image_id: number | null }>
+  /** Recent published posts — populated only when the page tree has an
+   *  `lx_posts` block (see hydrate.ts). Iteration order is newest-first.
+   *  Optional: callers that don't supply it (and the editor preview
+   *  path) leave it undefined and the posts block renders its empty
+   *  state rather than crashing. */
+  posts?: Map<number, { id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null }>
   /** Public preCsrf nonce minted once per page render. Only set when
    *  the page tree contains a block that submits a public form (today:
    *  `contact_form`). Blocks that don't need it ignore the field; an
@@ -106,6 +135,8 @@ type BlockRendererArgs<D> = {
   data: D
   media: RenderContext['media']
   projects: RenderContext['projects']
+  /** Recent posts — see RenderContext.posts. Only lx_posts consumes it. */
+  posts?: RenderContext['posts']
   csrf?: RenderContext['csrf']
   /** Singular project context — see RenderContext.project. Only the
    *  project block renderers (lx_project_hero, lx_inquiry_form,
@@ -230,6 +261,75 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_featured_projects: ({ data, projects, media, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_featured_projects'>>) => (
     <LxFeaturedProjects data={data} projects={projects} media={media} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
+  // ─── Elementor-parity blocks ─────────────────────────────────────
+  lx_carousel: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_carousel'>>) => (
+    <LxCarousel data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_testimonial_carousel: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_testimonial_carousel'>>) => (
+    <LxTestimonialCarousel data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_star_rating: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_star_rating'>>) => (
+    <LxStarRating data={data} outerClass={outerClass} />
+  ),
+  lx_pricing_table: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_pricing_table'>>) => (
+    <LxPricingTable data={data} outerClass={outerClass} />
+  ),
+  lx_pricing_list: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_pricing_list'>>) => (
+    <LxPricingList data={data} outerClass={outerClass} />
+  ),
+  lx_reviews: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_reviews'>>) => (
+    <LxReviews data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_progress_tracker: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_progress_tracker'>>) => (
+    <LxProgressTracker data={data} outerClass={outerClass} />
+  ),
+  lx_animated_headline: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_animated_headline'>>) => (
+    <LxAnimatedHeadline data={data} outerClass={outerClass} />
+  ),
+  lx_countdown: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_countdown'>>) => (
+    <LxCountdown data={data} outerClass={outerClass} />
+  ),
+  lx_flip_box: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_flip_box'>>) => (
+    <LxFlipBox data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_hotspot: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_hotspot'>>) => (
+    <LxHotspot data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_progress: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_progress'>>) => (
+    <LxProgress data={data} outerClass={outerClass} />
+  ),
+  lx_menu_anchor: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_menu_anchor'>>) => (
+    <LxMenuAnchor data={data} outerClass={outerClass} />
+  ),
+  lx_toc: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_toc'>>) => (
+    <LxToc data={data} outerClass={outerClass} />
+  ),
+  lx_share: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_share'>>) => (
+    <LxShare data={data} outerClass={outerClass} />
+  ),
+  lx_posts: ({ data, posts, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
+    <LxPosts data={data} posts={posts} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
+  ),
+  lx_embed: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_embed'>>) => (
+    <LxEmbed data={data} outerClass={outerClass} />
+  ),
+  // LxCode is a SYNCHRONOUS component (escaped <pre>) — async would
+  // throw in the client editor canvas (EditableBlockTreeRenderer).
+  lx_code: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_code'>>) => (
+    <LxCode data={data} outerClass={outerClass} />
+  ),
+  lx_marquee: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_marquee'>>) => (
+    <LxMarquee data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_before_after: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_before_after'>>) => (
+    <LxBeforeAfter data={data} media={media} outerClass={outerClass} />
+  ),
+  lx_comparison_table: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_comparison_table'>>) => (
+    <LxComparisonTable data={data} outerClass={outerClass} />
+  ),
+  lx_timeline: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_timeline'>>) => (
+    <LxTimeline data={data} media={media} outerClass={outerClass} />
+  ),
   // ─── Project lead-form blocks (only project-specific blocks) ────
   // read RenderContext.project (project_id/name/brochure_pdf_id) +
   // csrf/preview. Everything else on a project page is composed from
@@ -347,6 +447,7 @@ export function renderBlock(
     data: data as never,
     media: ctx.media,
     projects: ctx.projects,
+    posts: ctx.posts,
     csrf: ctx.csrf,
     project: ctx.project,
     preview: ctx.preview,

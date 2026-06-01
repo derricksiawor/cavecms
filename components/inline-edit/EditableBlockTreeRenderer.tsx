@@ -7,6 +7,7 @@ import type {
   HydratedBlock,
   HydratedMedia,
   HydratedProject,
+  HydratedPost,
 } from '@/lib/cms/hydrate'
 import { buildBlockTree } from '@/lib/cms/blockTree'
 import {
@@ -66,6 +67,7 @@ interface Props {
   pageId: number
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
+  posts: Map<number, HydratedPost>
   /** Public preCsrf nonce minted in `renderCmsPage()`. Threaded through
    *  RenderContext to blocks that need it (today: `contact_form`).
    *  Undefined when no such block is on the page. */
@@ -82,6 +84,7 @@ export function EditableBlockTreeRenderer({
   pageId,
   media,
   projects,
+  posts,
   csrf,
   project,
   preview,
@@ -135,6 +138,7 @@ export function EditableBlockTreeRenderer({
                   pageVersion={state.pageVersion}
                   media={media}
                   projects={projects}
+                  posts={posts}
                   csrf={csrf}
                   project={project}
                   preview={preview}
@@ -147,6 +151,7 @@ export function EditableBlockTreeRenderer({
                   pageVersion={state.pageVersion}
                   media={media}
                   projects={projects}
+                  posts={posts}
                   csrf={csrf}
                   project={project}
                   preview={preview}
@@ -169,6 +174,7 @@ interface SectionSlotProps {
   pageVersion: number
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
+  posts: Map<number, HydratedPost>
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -181,6 +187,7 @@ function EditableSectionSlot({
   pageVersion,
   media,
   projects,
+  posts,
   csrf,
   project,
   preview,
@@ -227,6 +234,7 @@ function EditableSectionSlot({
             parentSectionMeta={parseSectionMeta(section.meta)}
             media={media}
             projects={projects}
+            posts={posts}
             csrf={csrf}
             project={project}
             preview={preview}
@@ -252,6 +260,7 @@ interface ColumnSlotProps {
   parentSectionMeta: SectionMeta
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
+  posts: Map<number, HydratedPost>
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -267,6 +276,7 @@ function EditableColumnSlot({
   parentSectionMeta,
   media,
   projects,
+  posts,
   csrf,
   project,
   preview,
@@ -319,6 +329,7 @@ function EditableColumnSlot({
               parentSectionMeta={parentSectionMeta}
               media={media}
               projects={projects}
+              posts={posts}
               csrf={csrf}
               project={project}
               preview={preview}
@@ -343,6 +354,7 @@ interface WidgetSlotProps {
   parentSectionMeta?: SectionMeta
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
+  posts: Map<number, HydratedPost>
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -356,6 +368,7 @@ function EditableWidgetSlot({
   parentSectionMeta,
   media,
   projects,
+  posts,
   csrf,
   project,
   preview,
@@ -436,7 +449,7 @@ function EditableWidgetSlot({
   const node = renderBlock(
     block.blockType,
     effectiveData,
-    { media, projects, csrf, project, preview },
+    { media, projects, posts, csrf, project, preview },
     inlineEdit,
     widgetSpacingClass,
     block.id,

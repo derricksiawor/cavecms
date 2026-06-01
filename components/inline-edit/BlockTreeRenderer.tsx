@@ -6,6 +6,7 @@ import type {
   HydratedBlock,
   HydratedMedia,
   HydratedProject,
+  HydratedPost,
 } from '@/lib/cms/hydrate'
 import { buildBlockTree } from '@/lib/cms/blockTree'
 import {
@@ -41,6 +42,7 @@ interface Props {
   blocks: HydratedBlock[]
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
+  posts: Map<number, HydratedPost>
   /** Public preCsrf nonce minted in `renderCmsPage()`. Threaded through
    *  every renderBlock dispatch via RenderContext so blocks that need
    *  it (today: `contact_form`) can submit without an extra round trip.
@@ -103,6 +105,7 @@ export function BlockTreeRenderer({
   blocks,
   media,
   projects,
+  posts,
   csrf,
   project,
   preview,
@@ -142,7 +145,7 @@ export function BlockTreeRenderer({
                             {renderBlock(
                               w.blockType,
                               w.data,
-                              { media, projects, csrf, project, preview },
+                              { media, projects, posts, csrf, project, preview },
                               undefined,
                               m.outerClass,
                               w.id,
@@ -169,7 +172,7 @@ export function BlockTreeRenderer({
                 {renderBlock(
                   entry.node.blockType,
                   entry.node.data,
-                  { media, projects, csrf, project, preview },
+                  { media, projects, posts, csrf, project, preview },
                   undefined,
                   m.outerClass,
                   entry.node.id,

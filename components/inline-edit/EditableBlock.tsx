@@ -824,6 +824,19 @@ export function EditableBlock(p: EditableBlockProps) {
   }, [p.blockId])
 
   const isSelected = selection.isSelected(p.blockId)
+  // Hydration guard for the selection-driven chrome. The persisted
+  // selection lives in sessionStorage and is loaded by SelectionProvider
+  // only AFTER mount, so the server HTML is always "unselected". If a
+  // block was restored as selected, its data-edit-selected attr + ring +
+  // toolbar would flip between the server HTML and the first client
+  // render → React hydration mismatch. Gate the RENDER-only selection
+  // state behind a post-mount flag so SSR and first client render are
+  // byte-identical; `isSelected` itself still drives keyboard logic.
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
+  const showSelected = hydrated && isSelected
   // Active AI session against THIS block — drives the dashed copper
   // outline + "AI proposing…" pill via AISparklePreviewOverlay.
   const sparkleSession = useSparkleSessionFor(p.blockId)
@@ -978,7 +991,7 @@ export function EditableBlock(p: EditableBlockProps) {
       data-edit-page-id={p.pageId}
       data-edit-page-version={versions.pageVersion}
       data-edit-parent-id={p.parentBlockId === null ? '' : p.parentBlockId}
-      data-edit-selected={isSelected ? 'true' : undefined}
+      data-edit-selected={showSelected ? 'true' : undefined}
       onContextMenu={onContextMenu}
       onClick={onWrapperClick}
       // Chunk H: tabIndex=-1 lets focus-restore on context-menu close
@@ -1029,7 +1042,7 @@ export function EditableBlock(p: EditableBlockProps) {
           'focus-within:outline-copper-400',
           // F13 — persistent selection ring. Outlasts hover/blur so
           // touch operators can hit the toolbar after the first tap.
-          isSelected &&
+          showSelected &&
             '!outline-copper-400 shadow-[0_18px_44px_-22px_rgba(160,90,40,0.35)]',
           // AI sparkle session active — dashed copper outline overrides
           // selection/hover state so the operator knows the AI is
@@ -1057,7 +1070,7 @@ export function EditableBlock(p: EditableBlockProps) {
         // covered by a child widget's chrome.
         className={clsx(
           'absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-full bg-obsidian/95 p-1 shadow-[0_12px_30px_-12px_rgba(0,0,0,0.6)] ring-1 ring-champagne/30 backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none',
-          isSelected
+          showSelected
             ? 'pointer-events-auto opacity-100'
             : 'pointer-events-none opacity-0 group-hover/edit:pointer-events-auto group-hover/edit:opacity-100 group-focus-within/edit:pointer-events-auto group-focus-within/edit:opacity-100',
         )}

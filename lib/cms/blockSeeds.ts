@@ -45,6 +45,30 @@ import {
   PhoneCall,
   TrendingUp,
   Quote as QuoteIcon2,
+  // ─── Elementor-parity block icons ───────────────────────────────
+  GalleryHorizontal,
+  MessagesSquare,
+  Star,
+  BadgeDollarSign,
+  ListOrdered,
+  ThumbsUp,
+  Footprints,
+  Sparkles,
+  Timer,
+  SquareStack,
+  Target,
+  Gauge,
+  ListTree,
+  Anchor,
+  Share,
+  Newspaper,
+  Code as CodeIcon,
+  MonitorPlay,
+  Megaphone,
+  Columns2,
+  Table as TableIcon,
+  GitCommitVertical,
+  ToggleRight,
 } from 'lucide-react'
 
 // Types that are seed-creatable from a picker WITHOUT a MediaPicker
@@ -82,6 +106,29 @@ export type SeedBlockType =
   | 'lx_cta_banner'
   | 'lx_gallery'
   | 'lx_featured_projects'
+  // ─── Elementor-parity blocks ────────────────────────────────────
+  | 'lx_carousel'
+  | 'lx_testimonial_carousel'
+  | 'lx_star_rating'
+  | 'lx_pricing_table'
+  | 'lx_pricing_list'
+  | 'lx_reviews'
+  | 'lx_progress_tracker'
+  | 'lx_animated_headline'
+  | 'lx_countdown'
+  | 'lx_flip_box'
+  | 'lx_hotspot'
+  | 'lx_progress'
+  | 'lx_menu_anchor'
+  | 'lx_toc'
+  | 'lx_share'
+  | 'lx_posts'
+  | 'lx_embed'
+  | 'lx_code'
+  | 'lx_marquee'
+  | 'lx_before_after'
+  | 'lx_comparison_table'
+  | 'lx_timeline'
 
 export interface SeedEntry {
   type: SeedBlockType
@@ -105,6 +152,100 @@ export interface SeedEntry {
    *  alias is a known shorthand while a keyword is a guess. NOT
    *  surfaced in the result row chrome. */
   keywords?: string[]
+}
+
+// ─── Widget-picker categories ───────────────────────────────────────
+// The palette groups widgets into a small set of operator-facing
+// categories (Elementor/Webflow-parity) so ~45 widgets don't read as
+// one undifferentiated wall. The picker renders these groups in the
+// order below when the search box is empty; a non-empty query collapses
+// to the flat ranked list (a filtered search shouldn't re-impose
+// category headers). Every SeedBlockType maps to exactly one category
+// via CATEGORY_BY_TYPE — a missing key would fail typecheck (the map is
+// Record<SeedBlockType, BlockCategory>), so adding a block forces a
+// category choice.
+export type BlockCategory =
+  | 'text'
+  | 'media'
+  | 'layout'
+  | 'content'
+  | 'social'
+  | 'marketing'
+  | 'embed'
+  | 'dynamic'
+
+export const BLOCK_CATEGORIES: ReadonlyArray<{ key: BlockCategory; label: string }> = [
+  { key: 'text', label: 'Text' },
+  { key: 'media', label: 'Media' },
+  { key: 'layout', label: 'Layout' },
+  { key: 'content', label: 'Content' },
+  { key: 'social', label: 'Social proof' },
+  { key: 'marketing', label: 'Marketing & pricing' },
+  { key: 'embed', label: 'Embed & forms' },
+  { key: 'dynamic', label: 'Dynamic' },
+]
+
+export const CATEGORY_BY_TYPE: Record<SeedBlockType, BlockCategory> = {
+  // Text
+  lx_heading: 'text',
+  lx_text: 'text',
+  lx_eyebrow: 'text',
+  lx_quote: 'text',
+  lx_animated_headline: 'text',
+  // Media
+  lx_figure: 'media',
+  lx_cover_image: 'media',
+  lx_image_pair: 'media',
+  lx_gallery: 'media',
+  lx_carousel: 'media',
+  lx_video: 'media',
+  lx_before_after: 'media',
+  lx_hotspot: 'media',
+  lx_marquee: 'media',
+  // Layout
+  lx_divider: 'layout',
+  lx_space: 'layout',
+  lx_menu_anchor: 'layout',
+  lx_toc: 'layout',
+  // Content
+  lx_accordion: 'content',
+  lx_tabs: 'content',
+  lx_icon_list: 'content',
+  lx_icon_box: 'content',
+  lx_stat: 'content',
+  lx_progress: 'content',
+  lx_progress_tracker: 'content',
+  lx_timeline: 'content',
+  lx_comparison_table: 'content',
+  lx_flip_box: 'content',
+  lx_countdown: 'content',
+  // Social proof
+  lx_testimonial: 'social',
+  lx_testimonial_carousel: 'social',
+  lx_reviews: 'social',
+  lx_star_rating: 'social',
+  // Marketing & pricing
+  lx_action: 'marketing',
+  lx_cta_banner: 'marketing',
+  lx_channel_card: 'marketing',
+  lx_share: 'marketing',
+  lx_social_icons: 'marketing',
+  lx_pricing_table: 'marketing',
+  lx_pricing_list: 'marketing',
+  // Embed & forms
+  lx_map: 'embed',
+  lx_embed: 'embed',
+  lx_code: 'embed',
+  contact_form: 'embed',
+  // Dynamic
+  lx_featured_projects: 'dynamic',
+  lx_posts: 'dynamic',
+}
+
+/** The category for a palette entry. Falls back by block type; the
+ *  `lx_toggle` alias (type lx_accordion) lands in Content alongside it. */
+export function categoryForEntry(entry: SeedEntry): BlockCategory {
+  return CATEGORY_BY_TYPE[entry.type]
 }
 
 // Order here is the order operators see in the picker. Curated to put
@@ -312,6 +453,205 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     icon: LayoutGrid,
     aliases: ['projects', 'portfolio', 'work grid', 'case studies'],
     keywords: ['projects', 'showcase', 'case studies', 'grid', 'featured'],
+  },
+
+  // ─── Elementor-parity blocks ────────────────────────────────────
+  {
+    type: 'lx_carousel',
+    label: 'Carousel',
+    description: 'Swipeable image slider — autoplay, loop, captions, links.',
+    icon: GalleryHorizontal,
+    aliases: ['slider', 'carousel', 'slideshow', 'slides'],
+    keywords: ['swipe', 'gallery', 'rotator', 'embla'],
+  },
+  {
+    type: 'lx_testimonial_carousel',
+    label: 'Testimonial carousel',
+    description: 'Rotating pull-quotes — one centered testimonial per slide.',
+    icon: MessagesSquare,
+    aliases: ['testimonials', 'reviews slider', 'quotes carousel'],
+    keywords: ['social proof', 'rotating quotes', 'endorsements'],
+  },
+  {
+    type: 'lx_star_rating',
+    label: 'Star rating',
+    description: 'Champagne star meter — supports half stars + a numeric value.',
+    icon: Star,
+    aliases: ['rating', 'stars', 'score'],
+    keywords: ['review score', 'out of five', 'rate'],
+  },
+  {
+    type: 'lx_pricing_table',
+    label: 'Pricing table',
+    description: 'A plan card — price, features, CTA, optional featured highlight.',
+    icon: BadgeDollarSign,
+    aliases: ['price table', 'plan', 'pricing card', 'tier'],
+    keywords: ['pricing', 'plans', 'subscribe', 'cost'],
+  },
+  {
+    type: 'lx_pricing_list',
+    label: 'Price list',
+    description: 'Menu-style rows — title, description, price with a dotted leader.',
+    icon: ListOrdered,
+    aliases: ['menu', 'price list', 'rate card'],
+    keywords: ['menu', 'services', 'rates', 'pricing'],
+  },
+  {
+    type: 'lx_reviews',
+    label: 'Reviews',
+    description: 'Card grid of customer reviews — stars, quote, author, avatar.',
+    icon: ThumbsUp,
+    aliases: ['reviews', 'ratings', 'feedback'],
+    keywords: ['testimonials', 'social proof', 'stars'],
+  },
+  {
+    type: 'lx_progress_tracker',
+    label: 'Progress tracker',
+    description: 'Stepper / timeline of steps — done, current, upcoming.',
+    icon: Footprints,
+    aliases: ['stepper', 'steps', 'process', 'tracker'],
+    keywords: ['how it works', 'milestones', 'progress', 'wizard'],
+  },
+  {
+    type: 'lx_animated_headline',
+    label: 'Animated headline',
+    description: 'Static text with rotating or typewriter words.',
+    icon: Sparkles,
+    aliases: ['rotating headline', 'typed text', 'typewriter'],
+    keywords: ['animated text', 'rotating words', 'hero headline'],
+  },
+  {
+    type: 'lx_countdown',
+    label: 'Countdown',
+    description: 'Ticking countdown to a target date and time.',
+    icon: Timer,
+    aliases: ['timer', 'countdown clock', 'deadline'],
+    keywords: ['launch', 'sale ends', 'urgency', 'clock'],
+  },
+  {
+    type: 'lx_flip_box',
+    label: 'Flip box',
+    description: 'A card that flips on hover or tap to reveal more.',
+    icon: SquareStack,
+    aliases: ['flip card', 'flipper', 'reveal card'],
+    keywords: ['interactive card', 'hover flip', 'feature'],
+  },
+  {
+    type: 'lx_hotspot',
+    label: 'Hotspot',
+    description: 'An image with clickable marker tooltips.',
+    icon: Target,
+    aliases: ['hotspots', 'image markers', 'pins'],
+    keywords: ['interactive image', 'tour', 'annotations'],
+  },
+  {
+    type: 'lx_progress',
+    label: 'Progress bars',
+    description: 'Labeled skill / progress meters that fill on scroll.',
+    icon: Gauge,
+    aliases: ['progress bar', 'skill bars', 'meters'],
+    keywords: ['skills', 'stats', 'percentage', 'bars'],
+  },
+  {
+    type: 'lx_toc',
+    label: 'Table of contents',
+    description: 'Jump links to anchored sections on the page.',
+    icon: ListTree,
+    aliases: ['toc', 'contents', 'on this page', 'jump links'],
+    keywords: ['navigation', 'index', 'outline', 'anchors'],
+  },
+  {
+    type: 'lx_menu_anchor',
+    label: 'Menu anchor',
+    description: 'Invisible jump target for in-page links.',
+    icon: Anchor,
+    aliases: ['anchor', 'jump target', 'bookmark'],
+    keywords: ['scroll to', 'in-page link', 'section id'],
+  },
+  {
+    type: 'lx_share',
+    label: 'Share buttons',
+    description: 'Share this page to X, LinkedIn, Facebook, email, or copy link.',
+    icon: Share,
+    aliases: ['share', 'social share', 'share this'],
+    keywords: ['share', 'tweet', 'copy link', 'social'],
+  },
+  {
+    type: 'lx_posts',
+    label: 'Posts',
+    description: 'Auto-grid of your latest published blog posts.',
+    icon: Newspaper,
+    aliases: ['blog posts', 'recent posts', 'latest articles', 'loop grid'],
+    keywords: ['blog', 'news', 'articles', 'journal', 'feed'],
+  },
+  {
+    type: 'lx_embed',
+    label: 'Embed',
+    description: 'Embed YouTube, Vimeo, Spotify, CodePen, SoundCloud, or CodeSandbox.',
+    icon: MonitorPlay,
+    aliases: ['embed', 'iframe', 'oembed', 'youtube', 'spotify'],
+    keywords: ['video', 'audio', 'codepen', 'embed code', 'external'],
+  },
+  {
+    type: 'lx_code',
+    label: 'Code',
+    description: 'Syntax-highlighted code block with optional line numbers.',
+    icon: CodeIcon,
+    aliases: ['code', 'snippet', 'syntax', 'highlight'],
+    keywords: ['code block', 'pre', 'monospace', 'developer'],
+  },
+  {
+    type: 'lx_marquee',
+    label: 'Marquee',
+    description: 'Scrolling text or logo strip — a seamless ticker.',
+    icon: Megaphone,
+    aliases: ['ticker', 'marquee', 'logo strip', 'scroller'],
+    keywords: ['scrolling', 'logos', 'trusted by', 'banner'],
+  },
+  {
+    type: 'lx_before_after',
+    label: 'Before / after',
+    description: 'Drag-to-compare image slider.',
+    icon: Columns2,
+    aliases: ['comparison slider', 'before after', 'image compare'],
+    keywords: ['slider', 'reveal', 'compare images', 'renovation'],
+  },
+  {
+    type: 'lx_comparison_table',
+    label: 'Comparison table',
+    description: 'Feature matrix comparing up to four plans.',
+    icon: TableIcon,
+    aliases: ['feature matrix', 'compare plans', 'comparison'],
+    keywords: ['pricing comparison', 'feature table', 'plans'],
+  },
+  {
+    type: 'lx_timeline',
+    label: 'Timeline',
+    description: 'Dated vertical sequence of milestones.',
+    icon: GitCommitVertical,
+    aliases: ['timeline', 'history', 'milestones', 'roadmap'],
+    keywords: ['history', 'journey', 'process', 'events'],
+  },
+  // lx_toggle — NOT a distinct block type. A single-item accordion is
+  // exactly a toggle, so this palette entry seeds lx_accordion with one
+  // item via the `data` override (the seed test allows shared types;
+  // the label must be unique).
+  {
+    type: 'lx_accordion',
+    label: 'Toggle',
+    description: 'A single show/hide panel — a one-item accordion.',
+    icon: ToggleRight,
+    data: {
+      items: [
+        {
+          title: 'Toggle title',
+          body_richtext: '<p>Hidden content the visitor expands on click.</p>',
+        },
+      ],
+      variant: 'accordion',
+    },
+    aliases: ['toggle', 'show hide', 'collapsible', 'expander'],
+    keywords: ['reveal', 'expand', 'spoiler', 'details'],
   },
 
   // ─── Fixed-slot widget — not strictly in the lx_ family but kept in
@@ -545,6 +885,147 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   // order); columns/tone/animation fall to schema defaults. An empty
   // grid renders a hint until at least one project is Featured.
   lx_featured_projects: {},
+
+  // ─── Elementor-parity seeds ─────────────────────────────────────
+  // lx_carousel — one placeholder slide (media_id=1 system image); the
+  // picker overrides with the operator's MediaPicker pick. All other
+  // knobs (ratio/autoplay/loop/arrows/dots/tone) fall to Zod defaults.
+  lx_carousel: { slides: [{ image: { media_id: 1, alt: '' } }] },
+  // lx_testimonial_carousel — one sample testimonial so the first
+  // render reads complete; operator edits via the drawer repeater.
+  lx_testimonial_carousel: {
+    items: [
+      {
+        quote: 'They listened, then they delivered — exactly what we asked for.',
+        attribution: 'Esther Loomis',
+        attribution_title: 'Co-founder, Studio Verde',
+      },
+    ],
+  },
+  // lx_star_rating — value is the only required field.
+  lx_star_rating: { value: 4.5, showValue: true },
+  // lx_pricing_table — planName + price + at least one feature required.
+  lx_pricing_table: {
+    planName: 'Professional',
+    price: '$49',
+    period: '/month',
+    description: 'Everything a growing team needs.',
+    features: ['Unlimited projects', 'Priority support', 'Advanced analytics'],
+    ctaLabel: 'Get started',
+    ctaHref: '/contact',
+    featured: true,
+  },
+  // lx_pricing_list — at least one item (title + price).
+  lx_pricing_list: {
+    items: [
+      { title: 'Brand strategy session', description: 'A focused 90-minute working session.', price: '$450' },
+      { title: 'Identity system', description: 'Logo, palette, type, and usage guidelines.', price: '$3,200' },
+      { title: 'Launch website', description: 'Design + build, ready to ship.', price: 'from $8,000' },
+    ],
+  },
+  // lx_reviews — at least one review (author + rating + text).
+  lx_reviews: {
+    items: [
+      { author: 'Marcus Reed', rating: 5, text: 'Best decision we made all year. The team is exceptional.', role: 'CEO, Northwind' },
+      { author: 'Priya Nair', rating: 4.5, text: 'Thoughtful, fast, and genuinely a pleasure to work with.', role: 'Founder, Bloom' },
+    ],
+  },
+  // lx_progress_tracker — at least one step.
+  lx_progress_tracker: {
+    steps: [
+      { title: 'Discovery', description: 'We learn your goals and constraints.', state: 'done' },
+      { title: 'Design', description: 'We craft and refine the direction.', state: 'current' },
+      { title: 'Launch', description: 'We ship and hand over.', state: 'upcoming' },
+    ],
+  },
+  // lx_animated_headline — prefix + at least one word.
+  lx_animated_headline: {
+    prefix: 'We design things that are',
+    words: ['beautiful', 'fast', 'unforgettable'],
+  },
+  // lx_countdown — target ISO string is required. A neutral future date;
+  // operator sets their own via the drawer.
+  lx_countdown: { target: '2027-01-01T00:00' },
+  // lx_flip_box — front + back headline required.
+  lx_flip_box: {
+    frontIcon: 'sparkles',
+    frontHeadline: 'Hover to learn more',
+    frontBody: 'A short teaser on the front face.',
+    backHeadline: 'Here is the detail',
+    backBody: 'The fuller story revealed on the flip.',
+    backCtaLabel: 'Learn more',
+    backCtaHref: '/contact',
+  },
+  // lx_hotspot — image + at least one marker. Placeholder media_id=1;
+  // picker overrides with the operator's pick.
+  lx_hotspot: {
+    image: { media_id: 1, alt: '' },
+    markers: [{ x: 50, y: 50, label: 'A point of interest', body: 'Describe what is here.' }],
+  },
+  // lx_progress — at least one bar.
+  lx_progress: {
+    items: [
+      { label: 'Design', value: 92 },
+      { label: 'Development', value: 85 },
+      { label: 'Strategy', value: 78 },
+    ],
+  },
+  // lx_menu_anchor — anchorId required.
+  lx_menu_anchor: { anchorId: 'section-anchor' },
+  // lx_toc — title optional, at least one link.
+  lx_toc: {
+    title: 'On this page',
+    items: [
+      { label: 'Overview', anchor: 'overview' },
+      { label: 'Pricing', anchor: 'pricing' },
+      { label: 'Contact', anchor: 'contact' },
+    ],
+  },
+  // lx_share — all booleans default true; nothing required.
+  lx_share: { label: 'Share' },
+  // lx_posts — no required fields; the grid auto-renders the latest
+  // published posts (limit/layout/columns fall to defaults).
+  lx_posts: {},
+  // lx_embed — embedUrl must pass isAllowedEmbedUrl; title required.
+  // Neutral public-domain YouTube short (same reference lx_video uses).
+  lx_embed: {
+    embedUrl: 'https://www.youtube.com/watch?v=YE7VzlLtp-4',
+    title: 'Embedded video',
+  },
+  // lx_code — code required.
+  lx_code: {
+    code: 'export function greet(name: string) {\n  return `Hello, ${name}!`\n}',
+    language: 'ts',
+    filename: 'greet.ts',
+  },
+  // lx_marquee — text mode; nothing strictly required (logos default []).
+  lx_marquee: { mode: 'text', text: 'Trusted by teams everywhere' },
+  // lx_before_after — both images required (placeholder media_id=1; the
+  // picker overrides with the operator's two picks).
+  lx_before_after: {
+    before: { media_id: 1, alt: '' },
+    after: { media_id: 1, alt: '' },
+    beforeLabel: 'Before',
+    afterLabel: 'After',
+  },
+  // lx_comparison_table — at least 2 columns + 1 row.
+  lx_comparison_table: {
+    columns: ['Starter', 'Pro', 'Enterprise'],
+    rows: [
+      { feature: 'Projects', c1: '3', c2: 'Unlimited', c3: 'Unlimited' },
+      { feature: 'Priority support', c1: 'no', c2: 'yes', c3: 'yes' },
+      { feature: 'Dedicated manager', c1: 'no', c2: 'no', c3: 'yes' },
+    ],
+    highlightColumn: 1,
+  },
+  // lx_timeline — at least one event (title required).
+  lx_timeline: {
+    events: [
+      { date: '2021', title: 'Founded', body: 'The studio opens its doors.' },
+      { date: '2023', title: 'First award', body: 'Recognised for design excellence.' },
+      { date: '2025', title: 'Global', body: 'Serving clients on four continents.' },
+    ],
+  },
 }
 
 // Convenience for picker UIs that need to include the Image entry
