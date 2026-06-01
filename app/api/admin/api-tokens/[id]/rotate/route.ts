@@ -44,7 +44,9 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
         SET token_hash = ${hash},
             token_prefix = ${prefix},
             last_used_at = NULL
-        WHERE id = ${id} AND revoked_at IS NULL
+        WHERE id = ${id}
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > NOW(3))
       `)) as unknown as [UpdateResult]
       if (!res.affectedRows) throw new HttpError(404, 'not_found')
       // Audit row never stores the token or its hash.

@@ -584,7 +584,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
               </thead>
               <tbody>
                 {pageItems.map((t) => {
-                  const inactive = t.revoked_at !== null
+                  const inactive = t.status !== 'active'
                   return (
                     <tr
                       key={t.id}
@@ -677,7 +677,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
           {/* Mobile — stacked cards (below md) so nothing is clipped or hidden */}
           <div className="mt-6 space-y-3 md:hidden">
             {pageItems.map((t) => {
-              const inactive = t.revoked_at !== null
+              const inactive = t.status !== 'active'
               return (
                 <div
                   key={t.id}

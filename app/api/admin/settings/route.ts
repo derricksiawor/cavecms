@@ -6,7 +6,7 @@ import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkReadRate, checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { requireFreshReauth } from '@/lib/auth/reauth'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { registry, type SettingsKey } from '@/lib/cms/settings-registry'
@@ -180,7 +180,7 @@ export const PATCH = withError(async (req: Request) => {
   // still applies on top (defense in depth — tokens write content/branding
   // keys only). Makes the `settings` scope a live, honest grant.
   requireScope(ctx, 'settings', 'write')
-  checkMutationRate(ctx.userId)
+  checkCmsMutationRate(ctx)
 
   const body = Body.parse(await readJsonBody(req))
   const entry = (registry as Record<string, { schema: z.ZodTypeAny }>)[body.key]

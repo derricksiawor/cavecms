@@ -96,9 +96,9 @@ function asArray(v: unknown): unknown[] {
 // ── GET /api/cms/nav — public-readable menu trees ────────────────────
 export const GET = withError(async (req: Request) => {
   // Resolve an admin/editor/viewer or API-token caller if present; anonymous
-  // reads are allowed (the middleware lets GET /api/cms/nav through). Only an
-  // auth failure (401/403) means "anonymous" — any other error is a real
-  // fault and must propagate.
+  // reads are allowed (the middleware lets GET /api/cms/nav through). Only a
+  // 401 (unauthenticated) means "anonymous"; a 403 (scope-denied token) and
+  // any other error must propagate.
   let authed = false
   try {
     const ctx = await requireRole(['admin', 'editor', 'viewer'])
@@ -106,7 +106,12 @@ export const GET = withError(async (req: Request) => {
     requireScope(ctx, 'nav', 'read')
     authed = true
   } catch (err) {
-    if (!(err instanceof HttpError && (err.status === 401 || err.status === 403))) throw err
+    // ONLY a 401 (no/invalid session) means "anonymous" → fall through to the
+    // public nav payload. A 403 here is requireScope denying a token that
+    // lacks nav:read (requireRole never 403s — all three roles are allowed),
+    // and it MUST propagate so a scope-denied token gets 403 forbidden_scope
+    // like every other read route, not a misleading 200 + data.
+    if (!(err instanceof HttpError && err.status === 401)) throw err
     // Anonymous → per-IP throttle BEFORE any read work.
     const headerObj: Record<string, string | undefined> = {}
     req.headers.forEach((v, k) => {
