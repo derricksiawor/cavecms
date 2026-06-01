@@ -878,6 +878,42 @@ print(best or "")
   fi
   TARGET_SHA="$ROLLBACK_PREV"
   echo "[cavecms-update] standalone rollback → ${ROLLBACK_PREV}"
+
+  # ── Decide whether this rollback must ALSO restore the database ──
+  # A code-only rollback strands the (older) restored code on the (newer) live
+  # schema. instrumentation.ts does a STRICT schema-fingerprint match at boot
+  # and process.exit(1)s on ANY mismatch — so code-only across ANY migration
+  # bricks startup (the exact failure a real install hit). compute_rollback_db_plan
+  # weighs rollback-meta.json (written at the replacing update's success) AND a
+  # live-vs-target fingerprint cross-check (authoritative + the safety net for
+  # legacy snapshots that predate the meta). Plan ∈ code_only | restore | refuse.
+  RB_PLAN_OUT="$(compute_rollback_db_plan "$ROLLBACK_PREV")"
+  RB_PLAN="$(printf '%s\n' "$RB_PLAN_OUT" | awk 'NR==1{print; exit}')"
+  RB_BACKUP_DUMP="$(printf '%s\n' "$RB_PLAN_OUT" | awk 'NR==2{print; exit}')"
+  RB_DETAIL="$(printf '%s\n' "$RB_PLAN_OUT" | awk 'NR==3{print; exit}')"
+  echo "[cavecms-update] rollback DB decision: plan=${RB_PLAN} dump=${RB_BACKUP_DUMP:-<none>} ${RB_DETAIL}" >&2
+
+  # refuse: a DB restore is required but we have no usable dump (the case the
+  # real install hit — a legacy snapshot whose update migrated the schema).
+  # Refuse with actionable guidance instead of completing a code-only rollback
+  # the boot guard will reject and silently bricking the site.
+  if [ "$RB_PLAN" = "refuse" ]; then
+    write_status "failed" 1 \
+      "This update changed your database, so we can't roll back the code on its own" \
+      "Rolling back only the code would leave your older site running on the newer database, and it wouldn't start. We couldn't find the matching pre-update database backup automatically. Restore your most recent backup from ${LOG_DIR} (look for a pre-update-*.sql.gz file) and restart your site, or reinstall a known-good version with npx create-cavecms@latest --version=X.Y.Z." \
+      ""
+    if declare -F post_audit_terminal >/dev/null 2>&1; then
+      post_audit_terminal failed "rollback_refused_no_db_backup"
+    fi
+    trap - EXIT TERM
+    rm -f "$LOCK_PATH" 2>/dev/null || true
+    echo "[cavecms-update] rollback refused — schema changed but no usable DB backup found for ${ROLLBACK_PREV}" >&2
+    exit 1
+  fi
+
+  RB_HAD_MIGRATION=0
+  [ "$RB_PLAN" = "restore" ] && RB_HAD_MIGRATION=1
+
   write_status "restarting" 1 "Restoring your previous version" "" ""
   CAVECMS_MAINT_TOGGLED_BY_US=1
   # Best-effort maintenance flip — must NOT gate the actual restore. Under
@@ -885,7 +921,7 @@ print(best or "")
   # unavailable — common when the app is broken, which is WHY we're rolling
   # back) would abort before rollback_to_previous ever runs.
   post_maintenance_toggle true || true
-  if rollback_to_previous "$ROLLBACK_PREV" 0 ""; then
+  if rollback_to_previous "$ROLLBACK_PREV" "$RB_HAD_MIGRATION" "$RB_BACKUP_DUMP"; then
     write_status "rolled_back" 1 "We put your site back on the previous version" "" ""
     post_maintenance_toggle false || true
     CAVECMS_MAINT_TOGGLED_BY_US=0
@@ -1585,6 +1621,11 @@ if [ "$RESTART_MODE" = "laptop" ]; then
   if declare -F post_audit_terminal >/dev/null 2>&1; then
     post_audit_terminal completed "laptop_manual_restart_required"
   fi
+  # Record how to undo this update from the standalone `cavecms rollback` CLI
+  # (it starts cold, without these in-process vars). Best-effort — must never
+  # fail the completed update. Written BEFORE prune so the just-created
+  # PREVIOUS_SHA snapshot (newest, always kept) carries it.
+  write_rollback_meta "$PREVIOUS_SHA" "$TARGET_FULL" "$HAD_MIGRATION" "$BACKUP_DUMP" || true
   prune_old_snapshots || true
   trap - EXIT
   rm -f "$LOCK_PATH" 2>/dev/null || true
@@ -1704,6 +1745,15 @@ export CAVECMS_STATUS_WATCHDOG_UNTIL="$WATCHDOG_UNTIL"
 
 write_status "completed" 6 "Update successful — you're on the new version" "" ""
 post_audit_terminal completed
+
+# Record how to undo this update from the standalone `cavecms rollback` CLI
+# (it starts cold, without HAD_MIGRATION / BACKUP_DUMP in scope). The meta
+# goes into the PREVIOUS_SHA snapshot — the version a future rollback restores
+# TO — and tells that rollback whether THIS update migrated the DB + the dump
+# that restores the prior schema. Best-effort; must never fail the completed
+# update. Written BEFORE prune so the just-created (newest, always-kept)
+# PREVIOUS_SHA snapshot carries it.
+write_rollback_meta "$PREVIOUS_SHA" "$TARGET_FULL" "$HAD_MIGRATION" "$BACKUP_DUMP" || true
 
 # Prune old snapshots — keep the most recent N (default 3), drop the
 # rest. Done AFTER terminal audit + status write so a prune failure

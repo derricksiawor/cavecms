@@ -236,6 +236,7 @@ snapshot_current_tree() {
     --exclude='.cavecms-state' \
     --exclude='.tarball-old.*' \
     --exclude='*.tmp.*' \
+    --exclude='rollback-meta.json*' \
     --exclude='public/uploads' \
     --exclude='public/media' \
     "$REPO_DIR/" "$snap_dir/" 2>>"$snap_log"; then
@@ -293,6 +294,7 @@ restore_from_snapshot() {
     --exclude='.next/cache' \
     --exclude='snapshots' \
     --exclude='.cavecms-state' \
+    --exclude='rollback-meta.json*' \
     --exclude='public/uploads' \
     --exclude='public/media' \
     "$snap_dir/" "$REPO_DIR/" 2>>"$restore_log"; then
@@ -674,6 +676,190 @@ restore_db_backup() {
 
   rm -f "$cred_file"
   return $restore_rc
+}
+
+# db_fingerprint — echo the LIVE database's schema_fingerprint (id=1), or "" if
+# it can't be read (no DATABASE_URL, no mysql client, table absent, query
+# failed). Mirrors _direct_db_maintenance_toggle's credential-file pattern.
+#
+# Used by the standalone `cavecms rollback` path to decide whether a code-only
+# rollback is SAFE: it's safe iff the live DB fingerprint already equals the
+# rollback target's code-side fingerprint (db/schema-fingerprint.txt inside the
+# snapshot). When they differ, the update being undone migrated the schema, and
+# rolling back the code alone would strand the older code on the newer schema —
+# which instrumentation.ts's strict boot-time fingerprint guard refuses to boot.
+#
+# ALWAYS returns 0 (best-effort signal) — the caller treats "" as "unknown".
+db_fingerprint() {
+  if [ -z "${DATABASE_URL:-}" ]; then printf ''; return 0; fi
+  if ! command -v mysql >/dev/null 2>&1; then printf ''; return 0; fi
+  if ! command -v python3 >/dev/null 2>&1; then printf ''; return 0; fi
+
+  local parsed
+  parsed=$(_parse_database_url "$DATABASE_URL") || { printf ''; return 0; }
+  local db_host db_port db_user db_pass db_name
+  db_host=$(echo "$parsed" | awk 'NR==1')
+  db_port=$(echo "$parsed" | awk 'NR==2')
+  db_user=$(echo "$parsed" | awk 'NR==3')
+  db_pass=$(echo "$parsed" | awk 'NR==4')
+  db_name=$(echo "$parsed" | awk 'NR==5')
+  if [ -z "$db_name" ]; then printf ''; return 0; fi
+
+  local cred_file
+  cred_file=$(mktemp "${TMPDIR:-/tmp}/cavecms-fp-cred.XXXXXX") || { printf ''; return 0; }
+  chmod 0600 "$cred_file"
+  printf '[client]\nhost=%s\nport=%s\nuser=%s\npassword=%s\n' \
+    "$db_host" "$db_port" "$db_user" "$db_pass" > "$cred_file"
+  if [ ! -s "$cred_file" ]; then rm -f "$cred_file"; printf ''; return 0; fi
+
+  # --connect-timeout bounds the probe so a partitioned/stopped DB fails fast
+  # instead of hanging the rollback. -BNe = batch, no column names, execute.
+  local fp
+  fp=$(mysql --defaults-extra-file="$cred_file" --connect-timeout=5 -BNe \
+    "SELECT fingerprint FROM schema_fingerprint WHERE id=1 LIMIT 1;" \
+    "$db_name" 2>/dev/null | head -n1 | tr -d '[:space:]') || fp=""
+  rm -f "$cred_file"
+  printf '%s' "$fp"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Rollback metadata — written into a snapshot dir at the SUCCESSFUL end of an
+# update, recording how to UNDO that update later from the standalone
+# `cavecms rollback` CLI (which starts cold, with none of the orchestrator's
+# in-process HAD_MIGRATION / BACKUP_DUMP variables).
+#
+# Lives at ${SNAPSHOT_ROOT}/<snapshot-sha>/rollback-meta.json. The snapshot is
+# of the version we'd roll back TO; the meta describes the update that REPLACED
+# it (did it migrate the DB, and where is the pre-migration dump). Excluded from
+# both snapshot + restore rsyncs (rollback-meta.json*) so it never leaks into
+# REPO_DIR, and removed automatically when prune_old_snapshots rm -rf's the dir.
+# ---------------------------------------------------------------------------
+# write_rollback_meta <snapshot_sha> <target_sha> <had_migration:0|1> <backup_dump>
+# Best-effort: returns non-zero on failure but the caller must NEVER let that
+# fail the update — the snapshot + dump still exist, and rollback falls back to
+# its live-fingerprint safety check when the meta is absent.
+write_rollback_meta() {
+  local snap_sha="$1" target_sha="$2" had_migration="$3" backup_dump="${4:-}"
+  is_safe_snapshot_sha "$snap_sha" || return 1
+  local snap_dir="${SNAPSHOT_ROOT}/${snap_sha}"
+  [ -d "$snap_dir" ] || return 1
+  local had_bool="false"
+  [ "$had_migration" = "1" ] && had_bool="true"
+  local esc_snap esc_target esc_dump
+  esc_snap=$(json_escape "$snap_sha")
+  esc_target=$(json_escape "$target_sha")
+  esc_dump=$(json_escape "$backup_dump")
+  # Temp in the SAME dir (atomic rename) with a NON-dot name so the
+  # rollback-meta.json* rsync exclude also covers a crash-leftover temp.
+  local tmp="${snap_dir}/rollback-meta.json.tmp.$(rand_suffix)"
+  cat > "$tmp" 2>/dev/null << EOF || { rm -f "$tmp" 2>/dev/null; return 1; }
+{
+  "schemaVersion": 1,
+  "snapshotSha": "${esc_snap}",
+  "replacedByTargetSha": "${esc_target}",
+  "hadMigration": ${had_bool},
+  "backupDump": "${esc_dump}",
+  "createdAt": "$(now_iso)"
+}
+EOF
+  chmod 0600 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "${snap_dir}/rollback-meta.json" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  return 0
+}
+
+# read_rollback_meta_field <snapshot_sha> <field>
+# Echo a single field from the snapshot's rollback-meta.json, or "" if the file
+# or field is absent. field ∈ { hadMigration, backupDump, replacedByTargetSha,
+# snapshotSha }. Booleans render as the strings "true"/"false". ALWAYS returns 0.
+read_rollback_meta_field() {
+  local snap_sha="$1" field="$2"
+  is_safe_snapshot_sha "$snap_sha" || { printf ''; return 0; }
+  local meta="${SNAPSHOT_ROOT}/${snap_sha}/rollback-meta.json"
+  [ -f "$meta" ] || { printf ''; return 0; }
+  if command -v python3 >/dev/null 2>&1; then
+    META_FILE="$meta" META_FIELD="$field" python3 -c '
+import os, json
+try:
+    with open(os.environ["META_FILE"]) as f:
+        d = json.load(f)
+    v = d.get(os.environ["META_FIELD"], "")
+    if isinstance(v, bool):
+        print("true" if v else "false")
+    elif v is None:
+        print("")
+    else:
+        print(v)
+except Exception:
+    print("")
+' 2>/dev/null || printf ''
+  else
+    # awk fallback for the flat one-field-per-line JSON this helper writes.
+    awk -v f="\"${field}\"" '
+      index($0, f) {
+        line = $0
+        sub(/^[^:]*:[[:space:]]*/, "", line)   # strip up to the value
+        sub(/,[[:space:]]*$/, "", line)        # strip trailing comma
+        gsub(/^"|"$/, "", line)                # strip surrounding quotes (strings)
+        print line
+        exit
+      }
+    ' "$meta" 2>/dev/null || printf ''
+  fi
+  return 0
+}
+
+# compute_rollback_db_plan <rollback_target_sha>
+# Decide whether a STANDALONE rollback to <rollback_target_sha> must also
+# restore the database, and locate the dump. Pure(ish) — reads SNAPSHOT_ROOT +
+# the rollback-meta.json + the live DB fingerprint (db_fingerprint) and the
+# target's code-side fingerprint. Extracted from the orchestrator's rollback
+# branch so the decision is unit-testable (stub db_fingerprint + craft a
+# snapshot dir). Echoes THREE lines:
+#   1: plan   — "code_only" | "restore" | "refuse"
+#   2: dump   — backup dump path (meaningful only when plan == "restore")
+#   3: detail — "live_fp=.. target_fp=.." for the caller's diagnostic log
+#
+# Decision precedence:
+#   - rollback-meta.json (written at the replacing update's success) seeds
+#     had_migration + dump.
+#   - The live-vs-target fingerprint cross-check OVERRIDES when both are
+#     readable: equal ⇒ DB already matches the target code ⇒ code-only is safe
+#     (skip a needless destructive restore); differ ⇒ DB is ahead ⇒ a restore
+#     is required.
+#   - "restore" needs a usable dump; without one we "refuse" rather than
+#     complete a code-only rollback the strict boot fingerprint guard rejects.
+# ALWAYS returns 0.
+compute_rollback_db_plan() {
+  local prev="$1"
+  local had=0 dump=""
+  local meta_had meta_dump
+  meta_had="$(read_rollback_meta_field "$prev" hadMigration)"
+  meta_dump="$(read_rollback_meta_field "$prev" backupDump)"
+  if [ "$meta_had" = "true" ]; then had=1; dump="$meta_dump"; fi
+
+  local live_fp target_fp target_fp_file
+  live_fp="$(db_fingerprint)"
+  target_fp=""
+  target_fp_file="${SNAPSHOT_ROOT}/${prev}/db/schema-fingerprint.txt"
+  if [ -f "$target_fp_file" ]; then
+    target_fp="$(tr -d '[:space:]' < "$target_fp_file" 2>/dev/null || true)"
+  fi
+  if [ -n "$live_fp" ] && [ -n "$target_fp" ]; then
+    if [ "$live_fp" = "$target_fp" ]; then had=0; dump=""; else had=1; fi
+  fi
+
+  local plan="code_only"
+  if [ "$had" = "1" ]; then
+    if [ -z "$dump" ] || [ "$dump" = "SKIPPED" ] || [ ! -f "$dump" ]; then
+      plan="refuse"
+    else
+      plan="restore"
+    fi
+  fi
+  printf '%s\n%s\nlive_fp=%s target_fp=%s\n' \
+    "$plan" "$dump" "${live_fp:-<unknown>}" "${target_fp:-<unknown>}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
