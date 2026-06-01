@@ -7,8 +7,11 @@ import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { rateLimit } from '@/lib/auth/rateLimit'
+import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { registry } from '@/lib/cms/settings-registry'
+import { getSetting } from '@/lib/cms/getSettings'
 import { safeRevalidate } from '@/lib/cache/revalidate'
 import { tag } from '@/lib/cache/tags'
 
@@ -56,27 +59,24 @@ function parseStored(value: unknown): Record<string, unknown> {
   return {}
 }
 
-async function readSetting(
-  key: 'site_header' | 'footer',
-): Promise<{ value: Record<string, unknown>; version: number }> {
-  const entry = registryEntry(key)
+// Per-IP throttle for ANONYMOUS reads. This is the only anonymous /api/cms
+// route, so it gets its own sliding window as defense-in-depth against a
+// cache-busting request loop (authed callers are limited by checkReadRate
+// instead). Generous: a headless frontend caches the menu itself and won't
+// poll anywhere near this.
+const anonNavReadLimit = rateLimit('cms_nav_anon_read', { limit: 60, windowSec: 60 })
+
+// Optimistic-lock version for a settings row (0 when unseeded). `version` is
+// not part of the Zod schema, so it's read directly rather than via getSetting.
+async function readVersion(key: 'site_header' | 'footer'): Promise<number> {
   const [rows] = (await db.execute(sql`
-    SELECT value, version FROM settings WHERE \`key\` = ${key}
-  `)) as unknown as [Array<{ value: unknown; version: number }>]
-  const raw = rows[0] ? parseStored(rows[0].value) : parseStored(entry.default)
-  const version = rows[0]?.version ?? 0
-  // Validate fail-closed to the registry default — mirrors lib/cms/getSettings
-  // so the public API serves the SAME schema-clean tree the renderer shows
-  // (an out-of-band-tampered / over-cap / extra-key row degrades to the safe
-  // default here exactly as it does in SiteHeader/SiteFooter). `version` is
-  // read from the raw row (it is not part of the Zod schema).
-  const result = entry.schema.safeParse(raw)
-  const value = (result.success ? result.data : entry.default) as Record<string, unknown>
-  return { value, version }
+    SELECT version FROM settings WHERE \`key\` = ${key}
+  `)) as unknown as [Array<{ version: number }>]
+  return rows[0]?.version ?? 0
 }
 
 // ── GET /api/cms/nav — public-readable menu trees ────────────────────
-export const GET = withError(async () => {
+export const GET = withError(async (req: Request) => {
   // Resolve an admin/editor/viewer or API-token caller if present; anonymous
   // reads are allowed (the middleware lets GET /api/cms/nav through). Only an
   // auth failure (401/403) means "anonymous" — any other error is a real
@@ -87,34 +87,58 @@ export const GET = withError(async () => {
     checkReadRate(ctx.userId)
     authed = true
   } catch (err) {
-    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
-      authed = false
-    } else {
-      throw err
+    if (!(err instanceof HttpError && (err.status === 401 || err.status === 403))) throw err
+    // Anonymous → per-IP throttle BEFORE any read work.
+    const headerObj: Record<string, string | undefined> = {}
+    req.headers.forEach((v, k) => {
+      headerObj[k] = v
+    })
+    const ip = clientIpFromHeaders(headerObj, '127.0.0.1') ?? '0.0.0.0'
+    if (!anonNavReadLimit(ip)) {
+      return new Response(JSON.stringify({ error: 'rate_limited' }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+          'retry-after': '60',
+        },
+      })
     }
   }
 
-  const header = await readSetting('site_header')
-  const footer = await readSetting('footer')
-  const headerItems = Array.isArray(header.value.navItems) ? header.value.navItems : []
-  const footerCols = Array.isArray(footer.value.columns) ? footer.value.columns : []
+  // Cached + validated read — the SAME revalidate-bounded, schema-clean path
+  // the public renderer (SiteHeader/SiteFooter) uses. Repeated anonymous reads
+  // collapse onto one DB hit per revalidation window (tag 'settings', bumped by
+  // the PUT below) instead of a fresh SELECT per request, so the public
+  // endpoint can't be turned into a DB-amplification surface.
+  const header = await getSetting('site_header')
+  const footer = await getSetting('footer')
+  const headerItems = Array.isArray(header.navItems) ? header.navItems : []
+  const footerCols = Array.isArray(footer.columns) ? footer.columns : []
 
-  const payload = authed
-    ? {
-        header: { items: headerItems, version: header.version },
-        footer: { columns: footerCols, version: footer.version },
-      }
-    : {
-        header: { items: headerItems },
-        footer: { columns: footerCols },
-      }
+  let payload: unknown
+  if (authed) {
+    const [headerVersion, footerVersion] = await Promise.all([
+      readVersion('site_header'),
+      readVersion('footer'),
+    ])
+    payload = {
+      header: { items: headerItems, version: headerVersion },
+      footer: { columns: footerCols, version: footerVersion },
+    }
+  } else {
+    payload = { header: { items: headerItems }, footer: { columns: footerCols } }
+  }
 
   return new Response(JSON.stringify(payload), {
     status: 200,
     headers: {
       'content-type': 'application/json',
-      // Public reads are cacheable for a short window; authed reads carry
-      // version data scoped to the caller and must never be shared-cached.
+      // Body differs by auth state (authed adds `version`), so a shared cache
+      // must key the public copy separately from authed requests.
+      vary: 'Cookie, Authorization',
+      // Public reads are shared-cacheable for a short window; authed reads
+      // carry caller-scoped version data and must never be shared-cached.
       'cache-control': authed ? 'private, no-store' : 'public, max-age=30',
     },
   })
@@ -145,7 +169,11 @@ export const PUT = withError(async (req: Request) => {
   const schema = registryEntry(key).schema
   const meta = auditMetaFromRequest(req)
 
-  const changed = await db.transaction<boolean>(async (tx) => {
+  // The transaction returns the resulting version directly so the response
+  // never re-reads the row post-commit — a transient blip on a re-read must
+  // not turn a successful write into a 500 (which a retrying client would then
+  // see as a phantom 409 against its now-stale version).
+  const result = await db.transaction<{ changed: boolean; version: number }>(async (tx) => {
     const [rows] = (await tx.execute(sql`
       SELECT value, version FROM settings WHERE \`key\` = ${key} FOR UPDATE
     `)) as unknown as [Array<{ value: unknown; version: number }>]
@@ -182,19 +210,23 @@ export const PUT = withError(async (req: Request) => {
         userAgent: meta.userAgent,
         requestId: meta.requestId,
       })
-      return true
+      return { changed: true, version: 1 }
     }
 
-    // No-op short-circuit on identical stored JSON (comparison on the
-    // PARSED stored value vs the parsed candidate — both schema-clean, so
-    // the client's transient `__id` keys never cause a false diff).
-    if (JSON.stringify(parseStored(rows[0].value)) === newJson) return false
+    // No-op short-circuit: compare SCHEMA-CLEAN stored value vs the parsed
+    // candidate. Parsing the stored side through the same schema (a) drops any
+    // transient `__id` an older client persisted, and (b) normalizes legacy/
+    // older-version row shapes — so an unchanged menu doesn't spuriously bump
+    // the version + write an audit row.
+    const storedParsed = schema.safeParse(existing)
+    const storedJson = storedParsed.success ? JSON.stringify(storedParsed.data) : null
+    if (storedJson === newJson) return { changed: false, version: currentVersion }
 
-    const [result] = (await tx.execute(sql`
+    const [updateResult] = (await tx.execute(sql`
       UPDATE settings SET value = ${newJson}, version = version + 1, updated_by = ${ctx.userId}
       WHERE \`key\` = ${key} AND version = ${body.version}
     `)) as unknown as [UpdateResult]
-    if (result.affectedRows === 0) throw new HttpError(409, 'version_conflict')
+    if (updateResult.affectedRows === 0) throw new HttpError(409, 'version_conflict')
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
@@ -206,14 +238,12 @@ export const PUT = withError(async (req: Request) => {
       userAgent: meta.userAgent,
       requestId: meta.requestId,
     })
-    return true
+    return { changed: true, version: body.version + 1 }
   })
 
-  if (changed) await safeRevalidate([tag.settings]).catch(() => undefined)
+  if (result.changed) await safeRevalidate([tag.settings]).catch(() => undefined)
 
-  // Echo the resulting version for round-trip clients.
-  const after = await readSetting(key)
-  return new Response(JSON.stringify({ ok: true, version: after.version }), {
+  return new Response(JSON.stringify({ ok: true, version: result.version }), {
     status: 200,
     headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
   })

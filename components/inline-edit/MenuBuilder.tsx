@@ -108,7 +108,11 @@ export function MenuBuilder({
               node={node}
               shape={shape}
               handleProps={helpers.handleProps}
-              canIndent={i > 0 && node.children.length === 0}
+              canIndent={
+                i > 0 &&
+                node.children.length === 0 &&
+                (nodes[i - 1]?.children.length ?? 0) < cfg.maxChildren
+              }
               onLabel={(v) => setParent(node.id, 'label', v)}
               onHref={(v) => setParent(node.id, 'href', v)}
               onIndent={() => emit(indentParent(nodes, node.id, cfg))}

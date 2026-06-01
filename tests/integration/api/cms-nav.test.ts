@@ -136,6 +136,33 @@ describe('/api/cms/nav (integration)', () => {
     expect(res.status).toBe(400)
   })
 
+  it('PUT is a no-op (no version bump) when the submitted tree is unchanged, even with transient __id', async () => {
+    const version = await seedHeader([{ label: 'Orig', href: '/orig' }])
+    // First write changes the tree → real version bump to version+1.
+    const first = await PUT(
+      new Request('http://x/api/cms/nav', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ menu: 'header', version, tree: [{ label: 'Same', href: '/same' }] }),
+      }),
+      {},
+    )
+    const v1 = (await first.json()).version as number
+    expect(v1).toBe(version + 1)
+    // Re-submit the SAME logical tree (with a transient __id the builder adds)
+    // at the bumped version → schema-clean compare detects the no-op.
+    const second = await PUT(
+      new Request('http://x/api/cms/nav', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ menu: 'header', version: v1, tree: [{ __id: 'transient', label: 'Same', href: '/same' }] }),
+      }),
+      {},
+    )
+    expect(second.status).toBe(200)
+    expect((await second.json()).version).toBe(v1) // unchanged — no spurious bump
+  })
+
   it('PUT strips the internal __id key before persisting', async () => {
     const version = await seedHeader([{ label: 'X', href: '/x' }])
     await PUT(

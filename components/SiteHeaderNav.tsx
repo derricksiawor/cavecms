@@ -77,7 +77,7 @@ export function SiteHeaderNav({
         const active = isNavLinkActive(item.href, pathname)
         return (
           <Link
-            key={`${item.label}-${item.href}`}
+            key={`${i}-${item.label}-${item.href}`}
             href={item.href}
             rel={externalRel(item.href, true)}
             target={isLikelyExternal(item.href) ? '_blank' : undefined}
