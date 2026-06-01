@@ -1,9 +1,17 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { ArrowUpRight, BookOpen } from 'lucide-react'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { renderMarkdown } from '@/lib/cms/markdown'
 
 export const dynamic = 'force-dynamic'
+
+// The canonical, always-current docs live on the marketing site and carry
+// Cave Concierge (the AI docs helper). We deep-link out rather than redirect:
+// the bundled help below stays available on firewalled / offline / older
+// installs and is matched to THIS install's version, while online operators
+// get the richer, latest docs + the assistant one click away.
+const DOCS_URL = 'https://cavecms.derricksiawor.com/docs'
 
 export async function generateMetadata() {
   return { robots: { index: false, follow: false } }
@@ -98,6 +106,30 @@ export default async function Help() {
       <h1 className="mt-4 font-serif text-4xl font-bold tracking-tight text-near-black sm:text-5xl">
         Admin help
       </h1>
+      <a
+        href={DOCS_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group mt-8 flex items-start gap-4 rounded-2xl bg-copper-50 px-5 py-4 transition-colors hover:bg-copper-100"
+      >
+        <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-copper-100 text-copper-700 transition-colors group-hover:bg-copper-50">
+          <BookOpen className="h-5 w-5" aria-hidden />
+        </span>
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 font-serif text-lg font-semibold text-near-black">
+            Full documentation &amp; Cave Concierge
+            <ArrowUpRight
+              className="h-4 w-4 text-copper-600 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+              aria-hidden
+            />
+          </span>
+          <span className="mt-1 block text-sm leading-relaxed text-warm-stone">
+            Browse the complete, always-current guides and ask Cave Concierge —
+            our AI helper — anything. The essentials below ship with your
+            install, so they work offline and match your installed version.
+          </span>
+        </span>
+      </a>
       <article
         className="prose prose-lg mt-10 max-w-none prose-headings:font-serif prose-headings:tracking-tight prose-headings:text-near-black prose-p:text-warm-stone prose-strong:text-near-black prose-a:text-copper-700 prose-li:text-warm-stone"
         dangerouslySetInnerHTML={{ __html: html }}
