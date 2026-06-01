@@ -109,6 +109,10 @@ export function MenuBuilder({
               shape={shape}
               handleProps={helpers.handleProps}
               canIndent={
+                // Header only: nesting carries the parent's href into the new
+                // leaf. A footer column has no href to give, so nesting it would
+                // mint a dead `href=""` link — disable nest there entirely.
+                Boolean(shape.parentHrefKey) &&
                 i > 0 &&
                 node.children.length === 0 &&
                 (nodes[i - 1]?.children.length ?? 0) < cfg.maxChildren
@@ -126,6 +130,9 @@ export function MenuBuilder({
               onChildHref={(cid, v) => setChild(node.id, cid, 'href', v)}
               onChildOutdent={(cid) => emit(outdentChild(nodes, node.id, cid, cfg))}
               atChildCap={node.children.length >= cfg.maxChildren}
+              // Promote (outdent) adds a top-level row — a no-op at the cap, so
+              // disable it there rather than letting the click do nothing.
+              canOutdent={nodes.length < cfg.maxItems}
             />
           )}
         />
@@ -151,6 +158,7 @@ function ParentRow({
   handleProps,
   canIndent,
   atChildCap,
+  canOutdent,
   onLabel,
   onHref,
   onIndent,
@@ -167,6 +175,7 @@ function ParentRow({
   handleProps: Record<string, unknown>
   canIndent: boolean
   atChildCap: boolean
+  canOutdent: boolean
   onLabel: (v: string) => void
   onHref: (v: string) => void
   onIndent: () => void
@@ -236,7 +245,7 @@ function ParentRow({
                     onChange={(e) => onChildHref(leaf.id, e.target.value)}
                     className="min-w-0 flex-1"
                   />
-                  <RowBtn label={`Promote to ${shape.parentNoun}`} onClick={() => onChildOutdent(leaf.id)}>
+                  <RowBtn label={`Promote to ${shape.parentNoun}`} disabled={!canOutdent} onClick={() => onChildOutdent(leaf.id)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <polyline points="15 18 9 12 15 6" />
                     </svg>

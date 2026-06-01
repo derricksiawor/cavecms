@@ -106,24 +106,26 @@ function footerBase(columns: unknown) {
   return { tagline: 'x', theme: 'obsidian', columns }
 }
 
-describe('footer columns prune (same MenuBuilder, same blank-row defense)', () => {
-  it('prunes unlabeled columns and unlabeled links', () => {
+describe('footer columns prune (conservative — back-compat safe on read)', () => {
+  it('drops only fully-empty rows; keeps blank-heading columns + href-only links', () => {
     const parsed = footerSchema.parse(
       footerBase([
         {
           label: 'Company',
           links: [
-            { text: 'Careers', href: '/careers' },
-            { __id: 'x', text: '', href: '' }, // blank link → dropped
-            { __id: 'y', text: '', href: '/url-no-text' }, // text blank → dropped
+            { text: 'Careers', href: '/careers' }, // kept
+            { __id: 'x', text: '', href: '' }, // fully blank → dropped
+            { __id: 'y', text: '', href: '/url-no-text' }, // href present → KEPT (back-compat)
           ],
         },
-        { __id: 'c', label: '', links: [{ text: 'Orphan', href: '/o' }] }, // blank column → dropped
-        { __id: 'd', label: '', links: [] }, // fully blank column → dropped
+        { __id: 'c', label: '', links: [{ text: 'Orphan', href: '/o' }] }, // blank heading + links → KEPT
+        { __id: 'd', label: '', links: [] }, // truly empty → dropped
       ]),
     ) as { columns: Array<{ label: string; links: unknown[] }> }
-    expect(parsed.columns).toHaveLength(1)
+    expect(parsed.columns).toHaveLength(2) // Company + the blank-heading-with-links column
     expect(parsed.columns[0]!.label).toBe('Company')
-    expect(parsed.columns[0]!.links).toHaveLength(1)
+    expect(parsed.columns[0]!.links).toHaveLength(2) // Careers + the href-only link
+    expect(parsed.columns[1]!.label).toBe('')
+    expect(parsed.columns[1]!.links).toHaveLength(1)
   })
 })

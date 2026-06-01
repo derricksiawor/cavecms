@@ -10,6 +10,7 @@ import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
+import { isDuplicateKey } from '@/lib/db/errors'
 import { registry } from '@/lib/cms/settings-registry'
 import { getSetting } from '@/lib/cms/getSettings'
 import { safeRevalidate } from '@/lib/cache/revalidate'
@@ -193,7 +194,9 @@ export const PUT = withError(async (req: Request) => {
   // never re-reads the row post-commit — a transient blip on a re-read must
   // not turn a successful write into a 500 (which a retrying client would then
   // see as a phantom 409 against its now-stale version).
-  const result = await db.transaction<{ changed: boolean; version: number }>(async (tx) => {
+  let result: { changed: boolean; version: number }
+  try {
+    result = await db.transaction<{ changed: boolean; version: number }>(async (tx) => {
     const [rows] = (await tx.execute(sql`
       SELECT value, version FROM settings WHERE \`key\` = ${key} FOR UPDATE
     `)) as unknown as [Array<{ value: unknown; version: number }>]
@@ -259,7 +262,15 @@ export const PUT = withError(async (req: Request) => {
       requestId: meta.requestId,
     })
     return { changed: true, version: body.version + 1 }
-  })
+    })
+  } catch (err) {
+    // Concurrent first-ever write: two requests both saw no row and both
+    // INSERTed; the loser trips the PK dup-key. Report it as the same 409 the
+    // UPDATE path uses so a retrying client re-reads the now-existing version
+    // rather than seeing a phantom 500.
+    if (isDuplicateKey(err)) throw new HttpError(409, 'version_conflict')
+    throw err
+  }
 
   if (result.changed) await safeRevalidate([tag.settings]).catch(() => undefined)
 

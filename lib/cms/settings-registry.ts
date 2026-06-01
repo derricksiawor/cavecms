@@ -159,7 +159,12 @@ const footer = z.object({
   // persists and renders as an empty heading / dead link in the public footer.
   // Footer link label key is `text`; the column label is `label`.
   columns: z.preprocess(
-    makeMenuPrune('links', 'text'),
+    makeMenuPrune({
+      childrenKey: 'links',
+      childLabelKey: 'text',
+      childHrefKey: 'href',
+      conservativeParent: true,
+    }),
     z
       .array(
         z.object({
@@ -232,22 +237,40 @@ const themePalette = z.object({
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
 })
 
-// Prune unlabeled rows BEFORE item validation, on every write path (admin form
-// + /api/cms/nav), for BOTH menus (header navItems + footer columns) which now
-// share the same blank-seeding MenuBuilder. The rule is keyed to what actually
-// breaks downstream: a row whose REQUIRED label is blank can never satisfy the
-// header's `label.min(1)` (it would reject the whole save with an opaque 400)
-// AND renders as an empty `<h4>` heading / dead `<a href="">` link on the
-// footer. So: drop any child whose label is blank, then drop any parent/column
-// whose label is blank (regardless of remaining children — a label-less parent
-// can't validate or render either). A row with a real label is kept + validated
-// normally. `childLabelKey` differs by surface (header children use 'label',
-// footer links use 'text'); the parent/column label is always 'label'.
-function makeMenuPrune(childrenKey: string, childLabelKey: string) {
+// Prune abandoned rows before item validation. Runs on every parse — INCLUDING
+// reads (getSetting → safeParse) — so it MUST be non-destructive to data an
+// existing install legitimately stored. The two menus differ in what "valid"
+// means, so the prune is parameterised:
+//
+//   • Header (strict): `label` was ALWAYS `.min(1)` on prior versions, so no
+//     stored item can have a blank label — dropping blank-label rows on read
+//     therefore can't lose real data, and on write it stops the shared
+//     MenuBuilder's seeded-but-empty row from rejecting the whole save with an
+//     opaque `label.min(1)` 400.
+//   • Footer (conservative): column headings + link text were NEVER required
+//     (`max(60)`, no `.min(1)`), so an existing footer may legitimately store a
+//     blank-heading column that still carries links, or a blank-text link that
+//     still carries an href. Those MUST survive (else upgrading silently drops
+//     them from the public footer). Here a child is "blank" only when BOTH its
+//     text AND href are empty, and a blank-heading column is dropped only when
+//     it has no surviving links.
+//
+// `childLabelKey` is 'label' (header children) | 'text' (footer links); the
+// parent/column label is always 'label'.
+function makeMenuPrune(opts: {
+  childrenKey: string
+  childLabelKey: string
+  childHrefKey?: string
+  conservativeParent?: boolean
+}) {
+  const { childrenKey, childLabelKey, childHrefKey, conservativeParent } = opts
+  const str = (x: unknown): string => (typeof x === 'string' ? x.trim() : '')
   const blankLeaf = (c: unknown): boolean => {
     if (!c || typeof c !== 'object') return true
     const o = c as Record<string, unknown>
-    const label = typeof o[childLabelKey] === 'string' ? (o[childLabelKey] as string).trim() : ''
+    const label = str(o[childLabelKey])
+    // Footer: keep an href-carrying link even with blank text (back-compat).
+    if (childHrefKey) return label === '' && str(o[childHrefKey]) === ''
     return label === ''
   }
   return (v: unknown): unknown => {
@@ -265,8 +288,15 @@ function makeMenuPrune(childrenKey: string, childLabelKey: string) {
       .filter((it) => {
         if (!it || typeof it !== 'object') return false
         const o = it as Record<string, unknown>
-        const label = typeof o.label === 'string' ? o.label.trim() : ''
-        return label !== ''
+        if (str(o.label) !== '') return true
+        // Conservative (footer): keep a blank-heading column that still carries
+        // links so existing footers render unchanged after upgrade.
+        if (conservativeParent) {
+          const kids = Array.isArray(o[childrenKey]) ? (o[childrenKey] as unknown[]) : []
+          return kids.length > 0
+        }
+        // Strict (header): a blank-label item can't validate or render — drop.
+        return false
       })
   }
 }
@@ -289,7 +319,7 @@ const siteHeader = z.object({
   // operator request — keeps the bar from wrapping and forces editorial
   // discipline.
   navItems: z.preprocess(
-    makeMenuPrune('children', 'label'),
+    makeMenuPrune({ childrenKey: 'children', childLabelKey: 'label' }),
     z
       .array(
         z.object({
