@@ -80,7 +80,9 @@ export const DELETE = withError<{ params: Promise<{ id: string }> }>(
 
     const ctx = await requireRole(['admin', 'editor'])
     await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-    requireScope(ctx, 'blocks', 'write')
+    // Hard (irreversible) delete of a saved-block library row → delete rank,
+    // not write. A token scoped only blocks:write must not destroy rows.
+    requireScope(ctx, 'blocks', 'delete')
     checkCmsMutationRate(ctx)
 
     const headerObj: Record<string, string | undefined> = {}
@@ -114,6 +116,7 @@ export const DELETE = withError<{ params: Promise<{ id: string }> }>(
 
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'delete',
         resourceType: 'saved_block',
         resourceId: String(id),

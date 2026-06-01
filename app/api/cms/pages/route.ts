@@ -105,6 +105,7 @@ export const POST = withError(async (req) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'page',
           resourceId: '0',
@@ -318,6 +319,7 @@ export const POST = withError(async (req) => {
 
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'page',
         resourceId: String(pageId),

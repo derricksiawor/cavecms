@@ -352,6 +352,7 @@ export const POST = withError(async (req) => {
         : String(body.pageId)
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'create',
       resourceType: 'content_block',
       resourceId: auditResourceId,

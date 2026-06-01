@@ -239,6 +239,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'post',
           resourceId: String(id),
@@ -443,6 +444,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const prevBodyMdLen = Buffer.byteLength(row.body_md, 'utf8')
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'update',
         resourceType: 'post',
         resourceId: String(id),
@@ -563,6 +565,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'post',
       resourceId: String(id),

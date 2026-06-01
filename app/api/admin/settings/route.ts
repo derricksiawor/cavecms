@@ -4,7 +4,7 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { requireFreshReauth } from '@/lib/auth/reauth'
@@ -174,6 +174,11 @@ interface UpdateResult {
 export const PATCH = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
+  // A scoped API token must hold settings:write to mutate any setting. No-op
+  // for cookie sessions and NULL-scope tokens; the per-key allowlist below
+  // still applies on top (defense in depth — tokens write content/branding
+  // keys only). Makes the `settings` scope a live, honest grant.
+  requireScope(ctx, 'settings', 'write')
   checkMutationRate(ctx.userId)
 
   const body = Body.parse(await readJsonBody(req))

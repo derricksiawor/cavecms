@@ -146,6 +146,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'page',
           resourceId: String(id),
@@ -546,6 +547,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         applied['heroImageId'] !== undefined
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'update',
         resourceType: 'page',
         resourceId: String(id),
@@ -724,6 +726,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     // Step 4: audit.
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'page',
       resourceId: String(id),

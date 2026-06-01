@@ -179,6 +179,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
       // Step 6: audit.
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'restore',
         resourceType: 'page',
         resourceId: String(id),

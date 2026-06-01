@@ -119,6 +119,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     await tx.execute(sql`UPDATE media SET deleted_at = NOW(3) WHERE id = ${id}`)
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'media',
       resourceId: String(id),

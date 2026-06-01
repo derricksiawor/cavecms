@@ -107,6 +107,7 @@ export const POST = withError(async (req) => {
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'reorder',
       resourceType: 'projects',
       resourceId: null,

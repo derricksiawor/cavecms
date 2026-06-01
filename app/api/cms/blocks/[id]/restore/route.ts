@@ -536,6 +536,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'restore',
       resourceType: 'content_block',
       resourceId: String(id),
@@ -584,6 +585,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
       try {
         await db.insert(auditLog).values({
           userId: e.payload.userId,
+          tokenId: ctx.tokenId,
           action: 'restore',
           resourceType: 'content_block',
           resourceId: String(e.payload.blockId),

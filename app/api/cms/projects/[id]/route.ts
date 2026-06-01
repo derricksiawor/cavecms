@@ -250,6 +250,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'project',
           resourceId: String(id),
@@ -469,6 +470,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       // outsized payloads on the audit_log side if needed.
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'update',
         resourceType: 'project',
         resourceId: String(id),
@@ -577,6 +579,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'project',
       resourceId: String(id),

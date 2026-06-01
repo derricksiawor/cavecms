@@ -106,7 +106,6 @@ function buildAssistantBriefing(token: string): string {
 Setup
 - API base URL: ${origin}
 - Authentication: send the header  Authorization: Bearer <token>  on every request. No cookie or CSRF header is needed.
-- MCP server (best for AI agents): connect your MCP client to  ${origin}/api/cms/mcp  with that same Authorization header — e.g.  claude mcp add --transport http cavecms ${origin}/api/cms/mcp --header "Authorization: Bearer <token>"
 - API reference: ${API_DOCS_URL} — read this for the endpoints and request shapes.
 - If you have this project's source code on disk, read the AGENTS.md file at its root FIRST — it spells out exactly what you may and may not change.
 
@@ -203,6 +202,18 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
     setCreateError(null)
     if (name.trim().length === 0) {
       setCreateError('Give the token a name so you can recognise it later.')
+      return
+    }
+    // Custom mode with nothing granted = a deny-everything token (the array is
+    // []), which silently 403s on every mutation. Catch it here with an
+    // actionable message instead of minting a useless credential.
+    if (
+      scopeMode === 'custom' &&
+      SCOPE_RESOURCES.every((r) => scopeGrants[r] === 'none')
+    ) {
+      setCreateError(
+        'Grant at least one resource access, or choose Full access.',
+      )
       return
     }
     setBusy(true)

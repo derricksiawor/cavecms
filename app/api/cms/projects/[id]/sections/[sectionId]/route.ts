@@ -224,6 +224,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         }
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'update',
       resourceType: 'project_section',
       resourceId: String(row.id),

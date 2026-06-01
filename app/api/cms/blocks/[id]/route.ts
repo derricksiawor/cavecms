@@ -435,6 +435,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
           }
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'content_block',
       resourceId: String(id),

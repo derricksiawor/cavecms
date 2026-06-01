@@ -7,7 +7,7 @@ import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { requireFreshReauth } from '@/lib/auth/reauth'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
-import { generateApiToken } from '@/lib/auth/apiToken'
+import { generateApiToken, clearTokenTouch } from '@/lib/auth/apiToken'
 
 interface UpdateResult {
   affectedRows: number
@@ -58,6 +58,9 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
         requestId: meta.requestId,
       })
     })
+    // last_used_at was reset to NULL above; drop the stale throttle entry so
+    // the rotated token's next use re-writes last_used_at promptly.
+    clearTokenTouch(id)
 
     // `token` is shown to the operator once and never again.
     return new Response(JSON.stringify({ id, token, prefix }), {

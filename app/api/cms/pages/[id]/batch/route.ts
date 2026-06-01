@@ -220,7 +220,19 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   // token evade the limiter by fanning mutations out through batches. The
   // charge happens before any DB work, so an over-limit batch 429s without
   // touching the page.
-  requireScope(ctx, 'pages', 'write')
+  // Scope the batch PER-OP against the `blocks` resource, mirroring the
+  // dedicated per-block routes (blocks/[id] PATCH = blocks:write, DELETE =
+  // blocks:delete). The batch is the agent fast-lane for the SAME
+  // content_blocks mutations, so it MUST enforce the same scope ceiling: a
+  // token granted only blocks:write cannot delete via a batch delete op, and a
+  // token with no blocks grant cannot create/patch/reorder blocks here. (A
+  // null-scope or cookie-session caller is unaffected — requireScope no-ops.)
+  if (body.ops.some((o) => o.op !== 'delete')) {
+    requireScope(ctx, 'blocks', 'write')
+  }
+  if (body.ops.some((o) => o.op === 'delete')) {
+    requireScope(ctx, 'blocks', 'delete')
+  }
   for (let i = 0; i < body.ops.length; i += 1) checkCmsMutationRate(ctx)
 
   const headerObj: Record<string, string | undefined> = {}

@@ -147,6 +147,16 @@ async function touchLastUsed(tokenId: number): Promise<void> {
   }
 }
 
+// Drop the in-memory last_used_at throttle entry for a token. Called after a
+// ROTATION resets last_used_at = NULL in the DB: without this, a stale recent
+// timestamp in `lastTouch` would suppress the next last_used_at write for up
+// to 60s, so a freshly-rotated, actively-used token would read "Never" in the
+// management UI. Mirrors the lastTouch.delete cleanup on the revoke/expiry
+// branches in verifyApiToken.
+export function clearTokenTouch(tokenId: number): void {
+  lastTouch.delete(tokenId)
+}
+
 // Metadata-only row for the management surfaces. NEVER includes the token
 // secret or its hash. Timestamps are typed Date | string because mysql2
 // returns JSON/TIMESTAMP columns differently depending on driver config;

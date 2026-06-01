@@ -226,6 +226,7 @@ export const PUT = withError(async (req: Request) => {
       `)
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'setting',
         resourceId: key,
@@ -254,6 +255,7 @@ export const PUT = withError(async (req: Request) => {
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'update',
       resourceType: 'setting',
       resourceId: key,

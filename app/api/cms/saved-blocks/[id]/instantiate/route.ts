@@ -315,6 +315,7 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
       // other.
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'content_block',
         resourceId: String(blockId),
@@ -329,6 +330,7 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
       })
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'instantiate',
         resourceType: 'saved_block',
         resourceId: String(savedBlockId),
