@@ -28,6 +28,25 @@ export function clientIpFromHeaders(
   if (socketRemoteAddress === '127.0.0.1' || socketRemoteAddress === '::1') {
     const candidate = h['x-real-ip']
     if (candidate && isIP(candidate)) return candidate
+    // Laptop / bare-node surface: there is NO reverse proxy to set
+    // `x-real-ip`, yet the operator genuinely IS local (single-host
+    // install). Resolving the loopback address lets the anti-lockout
+    // features — maintenance mode + the IP allow/block lists — actually
+    // be enabled from the dashboard; on the `0.0.0.0` sentinel their
+    // guards (lib/security/patchGuards.ts) refuse, so those features are
+    // permanently dead on a laptop install otherwise.
+    //
+    // Gated on the laptop surface ONLY (CAVECMS_RESTART_MODE === 'laptop',
+    // written into env.production by the CLI for that surface). On
+    // vps / pm2 / cpanel the install is proxied and still REQUIRES a real
+    // `x-real-ip` — the production trust model (don't trust spoofable
+    // `x-forwarded-for`) is unchanged there.
+    //
+    // CAVEAT: a laptop install later exposed publicly WITHOUT forwarding
+    // `X-Real-IP` (e.g. a raw tunnel) would resolve every caller to
+    // 127.0.0.1 — so a public laptop install MUST forward X-Real-IP, the
+    // same requirement as any proxied surface.
+    if (process.env.CAVECMS_RESTART_MODE === 'laptop') return '127.0.0.1'
     return null
   }
   return isIP(socketRemoteAddress) ? socketRemoteAddress : null
