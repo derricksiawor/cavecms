@@ -136,6 +136,21 @@ const config: NextConfig = {
     // `schema_fingerprint_check_failed: ENOENT`.
     '/': ['./db/schema-fingerprint.txt'],
   },
+  // Keep build-output + cache dirs OUT of the standalone trace. Webpack's
+  // tracer already ignores these, but Turbopack's standalone tracer otherwise
+  // sweeps up the whole tracing root — most damagingly `dist/`, where the
+  // build host accumulates every release zip (≈2 GB), ballooning the bundle.
+  // None of these are needed at runtime (template media is copied into the
+  // standalone separately by the release packer).
+  outputFileTracingExcludes: {
+    '*': [
+      'dist/**',
+      '.next/cache/**',
+      'template-media-cache/**',
+      'node_modules/.cache/**',
+      '.git/**',
+    ],
+  },
   // No experimental flags needed — middleware.ts uses Web Crypto API
   // (universal) and runs on the default Edge runtime. Previously we set
   // `experimental.nodeMiddleware: true` to allow `node:crypto.randomBytes`,
