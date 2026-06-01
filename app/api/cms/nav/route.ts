@@ -4,9 +4,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkReadRate, checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
@@ -181,7 +181,8 @@ interface UpdateResult {
 export const PUT = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'nav', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = Body.parse(await readJsonBody(req))
   const menu = body.menu as MenuKey

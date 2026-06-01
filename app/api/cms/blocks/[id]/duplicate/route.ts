@@ -1,9 +1,9 @@
 import { z } from 'zod'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { drainRevalidate } from '@/lib/cache/durableRevalidate'
 import {
@@ -46,7 +46,7 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
 
     const ctx = await requireRole(['admin', 'editor'])
     await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-    // checkMutationRate uses the per-user mutation bucket — same as
+    // checkCmsMutationRate uses the per-user mutation bucket — same as
     // POST / PATCH / DELETE. A single duplicate request can amplify
     // to MAX_DUPLICATE_SUBTREE_SIZE (256) INSERTs internally, so each
     // request consumes one bucket slot but generates up to 256× the
@@ -54,7 +54,8 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
     // radius — sustained abuse is throttled by the bucket. If
     // duplicate becomes a measurable vector, add a dedicated
     // checkDuplicationRate bucket with a tighter per-minute cap.
-    checkMutationRate(ctx.userId)
+    requireScope(ctx, 'blocks', 'write')
+    checkCmsMutationRate(ctx)
 
     const body = PostBody.parse(await readJsonBody(req))
 

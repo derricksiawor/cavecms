@@ -6,9 +6,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
@@ -220,7 +220,8 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   // token evade the limiter by fanning mutations out through batches. The
   // charge happens before any DB work, so an over-limit batch 429s without
   // touching the page.
-  for (let i = 0; i < body.ops.length; i += 1) checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'write')
+  for (let i = 0; i < body.ops.length; i += 1) checkCmsMutationRate(ctx)
 
   const headerObj: Record<string, string | undefined> = {}
   req.headers.forEach((v, k) => {

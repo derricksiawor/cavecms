@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { signPreviewJwt } from '@/lib/auth/jwt'
 
@@ -42,7 +42,8 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'projects', 'read')
+  checkCmsMutationRate(ctx)
   if (
     !limitPerProjectPerUser(`${ctx.userId}:${id}`) ||
     !limitPerUserTotal(String(ctx.userId))

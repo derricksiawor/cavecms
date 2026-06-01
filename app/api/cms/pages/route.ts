@@ -3,10 +3,10 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -67,7 +67,8 @@ const TEMPLATE_SLUGS: Record<string, string> = {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(adminPolicy('createPage'))
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'write')
+  checkCmsMutationRate(ctx)
 
   const raw = await readJsonBody(req)
   const Schema = ctx.role === 'admin' ? CreatePageAdminBody : CreatePageEditorBody

@@ -2,9 +2,9 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
@@ -69,7 +69,8 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'media', 'delete')
+  checkCmsMutationRate(ctx)
 
   const headerObj: Record<string, string | undefined> = {}
   req.headers.forEach((v, k) => {

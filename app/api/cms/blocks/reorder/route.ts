@@ -4,9 +4,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { tagsForBlockSave } from '@/lib/cache/tags'
@@ -112,7 +112,8 @@ function parentMatchFragment(parents: Array<number | null>) {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'blocks', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = Body.parse(await readJsonBody(req))
 

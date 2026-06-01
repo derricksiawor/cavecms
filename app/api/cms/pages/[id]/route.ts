@@ -3,9 +3,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -117,7 +117,8 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'write')
+  checkCmsMutationRate(ctx)
 
   const raw = await readJsonBody(req)
   const Schema = ctx.role === 'admin' ? PageAdminPatch : PageEditorPatch
@@ -675,7 +676,8 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'delete')
+  checkCmsMutationRate(ctx)
 
   const meta = auditMetaFromRequest(req)
 

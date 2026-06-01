@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { signPagePreviewJwt } from '@/lib/auth/jwt'
 
@@ -41,7 +41,8 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'read')
+  checkCmsMutationRate(ctx)
 
   // Two-axis rate limit. Check the per-(page, user) bucket FIRST so
   // a user spamming many pages still consumes their per-user quota

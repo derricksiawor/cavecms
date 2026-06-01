@@ -14,9 +14,9 @@ import {
 } from '@/lib/cms/saveBlock'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { isDuplicateKey } from '@/lib/db/errors'
@@ -119,7 +119,8 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'blocks', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = PatchBody.parse(await readJsonBody(req))
 
@@ -283,7 +284,8 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'blocks', 'delete')
+  checkCmsMutationRate(ctx)
 
   const headerObj: Record<string, string | undefined> = {}
   req.headers.forEach((v, k) => {

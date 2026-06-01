@@ -3,9 +3,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { blockSchemas } from '@/lib/cms/block-registry'
 import { WidgetMetaSchema } from '@/lib/cms/blockMeta'
@@ -86,7 +86,8 @@ export const GET = withError(async () => {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'blocks', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = SavedBlockCreateBody.parse(await readJsonBody(req))
 

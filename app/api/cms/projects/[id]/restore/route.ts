@@ -2,9 +2,9 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { tagsForProjectRestore } from '@/lib/cache/tags'
@@ -33,7 +33,8 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'projects', 'write')
+  checkCmsMutationRate(ctx)
 
   const headerObj: Record<string, string | undefined> = {}
   req.headers.forEach((v, k) => {
