@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -91,12 +91,12 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
   const lpInit = byKey<LoginPathValue>(initial, 'security_login_path')
   const [lp, setLp] = useState<LoginPathValue>(lpInit.value)
   const [lpVer, setLpVer] = useState(lpInit.version)
-  const lpPristine = useMemo(() => lpInit.value, [lpInit.value])
+  const [lpPristine, setLpPristine] = useState<LoginPathValue>(lpInit.value)
 
   const rcInit = byKey<RecaptchaValue>(initial, 'security_recaptcha')
   const [rc, setRc] = useState<RecaptchaValue>(rcInit.value)
   const [rcVer, setRcVer] = useState(rcInit.version)
-  const rcPristine = useMemo(() => rcInit.value, [rcInit.value])
+  const [rcPristine, setRcPristine] = useState<RecaptchaValue>(rcInit.value)
   const [verifyOpen, setVerifyOpen] = useState(false)
   // True after a successful verify against the CURRENT typed keys.
   // Cleared whenever the operator edits any key / version field so a
@@ -106,22 +106,22 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
   const ipInit = byKey<IpListsValue>(initial, 'security_ip_lists')
   const [ip, setIp] = useState<IpListsValue>(ipInit.value)
   const [ipVer, setIpVer] = useState(ipInit.version)
-  const ipPristine = useMemo(() => ipInit.value, [ipInit.value])
+  const [ipPristine, setIpPristine] = useState<IpListsValue>(ipInit.value)
 
   const thInit = byKey<LoginThresholdsValue>(initial, 'security_login_thresholds')
   const [th, setTh] = useState<LoginThresholdsValue>(thInit.value)
   const [thVer, setThVer] = useState(thInit.version)
-  const thPristine = useMemo(() => thInit.value, [thInit.value])
+  const [thPristine, setThPristine] = useState<LoginThresholdsValue>(thInit.value)
 
   const mtInit = byKey<MaintenanceValue>(initial, 'security_maintenance')
   const [mt, setMt] = useState<MaintenanceValue>(mtInit.value)
   const [mtVer, setMtVer] = useState(mtInit.version)
-  const mtPristine = useMemo(() => mtInit.value, [mtInit.value])
+  const [mtPristine, setMtPristine] = useState<MaintenanceValue>(mtInit.value)
 
   const spInit = byKey<SuspiciousValue>(initial, 'security_suspicious_blocks')
   const [sp, setSp] = useState<SuspiciousValue>(spInit.value)
   const [spVer, setSpVer] = useState(spInit.version)
-  const spPristine = useMemo(() => spInit.value, [spInit.value])
+  const [spPristine, setSpPristine] = useState<SuspiciousValue>(spInit.value)
 
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -148,6 +148,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
     value: T,
     version: number,
     setNewVersion: (v: number) => void,
+    setPristine: (v: T) => void,
   ): Promise<boolean> {
     if (busy) return false
     setBusy(key)
@@ -178,6 +179,11 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
         return false
       }
       setNewVersion(version + 1)
+      // Baseline pristine to the just-saved value so the dirty check
+      // (value vs pristine) clears — otherwise "Unsaved changes" persists
+      // forever after a successful save, since pristine stayed frozen at
+      // the original server value.
+      setPristine(value)
       toast.success('Saved.')
       return true
     } finally {
@@ -196,7 +202,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
         busy={busy === 'security_login_path'}
         onChange={setLp}
         onSave={async () => {
-          const ok = await save('security_login_path', lp, lpVer, setLpVer)
+          const ok = await save('security_login_path', lp, lpVer, setLpVer, setLpPristine)
           if (ok) {
             // Re-render the form with the new path. The PATCH handler
             // writes the pending row; refreshing surfaces the banner.
@@ -228,7 +234,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
           }
         }}
         onOpenVerify={() => setVerifyOpen(true)}
-        onSave={() => save('security_recaptcha', rc, rcVer, setRcVer)}
+        onSave={() => save('security_recaptcha', rc, rcVer, setRcVer, setRcPristine)}
         onDiscard={() => {
           setRc(rcPristine)
           setRcVerified(false)
@@ -255,7 +261,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
         saverIp={saverIp}
         busy={busy === 'security_ip_lists'}
         onChange={setIp}
-        onSave={() => save('security_ip_lists', ip, ipVer, setIpVer)}
+        onSave={() => save('security_ip_lists', ip, ipVer, setIpVer, setIpPristine)}
         onDiscard={() => setIp(ipPristine)}
       />
 
@@ -266,7 +272,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
         version={thVer}
         busy={busy === 'security_login_thresholds'}
         onChange={setTh}
-        onSave={() => save('security_login_thresholds', th, thVer, setThVer)}
+        onSave={() => save('security_login_thresholds', th, thVer, setThVer, setThPristine)}
         onDiscard={() => setTh(thPristine)}
       />
 
@@ -278,7 +284,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
         saverIp={saverIp}
         busy={busy === 'security_maintenance'}
         onChange={setMt}
-        onSave={() => save('security_maintenance', mt, mtVer, setMtVer)}
+        onSave={() => save('security_maintenance', mt, mtVer, setMtVer, setMtPristine)}
         onDiscard={() => setMt(mtPristine)}
       />
 
@@ -289,7 +295,7 @@ export function SecuritySettingsForm({ initial, saverIp, pending }: Props) {
         version={spVer}
         busy={busy === 'security_suspicious_blocks'}
         onChange={setSp}
-        onSave={() => save('security_suspicious_blocks', sp, spVer, setSpVer)}
+        onSave={() => save('security_suspicious_blocks', sp, spVer, setSpVer, setSpPristine)}
         onDiscard={() => setSp(spPristine)}
       />
 
