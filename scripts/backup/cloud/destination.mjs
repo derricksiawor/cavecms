@@ -113,6 +113,7 @@ export function createDestination({ provider, clientId, refreshToken, folderId, 
   return {
     provider,
     getRefreshToken: token.getRefreshToken,
+    getFolderId: () => ctx.folderId,
     ensureFolder: () => impl.ensureFolder(ctx),
     upload: (localPath, remoteName, onProgress) => impl.upload(ctx, localPath, remoteName, onProgress),
     list: () => impl.list(ctx),

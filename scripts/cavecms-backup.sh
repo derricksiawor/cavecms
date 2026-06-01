@@ -85,7 +85,9 @@ fi
 
 export PHASE_STARTED_AT
 PHASE_STARTED_AT="$(now_iso)"
+# A cloud destination adds a 6th "upload" step (the modal shows step/6).
 TOTAL=5
+[ "${CAVECMS_BACKUP_DESTINATION:-local}" != "local" ] && TOTAL=6
 STAGING=""
 ARCHIVE_ID=""
 LOCK_HELD=0
@@ -394,11 +396,35 @@ find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type d -name '.trash-*' -mtime +30 -exec
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type d -name '.staging.*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find "$CAVECMS_BACKUP_DIR/.incoming" -maxdepth 1 -type f -name 'upload-*' -mmin +120 -delete 2>/dev/null || true
 
+# ===========================================================================
+# STEP 6 — cloud upload (optional)
+# ===========================================================================
+# When a cloud destination is configured, the local archive (above) is the
+# staging copy; cloud-push.mjs uploads it, encrypts it if a passphrase is set,
+# writes a sidecar, applies remote retention, and (if KEEP_LOCAL=0) removes the
+# local copy AFTER a successful upload. A failed upload KEEPS the local copy.
+DEST="${CAVECMS_BACKUP_DESTINATION:-local}"
+if [ "$DEST" != "local" ]; then
+  bstatus running 6 "Uploading to the cloud"
+  CLOUD_PUSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cloud-push.mjs"
+  NODE_BIN="$(command -v node || true)"
+  if [ -z "$NODE_BIN" ] || [ ! -f "$CLOUD_PUSH" ]; then
+    bstatus failed 6 "Backup failed" "We saved a local backup, but the cloud uploader isn't available."
+    post_backup_audit_terminal backup_failed "$ARCHIVE_ID" "node/cloud-push missing"
+    exit 1
+  fi
+  if ! CAVECMS_CLOUD_STEP=6 CAVECMS_CLOUD_TOTAL="$TOTAL" "$NODE_BIN" "$CLOUD_PUSH" "${CAVECMS_BACKUP_DIR}/${FINAL_NAME}"; then
+    bstatus failed 6 "Backup failed" "We saved a local backup, but couldn't upload it to the cloud. Your data is safe on this server."
+    post_backup_audit_terminal backup_failed "$ARCHIVE_ID" "cloud upload failed"
+    exit 1
+  fi
+fi
+
 # Humanised label for the terminal modal copy (no path/timestamp jargon).
 # %d (zero-padded) is portable; %-d is GNU-only.
 ARCHIVE_LABEL=$(date -u +"%b %d, %Y" 2>/dev/null || echo "Today")
 
-bstatus completed 5 "Backup complete" "" "" "$ARCHIVE_LABEL"
+bstatus completed "$TOTAL" "Backup complete" "" "" "$ARCHIVE_LABEL"
 post_backup_audit_terminal backup_completed "$ARCHIVE_ID"
 release_op_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
 rm -rf "$STAGING"; STAGING=""
