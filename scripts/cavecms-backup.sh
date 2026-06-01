@@ -402,6 +402,9 @@ find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.partial.
 # upload that died before cloud-push could clean them — multi-GB, so prune
 # anything older than 2h to stop a failing-token nightly schedule filling disk.
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.enc.*' -mmin +120 -delete 2>/dev/null || true
+# Orphaned cloud sidecar temp files (only leak on a SIGKILL of cloud-push that
+# bypasses its finally). Sub-KB dotfiles, but prune for tidiness.
+find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.meta.*.json' -mmin +120 -delete 2>/dev/null || true
 # Prune trashed archives (dashboard deletes mv into .trash-<ts>/), orphaned
 # staging dirs, and orphaned upload partials (.incoming, from a timed-out /
 # interrupted upload-restore that the restore orchestrator never cleaned), so

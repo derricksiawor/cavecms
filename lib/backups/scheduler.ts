@@ -112,12 +112,16 @@ export async function runBackupTickIfDue(): Promise<void> {
             : String(err).slice(0, 300)
     await updateSettingValue(
       'backups_state',
-      (cur) => ({
-        ...cur,
-        lastScheduledResult: 'failed',
-        lastScheduledError: msg,
-        scheduledInFlight: false,
-      }),
+      (cur) => {
+        const next = {
+          ...cur,
+          lastScheduledResult: 'failed' as const,
+          lastScheduledError: msg,
+          scheduledInFlight: false,
+        }
+        delete next.scheduledInFlightAt
+        return next
+      },
       null,
     )
   }
