@@ -59,14 +59,20 @@ function parseStored(value: unknown): Record<string, unknown> {
 async function readSetting(
   key: 'site_header' | 'footer',
 ): Promise<{ value: Record<string, unknown>; version: number }> {
+  const entry = registryEntry(key)
   const [rows] = (await db.execute(sql`
     SELECT value, version FROM settings WHERE \`key\` = ${key}
   `)) as unknown as [Array<{ value: unknown; version: number }>]
-  if (rows[0]) {
-    return { value: parseStored(rows[0].value), version: rows[0].version }
-  }
-  // Unseeded → registry default at version 0.
-  return { value: parseStored(registryEntry(key).default), version: 0 }
+  const raw = rows[0] ? parseStored(rows[0].value) : parseStored(entry.default)
+  const version = rows[0]?.version ?? 0
+  // Validate fail-closed to the registry default — mirrors lib/cms/getSettings
+  // so the public API serves the SAME schema-clean tree the renderer shows
+  // (an out-of-band-tampered / over-cap / extra-key row degrades to the safe
+  // default here exactly as it does in SiteHeader/SiteFooter). `version` is
+  // read from the raw row (it is not part of the Zod schema).
+  const result = entry.schema.safeParse(raw)
+  const value = (result.success ? result.data : entry.default) as Record<string, unknown>
+  return { value, version }
 }
 
 // ── GET /api/cms/nav — public-readable menu trees ────────────────────

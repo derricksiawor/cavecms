@@ -48,12 +48,12 @@ export function SiteHeaderNav({
   const pathname = mounted ? (livePathname ?? '') : initialPathname
   return (
     <nav className="ml-auto hidden items-center gap-8 lg:flex">
-      {navItems.map((item) => {
+      {navItems.map((item, i) => {
         // 1) Operator-authored submenu wins.
         if (item.children && item.children.length > 0) {
           return (
             <NavDropdown
-              key={`${item.label}-${item.href}`}
+              key={`${i}-${item.label}-${item.href}`}
               trigger={{ label: item.label, href: item.href }}
               links={item.children}
               theme={theme}
@@ -65,7 +65,7 @@ export function SiteHeaderNav({
         if (item.href === PROJECTS_HREF && projects.length > 0) {
           return (
             <NavDropdown
-              key={`${item.label}-${item.href}`}
+              key={`${i}-${item.label}-${item.href}`}
               trigger={{ label: item.label, href: item.href }}
               links={projects.map((p) => ({ label: p.name, href: `/projects/${p.slug}` }))}
               theme={theme}
@@ -217,10 +217,10 @@ function NavDropdown({
             onMouseEnter={openNow}
             onMouseLeave={scheduleClose}
           >
-            {links.map((l) => {
+            {links.map((l, li) => {
               const active = isNavLinkActive(l.href, pathname)
               return (
-                <li key={`${l.label}-${l.href}`}>
+                <li key={`${li}-${l.label}-${l.href}`}>
                   <Link
                     role="menuitem"
                     href={l.href}

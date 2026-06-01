@@ -58,17 +58,21 @@ export function SiteHeaderMobile({
   // — the user is more likely to want a sibling than a different section.
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {}
-    for (const item of navItems) {
+    // Key is index-prefixed (positional) so duplicate label+href entries get
+    // distinct expand-state keys. The init loop and the render map below MUST
+    // build the key identically — both iterate navItems in order, so the
+    // index lines up.
+    navItems.forEach((item, i) => {
       const links = childLinksFor(item, projects)
-      if (links.length === 0) continue
-      const key = `${item.label}-${item.href}`
+      if (links.length === 0) return
+      const key = `${i}-${item.label}-${item.href}`
       if (
         isNavLinkActive(item.href, pathname) ||
         links.some((l) => isNavLinkActive(l.href, pathname))
       ) {
         init[key] = true
       }
-    }
+    })
     return init
   })
   const toggle = (key: string) => setExpanded((m) => ({ ...m, [key]: !m[key] }))
@@ -122,8 +126,8 @@ export function SiteHeaderMobile({
               </button>
             </div>
             <nav className="mt-4 flex flex-col gap-1">
-              {navItems.map((item) => {
-                const key = `${item.label}-${item.href}`
+              {navItems.map((item, i) => {
+                const key = `${i}-${item.label}-${item.href}`
                 const links = childLinksFor(item, projects)
 
                 if (links.length > 0) {
@@ -170,10 +174,10 @@ export function SiteHeaderMobile({
                               </Link>
                             </li>
                           )}
-                          {links.map((l) => {
+                          {links.map((l, ci) => {
                             const active = isNavLinkActive(l.href, pathname)
                             return (
-                              <li key={`${l.label}-${l.href}`}>
+                              <li key={`${ci}-${l.label}-${l.href}`}>
                                 <Link
                                   href={l.href}
                                   onClick={() => setOpen(false)}

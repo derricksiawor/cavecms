@@ -194,6 +194,16 @@ function adminPath(p: string): boolean {
   return p === '/admin' || p.startsWith('/admin/') || p.startsWith('/api/admin/') || p.startsWith('/api/cms/')
 }
 
+// Public read of the navigation menus. `/api/cms/nav` matches adminPath
+// (it lives under /api/cms/), so WITHOUT this carve-out it would be caught
+// by BOTH the /admin IP-allowlist gate AND the auth gate. The GET is public
+// content (header nav + footer columns, also fetched by headless frontends);
+// only the PUT stays gated. Both gates consult this single predicate so the
+// "public" contract can't silently break under the IP-allowlist config.
+function isPublicNavRead(req: NextRequest): boolean {
+  return req.method === 'GET' && req.nextUrl.pathname === '/api/cms/nav'
+}
+
 // `tokenAllowedPath` (the surfaces a bearer token may reach) lives in the
 // edge-safe lib/auth/apiTokenScope module so middleware AND _loadAuthState
 // share one definition. The cap is enforced in BOTH places: here at the
@@ -205,11 +215,10 @@ function adminPath(p: string): boolean {
 
 async function authGate(req: NextRequest): Promise<NextResponse | null> {
   const p = req.nextUrl.pathname
-  // Public read of the navigation menus — the header nav + footer columns
-  // are public content (rendered on every page; also fetched by headless
-  // frontends). Only the GET is public; PUT stays under the /api/cms/* gate
-  // below (session or bearer token, verified in the route handler).
-  if (req.method === 'GET' && p === '/api/cms/nav') return null
+  // Public read of the navigation menus (see isPublicNavRead). Only the GET
+  // is public; PUT stays under the /api/cms/* gate below (session or bearer
+  // token, verified in the route handler).
+  if (isPublicNavRead(req)) return null
   const needsAuth = adminPath(p) || p === '/api/auth/logout'
   if (!needsAuth) return null
   const token = req.cookies.get(SESSION_COOKIE)?.value
@@ -536,7 +545,11 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     cfg.ipAllowlist.cidrs.length > 0 &&
     !cfg.disableIpAllowlist &&
     adminPath(pathname) &&
-    !(isBearerApiToken(req.headers.get('authorization')) && tokenAllowedPath(pathname))
+    !(isBearerApiToken(req.headers.get('authorization')) && tokenAllowedPath(pathname)) &&
+    // Anonymous public nav reads bypass the admin-only allowlist exactly as
+    // they bypass authGate — otherwise enabling the allowlist silently 404s
+    // the documented public GET /api/cms/nav for off-allowlist callers.
+    !isPublicNavRead(req)
   ) {
     if (!cidrListMatch(ip, cfg.ipAllowlist.cidrs)) return notFoundResponse()
   }

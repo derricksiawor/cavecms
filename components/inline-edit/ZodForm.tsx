@@ -142,7 +142,9 @@ export type FieldShape =
       key: string
       label: string
       help?: string
-      parentLabelKey: string
+      // Parent label is always the `label` field (header link + footer column
+      // heading both use it), so there's no parentLabelKey — only the child
+      // label key varies ('label' vs 'text').
       parentHrefKey?: string
       childrenKey: string
       childLabelKey: string
