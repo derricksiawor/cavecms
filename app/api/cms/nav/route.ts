@@ -66,13 +66,30 @@ function parseStored(value: unknown): Record<string, unknown> {
 // poll anywhere near this.
 const anonNavReadLimit = rateLimit('cms_nav_anon_read', { limit: 60, windowSec: 60 })
 
-// Optimistic-lock version for a settings row (0 when unseeded). `version` is
-// not part of the Zod schema, so it's read directly rather than via getSetting.
-async function readVersion(key: 'site_header' | 'footer'): Promise<number> {
+// Fresh, mutually-consistent value + version in ONE read, validated fail-closed
+// to the registry default (mirrors lib/cms/getSettings). Used for the AUTHED
+// GET branch: the value and version MUST come from the same point-in-time read,
+// because an authed caller round-trips them through PUT's optimistic lock —
+// pairing a cache-stale value with a fresh version would let the caller PUT at
+// a version that no longer reflects what they saw and silently clobber an
+// intervening write. Anonymous reads use the cached getSetting path instead
+// (they get no version and cannot write, so staleness is harmless there).
+async function readFreshSetting(
+  key: 'site_header' | 'footer',
+): Promise<{ value: Record<string, unknown>; version: number }> {
+  const entry = registryEntry(key)
   const [rows] = (await db.execute(sql`
-    SELECT version FROM settings WHERE \`key\` = ${key}
-  `)) as unknown as [Array<{ version: number }>]
-  return rows[0]?.version ?? 0
+    SELECT value, version FROM settings WHERE \`key\` = ${key}
+  `)) as unknown as [Array<{ value: unknown; version: number }>]
+  const raw = rows[0] ? parseStored(rows[0].value) : parseStored(entry.default)
+  const version = rows[0]?.version ?? 0
+  const result = entry.schema.safeParse(raw)
+  const value = (result.success ? result.data : entry.default) as Record<string, unknown>
+  return { value, version }
+}
+
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : []
 }
 
 // ── GET /api/cms/nav — public-readable menu trees ────────────────────
@@ -106,28 +123,31 @@ export const GET = withError(async (req: Request) => {
     }
   }
 
-  // Cached + validated read — the SAME revalidate-bounded, schema-clean path
-  // the public renderer (SiteHeader/SiteFooter) uses. Repeated anonymous reads
-  // collapse onto one DB hit per revalidation window (tag 'settings', bumped by
-  // the PUT below) instead of a fresh SELECT per request, so the public
-  // endpoint can't be turned into a DB-amplification surface.
-  const header = await getSetting('site_header')
-  const footer = await getSetting('footer')
-  const headerItems = Array.isArray(header.navItems) ? header.navItems : []
-  const footerCols = Array.isArray(footer.columns) ? footer.columns : []
-
   let payload: unknown
   if (authed) {
-    const [headerVersion, footerVersion] = await Promise.all([
-      readVersion('site_header'),
-      readVersion('footer'),
+    // Fresh, mutually-consistent value+version (single read per key) so the
+    // round-trip write contract holds — see readFreshSetting.
+    const [h, f] = await Promise.all([
+      readFreshSetting('site_header'),
+      readFreshSetting('footer'),
     ])
     payload = {
-      header: { items: headerItems, version: headerVersion },
-      footer: { columns: footerCols, version: footerVersion },
+      header: { items: asArray(h.value.navItems), version: h.version },
+      footer: { columns: asArray(f.value.columns), version: f.version },
     }
   } else {
-    payload = { header: { items: headerItems }, footer: { columns: footerCols } }
+    // Anonymous → cached + validated read (the SAME revalidate-bounded,
+    // schema-clean path the public renderer uses). Repeated anonymous reads
+    // collapse onto one DB hit per revalidation window (tag 'settings', bumped
+    // by PUT) instead of a fresh SELECT per request, so the public endpoint
+    // can't be turned into a DB-amplification surface. No version is returned
+    // (anonymous callers can't write), so cache staleness is harmless here.
+    const header = await getSetting('site_header')
+    const footer = await getSetting('footer')
+    payload = {
+      header: { items: asArray(header.navItems) },
+      footer: { columns: asArray(footer.columns) },
+    }
   }
 
   return new Response(JSON.stringify(payload), {

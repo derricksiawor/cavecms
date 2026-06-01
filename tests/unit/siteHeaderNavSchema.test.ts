@@ -56,6 +56,32 @@ describe('site_header navItems with children', () => {
     expect('children' in child).toBe(false)
   })
 
+  it('prunes a fully-blank parent row (abandoned "Add link") instead of rejecting the whole save', () => {
+    const parsed = schema.parse(
+      base([
+        { label: 'About', href: '/about' },
+        { __id: 'new', label: '', href: '' },
+      ]),
+    ) as { navItems: unknown[] }
+    expect(parsed.navItems).toHaveLength(1)
+  })
+
+  it('prunes a fully-blank child row but keeps the labeled ones', () => {
+    const parsed = schema.parse(
+      base([
+        {
+          label: 'About',
+          href: '/about',
+          children: [
+            { label: 'Team', href: '/team' },
+            { __id: 'x', label: '', href: '' },
+          ],
+        },
+      ]),
+    ) as { navItems: Array<{ children: unknown[] }> }
+    expect(parsed.navItems[0]!.children).toHaveLength(1)
+  })
+
   it('strips the internal __id key on parse (so it never persists)', () => {
     const parsed = schema.parse(
       base([{ __id: 'x1', label: 'About', href: '/about', children: [{ __id: 'x2', label: 'T', href: '/t' }] }]),

@@ -225,6 +225,40 @@ const themePalette = z.object({
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
 })
 
+// Drop abandoned blank rows BEFORE item validation. The shared MenuBuilder
+// seeds a fully-empty row on "Add link"/"Add sub-link"; an operator who saves
+// while one is still blank would otherwise trip the label .min(1) rule and get
+// the ENTIRE site_header save rejected with an opaque 400. A row with ANY
+// content — a label, an href, or (for a parent) any non-blank child — is kept
+// and validated normally. Runs on every write path (admin form + /api/cms/nav).
+function pruneBlankNavItems(v: unknown): unknown {
+  if (!Array.isArray(v)) return v
+  const blankLeaf = (c: unknown): boolean => {
+    if (!c || typeof c !== 'object') return true
+    const o = c as Record<string, unknown>
+    const label = typeof o.label === 'string' ? o.label.trim() : ''
+    const href = typeof o.href === 'string' ? o.href.trim() : ''
+    return label === '' && href === ''
+  }
+  return v
+    .map((it) => {
+      if (!it || typeof it !== 'object') return it
+      const o = it as Record<string, unknown>
+      if (Array.isArray(o.children)) {
+        return { ...o, children: o.children.filter((c) => !blankLeaf(c)) }
+      }
+      return o
+    })
+    .filter((it) => {
+      if (!it || typeof it !== 'object') return false
+      const o = it as Record<string, unknown>
+      const label = typeof o.label === 'string' ? o.label.trim() : ''
+      const href = typeof o.href === 'string' ? o.href.trim() : ''
+      const kids = Array.isArray(o.children) ? o.children : []
+      return label !== '' || href !== '' || kids.length > 0
+    })
+}
+
 const siteHeader = z.object({
   // Brand text shown next to (or in place of) the logo.
   brandText: z.string().max(120),
@@ -242,28 +276,31 @@ const siteHeader = z.object({
   // Primary navigation links shown in the top bar. Capped at 6 per
   // operator request — keeps the bar from wrapping and forces editorial
   // discipline.
-  navItems: z
-    .array(
-      z.object({
-        label: z.string().min(1).max(60),
-        // '' allowed (siteLink permits empty) → a parent with children and
-        // an empty href is a dropdown-only toggle on the public header.
-        href: siteLink,
-        // One level of submenu only — a child has no `children`, so the
-        // tree can never exceed depth 1. Optional → stored flat menus parse
-        // unchanged (settings JSON is validated on read; no migration).
-        children: z
-          .array(
-            z.object({
-              label: z.string().min(1).max(60),
-              href: siteLink,
-            }),
-          )
-          .max(12)
-          .optional(),
-      }),
-    )
-    .max(6),
+  navItems: z.preprocess(
+    pruneBlankNavItems,
+    z
+      .array(
+        z.object({
+          label: z.string().min(1).max(60),
+          // '' allowed (siteLink permits empty) → a parent with children and
+          // an empty href is a dropdown-only toggle on the public header.
+          href: siteLink,
+          // One level of submenu only — a child has no `children`, so the
+          // tree can never exceed depth 1. Optional → stored flat menus parse
+          // unchanged (settings JSON is validated on read; no migration).
+          children: z
+            .array(
+              z.object({
+                label: z.string().min(1).max(60),
+                href: siteLink,
+              }),
+            )
+            .max(12)
+            .optional(),
+        }),
+      )
+      .max(6),
+  ),
   // Single primary call-to-action button. Either field empty → the
   // public renderer hides the button entirely.
   // Nullable so a fresh one-pager install can omit the CTA entirely.
