@@ -100,7 +100,10 @@ interface SiblingRow {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  requireScope(ctx, 'pages', 'write')
+  // Inserts content_blocks rows (section/column/widget) into a page — a
+  // blocks write, same as saved-blocks/[id]/instantiate and every dedicated
+  // block route. (Not pages:write — no pages row is created or edited here.)
+  requireScope(ctx, 'blocks', 'write')
   checkCmsMutationRate(ctx)
 
   const body = PostBody.parse(await readJsonBody(req))

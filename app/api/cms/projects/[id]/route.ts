@@ -205,6 +205,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'projects', 'read')
 
   const [rows] = (await db.execute(sql`
     SELECT * FROM projects WHERE id = ${id}

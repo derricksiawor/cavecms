@@ -131,6 +131,7 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
 export const GET = withError(async () => {
   const ctx = await requireRole(['admin'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'settings', 'read')
   const [rows] = (await db.execute(sql`
     SELECT \`key\`, value, version, updated_at
     FROM settings

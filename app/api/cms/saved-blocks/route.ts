@@ -35,6 +35,7 @@ export const GET = withError(async () => {
   // library at full bandwidth. checkReadRate is the same bucket used
   // by other CMS read endpoints — appropriate for an auth'd list call.
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'blocks', 'read')
 
   const [rows] = (await db.execute(sql`
     SELECT id, name, block_type AS blockType, created_at AS createdAt, updated_at AS updatedAt

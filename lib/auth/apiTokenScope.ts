@@ -85,15 +85,22 @@ const SCOPE_RE = /^([a-z]+):(read|write|delete)$/
 // unparseable, or NULL input returns null = "unrestricted within role".
 export function parseScopes(raw: unknown): string[] | null {
   let arr: unknown = raw
+  // Literal NULL/undefined = "unrestricted within role" (legacy/back-compat).
+  // This is the ONLY input that fails OPEN, and it is the intended one.
   if (raw === null || raw === undefined) return null
+  // A PRESENT-but-corrupt value (unparseable string, or a non-array like {})
+  // is a damaged restrictive grant — fail CLOSED to deny-all ([]), never
+  // widen a once-scoped token to unrestricted. (DDL-validated JSON makes this
+  // unreachable in normal operation; this is defense-in-depth at the read
+  // boundary, symmetric with the mint path which also normalises garbage → [].)
   if (typeof raw === 'string') {
     try {
       arr = JSON.parse(raw)
     } catch {
-      return null
+      return []
     }
   }
-  if (!Array.isArray(arr)) return null
+  if (!Array.isArray(arr)) return []
   const out: string[] = []
   for (const v of arr) {
     if (typeof v !== 'string') continue

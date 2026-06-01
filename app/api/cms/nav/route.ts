@@ -103,6 +103,7 @@ export const GET = withError(async (req: Request) => {
   try {
     const ctx = await requireRole(['admin', 'editor', 'viewer'])
     checkReadRate(ctx.userId)
+    requireScope(ctx, 'nav', 'read')
     authed = true
   } catch (err) {
     if (!(err instanceof HttpError && (err.status === 401 || err.status === 403))) throw err

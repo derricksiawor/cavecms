@@ -101,6 +101,35 @@ export function checkCmsMutationRate(ctx: {
   }
 }
 
+// Per-TOKEN upload budget — the upload path is heavier (sharp/disk) so it
+// stays tighter than the mutation bucket, but a token gets its OWN upload
+// budget so an agent's uploads don't starve the minting human's per-user
+// upload bucket (10/min, the tightest CMS bucket).
+const limitTokenUploads = rateLimit('cms:upload:token', {
+  limit: 30,
+  windowSec: 60,
+})
+
+export function checkUploadRateForToken(tokenId: number): void {
+  if (!limitTokenUploads(`t${tokenId}`)) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Dispatcher for the media-upload route: token requests draw on the per-token
+// upload bucket; cookie sessions on the per-user upload bucket.
+export function checkCmsUploadRate(ctx: {
+  userId: number
+  viaApiToken: boolean
+  tokenId: number | null
+}): void {
+  if (ctx.viaApiToken && ctx.tokenId !== null) {
+    checkUploadRateForToken(ctx.tokenId)
+  } else {
+    checkUploadRate(ctx.userId)
+  }
+}
+
 export function checkUploadRate(userId: number): void {
   if (!limitUploads(String(userId))) {
     throw new HttpError(429, 'rate_limited')

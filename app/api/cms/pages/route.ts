@@ -389,6 +389,7 @@ interface PageListRow {
 export const GET = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'pages', 'read')
 
   const url = new URL(req.url)
   const trashed = url.searchParams.get('trashed') === '1'

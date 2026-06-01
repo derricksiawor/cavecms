@@ -194,6 +194,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'posts', 'read')
 
   const [rows] = (await db.execute(sql`
     SELECT * FROM posts WHERE id = ${id}
@@ -265,6 +266,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         .insert(auditLog)
         .values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'post',
           resourceId: String(id),

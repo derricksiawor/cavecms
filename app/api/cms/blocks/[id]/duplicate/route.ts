@@ -72,6 +72,7 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
       result = await duplicateBlock({
         sourceId,
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         pageId: body.pageId,
         ip,
         userAgent,

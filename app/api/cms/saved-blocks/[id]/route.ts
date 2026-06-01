@@ -35,6 +35,7 @@ export const GET = withError<{ params: Promise<{ id: string }> }>(
 
     const ctx = await requireRole(['admin', 'editor'])
     checkReadRate(ctx.userId)
+    requireScope(ctx, 'blocks', 'read')
 
     const [rows] = (await db.execute(sql`
       SELECT id, name, block_type AS blockType, data, meta, created_at AS createdAt

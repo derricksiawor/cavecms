@@ -93,6 +93,7 @@ describe('duplicateBlock — widget', () => {
     const r = await duplicateBlock({
       sourceId: widgetId,
       userId: USER_ID,
+      tokenId: null,
       pageId,
       ip: null,
       userAgent: null,
@@ -111,6 +112,7 @@ describe('duplicateBlock — widget', () => {
     const r = await duplicateBlock({
       sourceId: widgetId,
       userId: USER_ID,
+      tokenId: null,
       pageId,
       ip: null,
       userAgent: null,
@@ -133,6 +135,7 @@ describe('duplicateBlock — widget', () => {
     const r = await duplicateBlock({
       sourceId: widgetId,
       userId: USER_ID,
+      tokenId: null,
       pageId,
       ip: null,
       userAgent: null,
@@ -164,6 +167,7 @@ describe('duplicateBlock — widget', () => {
     const r = await duplicateBlock({
       sourceId: imgId,
       userId: USER_ID,
+      tokenId: null,
       pageId,
       ip: null,
       userAgent: null,
@@ -183,6 +187,7 @@ describe('duplicateBlock — widget', () => {
     const r = await duplicateBlock({
       sourceId: widgetId,
       userId: USER_ID,
+      tokenId: null,
       pageId,
       ip: '127.0.0.1',
       userAgent: 'test-ua',
@@ -228,6 +233,7 @@ describe('duplicateBlock — failure modes', () => {
       duplicateBlock({
         sourceId: widgetId,
         userId: USER_ID,
+        tokenId: null,
         pageId: 9999,
         ip: null,
         userAgent: null,
@@ -249,6 +255,7 @@ describe('duplicateBlock — failure modes', () => {
       duplicateBlock({
         sourceId: onPage1,
         userId: USER_ID,
+        tokenId: null,
         pageId: 2, // claim page 2 but the source belongs to page 1
         ip: null,
         userAgent: null,
@@ -283,6 +290,7 @@ describe('duplicateBlock — failure modes', () => {
       duplicateBlock({
         sourceId: a,
         userId: USER_ID,
+        tokenId: null,
         pageId: 1,
         ip: null,
         userAgent: null,
@@ -310,6 +318,7 @@ describe('duplicateBlock — failure modes', () => {
       duplicateBlock({
         sourceId: formId,
         userId: USER_ID,
+        tokenId: null,
         pageId: 3,
         ip: null,
         userAgent: null,
@@ -344,6 +353,7 @@ describe('duplicateBlock — failure modes', () => {
       duplicateBlock({
         sourceId: colIds[0]!,
         userId: USER_ID,
+        tokenId: null,
         pageId: 1,
         ip: null,
         userAgent: null,
@@ -404,6 +414,7 @@ describe('duplicateBlock — full section subtree', () => {
     const r = await duplicateBlock({
       sourceId: sectionId,
       userId: USER_ID,
+      tokenId: null,
       pageId: 1,
       ip: null,
       userAgent: null,
@@ -477,6 +488,7 @@ describe('duplicateBlock — full section subtree', () => {
       duplicateBlock({
         sourceId: sectionId,
         userId: USER_ID,
+        tokenId: null,
         pageId: 1,
         ip: null,
         userAgent: null,

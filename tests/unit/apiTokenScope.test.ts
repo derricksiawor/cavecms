@@ -42,7 +42,17 @@ describe('API token scopes', () => {
     expect(parseScopes(['pages:write', 'bogus', 'pages:fly'])).toEqual([
       'pages:write',
     ])
-    expect(parseScopes('not json')).toBe(null)
+  })
+
+  it('parseScopes fails OPEN only for literal null/undefined; corrupt present values fail CLOSED to deny-all', () => {
+    // Intended unrestricted (legacy/back-compat).
+    expect(parseScopes(null)).toBe(null)
+    expect(parseScopes(undefined)).toBe(null)
+    // Present-but-corrupt → deny-all [] (never widen a once-scoped token).
+    expect(parseScopes('not json')).toEqual([])
+    expect(parseScopes('"pages:write"')).toEqual([]) // parses to a string, not array
+    expect(parseScopes({})).toEqual([])
+    expect(parseScopes(42)).toEqual([])
   })
 })
 

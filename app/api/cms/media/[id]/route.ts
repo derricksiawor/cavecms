@@ -30,6 +30,7 @@ export const GET = withError<RouteCtx>(async (_req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(adminPolicy('uploadMedia'))
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'media', 'read')
 
   const [rows] = (await db.execute(sql`
     SELECT id, filename_uuid, mime_type, alt_text, width, height, byte_size, variants, created_at

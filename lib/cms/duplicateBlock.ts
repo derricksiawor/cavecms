@@ -191,6 +191,9 @@ export interface DuplicateBlockResult {
 export async function duplicateBlock(args: {
   sourceId: number
   userId: number
+  // Acting API token id (null for cookie-session writes) — stamped on the
+  // audit row so token-driven duplications attribute to the agent.
+  tokenId: number | null
   pageId: number
   ip: string | null
   userAgent: string | null
@@ -535,6 +538,7 @@ export async function duplicateBlock(args: {
     }
     await tx.insert(auditLog).values({
       userId: args.userId,
+      tokenId: args.tokenId,
       action: 'create',
       resourceType: 'content_block',
       resourceId: String(newTopId),

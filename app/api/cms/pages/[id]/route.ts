@@ -71,6 +71,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'pages', 'read')
 
   const [pageRows] = (await db.execute(sql`
     SELECT * FROM pages WHERE id = ${id}
@@ -166,6 +167,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         .insert(auditLog)
         .values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'page',
           resourceId: String(id),
@@ -480,6 +482,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             .insert(auditLog)
             .values({
               userId: ctx.userId,
+              tokenId: ctx.tokenId,
               action: 'rbac_field_reject',
               resourceType: 'page',
               resourceId: String(id),

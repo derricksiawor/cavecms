@@ -116,7 +116,8 @@ interface PostListRow {
 // is small enough that a 50-row cap (newest first) covers the admin
 // list UI without scroll virtualization.
 export const GET = withError(async (req) => {
-  await requireRole(['admin', 'editor', 'viewer'])
+  const ctx = await requireRole(['admin', 'editor', 'viewer'])
+  requireScope(ctx, 'posts', 'read')
   const url = new URL(req.url)
   const showArchived = url.searchParams.get('archived') === '1'
 
