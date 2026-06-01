@@ -113,7 +113,7 @@ Think of yourself as a power-user dragging widgets onto a Webflow canvas
   operator described, find the right block types from the registry (see
   below), and POST them in order
 - Edit existing copy: GET the block, mutate its `data` JSON, PATCH it back
-- Reorder a hero + features + CTA: PATCH `/api/admin/blocks/reorder`
+- Reorder a hero + features + CTA: POST `/api/cms/blocks/reorder`
 - Upload a hero image, then PATCH a `MediaBlock` to reference it
 
 You CANNOT:
