@@ -288,7 +288,7 @@ export function BackupsClient({
     } finally {
       setSavingOpts(false)
     }
-  }, [activeDest, retention, keepLocal, passphraseEnabled, passphrase, schedule, scheduleHour, scheduleWeekday, toast])
+  }, [activeDest, retention, keepLocal, passphraseEnabled, passphrase, schedule, scheduleHour, scheduleWeekday, destinations.options.passphraseEnabled, toast])
 
   // ── Restore from cloud ──
   interface RemoteRow {
