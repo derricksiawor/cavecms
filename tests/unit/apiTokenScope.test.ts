@@ -45,3 +45,52 @@ describe('API token scopes', () => {
     expect(parseScopes('not json')).toBe(null)
   })
 })
+
+import { requireScope } from '@/lib/auth/requireRole'
+
+function ctx(partial: Partial<{ viaApiToken: boolean; scopes: string[] | null }>) {
+  return {
+    userId: 1,
+    role: 'editor' as const,
+    email: 'a@b.c',
+    jti: 'j',
+    oat: 0,
+    iat: 0,
+    pwp: false,
+    viaApiToken: false,
+    tokenId: null,
+    scopes: null,
+    ...partial,
+  }
+}
+
+describe('requireScope', () => {
+  it('is a no-op for cookie sessions', () => {
+    expect(() =>
+      requireScope(ctx({ viaApiToken: false }), 'pages', 'delete'),
+    ).not.toThrow()
+  })
+  it('is a no-op for null-scope tokens', () => {
+    expect(() =>
+      requireScope(ctx({ viaApiToken: true, scopes: null }), 'pages', 'write'),
+    ).not.toThrow()
+  })
+  it('throws forbidden_scope when the grant is missing', () => {
+    expect(() =>
+      requireScope(
+        ctx({ viaApiToken: true, scopes: ['posts:read'] }),
+        'pages',
+        'write',
+      ),
+    ).toThrow('forbidden_scope')
+  })
+  it('allows a granted action', () => {
+    expect(() =>
+      requireScope(
+        ctx({ viaApiToken: true, scopes: ['pages:write'] }),
+        'pages',
+        'read',
+      ),
+    ).not.toThrow()
+  })
+})

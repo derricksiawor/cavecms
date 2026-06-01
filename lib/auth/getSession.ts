@@ -73,6 +73,9 @@ interface AuthState {
   // the synthetic `apitoken:<id>` jti; requireAuth surfaces this as
   // `viaApiToken` so handlers can defend sensitive surfaces explicitly.
   apiTokenId?: number
+  // The token's per-resource grants (null = unrestricted within role).
+  // Surfaced as AuthContext.scopes and enforced by requireScope.
+  apiTokenScopes?: string[] | null
 }
 
 // Intentionally not exported as part of the public API — adapters in
@@ -137,6 +140,7 @@ export const _loadAuthState = cache(async (): Promise<AuthState | null> => {
               pwp: false,
             },
             apiTokenId: tok.tokenId,
+            apiTokenScopes: tok.scopes,
           }
         }
       }
