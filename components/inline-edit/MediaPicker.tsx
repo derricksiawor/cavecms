@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useMediaPicker, type MediaRef } from './MediaPickerProvider'
 import { readCsrf, refreshCsrf } from '@/lib/client/csrf'
+import { registerUploadedMedia } from '@/lib/cms/uploadedMediaRegistry'
 import { Input } from '@/components/ui/Input'
 
 // Polished media field. When empty: shows a copper drag-and-drop zone
@@ -102,6 +103,26 @@ export function MediaPicker({
       const result = await xhrUpload<{ id: number }>('/api/cms/media', fd, (p) =>
         setProgress(p),
       )
+      // Register the freshly-uploaded media so a section/column background
+      // keyed on its id resolves its URL immediately — the SSR media map
+      // doesn't include it, so without this the background only appears after
+      // a full refresh. Variants are generated synchronously by the upload, so
+      // this GET returns them. Best-effort: on failure we still commit the
+      // value (it shows on the next refresh, the prior behaviour — no
+      // regression).
+      try {
+        const mr = await fetch(`/api/cms/media/${result.id}`, {
+          credentials: 'same-origin',
+        })
+        if (mr.ok) {
+          const m = (await mr.json()) as {
+            variants?: Record<string, string> | null
+          }
+          registerUploadedMedia(result.id, m.variants ?? null)
+        }
+      } catch {
+        /* best-effort — background just shows after the next refresh */
+      }
       onChange({ media_id: result.id, alt: provisionalAlt })
       setAltDraft(provisionalAlt)
       // Focus the alt input so the user can refine the alt text.

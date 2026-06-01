@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import clsx from 'clsx'
+import { getUploadedMedia } from '@/lib/cms/uploadedMediaRegistry'
 import {
   clampColumnsCount,
   htmlIdForBlock,
@@ -133,7 +134,9 @@ export function SectionFrame({
   // when the media row is missing variants; the section still renders
   // with its background-token paint.
   const bgImage = parsed.backgroundImage
-  const bgMedia = bgImage && media ? media.get(bgImage.media_id) : undefined
+  const bgMedia = bgImage
+    ? (media?.get(bgImage.media_id) ?? getUploadedMedia(bgImage.media_id))
+    : undefined
   const bgSrc =
     bgMedia?.variants?.lg ??
     bgMedia?.variants?.md ??
@@ -248,7 +251,9 @@ export function ColumnFrame({
   // hero" layouts (text column next to a photo column) without
   // touching CSS.
   const bgImage = parsed.backgroundImage
-  const bgMedia = bgImage && media ? media.get(bgImage.media_id) : undefined
+  const bgMedia = bgImage
+    ? (media?.get(bgImage.media_id) ?? getUploadedMedia(bgImage.media_id))
+    : undefined
   const bgSrc =
     bgMedia?.variants?.lg ??
     bgMedia?.variants?.md ??
