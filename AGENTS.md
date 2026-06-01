@@ -153,6 +153,29 @@ GET /api/cms/pages/{id}      # the page row + its blocks (each carries a
                              # locked writes)
 ```
 
+### Detail pages (e.g. `/projects/<slug>`) render from a BLOCK TREE — check first
+
+A detail page can resolve two ways, and on a migrated install it is the first:
+
+1. **Block-tree page (current).** A `pages` row whose slug matches `<slug>`
+   (with `is_home = 0`) renders from its OWN block tree (`content_blocks`) — the
+   same section → column → widget model as every other page. Edit it the normal
+   way: `PATCH /api/cms/blocks/{id}`.
+2. **Legacy `project_sections` (pre-block-CMS).** Used ONLY when no matching
+   `pages` row exists. On a migrated install that path renders nothing.
+
+**So before editing any detail page, look it up in `GET /api/cms/pages` first.**
+If a page matches the slug, work the block layer — editing `project_sections`
+there is editing a layer that no longer renders, and any field you send is
+silently dropped on save (a classic time sink).
+
+Presentation controls live on the BLOCK schemas, not on `project_sections`: e.g.
+`lx_inquiry_form` / `lx_brochure_form` carry `card_surface` + `field_style`,
+`lx_gallery` carries `columns`, `lx_stat` carries `orientation` + `alignment`,
+and the text blocks (`lx_eyebrow` / `lx_heading` / `lx_text` / `lx_action`) carry
+`alignment` + `tone`. Set them by PATCHing the block's `data`, echoing the block
++ page `version` from `GET /api/cms/pages/{id}`.
+
 ---
 
 ## Connecting to the running instance
