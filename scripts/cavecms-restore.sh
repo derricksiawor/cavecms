@@ -170,6 +170,10 @@ on_exit() {
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH" 2>/dev/null || true
   [ -n "$SAFETY_DIR" ] && rm -rf "$SAFETY_DIR" 2>/dev/null || true
   [ -n "$PULL_DIR" ] && rm -rf "$PULL_DIR" 2>/dev/null || true
+  # Defence in depth: wipe the plaintext cloud creds file (decrypted refresh
+  # token + passphrase) on every exit — cloud-pull removes it on success, but a
+  # failed download/decrypt must not leave it on disk.
+  [ -n "${CAVECMS_BACKUP_CLOUD_CREDS_FILE:-}" ] && rm -f "$CAVECMS_BACKUP_CLOUD_CREDS_FILE" 2>/dev/null || true
   if [ "${CAVECMS_RESTORE_CLEANUP_ARCHIVE:-0}" = "1" ] && [ -n "$ARCHIVE" ]; then
     rm -f "$ARCHIVE" 2>/dev/null || true
   fi
@@ -276,7 +280,12 @@ if [ "${CAVECMS_RESTORE_SOURCE:-file}" = "cloud" ]; then
     rstatus failed 1 "Restore failed" "The cloud downloader isn't available on this install."
     exit 1
   fi
-  if ! CAVECMS_RESTORE_DOWNLOAD_DIR="$PULL_DIR" CAVECMS_RESTORE_PULL_OUT="$PULL_OUT" "$NODE_BIN" "$CLOUD_PULL"; then
+  # Wall-clock bound on the download child so a half-open socket can't wedge the
+  # restore (and hold the shared op lock) forever. Pre-mutation, so a timeout
+  # just fails the restore cleanly with nothing changed.
+  PULL_TIMEOUT=""
+  command -v timeout >/dev/null 2>&1 && PULL_TIMEOUT="timeout --signal=TERM 10800"
+  if ! CAVECMS_RESTORE_DOWNLOAD_DIR="$PULL_DIR" CAVECMS_RESTORE_PULL_OUT="$PULL_OUT" $PULL_TIMEOUT "$NODE_BIN" "$CLOUD_PULL"; then
     rstatus failed 1 "Restore failed" "We couldn't download the backup from the cloud. Nothing was changed."
     exit 1
   fi

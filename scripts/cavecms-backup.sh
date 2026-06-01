@@ -125,6 +125,10 @@ on_exit() {
     esac
   fi
   [ -n "$STAGING" ] && rm -rf "$STAGING" 2>/dev/null || true
+  # Defence in depth: wipe the plaintext cloud creds file on EVERY exit
+  # (success or failure) — cloud-push removes it on success, but a failed
+  # upload must not leave the decrypted refresh token + passphrase on disk.
+  [ -n "${CAVECMS_BACKUP_CLOUD_CREDS_FILE:-}" ] && rm -f "$CAVECMS_BACKUP_CLOUD_CREDS_FILE" 2>/dev/null || true
   [ "$LOCK_HELD" = "1" ] && release_op_lock "$SHARED_LOCK_PATH" 2>/dev/null || true
 }
 trap on_exit EXIT
@@ -303,7 +307,13 @@ if [ "$MIG_ENCODING" = "unknown" ] || [ "${MIG_COUNT:-0}" -eq 0 ]; then
 fi
 [ -z "$FINGERPRINT" ] && FINGERPRINT="0000000000000000000000000000000000000000000000000000000000000000"
 AGE_SCHEME="none"; AGE_RECIP=""
-if [ -n "${CAVECMS_BACKUP_AGE_RECIPIENT:-}" ] && command -v age >/dev/null 2>&1; then
+# Local age encryption only applies to LOCAL backups. For a cloud destination,
+# cloud-push.mjs owns encryption (passphrase → AES-256-GCM) and must read the
+# plain-tar manifest, so we must NOT age-wrap the archive here (an .age blob
+# isn't a gzip stream and would break the cloud manifest read).
+if [ -n "${CAVECMS_BACKUP_AGE_RECIPIENT:-}" ] \
+   && [ "${CAVECMS_BACKUP_DESTINATION:-local}" = "local" ] \
+   && command -v age >/dev/null 2>&1; then
   AGE_SCHEME="age"; AGE_RECIP="$CAVECMS_BACKUP_AGE_RECIPIENT"
 fi
 
@@ -388,6 +398,10 @@ for f in files[keep:]:
 fi
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f \( -name 'cavecms-backup-*.tar.gz' -o -name 'cavecms-backup-*.tar.gz.age' \) -mtime +30 -delete 2>/dev/null || true
 find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.partial.*' -mtime +1 -delete 2>/dev/null || true
+# Orphaned cloud-encryption temp blobs (.cavecms-backup-*.enc.<pid>) from an
+# upload that died before cloud-push could clean them — multi-GB, so prune
+# anything older than 2h to stop a failing-token nightly schedule filling disk.
+find "$CAVECMS_BACKUP_DIR" -maxdepth 1 -type f -name '.cavecms-backup-*.enc.*' -mmin +120 -delete 2>/dev/null || true
 # Prune trashed archives (dashboard deletes mv into .trash-<ts>/), orphaned
 # staging dirs, and orphaned upload partials (.incoming, from a timed-out /
 # interrupted upload-restore that the restore orchestrator never cleaned), so
@@ -406,14 +420,19 @@ find "$CAVECMS_BACKUP_DIR/.incoming" -maxdepth 1 -type f -name 'upload-*' -mmin 
 DEST="${CAVECMS_BACKUP_DESTINATION:-local}"
 if [ "$DEST" != "local" ]; then
   bstatus running 6 "Uploading to the cloud"
-  CLOUD_PUSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cloud-push.mjs"
+  CLOUD_PUSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup/cloud-push.mjs"
   NODE_BIN="$(command -v node || true)"
   if [ -z "$NODE_BIN" ] || [ ! -f "$CLOUD_PUSH" ]; then
     bstatus failed 6 "Backup failed" "We saved a local backup, but the cloud uploader isn't available."
     post_backup_audit_terminal backup_failed "$ARCHIVE_ID" "node/cloud-push missing"
     exit 1
   fi
-  if ! CAVECMS_CLOUD_STEP=6 CAVECMS_CLOUD_TOTAL="$TOTAL" "$NODE_BIN" "$CLOUD_PUSH" "${CAVECMS_BACKUP_DIR}/${FINAL_NAME}"; then
+  # Hard wall-clock bound on the upload child so a half-open socket can't wedge
+  # the engine (and hold the shared op lock) forever. `timeout` is coreutils on
+  # Linux prod; skip the wrapper where it's absent (macOS dev w/o coreutils).
+  CLOUD_TIMEOUT=""
+  command -v timeout >/dev/null 2>&1 && CLOUD_TIMEOUT="timeout --signal=TERM 10800"
+  if ! CAVECMS_CLOUD_STEP=6 CAVECMS_CLOUD_TOTAL="$TOTAL" $CLOUD_TIMEOUT "$NODE_BIN" "$CLOUD_PUSH" "${CAVECMS_BACKUP_DIR}/${FINAL_NAME}"; then
     bstatus failed 6 "Backup failed" "We saved a local backup, but couldn't upload it to the cloud. Your data is safe on this server."
     post_backup_audit_terminal backup_failed "$ARCHIVE_ID" "cloud upload failed"
     exit 1

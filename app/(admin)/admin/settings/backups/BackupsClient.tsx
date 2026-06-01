@@ -237,6 +237,18 @@ export function BackupsClient({
   }, [])
 
   const saveOptions = useCallback(async () => {
+    // A newly-entered passphrase must be ≥12 chars. Blank is allowed only when
+    // one already exists (keeps the current passphrase).
+    if (passphraseEnabled) {
+      if (passphrase.length > 0 && passphrase.length < 12) {
+        toast.error('Passphrase must be at least 12 characters.')
+        return
+      }
+      if (passphrase.length === 0 && !destinations.options.passphraseEnabled) {
+        toast.error('Set a passphrase (at least 12 characters) to turn on encryption.')
+        return
+      }
+    }
     setSavingOpts(true)
     try {
       const r = await csrfFetch('/api/admin/backups/destinations/options', {
@@ -611,7 +623,7 @@ export function BackupsClient({
                   placeholder={
                     destinations.options.passphraseEnabled
                       ? 'Leave blank to keep your current passphrase'
-                      : 'Choose a passphrase you’ll remember'
+                      : 'Choose a passphrase (12+ characters) you’ll remember'
                   }
                   className="min-w-[16rem] flex-1 rounded-lg border border-warm-stone/30 bg-white px-3 py-2 font-mono text-sm"
                 />

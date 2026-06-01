@@ -24,7 +24,11 @@ const Body = z
     remoteRetention: z.number().int().min(1).max(100),
     keepLocalCopy: z.boolean(),
     passphraseEnabled: z.boolean(),
-    passphrase: z.string().max(400).optional(),
+    // When provided, a passphrase must be ≥12 chars — the cleartext sidecar
+    // carries the scrypt salt, so a weak passphrase is brute-forceable offline
+    // by anyone who obtains the cloud archive. Blank/undefined keeps the
+    // existing passphrase.
+    passphrase: z.string().min(12, 'passphrase_too_short').max(400).optional(),
     schedule: z.enum(['off', 'daily', 'weekly']),
     scheduleHour: z.number().int().min(0).max(23),
     scheduleWeekday: z.number().int().min(0).max(6),

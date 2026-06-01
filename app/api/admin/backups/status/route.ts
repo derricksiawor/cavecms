@@ -10,7 +10,6 @@ import {
   isRestoreStaleTerminal,
 } from '@/lib/backups/statusFile'
 import { BACKUP_TOTAL_STEPS, RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
-import { reconcileBackupCloudCredsOut } from '@/lib/backups/cloud/credsFile'
 
 // GET /api/admin/backups/status?kind=backup|restore — admin-gated read of the
 // live backup/restore status file. The progress modals poll this. Pure read,
@@ -44,15 +43,9 @@ export const GET = withError(async (req: Request) => {
     } else if (isBackupStale(s)) {
       payload = { ...s, state: 'failed', error: 'backup process timed out (no progress in 15 min)' }
     } else {
-      // On a completed cloud backup, persist any rotated refresh token / folder
-      // id the engine wrote to the creds-out file. Idempotent (unlinks after).
-      if (s.state === 'completed') {
-        try {
-          await reconcileBackupCloudCredsOut()
-        } catch {
-          /* best-effort bookkeeping */
-        }
-      }
+      // NOTE: cloud token/folder reconciliation happens in the audit-terminal
+      // internal endpoint (which fires for scheduled runs too), not here — this
+      // GET stays a pure read.
       payload = s
     }
   }

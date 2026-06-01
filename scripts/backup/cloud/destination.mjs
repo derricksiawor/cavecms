@@ -8,6 +8,8 @@
 // so one size satisfies both providers.
 
 import { open } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { refreshAccessToken } from './oauth.mjs'
 import * as gdrive from './gdrive.mjs'
 import * as onedrive from './onedrive.mjs'
@@ -57,14 +59,22 @@ function sleep(ms) {
   })
 }
 
-// fetch with exponential backoff. Retries on network error, 429, and 5xx.
-// `attempts` total tries (default 5). Backoff: 1s, 2s, 4s, 8s (+ small jitter
-// derived from the attempt index, not Math.random which is unavailable).
-export async function fetchRetry(url, opts = {}, { attempts = 5 } = {}) {
+// fetch with exponential backoff + a per-request timeout. Retries on network
+// error, timeout, 429, and 5xx. `attempts` total tries (default 5). Backoff:
+// 1s, 2s, 4s, 8s (+ small jitter from the attempt index, not Math.random which
+// is unavailable). `timeoutMs` (default 120s) bounds EACH attempt via
+// AbortSignal so a half-open socket can't wedge the engine forever; an abort is
+// treated as a retryable network error.
+export async function fetchRetry(url, opts = {}, { attempts = 5, timeoutMs = 120_000 } = {}) {
   let lastErr
   for (let i = 0; i < attempts; i++) {
+    // Compose the caller's signal (if any) with the per-attempt timeout.
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = opts.signal
+      ? AbortSignal.any([opts.signal, timeoutSignal])
+      : timeoutSignal
     try {
-      const res = await fetch(url, opts)
+      const res = await fetch(url, { ...opts, signal })
       if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
         if (i < attempts - 1) {
           await sleep(1000 * 2 ** i + i * 137)
@@ -82,6 +92,18 @@ export async function fetchRetry(url, opts = {}, { attempts = 5 } = {}) {
   }
   if (lastErr) throw lastErr
   throw new Error('fetch_retry_exhausted')
+}
+
+// Streaming sha256 of a file (shared by cloud-push + cloud-pull; never loads a
+// multi-GB archive into memory).
+export function sha256FileStream(path) {
+  return new Promise((resolve, reject) => {
+    const h = createHash('sha256')
+    const s = createReadStream(path)
+    s.on('error', reject)
+    s.on('data', (c) => h.update(c))
+    s.on('end', () => resolve(h.digest('hex')))
+  })
 }
 
 // Read [start, start+len) from an open file handle into a Buffer (may return

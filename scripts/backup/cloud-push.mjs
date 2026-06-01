@@ -18,13 +18,21 @@
 //   CAVECMS_BACKUP_KEEP_LOCAL        '0' to delete the local archive on success
 //   PHASE_STARTED_AT                 ISO timestamp for the status startedAt
 
-import { readFileSync, writeFileSync, statSync, unlinkSync, renameSync, createReadStream } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { readFileSync, writeFileSync, statSync, unlinkSync, renameSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { createDestination } from './cloud/destination.mjs'
+import { createDestination, sha256FileStream } from './cloud/destination.mjs'
 import { encryptFile } from './cloud/passphraseCipher.mjs'
+
+function safeUnlink(p) {
+  if (!p) return
+  try {
+    unlinkSync(p)
+  } catch {
+    /* ignore */
+  }
+}
 
 const PROVIDER_LABEL = { gdrive: 'Google Drive', onedrive: 'OneDrive' }
 
@@ -53,16 +61,6 @@ function makeStatusWriter(statusPath, step, total, started) {
       /* best-effort progress */
     }
   }
-}
-
-function sha256FileStream(path) {
-  return new Promise((resolve, reject) => {
-    const h = createHash('sha256')
-    const s = createReadStream(path)
-    s.on('error', reject)
-    s.on('data', (c) => h.update(c))
-    s.on('end', () => resolve(h.digest('hex')))
-  })
 }
 
 function readManifestFromArchive(archivePath) {
@@ -99,134 +97,120 @@ export async function pushToCloud({ archivePath, env = process.env, createDest =
     env.PHASE_STARTED_AT || new Date(0).toISOString(),
   )
 
-  status(`Preparing upload to ${label}…`)
-  const manifest = readManifestFromArchive(archivePath)
-
   const base = basename(archivePath)
-  let blobPath = archivePath
-  let remoteName = base
-  let enc = null
   let encTmp = null
-  if (passphrase) {
-    status(`Encrypting backup before upload to ${label}…`)
-    encTmp = join(dirname(archivePath), `.${base}.enc.${process.pid}`)
-    const meta = await encryptFile({ srcPath: archivePath, destPath: encTmp, passphrase })
-    enc = { scheme: 'aesgcm-scrypt', ...meta }
-    blobPath = encTmp
-    remoteName = `${base}.enc`
-  }
-
-  const blobSha = await sha256FileStream(blobPath)
-  const blobSize = statSync(blobPath).size
-
-  let rotatedRefresh = null
-  const dest = createDest({
-    provider,
-    clientId,
-    refreshToken,
-    folderId: creds.folderId,
-    onRotate: (rt) => {
-      rotatedRefresh = rt
-    },
-  })
-
-  await dest.ensureFolder()
-  await dest.upload(blobPath, remoteName, (sent, total) => {
-    const pct = total ? Math.min(100, Math.floor((sent / total) * 100)) : 0
-    status(`Uploading to ${label}… ${pct}%`)
-  })
-
-  // Cleartext sidecar for cheap listing + compat badges.
-  const sidecar = {
-    kind: 'cavecms-backup-sidecar',
-    formatVersion: 1,
-    archive: remoteName,
-    sha256: blobSha,
-    sizeBytes: blobSize,
-    createdAt: manifest.createdAt,
-    version: manifest.cavecms?.version ?? '0.0.0',
-    commit: manifest.cavecms?.commit ?? '',
-    migrationCount: manifest.database?.migrationCount ?? 0,
-    schemaFingerprint: manifest.database?.schemaFingerprint ?? '',
-    migratorEncoding: manifest.database?.migratorEncoding ?? 'unknown',
-    includeEnv: manifest.env?.included === true,
-    encrypted: enc !== null,
-    enc,
-  }
-  const sidecarTmp = join(dirname(archivePath), `.${remoteName}.meta.${process.pid}.json`)
-  writeFileSync(sidecarTmp, JSON.stringify(sidecar, null, 2), { mode: 0o600 })
-  await dest.upload(sidecarTmp, `${remoteName}.meta.json`, () => {})
+  let sidecarTmp = null
   try {
-    unlinkSync(sidecarTmp)
-  } catch {
-    /* ignore */
-  }
+    status(`Preparing upload to ${label}…`)
+    const manifest = readManifestFromArchive(archivePath)
 
-  // Remote retention: keep newest N archive blobs (+ delete their sidecars).
-  status(`Tidying up ${label}…`)
-  try {
-    const entries = await dest.list()
-    const blobs = archiveBlobsOnly(entries).sort((a, b) =>
-      String(b.createdAt).localeCompare(String(a.createdAt)),
-    )
-    const byName = new Map(entries.map((e) => [e.name, e]))
-    for (const old of blobs.slice(retention)) {
-      try {
-        await dest.delete(old.remoteId)
-      } catch {
-        /* best-effort */
-      }
-      const meta = byName.get(`${old.name}.meta.json`)
-      if (meta) {
+    let blobPath = archivePath
+    let remoteName = base
+    let enc = null
+    if (passphrase) {
+      status(`Encrypting backup before upload to ${label}…`)
+      encTmp = join(dirname(archivePath), `.${base}.enc.${process.pid}`)
+      const meta = await encryptFile({ srcPath: archivePath, destPath: encTmp, passphrase })
+      enc = { scheme: 'aesgcm-scrypt', ...meta }
+      blobPath = encTmp
+      remoteName = `${base}.enc`
+    }
+
+    const blobSha = await sha256FileStream(blobPath)
+    const blobSize = statSync(blobPath).size
+
+    let rotatedRefresh = null
+    const dest = createDest({
+      provider,
+      clientId,
+      refreshToken,
+      folderId: creds.folderId,
+      onRotate: (rt) => {
+        rotatedRefresh = rt
+      },
+    })
+
+    await dest.ensureFolder()
+    await dest.upload(blobPath, remoteName, (sent, total) => {
+      const pct = total ? Math.min(100, Math.floor((sent / total) * 100)) : 0
+      status(`Uploading to ${label}… ${pct}%`)
+    })
+
+    // Cleartext sidecar for cheap listing + compat badges.
+    const sidecar = {
+      kind: 'cavecms-backup-sidecar',
+      formatVersion: 1,
+      archive: remoteName,
+      sha256: blobSha,
+      sizeBytes: blobSize,
+      createdAt: manifest.createdAt,
+      version: manifest.cavecms?.version ?? '0.0.0',
+      commit: manifest.cavecms?.commit ?? '',
+      migrationCount: manifest.database?.migrationCount ?? 0,
+      schemaFingerprint: manifest.database?.schemaFingerprint ?? '',
+      migratorEncoding: manifest.database?.migratorEncoding ?? 'unknown',
+      includeEnv: manifest.env?.included === true,
+      encrypted: enc !== null,
+      enc,
+    }
+    sidecarTmp = join(dirname(archivePath), `.${remoteName}.meta.${process.pid}.json`)
+    writeFileSync(sidecarTmp, JSON.stringify(sidecar, null, 2), { mode: 0o600 })
+    await dest.upload(sidecarTmp, `${remoteName}.meta.json`, () => {})
+
+    // Remote retention: keep newest N archive blobs (+ delete their sidecars).
+    status(`Tidying up ${label}…`)
+    try {
+      const entries = await dest.list()
+      const blobs = archiveBlobsOnly(entries).sort((a, b) =>
+        String(b.createdAt).localeCompare(String(a.createdAt)),
+      )
+      const byName = new Map(entries.map((e) => [e.name, e]))
+      for (const old of blobs.slice(retention)) {
         try {
-          await dest.delete(meta.remoteId)
+          await dest.delete(old.remoteId)
+        } catch {
+          /* best-effort */
+        }
+        const meta = byName.get(`${old.name}.meta.json`)
+        if (meta) {
+          try {
+            await dest.delete(meta.remoteId)
+          } catch {
+            /* best-effort */
+          }
+        }
+      }
+    } catch {
+      /* retention is best-effort */
+    }
+
+    // Writeback rotated refresh token + resolved folder id for the app to persist.
+    const out = env.CAVECMS_BACKUP_CLOUD_CREDS_OUT
+    if (out) {
+      const payload = { provider }
+      if (rotatedRefresh) payload.refreshToken = rotatedRefresh
+      const fid = dest.getFolderId()
+      if (fid && fid !== creds.folderId) payload.folderId = fid
+      if (payload.refreshToken || payload.folderId) {
+        try {
+          writeFileSync(out, JSON.stringify(payload), { mode: 0o600 })
         } catch {
           /* best-effort */
         }
       }
     }
-  } catch {
-    /* retention is best-effort */
-  }
 
-  // Writeback rotated refresh token + resolved folder id for the app to persist.
-  const out = env.CAVECMS_BACKUP_CLOUD_CREDS_OUT
-  if (out) {
-    const payload = { provider }
-    if (rotatedRefresh) payload.refreshToken = rotatedRefresh
-    const fid = dest.getFolderId()
-    if (fid && fid !== creds.folderId) payload.folderId = fid
-    if (payload.refreshToken || payload.folderId) {
-      try {
-        writeFileSync(out, JSON.stringify(payload), { mode: 0o600 })
-      } catch {
-        /* best-effort */
-      }
-    }
-  }
+    // Drop the local copy ONLY on a successful upload, and only if opted out.
+    if (!keepLocal) safeUnlink(archivePath)
 
-  if (encTmp) {
-    try {
-      unlinkSync(encTmp)
-    } catch {
-      /* ignore */
-    }
+    status(`Uploaded to ${label}.`)
+    return { remoteName, sha256: blobSha, sizeBytes: blobSize, encrypted: enc !== null }
+  } finally {
+    // Always clean temp blobs + the plaintext creds file — success or throw.
+    safeUnlink(encTmp)
+    safeUnlink(sidecarTmp)
+    safeUnlink(credsFile)
   }
-  if (!keepLocal) {
-    try {
-      unlinkSync(archivePath)
-    } catch {
-      /* ignore */
-    }
-  }
-  try {
-    unlinkSync(credsFile)
-  } catch {
-    /* ignore */
-  }
-
-  status(`Uploaded to ${label}.`)
-  return { remoteName, sha256: blobSha, sizeBytes: blobSize, encrypted: enc !== null }
 }
 
 // Direct-invocation guard: only run from argv when executed as a script, not

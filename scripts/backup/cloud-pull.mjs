@@ -15,14 +15,26 @@
 //   CAVECMS_RESTORE_STATUS_PATH       restore status file (download progress)
 //   PHASE_STARTED_AT                  ISO timestamp for status startedAt
 
-import { readFileSync, writeFileSync, unlinkSync, renameSync, createReadStream } from 'node:fs'
-import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { readFileSync, writeFileSync, unlinkSync, renameSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { createDestination } from './cloud/destination.mjs'
+import { createDestination, sha256FileStream } from './cloud/destination.mjs'
 import { decryptFile } from './cloud/passphraseCipher.mjs'
 
 const PROVIDER_LABEL = { gdrive: 'Google Drive', onedrive: 'OneDrive' }
+// Archive blob name shape — the downloaded filename is constrained to this so a
+// compromised cloud account can't supply a traversal path as the blob "name".
+const ARCHIVE_RE = /^cavecms-backup-[A-Za-z0-9._-]+\.(tar\.gz|tar\.gz\.enc|tar\.gz\.age)$/
+const SHA256_RE = /^[0-9a-f]{64}$/
+
+function safeUnlink(p) {
+  if (!p) return
+  try {
+    unlinkSync(p)
+  } catch {
+    /* ignore */
+  }
+}
 
 function nowIso() {
   return new Date().toISOString()
@@ -51,16 +63,6 @@ function makeStatusWriter(statusPath, started) {
   }
 }
 
-function sha256FileStream(path) {
-  return new Promise((resolve, reject) => {
-    const h = createHash('sha256')
-    const s = createReadStream(path)
-    s.on('error', reject)
-    s.on('data', (c) => h.update(c))
-    s.on('end', () => resolve(h.digest('hex')))
-  })
-}
-
 export async function pullFromCloud({ env = process.env, createDest = createDestination }) {
   const provider = env.CAVECMS_RESTORE_PROVIDER
   const remoteId = env.CAVECMS_RESTORE_REMOTE_ID
@@ -83,80 +85,85 @@ export async function pullFromCloud({ env = process.env, createDest = createDest
     refreshToken: creds.refreshToken,
     folderId: creds.folderId,
   })
-  await dest.ensureFolder()
 
-  status(`Finding your backup in ${label}…`)
-  const entries = await dest.list()
-  const blob = entries.find((e) => e.remoteId === remoteId)
-  if (!blob) throw new Error('cloud-pull: remote archive not found')
-  const sidecarEntry = entries.find((e) => e.name === `${blob.name}.meta.json`)
-  if (!sidecarEntry) throw new Error('cloud-pull: sidecar metadata not found')
-
-  // Download the (tiny) sidecar first to learn the expected sha256 + enc meta.
-  const sidecarPath = join(downloadDir, `.sidecar.${process.pid}.json`)
-  await dest.download(sidecarEntry.remoteId, sidecarPath, () => {})
-  const sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8'))
+  let blobPath = null
   try {
-    unlinkSync(sidecarPath)
-  } catch {
-    /* ignore */
-  }
+    await dest.ensureFolder()
 
-  // Download the archive blob with progress.
-  const blobPath = join(downloadDir, blob.name)
-  await dest.download(remoteId, blobPath, (seen, total) => {
-    const pct = total ? Math.min(100, Math.floor((seen / total) * 100)) : 0
-    status(`Downloading from ${label}… ${pct}%`)
-  })
-
-  // Verify integrity BEFORE handing anything to the (destructive) restore.
-  status(`Checking the download…`)
-  const sha = await sha256FileStream(blobPath)
-  if (sidecar.sha256 && sha !== sidecar.sha256) {
-    try {
-      unlinkSync(blobPath)
-    } catch {
-      /* ignore */
+    status(`Finding your backup in ${label}…`)
+    const entries = await dest.list()
+    const blob = entries.find((e) => e.remoteId === remoteId)
+    if (!blob) throw new Error('cloud-pull: remote archive not found')
+    // Constrain the filename to the archive shape + strip any directory
+    // component — a compromised cloud account must not be able to write the
+    // downloaded blob outside the staging dir via a traversal "name".
+    const safeName = basename(blob.name)
+    if (!ARCHIVE_RE.test(safeName)) {
+      throw new Error('cloud-pull: unexpected remote archive name')
     }
-    throw new Error('cloud-pull: checksum mismatch — the downloaded backup is corrupt')
-  }
+    const sidecarEntry = entries.find((e) => e.name === `${blob.name}.meta.json`)
+    if (!sidecarEntry) throw new Error('cloud-pull: sidecar metadata not found')
 
-  // Decrypt if the blob was passphrase-encrypted.
-  let archivePath = blobPath
-  if (sidecar.encrypted) {
-    if (!creds.passphrase) throw new Error('cloud-pull: this backup is encrypted — a passphrase is required')
-    if (!sidecar.enc || sidecar.enc.scheme !== 'aesgcm-scrypt') {
-      throw new Error('cloud-pull: unknown encryption scheme')
+    // Download the (tiny) sidecar first to learn the expected sha256 + enc meta.
+    const sidecarPath = join(downloadDir, `.sidecar.${process.pid}.json`)
+    await dest.download(sidecarEntry.remoteId, sidecarPath, () => {})
+    const sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8'))
+    safeUnlink(sidecarPath)
+
+    // Fail CLOSED on a missing/malformed checksum — the sidecar is
+    // attacker-influenceable if the cloud account is compromised, so an absent
+    // sha256 must be a hard error, not a skipped integrity check.
+    if (!SHA256_RE.test(String(sidecar.sha256 || ''))) {
+      throw new Error('cloud-pull: backup metadata is missing its integrity checksum')
     }
-    status(`Decrypting your backup…`)
-    const plainPath = blobPath.replace(/\.enc$/, '')
-    await decryptFile({
-      srcPath: blobPath,
-      destPath: plainPath,
-      passphrase: creds.passphrase,
-      saltB64: sidecar.enc.saltB64,
-      ivB64: sidecar.enc.ivB64,
-      tagB64: sidecar.enc.tagB64,
+
+    // Download the archive blob with progress.
+    blobPath = join(downloadDir, safeName)
+    await dest.download(remoteId, blobPath, (seen, total) => {
+      const pct = total ? Math.min(100, Math.floor((seen / total) * 100)) : 0
+      status(`Downloading from ${label}… ${pct}%`)
     })
-    try {
-      unlinkSync(blobPath)
-    } catch {
-      /* ignore */
-    }
-    archivePath = plainPath
-  }
 
-  // Hand the resolved path back to the bash orchestrator.
-  if (env.CAVECMS_RESTORE_PULL_OUT) {
-    writeFileSync(env.CAVECMS_RESTORE_PULL_OUT, archivePath, { mode: 0o600 })
+    // Verify integrity BEFORE handing anything to the (destructive) restore.
+    status(`Checking the download…`)
+    const sha = await sha256FileStream(blobPath)
+    if (sha !== sidecar.sha256) {
+      safeUnlink(blobPath)
+      throw new Error('cloud-pull: checksum mismatch — the downloaded backup is corrupt')
+    }
+
+    // Decrypt if the blob was passphrase-encrypted.
+    let archivePath = blobPath
+    if (sidecar.encrypted) {
+      if (!creds.passphrase) {
+        throw new Error('cloud-pull: this backup is encrypted — a passphrase is required')
+      }
+      if (!sidecar.enc || sidecar.enc.scheme !== 'aesgcm-scrypt') {
+        throw new Error('cloud-pull: unknown encryption scheme')
+      }
+      status(`Decrypting your backup…`)
+      const plainPath = blobPath.replace(/\.enc$/, '')
+      await decryptFile({
+        srcPath: blobPath,
+        destPath: plainPath,
+        passphrase: creds.passphrase,
+        saltB64: sidecar.enc.saltB64,
+        ivB64: sidecar.enc.ivB64,
+        tagB64: sidecar.enc.tagB64,
+      })
+      safeUnlink(blobPath)
+      archivePath = plainPath
+    }
+
+    // Hand the resolved path back to the bash orchestrator.
+    if (env.CAVECMS_RESTORE_PULL_OUT) {
+      writeFileSync(env.CAVECMS_RESTORE_PULL_OUT, archivePath, { mode: 0o600 })
+    }
+    return { archivePath, encrypted: sidecar.encrypted === true }
+  } finally {
+    // Always wipe the plaintext creds file (passphrase + token) — success or throw.
+    safeUnlink(credsFile)
   }
-  // Wipe the plaintext creds file (passphrase + token).
-  try {
-    unlinkSync(credsFile)
-  } catch {
-    /* ignore */
-  }
-  return { archivePath, encrypted: sidecar.encrypted === true }
 }
 
 const invokedDirectly =

@@ -7,7 +7,11 @@ import {
 } from '@/lib/backups/statusFile'
 import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
-import { prepareBackupCloudEnv, PassphraseRequiredError } from '@/lib/backups/cloud/credsFile'
+import {
+  prepareBackupCloudEnv,
+  PassphraseRequiredError,
+  CloudDestinationUnavailableError,
+} from '@/lib/backups/cloud/credsFile'
 import type { SettingsValue } from '@/lib/cms/settings-registry'
 
 type Backups = SettingsValue<'backups'>
@@ -48,10 +52,11 @@ async function triggerScheduledBackup(cfg: Backups): Promise<void> {
 }
 
 // One scheduler tick: run a backup if the schedule says it's due AND no other
-// op holds the shared lock. Idempotent + re-entrant-safe via lastScheduled
-// BackupAt (claimed before spawning so a concurrent in-process tick + systemd
-// trigger don't double-fire). Never throws — records failures into
-// backups_state for the UI.
+// op holds the shared lock. The claim (advancing lastScheduledBackupAt) narrows
+// the double-fire window between the in-process tick and the systemd trigger;
+// the AUTHORITATIVE dedup is the bash O_EXCL op lock in cavecms-backup.sh — a
+// losing concurrent spawn exits cleanly without mutating or clobbering status.
+// Never throws — spawn-time failures are recorded into backups_state.
 export async function runBackupTickIfDue(): Promise<void> {
   const cfg = await getSetting('backups')
   if (cfg.schedule === 'off') return
@@ -69,34 +74,38 @@ export async function runBackupTickIfDue(): Promise<void> {
     return
   }
 
-  // Claim this occurrence FIRST so a sibling trigger can't double-fire.
+  // Claim this occurrence FIRST (advance lastScheduledBackupAt so a sibling
+  // trigger can't double-fire) and flag the run in-flight so the audit-terminal
+  // endpoint records the REAL completion outcome.
   await updateSettingValue(
     'backups_state',
-    (cur) => ({ ...cur, lastScheduledBackupAt: now.toISOString() }),
+    (cur) => ({ ...cur, lastScheduledBackupAt: now.toISOString(), scheduledInFlight: true }),
     null,
   )
 
   try {
     await triggerScheduledBackup(cfg)
-    await updateSettingValue(
-      'backups_state',
-      (cur) => {
-        const next = { ...cur, lastScheduledResult: 'ok' as const }
-        delete next.lastScheduledError
-        return next
-      },
-      null,
-    )
+    // Success here means "spawned" — the terminal result is recorded by
+    // recordScheduledBackupOutcome() from the audit-terminal callback.
   } catch (err) {
+    // A spawn-time failure means no backup ran and no audit-terminal will fire,
+    // so record the failure + clear the in-flight flag here.
     const msg =
       err instanceof PassphraseRequiredError
         ? 'A passphrase is required to back up secrets to the cloud.'
-        : err instanceof Error
-          ? err.message.slice(0, 300)
-          : String(err).slice(0, 300)
+        : err instanceof CloudDestinationUnavailableError
+          ? 'Your cloud destination is disconnected — reconnect it to resume backups.'
+          : err instanceof Error
+            ? err.message.slice(0, 300)
+            : String(err).slice(0, 300)
     await updateSettingValue(
       'backups_state',
-      (cur) => ({ ...cur, lastScheduledResult: 'failed', lastScheduledError: msg }),
+      (cur) => ({
+        ...cur,
+        lastScheduledResult: 'failed',
+        lastScheduledError: msg,
+        scheduledInFlight: false,
+      }),
       null,
     )
   }

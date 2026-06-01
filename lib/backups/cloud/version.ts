@@ -12,15 +12,18 @@ export function installVersion(): string {
     cached = fromEnv
     return fromEnv
   }
-  let v = '0.0.0'
   try {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
       version?: unknown
     }
-    if (typeof pkg.version === 'string') v = pkg.version
+    if (typeof pkg.version === 'string') {
+      cached = pkg.version
+      return pkg.version
+    }
   } catch {
-    /* fall back to 0.0.0 */
+    /* fall through */
   }
-  cached = v
-  return v
+  // Don't CACHE the fallback — a transient first-read miss would otherwise mark
+  // every remote backup "made by a newer version" for the whole process life.
+  return '0.0.0'
 }

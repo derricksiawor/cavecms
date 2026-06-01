@@ -50,7 +50,9 @@ export async function upload(ctx, localPath, remoteName, onProgress) {
   const sessionUri = init.headers.get('location')
   if (!sessionUri) throw new Error('gdrive_no_session_uri')
 
-  // 2. PUT chunks with Content-Range. 308 between, 200/201 on the last.
+  // 2. PUT chunks with Content-Range. 308 between, 200/201 on the last. On any
+  // mid-upload failure, best-effort abandon the resumable session so it doesn't
+  // linger on the provider until it auto-expires.
   return withOpenFile(localPath, async (fh) => {
     let offset = 0
     // Handle the empty-file edge: send a single zero-length finalizing PUT.
@@ -96,6 +98,13 @@ export async function upload(ctx, localPath, remoteName, onProgress) {
       throw new Error(`gdrive_chunk_failed:${res.status}`)
     }
     throw new Error('gdrive_upload_incomplete')
+  }).catch(async (err) => {
+    try {
+      await fetch(sessionUri, { method: 'DELETE', signal: AbortSignal.timeout(15_000) })
+    } catch {
+      /* best-effort abandon */
+    }
+    throw err
   })
 }
 

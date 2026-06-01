@@ -25,6 +25,17 @@ export class PassphraseRequiredError extends Error {
   }
 }
 
+// Thrown when a cloud destination is selected but not connected (e.g. the
+// refresh token was revoked). We fail loudly rather than silently falling back
+// to a local backup, so the operator is told to reconnect instead of believing
+// their cloud backups are still running.
+export class CloudDestinationUnavailableError extends Error {
+  constructor() {
+    super('cloud_destination_unavailable')
+    this.name = 'CloudDestinationUnavailableError'
+  }
+}
+
 function credsDir(): string {
   return getInstallStateDir() ?? tmpdir()
 }
@@ -49,11 +60,16 @@ export async function prepareBackupCloudEnv(
   const cfg = await getSetting('backups')
   const dest = cfg.destination
   if (dest === 'local') return null
-  const conn = cfg[dest]
-  if (!conn?.connected || !conn.refreshToken) return null // misconfig → local
 
+  // Order matters: the "include secrets" safety gate is evaluated BEFORE the
+  // connection check, so a disconnected cloud destination can never silently
+  // degrade a secrets-bearing backup into a local plaintext archive.
   if (includeEnv && !cfg.encryption.passphraseEnabled) {
     throw new PassphraseRequiredError()
+  }
+  const conn = cfg[dest]
+  if (!conn?.connected || !conn.refreshToken) {
+    throw new CloudDestinationUnavailableError()
   }
 
   const creds: {
@@ -119,6 +135,32 @@ export async function prepareRestoreCloudCreds(provider: CloudProvider): Promise
   const inPath = credsInPath()
   writeFileSync(inPath, JSON.stringify(creds), { mode: 0o600 })
   return inPath
+}
+
+// Record the terminal outcome of a SCHEDULER-initiated backup. No-op unless a
+// scheduled run is in flight (so manual backups never touch the scheduled
+// result). Clears the in-flight flag. Called from the audit-terminal endpoint
+// (which fires for every backup, scheduled or manual).
+export async function recordScheduledBackupOutcome(
+  completed: boolean,
+  errorMsg: string | null,
+): Promise<void> {
+  const state = await getSetting('backups_state')
+  if (!state.scheduledInFlight) return
+  await updateSettingValue(
+    'backups_state',
+    (cur) => {
+      const next = {
+        ...cur,
+        scheduledInFlight: false,
+        lastScheduledResult: completed ? ('ok' as const) : ('failed' as const),
+      }
+      if (completed) delete next.lastScheduledError
+      else next.lastScheduledError = (errorMsg || 'The scheduled backup failed.').slice(0, 300)
+      return next
+    },
+    null,
+  )
 }
 
 // After a backup completes, persist any rotated refresh token + resolved folder

@@ -110,6 +110,12 @@ export async function upload(ctx, localPath, remoteName, onProgress, _restarted 
       // Session expired — restart the whole upload once.
       return upload(ctx, localPath, remoteName, onProgress, true)
     }
+    // Best-effort abandon the (still-live) upload session so it doesn't linger.
+    try {
+      await fetch(uploadUrl, { method: 'DELETE', signal: AbortSignal.timeout(15_000) })
+    } catch {
+      /* best-effort abandon */
+    }
     throw err
   }
 }

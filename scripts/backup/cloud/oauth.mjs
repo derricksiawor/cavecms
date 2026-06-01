@@ -33,12 +33,18 @@ function providerOrThrow(provider) {
   return p
 }
 
+// 30s per-request timeout on every OAuth call so a hung token endpoint can't
+// block an admin route handler (connect/poll) or the upload engine's mid-
+// transfer refresh indefinitely.
+const OAUTH_TIMEOUT_MS = 30_000
+
 async function postForm(url, params) {
   const body = new URLSearchParams(params).toString()
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
+    signal: AbortSignal.timeout(OAUTH_TIMEOUT_MS),
   })
   let json = {}
   try {
@@ -122,6 +128,7 @@ export async function fetchAccountEmail({ provider, accessToken }) {
   const p = providerOrThrow(provider)
   const res = await fetch(p.userInfoUrl, {
     headers: { authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(OAUTH_TIMEOUT_MS),
   })
   let json = {}
   try {

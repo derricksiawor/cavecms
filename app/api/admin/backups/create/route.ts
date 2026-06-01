@@ -18,7 +18,11 @@ import {
 } from '@/lib/backups/statusFile'
 import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
-import { prepareBackupCloudEnv, PassphraseRequiredError } from '@/lib/backups/cloud/credsFile'
+import {
+  prepareBackupCloudEnv,
+  PassphraseRequiredError,
+  CloudDestinationUnavailableError,
+} from '@/lib/backups/cloud/credsFile'
 
 // POST /api/admin/backups/create — kick off a detached backup. Returns 202.
 // The Settings page polls /api/admin/backups/status?kind=backup.
@@ -64,6 +68,12 @@ export const POST = withError(async (req: Request) => {
   } catch (err) {
     if (err instanceof PassphraseRequiredError) {
       return new Response(JSON.stringify({ error: 'passphrase_required_for_secrets' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      })
+    }
+    if (err instanceof CloudDestinationUnavailableError) {
+      return new Response(JSON.stringify({ error: 'destination_not_connected' }), {
         status: 400,
         headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
       })

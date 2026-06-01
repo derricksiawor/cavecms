@@ -82,7 +82,8 @@ describe('pullFromCloud', () => {
     const archive = join(dir, 'cavecms-backup-y.tar.gz')
     writeFileSync(archive, Buffer.from('bytes'))
     const sidecar = join(dir, 'sidecar.json')
-    writeFileSync(sidecar, JSON.stringify({ sha256: 'deadbeef', encrypted: false }))
+    // Valid sha256 SHAPE but wrong value → reaches the mismatch branch.
+    writeFileSync(sidecar, JSON.stringify({ sha256: 'a'.repeat(64), encrypted: false }))
     const credsFile = writeCreds()
 
     await expect(
@@ -102,6 +103,51 @@ describe('pullFromCloud', () => {
         ),
       }),
     ).rejects.toThrow(/checksum mismatch/)
+  })
+
+  it('fails closed when the sidecar omits a well-formed sha256 (no skipped integrity check)', async () => {
+    const archive = join(dir, 'cavecms-backup-m.tar.gz')
+    writeFileSync(archive, Buffer.from('bytes'))
+    const sidecar = join(dir, 'sidecar.json')
+    writeFileSync(sidecar, JSON.stringify({ encrypted: false })) // no sha256
+    const credsFile = writeCreds()
+    await expect(
+      pullFromCloud({
+        env: {
+          CAVECMS_RESTORE_PROVIDER: 'gdrive',
+          CAVECMS_RESTORE_REMOTE_ID: 'BLOB',
+          CAVECMS_BACKUP_CLOUD_CREDS_FILE: credsFile,
+          CAVECMS_RESTORE_DOWNLOAD_DIR: dir,
+        },
+        createDest: fakeDestFactory({ BLOB: archive, SIDE: sidecar }, [
+          { remoteId: 'BLOB', name: 'cavecms-backup-m.tar.gz' },
+          { remoteId: 'SIDE', name: 'cavecms-backup-m.tar.gz.meta.json' },
+        ]),
+      }),
+    ).rejects.toThrow(/integrity checksum/)
+  })
+
+  it('rejects a remote blob whose name is not a CaveCMS archive (traversal / non-archive)', async () => {
+    const archive = join(dir, 'evil')
+    writeFileSync(archive, Buffer.from('bytes'))
+    const sidecar = join(dir, 'sidecar.json')
+    writeFileSync(sidecar, JSON.stringify({ sha256: 'a'.repeat(64), encrypted: false }))
+    const credsFile = writeCreds()
+    await expect(
+      pullFromCloud({
+        env: {
+          CAVECMS_RESTORE_PROVIDER: 'gdrive',
+          CAVECMS_RESTORE_REMOTE_ID: 'BLOB',
+          CAVECMS_BACKUP_CLOUD_CREDS_FILE: credsFile,
+          CAVECMS_RESTORE_DOWNLOAD_DIR: dir,
+        },
+        createDest: fakeDestFactory({ BLOB: archive, SIDE: sidecar }, [
+          // basename is "passwd" → fails ARCHIVE_RE → rejected before any write.
+          { remoteId: 'BLOB', name: '../../../etc/passwd' },
+          { remoteId: 'SIDE', name: '../../../etc/passwd.meta.json' },
+        ]),
+      }),
+    ).rejects.toThrow(/unexpected remote archive name/)
   })
 
   it('decrypts a passphrase-encrypted archive back to the original bytes', async () => {
