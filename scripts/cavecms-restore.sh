@@ -90,6 +90,7 @@ rstatus() { write_phase_status "$STATUS_PATH" "$TOTAL" "$@"; }
 # State carried across steps for the rollback path.
 SCRATCH=""
 SAFETY_DIR=""
+PULL_DIR=""
 LOCK_HELD=0
 MAINT_ON=0
 MAINT_KEEP_ON=0       # set when a FAILED rollback must leave maintenance ON
@@ -168,6 +169,7 @@ on_exit() {
   fi
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH" 2>/dev/null || true
   [ -n "$SAFETY_DIR" ] && rm -rf "$SAFETY_DIR" 2>/dev/null || true
+  [ -n "$PULL_DIR" ] && rm -rf "$PULL_DIR" 2>/dev/null || true
   if [ "${CAVECMS_RESTORE_CLEANUP_ARCHIVE:-0}" = "1" ] && [ -n "$ARCHIVE" ]; then
     rm -f "$ARCHIVE" 2>/dev/null || true
   fi
@@ -256,6 +258,34 @@ if ! acquire_op_lock "$SHARED_LOCK_PATH"; then
   exit 0
 fi
 LOCK_HELD=1
+
+# ===========================================================================
+# STEP 0 — cloud download (optional, pre-mutation)
+# ===========================================================================
+# When restoring from a cloud destination, fetch the archive FIRST: cloud-pull
+# downloads the blob, verifies sha256 against the sidecar, and decrypts it if it
+# was passphrase-encrypted — all before any mutation. ARCHIVE is then the local
+# plaintext path the rest of the restore consumes unchanged.
+if [ "${CAVECMS_RESTORE_SOURCE:-file}" = "cloud" ]; then
+  rstatus validating 1 "Finding your backup in the cloud"
+  CLOUD_PULL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup/cloud-pull.mjs"
+  NODE_BIN="$(command -v node || true)"
+  PULL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cavecms-pull.XXXXXX")"
+  PULL_OUT="${PULL_DIR}/path.txt"
+  if [ -z "$NODE_BIN" ] || [ ! -f "$CLOUD_PULL" ]; then
+    rstatus failed 1 "Restore failed" "The cloud downloader isn't available on this install."
+    exit 1
+  fi
+  if ! CAVECMS_RESTORE_DOWNLOAD_DIR="$PULL_DIR" CAVECMS_RESTORE_PULL_OUT="$PULL_OUT" "$NODE_BIN" "$CLOUD_PULL"; then
+    rstatus failed 1 "Restore failed" "We couldn't download the backup from the cloud. Nothing was changed."
+    exit 1
+  fi
+  ARCHIVE="$(cat "$PULL_OUT" 2>/dev/null || true)"
+  if [ -z "$ARCHIVE" ] || [ ! -f "$ARCHIVE" ]; then
+    rstatus failed 1 "Restore failed" "The downloaded backup couldn't be read."
+    exit 1
+  fi
+fi
 
 # ===========================================================================
 # STEP 1 — validate + compat gate (NO mutation)

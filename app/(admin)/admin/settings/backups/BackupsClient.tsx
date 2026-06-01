@@ -265,6 +265,74 @@ export function BackupsClient({
     }
   }, [activeDest, retention, keepLocal, passphraseEnabled, passphrase, toast])
 
+  // ── Restore from cloud ──
+  interface RemoteRow {
+    remoteId: string
+    name: string
+    sizeBytes: number
+    createdAt: string | null
+    version: string
+    encrypted: boolean
+    includeEnv: boolean
+    compatible: boolean
+    compatNote: string | null
+  }
+  const [remoteProvider, setRemoteProvider] = useState<CloudProvider | null>(null)
+  const [remoteRows, setRemoteRows] = useState<RemoteRow[]>([])
+  const [loadingRemote, setLoadingRemote] = useState(false)
+  const [confirmCloudRestore, setConfirmCloudRestore] = useState<{ provider: CloudProvider; row: RemoteRow } | null>(null)
+
+  const loadRemote = useCallback(
+    async (provider: CloudProvider) => {
+      setLoadingRemote(true)
+      setRemoteProvider(provider)
+      try {
+        const r = await fetch(`/api/admin/backups/destinations/remote-list?provider=${provider}`, {
+          credentials: 'include',
+          cache: 'no-store',
+        })
+        if (!r.ok) {
+          toast.error(`Couldn't load backups from ${PROVIDER_LABEL[provider]}.`)
+          setRemoteRows([])
+          return
+        }
+        const j = (await r.json()) as { backups: RemoteRow[] }
+        setRemoteRows(j.backups)
+      } catch {
+        toast.error(`Couldn't load backups from ${PROVIDER_LABEL[provider]}.`)
+        setRemoteRows([])
+      } finally {
+        setLoadingRemote(false)
+      }
+    },
+    [toast],
+  )
+
+  const startCloudRestore = useCallback(
+    async (provider: CloudProvider, row: RemoteRow) => {
+      setConfirmCloudRestore(null)
+      try {
+        const r = await csrfFetch('/api/admin/backups/restore-from-cloud', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider, remoteId: row.remoteId }),
+        })
+        if (r.status === 409) {
+          toast.error('A backup or restore is already running.')
+          return
+        }
+        if (!r.ok) {
+          toast.error("Couldn't start the restore — try again.")
+          return
+        }
+        setRestoreModalOpen(true)
+      } catch {
+        toast.error("Couldn't start the restore — try again.")
+      }
+    },
+    [toast],
+  )
+
   const refreshList = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/backups/list', { credentials: 'include', cache: 'no-store' })
@@ -553,6 +621,80 @@ export function BackupsClient({
         ) : null}
       </section>
 
+      {/* Restore from cloud */}
+      {anyConnected ? (
+        <section className="mb-8 rounded-2xl border border-warm-stone/20 bg-cream-50 p-6">
+          <h2 className="text-lg font-semibold text-near-black">Restore from the cloud</h2>
+          <p className="mt-1 text-sm text-warm-stone">
+            Pull a backup back from your connected account — useful if this server is ever lost.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {(['gdrive', 'onedrive'] as CloudProvider[])
+              .filter((p) => dest[p].connected)
+              .map((p) => (
+                <Button
+                  key={p}
+                  type="button"
+                  variant="ghost"
+                  disabled={loadingRemote}
+                  onClick={() => void loadRemote(p)}
+                >
+                  {loadingRemote && remoteProvider === p
+                    ? 'Loading…'
+                    : `Show ${PROVIDER_LABEL[p]} backups`}
+                </Button>
+              ))}
+          </div>
+
+          {remoteProvider && !loadingRemote ? (
+            remoteRows.length === 0 ? (
+              <p className="mt-4 text-sm text-warm-stone">
+                No backups found in {PROVIDER_LABEL[remoteProvider]} yet.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {remoteRows.map((row) => (
+                  <li
+                    key={row.remoteId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warm-stone/20 bg-white/40 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-near-black">{humanWhen(row.createdAt ?? '')}</p>
+                      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-warm-stone">
+                        <span>{humanSize(row.sizeBytes)}</span>
+                        <span className="rounded-full bg-warm-stone/10 px-2 py-0.5">v{row.version}</span>
+                        {row.encrypted ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700">
+                            <ShieldCheck className="h-3.5 w-3.5" /> Encrypted
+                          </span>
+                        ) : null}
+                        {row.includeEnv ? (
+                          <span className="inline-flex items-center gap-1 text-amber-700">
+                            <ShieldCheck className="h-3.5 w-3.5" /> Includes secrets
+                          </span>
+                        ) : null}
+                        {!row.compatible && row.compatNote ? (
+                          <span className="text-red-600">{row.compatNote}</span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!row.compatible}
+                      onClick={() => setConfirmCloudRestore({ provider: remoteProvider, row })}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-copper-400 px-3 py-1.5 text-xs font-medium text-copper-700 transition-colors hover:bg-copper-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Restore
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : null}
+        </section>
+      ) : null}
+
       {/* Create + upload actions */}
       <section className="mb-8 grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-warm-stone/20 bg-cream-50 p-6">
@@ -688,6 +830,18 @@ export function BackupsClient({
         confirmLabel="Restore"
         onConfirm={() => confirmRestore && void startRestore(confirmRestore)}
         onCancel={() => setConfirmRestore(null)}
+      />
+      <ConfirmModal
+        open={confirmCloudRestore !== null}
+        destructive
+        title="Restore from the cloud?"
+        description="This downloads the backup and replaces your current content and media with it. A safety snapshot is taken first, and the restore rolls back automatically if anything goes wrong."
+        confirmLabel="Restore"
+        onConfirm={() =>
+          confirmCloudRestore &&
+          void startCloudRestore(confirmCloudRestore.provider, confirmCloudRestore.row)
+        }
+        onCancel={() => setConfirmCloudRestore(null)}
       />
       <ConfirmModal
         open={confirmDelete !== null}

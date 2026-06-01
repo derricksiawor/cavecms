@@ -91,6 +91,36 @@ export async function prepareBackupCloudEnv(
   }
 }
 
+// Write the mode-600 creds file for a cloud RESTORE (cloud-pull reads it).
+// Includes the passphrase when configured so an encrypted archive can be
+// decrypted. Returns the creds file path. Throws 'not_connected' if the
+// provider isn't connected.
+export async function prepareRestoreCloudCreds(provider: CloudProvider): Promise<string> {
+  const cfg = await getSetting('backups')
+  const conn = cfg[provider]
+  if (!conn?.connected || !conn.refreshToken) {
+    throw new Error('not_connected')
+  }
+  const creds: {
+    provider: CloudProvider
+    clientId: string
+    refreshToken: string
+    folderId?: string
+    passphrase?: string
+  } = {
+    provider,
+    clientId: getClientId(provider),
+    refreshToken: decryptSecret(conn.refreshToken, refreshAad(provider)),
+    folderId: conn.folderId,
+  }
+  if (cfg.encryption.passphraseEnabled && cfg.encryption.passphrase) {
+    creds.passphrase = decryptSecret(cfg.encryption.passphrase, AAD_BACKUP_PASSPHRASE)
+  }
+  const inPath = credsInPath()
+  writeFileSync(inPath, JSON.stringify(creds), { mode: 0o600 })
+  return inPath
+}
+
 // After a backup completes, persist any rotated refresh token + resolved folder
 // id the engine wrote. Best-effort + idempotent — safe to call on every
 // terminal poll.
