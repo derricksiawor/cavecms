@@ -539,7 +539,20 @@ export function EditableSection(p: Props) {
     setOptimisticallyDeleted(false)
   }, [p.blockId])
 
-  const isSelected = selection.isSelected(p.blockId)
+  // Hydration guard. EditableBlockTreeRenderer is a dynamic import, so by the
+  // time this subtree hydrates, the SelectionProvider's post-mount effect has
+  // already restored the persisted selection. Reading it on the FIRST client
+  // render would then disagree with the server HTML (nothing selected) →
+  // hydration mismatch on data-edit-selected + the outline/toolbar/badge
+  // classes. Gate the selected visuals on THIS section's own mount so the
+  // first client render always matches SSR; the real selection applies a tick
+  // later (imperceptible).
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const isSelected = mounted && selection.isSelected(p.blockId)
 
   // Keyboard shortcuts. Sections are high-blast-radius — ⌘D / ⌫ /
   // ⌥↑↓ map to the same handlers the toolbar buttons use; the toast-
