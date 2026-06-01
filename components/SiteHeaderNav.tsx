@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { isLikelyExternal, externalRel } from '@/lib/url/external'
 import { isNavLinkActive, type HeaderThemeClasses } from '@/lib/cms/headerTheme'
+import type { NavItem, NavChild } from '@/lib/cms/navTypes'
 
 // Desktop nav links. Client component so the "active" class recomputes
 // on every client-side navigation — the root layout that mounts
@@ -12,15 +13,12 @@ import { isNavLinkActive, type HeaderThemeClasses } from '@/lib/cms/headerTheme'
 // server-resolved pathname would freeze at first load. usePathname()
 // re-runs per navigation and keeps the active highlight honest.
 //
-// The Projects entry (detected by href === '/projects') renders a
-// hover-and-focus dropdown of every published project. Clicking the
-// "Projects" label itself still navigates to /projects — the dropdown
-// is additive, not a replacement for the index link.
-
-interface NavItem {
-  label: string
-  href: string
-}
+// Dropdowns: any item with `children` renders a hover/focus dropdown of
+// those sub-links (operator-authored, via Settings → Header). The Projects
+// entry (href === '/projects') ALSO auto-builds a dropdown of every
+// published project — but ONLY when the operator hasn't authored their own
+// children for it (manual children win). Clicking a parent that has its own
+// href still navigates; a parent with a blank href is a dropdown-only toggle.
 
 interface Project {
   slug: string
@@ -42,9 +40,6 @@ export function SiteHeaderNav({
   // Server-resolved path (x-pathname header). Used for SSR + the first
   // client render so the active-link class/aria-current match exactly;
   // usePathname() takes over after mount to stay reactive on soft navs.
-  // Without this, usePathname() is empty during SSR (this lives in the
-  // cached root layout) → the active link renders inactive on the
-  // server, active on the client → hydration mismatch.
   initialPathname: string
 }) {
   const livePathname = usePathname()
@@ -54,19 +49,31 @@ export function SiteHeaderNav({
   return (
     <nav className="ml-auto hidden items-center gap-8 lg:flex">
       {navItems.map((item) => {
-        const isProjectsItem =
-          item.href === PROJECTS_HREF && projects.length > 0
-        if (isProjectsItem) {
+        // 1) Operator-authored submenu wins.
+        if (item.children && item.children.length > 0) {
           return (
-            <ProjectsDropdown
+            <NavDropdown
               key={`${item.label}-${item.href}`}
-              item={item}
-              projects={projects}
+              trigger={{ label: item.label, href: item.href }}
+              links={item.children}
               theme={theme}
               pathname={pathname}
             />
           )
         }
+        // 2) Auto-Projects dropdown (only when no manual children).
+        if (item.href === PROJECTS_HREF && projects.length > 0) {
+          return (
+            <NavDropdown
+              key={`${item.label}-${item.href}`}
+              trigger={{ label: item.label, href: item.href }}
+              links={projects.map((p) => ({ label: p.name, href: `/projects/${p.slug}` }))}
+              theme={theme}
+              pathname={pathname}
+            />
+          )
+        }
+        // 3) Flat link.
         const active = isNavLinkActive(item.href, pathname)
         return (
           <Link
@@ -87,21 +94,27 @@ export function SiteHeaderNav({
   )
 }
 
-function ProjectsDropdown({
-  item,
-  projects,
+// Generic dropdown — renders a trigger plus a hover/focus panel of links.
+// Trigger is a <Link> when `trigger.href` is non-empty (clicking navigates,
+// the dropdown is additive) or a <button> when blank (dropdown-only toggle).
+function NavDropdown({
+  trigger,
+  links,
   theme,
   pathname,
 }: {
-  item: NavItem
-  projects: Project[]
+  trigger: { label: string; href: string }
+  links: NavChild[]
   theme: HeaderThemeClasses
   pathname: string
 }) {
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
-  const parentActive = isNavLinkActive(item.href, pathname)
+  const parentActive =
+    isNavLinkActive(trigger.href, pathname) ||
+    links.some((l) => isNavLinkActive(l.href, pathname))
+  const hasHref = trigger.href.trim() !== ''
 
   const clearCloseTimer = () => {
     if (closeTimer.current) {
@@ -137,8 +150,11 @@ function ProjectsDropdown({
     }
   }, [open])
 
-  // Clean up the close timer if the component unmounts mid-grace.
   useEffect(() => () => clearCloseTimer(), [])
+
+  const triggerClass = `inline-flex items-center gap-1 text-sm font-medium transition-[color] duration-200 ${
+    parentActive ? theme.navActive : `${theme.nav} ${theme.navHover}`
+  }`
 
   return (
     <div
@@ -148,67 +164,75 @@ function ProjectsDropdown({
       onMouseLeave={scheduleClose}
       onFocus={openNow}
       onBlur={(e) => {
-        // Only close if focus leaves the wrapper entirely.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           scheduleClose()
         }
       }}
     >
-      <Link
-        href={item.href}
-        aria-current={parentActive ? 'page' : undefined}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={`inline-flex items-center gap-1 text-sm font-medium transition-[color] duration-200 ${
-          parentActive ? theme.navActive : `${theme.nav} ${theme.navHover}`
-        }`}
-      >
-        {item.label}
-        <ChevronDown
-          size={14}
-          strokeWidth={2}
-          aria-hidden="true"
-          className={`transition-transform duration-200 ${
-            open ? 'rotate-180' : ''
-          }`}
-        />
-      </Link>
+      {hasHref ? (
+        <Link
+          href={trigger.href}
+          aria-current={parentActive ? 'page' : undefined}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className={triggerClass}
+        >
+          {trigger.label}
+          <ChevronDown
+            size={14}
+            strokeWidth={2}
+            aria-hidden="true"
+            className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          />
+        </Link>
+      ) : (
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className={triggerClass}
+        >
+          {trigger.label}
+          <ChevronDown
+            size={14}
+            strokeWidth={2}
+            aria-hidden="true"
+            className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
+      )}
 
       {open && (
         <div
           role="menu"
-          aria-label={`${item.label} submenu`}
+          aria-label={`${trigger.label} submenu`}
           className={`absolute left-1/2 top-full z-40 mt-3 w-72 -translate-x-1/2 overflow-hidden rounded-2xl border shadow-[0_30px_60px_-20px_rgba(5,5,5,0.4)] ${theme.drawer} ${
-            theme.bar.includes('obsidian')
-              ? 'border-champagne/20'
-              : 'border-obsidian/10'
+            theme.bar.includes('obsidian') ? 'border-champagne/20' : 'border-obsidian/10'
           }`}
         >
           <ul
             className="max-h-[60vh] overflow-y-auto py-2"
-            // Keep the hover bridge alive when the cursor enters the
-            // panel (otherwise the wrapper's mouseleave fires and the
-            // panel disappears mid-click).
+            // Keep the hover bridge alive when the cursor enters the panel.
             onMouseEnter={openNow}
             onMouseLeave={scheduleClose}
           >
-            {projects.map((p) => {
-              const href = `/projects/${p.slug}`
-              const active = pathname === href
+            {links.map((l) => {
+              const active = isNavLinkActive(l.href, pathname)
               return (
-                <li key={p.slug}>
+                <li key={`${l.label}-${l.href}`}>
                   <Link
                     role="menuitem"
-                    href={href}
+                    href={l.href}
+                    rel={externalRel(l.href, true)}
+                    target={isLikelyExternal(l.href) ? '_blank' : undefined}
                     onClick={() => setOpen(false)}
                     aria-current={active ? 'page' : undefined}
                     className={`block px-5 py-2.5 text-sm font-medium transition-colors ${
-                      active
-                        ? theme.drawerNavActive
-                        : `${theme.drawerNav}`
+                      active ? theme.drawerNavActive : `${theme.drawerNav}`
                     }`}
                   >
-                    {p.name}
+                    {l.label}
                   </Link>
                 </li>
               )
