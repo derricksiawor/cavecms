@@ -238,6 +238,11 @@ export function UpdatesClient({
         return
       }
       setModalOpen(true)
+    } catch {
+      // Previously there was NO catch here: a thrown fetch/CSRF/network
+      // error left the click a SILENT no-op (operator clicks, nothing
+      // happens, clicks again…). Always give feedback.
+      toast.error("Couldn't start the update — try again.")
     } finally {
       setApplying(false)
     }
@@ -303,6 +308,8 @@ export function UpdatesClient({
         return
       }
       setModalOpen(true)
+    } catch {
+      toast.error("Couldn't start the re-run — try again.")
     } finally {
       setApplying(false)
     }

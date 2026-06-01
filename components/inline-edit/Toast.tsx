@@ -68,6 +68,12 @@ let nextId = 1
 // for actionable toasts is 8-10s. Audit finding E5 (Chunk K).
 const TOAST_TTL_MS = 3_500
 const TOAST_ACTION_TTL_MS = 8_000
+// Error toasts hold the longest. They carry a failure the operator must
+// read — and often ACT on (e.g. "update to an in-between version first, or
+// re-install with the CLI"). At the 3.5s plain TTL an actionable error can
+// vanish before it's read, which reads as "the popup flashed and was gone."
+// Hover/focus still pause it; the close button still dismisses early.
+const TOAST_ERROR_TTL_MS = 10_000
 // Stack cap — drop the oldest when more than this many are visible
 // at once. Without this, rapid mutation bursts (e.g. drag-reorder 20
 // blocks in 8s with hover-pause active) stack toasts off-screen and
@@ -132,8 +138,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       durationMs?: number,
     ) => {
       const id = nextId++
+      // Resolve the effective lifetime ONCE and bake it onto the item, so the
+      // initial auto-dismiss timer AND any hover-pause/resume reuse the same
+      // value. Precedence: explicit per-call durationMs → action-bearing →
+      // error (longest, must be read) → plain default.
+      const ttl =
+        typeof durationMs === 'number' && durationMs > 0
+          ? durationMs
+          : action
+            ? TOAST_ACTION_TTL_MS
+            : intent === 'error'
+              ? TOAST_ERROR_TTL_MS
+              : TOAST_TTL_MS
       setItems((prev) => {
-        const next = [...prev, { id, intent, message, action, durationMs }]
+        const next = [...prev, { id, intent, message, action, durationMs: ttl }]
         if (next.length <= TOAST_MAX_VISIBLE) return next
         // Drop the oldest. Also cancel its timer so the spillover
         // doesn't fire dismiss on an id no longer in items.
@@ -148,15 +166,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         }
         return next.slice(-TOAST_MAX_VISIBLE)
       })
-      // Per-call duration override wins. Otherwise: action-bearing
-      // toasts hold longer than plain ones so the operator can read
-      // the verb label AND click before auto-dismiss.
-      const ttl =
-        typeof durationMs === 'number' && durationMs > 0
-          ? durationMs
-          : action
-            ? TOAST_ACTION_TTL_MS
-            : TOAST_TTL_MS
       const t = setTimeout(() => dismiss(id), ttl)
       timersRef.current.set(id, t)
     },
