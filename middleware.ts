@@ -205,6 +205,11 @@ function adminPath(p: string): boolean {
 
 async function authGate(req: NextRequest): Promise<NextResponse | null> {
   const p = req.nextUrl.pathname
+  // Public read of the navigation menus — the header nav + footer columns
+  // are public content (rendered on every page; also fetched by headless
+  // frontends). Only the GET is public; PUT stays under the /api/cms/* gate
+  // below (session or bearer token, verified in the route handler).
+  if (req.method === 'GET' && p === '/api/cms/nav') return null
   const needsAuth = adminPath(p) || p === '/api/auth/logout'
   if (!needsAuth) return null
   const token = req.cookies.get(SESSION_COOKIE)?.value
