@@ -21,6 +21,7 @@ export interface DestinationsSummary {
   active: 'local' | 'gdrive' | 'onedrive'
   gdrive: { connected: boolean; accountEmail: string | null; configured: boolean }
   onedrive: { connected: boolean; accountEmail: string | null; configured: boolean }
+  options: { remoteRetention: number; keepLocalCopy: boolean; passphraseEnabled: boolean }
 }
 
 type CloudProvider = 'gdrive' | 'onedrive'
@@ -206,6 +207,63 @@ export function BackupsClient({
   )
 
   useEffect(() => () => stopPolling(), [stopPolling])
+
+  // ── Destination options (active destination, retention, encryption) ──
+  const [activeDest, setActiveDest] = useState(destinations.active)
+  const [retention, setRetention] = useState(destinations.options.remoteRetention)
+  const [keepLocal, setKeepLocal] = useState(destinations.options.keepLocalCopy)
+  const [passphraseEnabled, setPassphraseEnabled] = useState(destinations.options.passphraseEnabled)
+  const [passphrase, setPassphrase] = useState('')
+  const [savingOpts, setSavingOpts] = useState(false)
+
+  const anyConnected = dest.gdrive.connected || dest.onedrive.connected
+
+  const genPassphrase = useCallback(() => {
+    const bytes = new Uint8Array(18)
+    crypto.getRandomValues(bytes)
+    const b64 = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, '').slice(0, 24)
+    setPassphrase(b64)
+    setPassphraseEnabled(true)
+  }, [])
+
+  const saveOptions = useCallback(async () => {
+    setSavingOpts(true)
+    try {
+      const r = await csrfFetch('/api/admin/backups/destinations/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          destination: activeDest,
+          remoteRetention: retention,
+          keepLocalCopy: keepLocal,
+          passphraseEnabled,
+          passphrase: passphrase || undefined,
+        }),
+      })
+      if (r.status === 400) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string }
+        if (j.error === 'passphrase_required') {
+          toast.error('Set a passphrase before turning on encryption.')
+        } else if (j.error === 'destination_not_connected') {
+          toast.error('Connect that destination first.')
+        } else {
+          toast.error("Couldn't save those settings.")
+        }
+        return
+      }
+      if (!r.ok) {
+        toast.error("Couldn't save those settings.")
+        return
+      }
+      setPassphrase('')
+      setDest((d) => ({ ...d, active: activeDest }))
+      toast.success('Backup settings saved.')
+    } catch {
+      toast.error("Couldn't save those settings.")
+    } finally {
+      setSavingOpts(false)
+    }
+  }, [activeDest, retention, keepLocal, passphraseEnabled, passphrase, toast])
 
   const refreshList = useCallback(async () => {
     try {
@@ -411,6 +469,86 @@ export function BackupsClient({
             <Button type="button" variant="ghost" className="mt-2" onClick={cancelConnect}>
               Cancel
             </Button>
+          </div>
+        ) : null}
+
+        {anyConnected ? (
+          <div className="mt-6 border-t border-warm-stone/20 pt-5">
+            <h3 className="text-sm font-semibold text-near-black">Backup settings</h3>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-medium text-near-black">Send backups to</span>
+                <select
+                  value={activeDest}
+                  onChange={(e) => setActiveDest(e.target.value as DestinationsSummary['active'])}
+                  className="mt-1 w-full rounded-lg border border-warm-stone/30 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="local">This server only</option>
+                  {dest.gdrive.connected ? <option value="gdrive">Google Drive</option> : null}
+                  {dest.onedrive.connected ? <option value="onedrive">OneDrive</option> : null}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-near-black">Keep this many in the cloud</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={retention}
+                  onChange={(e) => setRetention(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                  className="mt-1 w-full rounded-lg border border-warm-stone/30 bg-white px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+
+            <label className="mt-4 flex items-center gap-2 text-sm text-near-black">
+              <input
+                type="checkbox"
+                checked={keepLocal}
+                onChange={(e) => setKeepLocal(e.target.checked)}
+                className="h-4 w-4 rounded border-warm-stone/40 text-copper-600"
+              />
+              Also keep a copy on this server
+            </label>
+
+            <label className="mt-3 flex items-center gap-2 text-sm text-near-black">
+              <input
+                type="checkbox"
+                checked={passphraseEnabled}
+                onChange={(e) => setPassphraseEnabled(e.target.checked)}
+                className="h-4 w-4 rounded border-warm-stone/40 text-copper-600"
+              />
+              Encrypt cloud backups with a passphrase
+            </label>
+            {passphraseEnabled ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  placeholder={
+                    destinations.options.passphraseEnabled
+                      ? 'Leave blank to keep your current passphrase'
+                      : 'Choose a passphrase you’ll remember'
+                  }
+                  className="min-w-[16rem] flex-1 rounded-lg border border-warm-stone/30 bg-white px-3 py-2 font-mono text-sm"
+                />
+                <Button type="button" variant="ghost" onClick={genPassphrase}>
+                  Generate
+                </Button>
+              </div>
+            ) : null}
+            <p className="mt-2 text-xs text-warm-stone">
+              Keep your passphrase safe — it’s the only way to restore an encrypted cloud backup if this
+              server is ever lost.
+            </p>
+
+            <div className="mt-4">
+              <Button type="button" disabled={savingOpts} onClick={() => void saveOptions()}>
+                {savingOpts ? 'Saving…' : 'Save backup settings'}
+              </Button>
+            </div>
           </div>
         ) : null}
       </section>

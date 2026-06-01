@@ -37,6 +37,11 @@ export default async function BackupsSettingsPage() {
       accountEmail: cfg.onedrive.accountEmail ?? null,
       configured: isProviderConfigured('onedrive'),
     },
+    options: {
+      remoteRetention: cfg.remoteRetention,
+      keepLocalCopy: cfg.keepLocalCopy,
+      passphraseEnabled: cfg.encryption.passphraseEnabled,
+    },
   }
   return <BackupsClient initialBackups={initial} destinations={destinations} />
 }
