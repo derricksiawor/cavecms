@@ -7,6 +7,9 @@ import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
 import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
 import { encryptedSecretSchema } from '@/lib/security/secretCipher'
 import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
+import { isFontKeySlug, TYPOGRAPHY_ROLES_DEFAULT } from '@/lib/typography/catalog'
+import { CUSTOM_FONT_KEY_RE, CUSTOM_FONT_FILE_RE } from '@/lib/typography/customFonts'
+import { GOOGLE_FONT_KEY_RE, GOOGLE_FONT_FILE_RE } from '@/lib/typography/googleFontKeys'
 
 // One Zod schema per `settings.key`. getSetting() parses every value
 // through this registry on read — so a tampered DB cell or a
@@ -83,10 +86,25 @@ const socialLinks = z
 const defaultSeo = z.object({
   title: z.string().max(180),
   description: z.string().max(320),
-  // Optional path served by next/image — null when no global OG image
-  // is configured (per-entity fallbacks live in projects.og_image_id /
-  // posts.og_image_id). Either a same-origin path (starts with /) or
-  // an https URL.
+  // Operator-picked default social-share (Open Graph) image — the
+  // preview card shown when the site is shared on social platforms.
+  // Stored as a media reference like the favicon / header logo; the
+  // SEO resolver (lib/seo/resolve.ts) turns it into an ABSOLUTE url
+  // using the configured site URL. Inline media shape (not the shared
+  // `mediaRef`) for the same temporal-dead-zone reason as `favicon`
+  // below — `mediaRef` is declared after `defaultSeo` in this module.
+  ogImage: z
+    .object({
+      media_id: z.number().int().positive(),
+      alt: z.string().max(180),
+    })
+    .nullable()
+    .optional(),
+  // LEGACY free-text OG image URL/path. Superseded by `ogImage` (the
+  // Media-library picker) — no longer surfaced in the admin form, but
+  // still read as a fallback so an install that configured it before
+  // the picker existed never loses its share image. Either a
+  // same-origin path (starts with /) or an https URL.
   ogImagePath: z
     .string()
     .max(500)
@@ -139,21 +157,33 @@ const footer = z.object({
   tagline: z.string().max(220),
   // Visual theme — see footerTheme above.
   theme: footerTheme,
-  columns: z
-    .array(
-      z.object({
-        label: z.string().max(60),
-        links: z
-          .array(
-            z.object({
-              text: z.string().max(60),
-              href: siteLink,
-            }),
-          )
-          .max(20),
-      }),
-    )
-    .max(6),
+  // Same blank-seeding MenuBuilder as the header → prune unlabeled columns +
+  // links before validation so an abandoned "Add column"/"Add link" row never
+  // persists and renders as an empty heading / dead link in the public footer.
+  // Footer link label key is `text`; the column label is `label`.
+  columns: z.preprocess(
+    makeMenuPrune({
+      childrenKey: 'links',
+      childLabelKey: 'text',
+      childHrefKey: 'href',
+      conservativeParent: true,
+    }),
+    z
+      .array(
+        z.object({
+          label: z.string().max(60),
+          links: z
+            .array(
+              z.object({
+                text: z.string().max(60),
+                href: siteLink,
+              }),
+            )
+            .max(20),
+        }),
+      )
+      .max(6),
+  ),
   // Optional footer logo override. When null, the footer falls back
   // to the header logo (or brand text). Lets the operator use a
   // lighter wordmark on the dark footer if the dark logo doesn't read
@@ -210,6 +240,123 @@ const themePalette = z.object({
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
 })
 
+// Global typography roles (the "Global Fonts" tier). Each role stores a
+// font key — a bundled catalog slug OR a runtime custom-font key — so the
+// validator is the loose slug shape, not the static catalog membership (the
+// settings layer can't see the runtime custom-font registry). roleVarsCss
+// fails closed to the default for a key that isn't ACTIVE at render time.
+// Token-writable so an AI agent can rebrand the site's typefaces via the
+// API — these are presentational, not security-sensitive like siteUrl.
+const fontKey = z
+  .string()
+  .max(64)
+  .refine((v) => isFontKeySlug(v), { message: 'unknown_font' })
+const typographyRoles = z.object({
+  display: fontKey.default(TYPOGRAPHY_ROLES_DEFAULT.display),
+  body: fontKey.default(TYPOGRAPHY_ROLES_DEFAULT.body),
+})
+
+// Operator-uploaded custom fonts. Managed ONLY by the /api/admin/fonts
+// endpoint (which validates the on-disk binary + writes this row) — the
+// generic settings PATCH rejects this key so no one can point it at an
+// arbitrary file. getSetting parses it on read; the layout emits its
+// @font-face from here.
+const customFontEntry = z.object({
+  key: z.string().regex(CUSTOM_FONT_KEY_RE),
+  family: z.string().min(1).max(60),
+  category: z.enum(['serif', 'sans', 'display', 'mono']),
+  file: z.string().regex(CUSTOM_FONT_FILE_RE),
+  format: z.enum(['woff2', 'woff', 'ttf', 'otf']),
+  weightRange: z.tuple([z.number().int(), z.number().int()]).nullable().optional(),
+  staticWeight: z.number().int().optional(),
+  italic: z.boolean().optional(),
+})
+const customFonts = z.array(customFontEntry).max(50)
+
+// Activated Google fonts. SAME shape as customFontEntry (so the CSS emitter,
+// picker, and renderer treat both lists identically) but with the `gf-`
+// key/file regexes. Managed ONLY by /api/admin/fonts/google (which fetches
+// the woff2 server-side, stores it self-hosted, and writes this row) — the
+// generic settings PATCH rejects this key, exactly like custom_fonts, so no
+// one can point it at an arbitrary file. getSetting parses it on read; the
+// layout emits its @font-face from here. Cap 100 (the activation endpoint
+// enforces the same ceiling under its mutex).
+const googleFontEntry = z.object({
+  key: z.string().regex(GOOGLE_FONT_KEY_RE),
+  family: z.string().min(1).max(80),
+  category: z.enum(['serif', 'sans', 'display', 'mono']),
+  file: z.string().regex(GOOGLE_FONT_FILE_RE),
+  format: z.literal('woff2'),
+  weightRange: z.tuple([z.number().int(), z.number().int()]).nullable().optional(),
+  staticWeight: z.number().int().optional(),
+  italic: z.boolean().optional(),
+})
+const googleFonts = z.array(googleFontEntry).max(100)
+
+// Prune abandoned rows before item validation. Runs on every parse — INCLUDING
+// reads (getSetting → safeParse) — so it MUST be non-destructive to data an
+// existing install legitimately stored. The two menus differ in what "valid"
+// means, so the prune is parameterised:
+//
+//   • Header (strict): `label` was ALWAYS `.min(1)` on prior versions, so no
+//     stored item can have a blank label — dropping blank-label rows on read
+//     therefore can't lose real data, and on write it stops the shared
+//     MenuBuilder's seeded-but-empty row from rejecting the whole save with an
+//     opaque `label.min(1)` 400.
+//   • Footer (conservative): column headings + link text were NEVER required
+//     (`max(60)`, no `.min(1)`), so an existing footer may legitimately store a
+//     blank-heading column that still carries links, or a blank-text link that
+//     still carries an href. Those MUST survive (else upgrading silently drops
+//     them from the public footer). Here a child is "blank" only when BOTH its
+//     text AND href are empty, and a blank-heading column is dropped only when
+//     it has no surviving links.
+//
+// `childLabelKey` is 'label' (header children) | 'text' (footer links); the
+// parent/column label is always 'label'.
+function makeMenuPrune(opts: {
+  childrenKey: string
+  childLabelKey: string
+  childHrefKey?: string
+  conservativeParent?: boolean
+}) {
+  const { childrenKey, childLabelKey, childHrefKey, conservativeParent } = opts
+  const str = (x: unknown): string => (typeof x === 'string' ? x.trim() : '')
+  const blankLeaf = (c: unknown): boolean => {
+    if (!c || typeof c !== 'object') return true
+    const o = c as Record<string, unknown>
+    const label = str(o[childLabelKey])
+    // Footer: keep an href-carrying link even with blank text (back-compat).
+    if (childHrefKey) return label === '' && str(o[childHrefKey]) === ''
+    return label === ''
+  }
+  return (v: unknown): unknown => {
+    if (!Array.isArray(v)) return v
+    return v
+      .map((it) => {
+        if (!it || typeof it !== 'object') return it
+        const o = it as Record<string, unknown>
+        const kids = o[childrenKey]
+        if (Array.isArray(kids)) {
+          return { ...o, [childrenKey]: kids.filter((c) => !blankLeaf(c)) }
+        }
+        return o
+      })
+      .filter((it) => {
+        if (!it || typeof it !== 'object') return false
+        const o = it as Record<string, unknown>
+        if (str(o.label) !== '') return true
+        // Conservative (footer): keep a blank-heading column that still carries
+        // links so existing footers render unchanged after upgrade.
+        if (conservativeParent) {
+          const kids = Array.isArray(o[childrenKey]) ? (o[childrenKey] as unknown[]) : []
+          return kids.length > 0
+        }
+        // Strict (header): a blank-label item can't validate or render — drop.
+        return false
+      })
+  }
+}
+
 const siteHeader = z.object({
   // Brand text shown next to (or in place of) the logo.
   brandText: z.string().max(120),
@@ -227,14 +374,31 @@ const siteHeader = z.object({
   // Primary navigation links shown in the top bar. Capped at 6 per
   // operator request — keeps the bar from wrapping and forces editorial
   // discipline.
-  navItems: z
-    .array(
-      z.object({
-        label: z.string().min(1).max(60),
-        href: siteLink,
-      }),
-    )
-    .max(6),
+  navItems: z.preprocess(
+    makeMenuPrune({ childrenKey: 'children', childLabelKey: 'label' }),
+    z
+      .array(
+        z.object({
+          label: z.string().min(1).max(60),
+          // '' allowed (siteLink permits empty) → a parent with children and
+          // an empty href is a dropdown-only toggle on the public header.
+          href: siteLink,
+          // One level of submenu only — a child has no `children`, so the
+          // tree can never exceed depth 1. Optional → stored flat menus parse
+          // unchanged (settings JSON is validated on read; no migration).
+          children: z
+            .array(
+              z.object({
+                label: z.string().min(1).max(60),
+                href: siteLink,
+              }),
+            )
+            .max(12)
+            .optional(),
+        }),
+      )
+      .max(6),
+  ),
   // Single primary call-to-action button. Either field empty → the
   // public renderer hides the button entirely.
   // Nullable so a fresh one-pager install can omit the CTA entirely.
@@ -883,6 +1047,7 @@ export const registry = {
     default: {
       title: '',
       description: '',
+      ogImage: null,
       ogImagePath: null,
       favicon: null,
     } satisfies z.infer<typeof defaultSeo>,
@@ -1052,6 +1217,26 @@ export const registry = {
       surfaceDark: '#050505',
       surfaceLight: '#F5F1EA',
     } satisfies z.infer<typeof themePalette>,
+  },
+  // ─── Typography roles (Settings → Typography) ───
+  typography_roles: {
+    schema: typographyRoles,
+    default: {
+      display: TYPOGRAPHY_ROLES_DEFAULT.display,
+      body: TYPOGRAPHY_ROLES_DEFAULT.body,
+    } satisfies z.infer<typeof typographyRoles>,
+  },
+  // ─── Operator-uploaded custom fonts (managed by /api/admin/fonts) ───
+  custom_fonts: {
+    schema: customFonts,
+    default: [] satisfies z.infer<typeof customFonts>,
+  },
+  // ─── Activated Google fonts (managed by /api/admin/fonts/google) ───
+  // Operator picks from the ~1,934-family catalog; the server fetches the
+  // woff2 ONCE and self-hosts it. Visitors never touch Google.
+  google_fonts: {
+    schema: googleFonts,
+    default: [] satisfies z.infer<typeof googleFonts>,
   },
   // ─── Self-update preferences ───
   updates: {

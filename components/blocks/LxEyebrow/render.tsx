@@ -7,6 +7,7 @@ import {
   fontWeightClass,
   isColorToken,
   resolveColorValue,
+  resolveFamilyRender,
 } from '@/lib/cms/designTokens'
 
 // Luxury eyebrow — rendered as a BADGE per ~/.claude/CLAUDE.md
@@ -40,8 +41,10 @@ const ALIGN_FLEX: Record<BlockData<'lx_eyebrow'>['alignment'], string> = {
 // lines so the inner content reads balanced inside the pill. On
 // md+ the wrap rarely happens and the operator's saved alignment
 // (passed via the outer flex-justify) drives placement.
+// font-sans is the default body face; a per-element `family` override
+// (role or catalog font) replaces it via badgeClass below.
 const BADGE_BASE =
-  'inline-flex items-center px-4 py-1.5 rounded-full font-sans text-xs uppercase tracking-eyebrow text-center md:text-left'
+  'inline-flex items-center px-4 py-1.5 rounded-full text-xs uppercase tracking-eyebrow text-center md:text-left'
 
 export function LxEyebrow({
   data,
@@ -73,8 +76,15 @@ export function LxEyebrow({
     ? fontWeightClass(overrideWeight)
     : 'font-semibold'
 
+  // Family override: role token → Tailwind class; catalog font → inline
+  // font-family var (merged into the badge style below). Default font-sans.
+  const fam = resolveFamilyRender(data.family)
+  const badgeStyle =
+    customStyle || fam.style ? { ...customStyle, ...fam.style } : undefined
+
   const badgeClass = clsx(
     BADGE_BASE,
+    fam.className ?? 'font-sans',
     weightClass,
     tonePalette?.bg,
     tonePalette?.text,
@@ -85,7 +95,7 @@ export function LxEyebrow({
     return (
       <div className={outerClass}>
         <div className={flexClass}>
-          <span className={badgeClass} style={customStyle}>
+          <span className={badgeClass} style={badgeStyle}>
             <InlineEditable
               blockId={inlineEdit.blockId}
               blockVersion={inlineEdit.blockVersion}
@@ -107,7 +117,7 @@ export function LxEyebrow({
 
   const content = (
     <div className={flexClass}>
-      <span className={badgeClass} style={customStyle}>
+      <span className={badgeClass} style={badgeStyle}>
         {data.text}
       </span>
     </div>

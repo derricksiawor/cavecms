@@ -996,10 +996,15 @@ export function EditDrawer({
       tone="dark"
       resizable
       resizeStorageKey="cavecms:drawer-width:edit"
-      // The inline editor always renders the public admin bar (fixed,
-      // top:0, z-60); dock the drawer below it so the operator can still
-      // reach the bar's Sign out / nav instead of the drawer sliding behind.
-      dockBelowAdminBar
+      // Full-height, on top of ALL page chrome (site header + admin bar).
+      // The Drawer portals to <body> and renders at z-[85] (above the
+      // admin bar's z-60), so the editor panel is never trapped behind a
+      // sticky header's stacking context. Close the panel to get the
+      // admin bar back.
+      // Editor side-panel: keep the canvas scrollable behind the drawer so
+      // the operator can scroll to other blocks while editing. Mobile (the
+      // 85vh bottom-sheet) still locks scroll — handled inside Drawer.
+      allowBackgroundScroll
     >
       {/* Header — bold, copper eyebrow + serif title + block-type pill.
          Dark-tone restyle: cream/near-black flipped, copper accent

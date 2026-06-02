@@ -6,18 +6,15 @@ import { Menu, X, ChevronDown } from 'lucide-react'
 import { isLikelyExternal } from '@/lib/url/external'
 import { acquireScrollLock, releaseScrollLock } from '@/lib/client/bodyScrollLock'
 import { isNavLinkActive, type HeaderThemeClasses } from '@/lib/cms/headerTheme'
+import type { NavItem, NavChild } from '@/lib/cms/navTypes'
 
 const PROJECTS_HREF = '/projects'
 
 // Mobile drawer for SiteHeader. Hamburger button below `lg`. Opens a
 // slide-in overlay with the same nav items + CTA as the desktop bar.
-// Kept in a sibling client component so the SiteHeader itself stays
-// server-rendered.
-
-interface NavItem {
-  label: string
-  href: string
-}
+// Any item with children (operator-authored, or the auto-Projects list when
+// no manual children exist) renders as a collapsible accordion. Kept in a
+// sibling client component so the SiteHeader itself stays server-rendered.
 
 interface Cta {
   text: string
@@ -28,6 +25,16 @@ interface Cta {
 interface Project {
   slug: string
   name: string
+}
+
+// Resolve the child links for an item: operator children win; otherwise the
+// auto-Projects list (only for the /projects entry when projects exist).
+function childLinksFor(item: NavItem, projects: Project[]): NavChild[] {
+  if (item.children && item.children.length > 0) return item.children
+  if (item.href === PROJECTS_HREF && projects.length > 0) {
+    return projects.map((p) => ({ label: p.name, href: `/projects/${p.slug}` }))
+  }
+  return []
 }
 
 export function SiteHeaderMobile({
@@ -47,17 +54,30 @@ export function SiteHeaderMobile({
   // highlight sticks on the wrong link as the user navigates.
   const pathname = usePathname() ?? ''
   const [open, setOpen] = useState(false)
-  // Auto-expand the Projects section when the user opens the drawer
-  // from a project detail page — they're more likely to want to jump
-  // to a sibling project than to a different top-level section.
-  const [projectsExpanded, setProjectsExpanded] = useState(() =>
-    pathname.startsWith(PROJECTS_HREF + '/'),
-  )
+  // Auto-expand any submenu whose parent or a child matches the current path
+  // — the user is more likely to want a sibling than a different section.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {}
+    // Key is index-prefixed (positional) so duplicate label+href entries get
+    // distinct expand-state keys. The init loop and the render map below MUST
+    // build the key identically — both iterate navItems in order, so the
+    // index lines up.
+    navItems.forEach((item, i) => {
+      const links = childLinksFor(item, projects)
+      if (links.length === 0) return
+      const key = `${i}-${item.label}-${item.href}`
+      if (
+        isNavLinkActive(item.href, pathname) ||
+        links.some((l) => isNavLinkActive(l.href, pathname))
+      ) {
+        init[key] = true
+      }
+    })
+    return init
+  })
+  const toggle = (key: string) => setExpanded((m) => ({ ...m, [key]: !m[key] }))
 
-  // Close on route change — we don't have direct access to the route
-  // change event from a server-routed Link, so listen for the popstate
-  // + click bubbling up. Simpler: close whenever an internal link is
-  // clicked (handled inline below).
+  // Close on Escape; lock body scroll while the drawer is open.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -106,25 +126,25 @@ export function SiteHeaderMobile({
               </button>
             </div>
             <nav className="mt-4 flex flex-col gap-1">
-              {navItems.map((item) => {
-                const isProjectsItem =
-                  item.href === PROJECTS_HREF && projects.length > 0
-                if (isProjectsItem) {
-                  const parentActive = isNavLinkActive(item.href, pathname)
+              {navItems.map((item, i) => {
+                const key = `${i}-${item.label}-${item.href}`
+                const links = childLinksFor(item, projects)
+
+                if (links.length > 0) {
+                  const isOpen = expanded[key] ?? false
+                  const parentActive =
+                    isNavLinkActive(item.href, pathname) ||
+                    links.some((l) => isNavLinkActive(l.href, pathname))
+                  const hasHref = item.href.trim() !== ''
                   return (
-                    <div
-                      key={`${item.label}-${item.href}`}
-                      className="flex flex-col"
-                    >
+                    <div key={key} className="flex flex-col">
                       <button
                         type="button"
-                        aria-expanded={projectsExpanded}
-                        aria-controls="mobile-projects-submenu"
-                        onClick={() => setProjectsExpanded((v) => !v)}
+                        aria-expanded={isOpen}
+                        aria-controls={`mobile-submenu-${key}`}
+                        onClick={() => toggle(key)}
                         className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-colors ${
-                          parentActive
-                            ? theme.drawerNavActive
-                            : theme.drawerNav
+                          parentActive ? theme.drawerNavActive : theme.drawerNav
                         }`}
                       >
                         <span>{item.label}</span>
@@ -132,48 +152,43 @@ export function SiteHeaderMobile({
                           size={18}
                           strokeWidth={2}
                           aria-hidden="true"
-                          className={`transition-transform duration-200 ${
-                            projectsExpanded ? 'rotate-180' : ''
-                          }`}
+                          className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
                         />
                       </button>
-                      {projectsExpanded && (
+                      {isOpen && (
                         <ul
-                          id="mobile-projects-submenu"
+                          id={`mobile-submenu-${key}`}
                           className="mt-1 flex flex-col gap-0.5 pl-3"
                         >
-                          <li>
-                            <Link
-                              href={item.href}
-                              onClick={() => setOpen(false)}
-                              aria-current={
-                                pathname === item.href ? 'page' : undefined
-                              }
-                              className={`block rounded-xl px-4 py-2.5 text-sm font-medium uppercase tracking-[0.18em] transition-colors ${
-                                pathname === item.href
-                                  ? theme.drawerNavActive
-                                  : theme.drawerNav
-                              }`}
-                            >
-                              View all projects
-                            </Link>
-                          </li>
-                          {projects.map((p) => {
-                            const href = `/projects/${p.slug}`
-                            const active = pathname === href
+                          {hasHref && (
+                            <li>
+                              <Link
+                                href={item.href}
+                                onClick={() => setOpen(false)}
+                                aria-current={pathname === item.href ? 'page' : undefined}
+                                className={`block rounded-xl px-4 py-2.5 text-sm font-medium uppercase tracking-[0.18em] transition-colors ${
+                                  pathname === item.href ? theme.drawerNavActive : theme.drawerNav
+                                }`}
+                              >
+                                Go to {item.label}
+                              </Link>
+                            </li>
+                          )}
+                          {links.map((l, ci) => {
+                            const active = isNavLinkActive(l.href, pathname)
                             return (
-                              <li key={p.slug}>
+                              <li key={`${ci}-${l.label}-${l.href}`}>
                                 <Link
-                                  href={href}
+                                  href={l.href}
                                   onClick={() => setOpen(false)}
+                                  target={isLikelyExternal(l.href) ? '_blank' : undefined}
+                                  rel={isLikelyExternal(l.href) ? 'noopener noreferrer' : undefined}
                                   aria-current={active ? 'page' : undefined}
                                   className={`block rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
-                                    active
-                                      ? theme.drawerNavActive
-                                      : theme.drawerNav
+                                    active ? theme.drawerNavActive : theme.drawerNav
                                   }`}
                                 >
-                                  {p.name}
+                                  {l.label}
                                 </Link>
                               </li>
                             )
@@ -183,10 +198,11 @@ export function SiteHeaderMobile({
                     </div>
                   )
                 }
+
                 const active = isNavLinkActive(item.href, pathname)
                 return (
                   <Link
-                    key={`${item.label}-${item.href}`}
+                    key={key}
                     href={item.href}
                     onClick={() => setOpen(false)}
                     target={isLikelyExternal(item.href) ? '_blank' : undefined}

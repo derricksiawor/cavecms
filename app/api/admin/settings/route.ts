@@ -118,6 +118,10 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
   'site_header',
   'organization_json_ld',
   'theme_palette',
+  // Typography roles (which catalog font each role uses) — presentational
+  // branding, same trust level as theme_palette. An AI agent can restyle the
+  // site's typefaces via the API.
+  'typography_roles',
   // NOTE: site_general is deliberately NOT here — its `siteUrl` sets the
   // origin of outbound tokenized email links (newsletter confirm/unsubscribe,
   // brochure) and the canonical host, so a token writing it could harvest
@@ -179,6 +183,23 @@ export const PATCH = withError(async (req: Request) => {
   const body = Body.parse(await readJsonBody(req))
   const entry = (registry as Record<string, { schema: z.ZodTypeAny }>)[body.key]
   if (!entry) throw new HttpError(400, 'unknown_setting')
+
+  // custom_fonts is managed exclusively by /api/admin/fonts (which validates
+  // the on-disk binary before adding a row). Editing it through the generic
+  // settings PATCH would let an admin point a `file` at an arbitrary path /
+  // register a font with no backing file, so it's rejected here.
+  if (body.key === 'custom_fonts') {
+    throw new HttpError(400, 'managed_by_fonts_endpoint')
+  }
+
+  // google_fonts is managed exclusively by /api/admin/fonts/google (which
+  // fetches + verifies the woff2 server-side before adding a row). Editing it
+  // through the generic settings PATCH would let an admin point a `file` at an
+  // arbitrary path / register a font with no backing file, so it's rejected
+  // here — same as custom_fonts.
+  if (body.key === 'google_fonts') {
+    throw new HttpError(400, 'managed_by_fonts_endpoint')
+  }
 
   // API-token write cap — tokens write CONTENT + BRANDING only. A bearer
   // token reaches this route (middleware allows /api/admin/settings) but is

@@ -73,9 +73,17 @@ id_ed25519*
 .cursor
 .superpowers
 .notes
+# Brainstorming specs + implementation plans — local planning artifacts,
+# never shipped to customers or pushed to GitHub (global rule #0.55 / #1).
+docs/superpowers/
 # Project-level Claude instructions — local-only per global rule #1
 # (NEVER commit files with "claude" in the name).
 /CLAUDE.md
+
+# Local release/prestage tooling caches (local↔remote sync) — regenerable
+# state, ~144MB each; never tracked (global rule #0.55 production-only).
+/.source-state
+/.target-state
 
 # uploads live on disk (mounted dir), not in git
 /public/uploads

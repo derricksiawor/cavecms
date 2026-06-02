@@ -70,22 +70,139 @@ function rankEntry(entry: SeedEntry, q: string): number {
   return RANK_NO_MATCH
 }
 
-export function WidgetPicker({ pageId }: { pageId: number }) {
+// ─── WidgetPickerBody ───────────────────────────────────────────────
+// The search + categorized-pill list, extracted so BOTH the left-pinned
+// WidgetPicker rail AND the InsertBlockHere floating popover render the
+// exact same widgets UI. The ONLY difference is the insert target:
+//   - left rail  → no position params → append at end of page
+//   - insert popover → afterBlockId / beforeBlockId / parentId → insert
+//                      at that exact slot, then `onInserted()` closes it.
+// All the picker state (query, ranking, keyboard nav, busy, errors)
+// lives here so neither caller re-implements it.
+export function WidgetPickerBody({
+  pageId,
+  afterBlockId,
+  beforeBlockId,
+  parentId,
+  onInserted,
+  autoFocusSearch = false,
+}: {
+  pageId: number
+  afterBlockId?: number | null
+  beforeBlockId?: number | null
+  parentId?: number | null
+  // Called after a successful insert — the popover uses it to close.
+  onInserted?: () => void
+  // The popover focuses the search box on open; the rail doesn't.
+  autoFocusSearch?: boolean
+}) {
   const insertBlock = useInsertBlock()
   const templateGallery = useSectionTemplateGallery()
   const inFlightRef = useRef(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [open, setOpen] = useState(true)
   const [query, setQuery] = useState('')
   const [focusIndex, setFocusIndex] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (autoFocusSearch) searchInputRef.current?.focus()
+  }, [autoFocusSearch])
+
+  const visibleEntries = useMemo(
+    () => SEED_ENTRIES.filter(isPaletteVisible),
+    [],
+  )
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (q === '') return visibleEntries
+    const ranked = visibleEntries
+      .map((entry, originalIndex) => ({
+        entry,
+        rank: rankEntry(entry, q),
+        originalIndex,
+      }))
+      .filter((r) => r.rank !== RANK_NO_MATCH)
+      .sort((a, b) =>
+        a.rank !== b.rank ? a.rank - b.rank : a.originalIndex - b.originalIndex,
+      )
+    return ranked.map((r) => r.entry)
+  }, [visibleEntries, query])
+
+  useEffect(() => {
+    setFocusIndex(0)
+  }, [query])
+
+  const add = async (
+    blockType: SeedBlockType,
+    data?: Record<string, unknown>,
+    busyKey?: string,
+  ) => {
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    setBusy(busyKey ?? blockType)
+    setErr(null)
+    try {
+      const res = await insertBlock(blockType, {
+        pageId,
+        data,
+        afterBlockId: afterBlockId ?? undefined,
+        beforeBlockId: beforeBlockId ?? undefined,
+        parentId: parentId ?? undefined,
+      })
+      if (!res.ok) {
+        setErr(mapInsertBlockError(res.error).copy)
+        return
+      }
+      onInserted?.()
+    } finally {
+      setBusy(null)
+      inFlightRef.current = false
+    }
+  }
+
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (filtered.length === 0) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      setFocusIndex((i) => Math.min(filtered.length - 1, i + 1))
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setFocusIndex((i) => Math.max(0, i - 1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const entry = filtered[focusIndex]
+      if (entry) void add(entry.type, entry.data, entry.label)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setQuery('')
+    }
+  }
+
+  return (
+    <WidgetTab
+      err={err}
+      query={query}
+      setQuery={setQuery}
+      searchInputRef={searchInputRef}
+      onSearchKeyDown={onSearchKeyDown}
+      templateGallery={templateGallery}
+      busy={busy}
+      filtered={filtered}
+      focusIndex={focusIndex}
+      add={add}
+    />
+  )
+}
+
+export function WidgetPicker({ pageId }: { pageId: number }) {
+  const [open, setOpen] = useState(true)
   // Tab discriminator. "widgets" = the seed-entry pill list (default).
   // "saved" = the per-user Saved-Blocks library panel. Persisted to
   // localStorage so an operator who reaches for the library tab on
   // their last edit returns to it on the next page. Mirrors the
   // open/closed persistence pattern below.
   const [tab, setTab] = useState<'widgets' | 'saved'>('widgets')
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
   // `hasMounted` powers the mount-in slide-from-left entrance. SSR
   // renders the panel off-screen (translate-x-[-full] + opacity 0).
   // The post-mount effect flips it true; the CSS transition handles
@@ -133,77 +250,6 @@ export function WidgetPicker({ pageId }: { pageId: number }) {
     }
     safeStorage.set('cavecms:picker-open', String(open))
   }, [open])
-
-  // Filtered + ranked entries. Recomputes only when the query or the
-  // palette-visible set changes (SEED_ENTRIES is module-scope and
-  // never mutates — defended by `readonly SeedEntry[]` in blockSeeds).
-  const visibleEntries = useMemo(
-    () => SEED_ENTRIES.filter(isPaletteVisible),
-    [],
-  )
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (q === '') return visibleEntries
-    const ranked = visibleEntries
-      .map((entry, originalIndex) => ({
-        entry,
-        rank: rankEntry(entry, q),
-        originalIndex,
-      }))
-      .filter((r) => r.rank !== RANK_NO_MATCH)
-      .sort((a, b) =>
-        a.rank !== b.rank ? a.rank - b.rank : a.originalIndex - b.originalIndex,
-      )
-    return ranked.map((r) => r.entry)
-  }, [visibleEntries, query])
-
-  // Reset keyboard focus to the first match when the result set
-  // changes — otherwise an arrow-down on an out-of-range index would
-  // land on a deleted entry.
-  useEffect(() => {
-    setFocusIndex(0)
-  }, [query])
-
-  const add = async (
-    blockType: SeedBlockType,
-    data?: Record<string, unknown>,
-    busyKey?: string,
-  ) => {
-    if (inFlightRef.current) return
-    inFlightRef.current = true
-    setBusy(busyKey ?? blockType)
-    setErr(null)
-    try {
-      const res = await insertBlock(blockType, { pageId, data })
-      if (!res.ok) {
-        setErr(mapInsertBlockError(res.error).copy)
-        return
-      }
-    } finally {
-      setBusy(null)
-      inFlightRef.current = false
-    }
-  }
-
-  // Keyboard nav on the search input — arrow keys move the focused
-  // pill, Enter inserts the focused pill. Escape clears the query.
-  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (filtered.length === 0) return
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      e.preventDefault()
-      setFocusIndex((i) => Math.min(filtered.length - 1, i + 1))
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      e.preventDefault()
-      setFocusIndex((i) => Math.max(0, i - 1))
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const entry = filtered[focusIndex]
-      if (entry) void add(entry.type, entry.data, entry.label)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      setQuery('')
-    }
-  }
 
   return (
     <aside
@@ -314,18 +360,7 @@ export function WidgetPicker({ pageId }: { pageId: number }) {
         {tab === 'saved' ? (
           <SavedBlocksPanel pageId={pageId} />
         ) : (
-          <WidgetTab
-            err={err}
-            query={query}
-            setQuery={setQuery}
-            searchInputRef={searchInputRef}
-            onSearchKeyDown={onSearchKeyDown}
-            templateGallery={templateGallery}
-            busy={busy}
-            filtered={filtered}
-            focusIndex={focusIndex}
-            add={add}
-          />
+          <WidgetPickerBody pageId={pageId} />
         )}
       </div>
     </aside>

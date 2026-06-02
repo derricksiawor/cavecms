@@ -13,6 +13,7 @@ import { TagInput } from './TagInput'
 import { RichTextEditor } from './RichTextEditor'
 import { DatePicker } from './DatePicker'
 import { SortableList, DragHandle } from './SortableList'
+import { MenuBuilder } from './MenuBuilder'
 import { SocialLinkRow, type SocialLinkValue } from './SocialLinkRow'
 import { TEXT_MAX } from '@/lib/cms/limits'
 import {
@@ -21,7 +22,7 @@ import {
   FontWeightPickerField,
   IconPickerField,
 } from './pickers'
-import type { ColorToken, FontFamilyToken, FontWeightToken } from '@/lib/cms/designTokens'
+import type { ColorToken, FontWeightToken } from '@/lib/cms/designTokens'
 
 // Visual-form renderer. The `kind` discriminator drives which premium
 // widget the field uses. Server-side Zod schemas validate the final
@@ -132,6 +133,26 @@ export type FieldShape =
       max?: number
       fallback?: number
       help?: string
+    }
+  // Shared drag-and-drop menu builder for one-level menus (header nav with
+  // dropdowns; footer columns with links). Config keys decouple the builder
+  // from the raw value shape — see lib/cms/menuTree.ts MenuConfig.
+  | {
+      kind: 'menu_builder'
+      key: string
+      label: string
+      help?: string
+      // Parent label is always the `label` field (header link + footer column
+      // heading both use it), so there's no parentLabelKey — only the child
+      // label key varies ('label' vs 'text').
+      parentHrefKey?: string
+      childrenKey: string
+      childLabelKey: string
+      childHrefKey: string
+      maxItems: number
+      maxChildren: number
+      parentNoun: string
+      childNoun: string
     }
 
 export function ZodForm({
@@ -454,19 +475,17 @@ function FieldRenderer({
         <FontFamilyPickerField
           label={shape.label}
           help={shape.help}
-          value={
-            typeof value === 'string'
-              ? (value as FontFamilyToken)
-              : undefined
-          }
+          value={typeof value === 'string' ? value : undefined}
           onChange={(v) => onChange(v)}
         />
       )
 
     case 'font_weight': {
+      // `family` is a role token OR a catalog font key — passed through as a
+      // plain string so the weight picker can gate weights for either.
       const fam =
         shape.familyKey && typeof parent[shape.familyKey] === 'string'
-          ? (parent[shape.familyKey] as FontFamilyToken)
+          ? (parent[shape.familyKey] as string)
           : undefined
       return (
         <FontWeightPickerField
@@ -516,6 +535,15 @@ function FieldRenderer({
           onChange={onChange}
         />
       )
+    case 'menu_builder':
+      return (
+        <MenuBuilder
+          shape={shape}
+          value={value as Array<Record<string, unknown>> | undefined}
+          onChange={onChange}
+        />
+      )
+
     default:
       // Exhaustiveness gate — a new FieldShape variant lands as a TS
       // error here so the form picker can't silently skip a new kind.
@@ -1527,9 +1555,16 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       help: 'Champagne is the signature editorial kicker tone.',
     },
     {
+      kind: 'font_family',
+      key: 'family',
+      label: 'Font family',
+      help: 'Defaults to the body role. Pick a role or any catalog font.',
+    },
+    {
       kind: 'font_weight',
       key: 'weight',
       label: 'Font weight',
+      familyKey: 'family',
       help: 'Eyebrows traditionally sit at semibold/bold for crisp uppercase.',
     },
     {
@@ -2129,6 +2164,18 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'md', label: 'Medium' },
         { value: 'lg', label: 'Large' },
       ],
+    },
+    {
+      kind: 'font_family',
+      key: 'family',
+      label: 'Font family',
+      help: 'Defaults to the body role. Pick a role or any catalog/custom font.',
+    },
+    {
+      kind: 'font_weight',
+      key: 'weight',
+      label: 'Font weight',
+      familyKey: 'family',
     },
     {
       kind: 'select', key: 'alignment', label: 'Alignment',

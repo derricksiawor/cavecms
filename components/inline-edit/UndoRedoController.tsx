@@ -1,7 +1,11 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useUndoActions } from './UndoStackProvider'
+import {
+  useCanRedo,
+  useCanUndo,
+  useUndoActions,
+} from './UndoStackProvider'
 
 // Chunk J — UndoRedoController
 //
@@ -27,6 +31,40 @@ import { useUndoActions } from './UndoStackProvider'
 
 export function UndoRedoController() {
   const { runUndo, runRedo } = useUndoActions()
+  const canUndo = useCanUndo()
+  const canRedo = useCanRedo()
+
+  // ── Admin-bar bridge ──
+  // The public admin bar (AdminBarInteractive) renders in the root layout,
+  // OUTSIDE the UndoStackProvider, so its Undo/Redo pills cannot call
+  // runUndo/runRedo or read canUndo/canRedo directly. Same constraint the
+  // OutlineTogglePill solves with `cavecms:outline-visibility`. The pills
+  // post `cavecms:undo` / `cavecms:redo` window events (executed here) and
+  // a `cavecms:undo-state-request` to pull the current enabled state; this
+  // controller broadcasts `cavecms:undo-state` { canUndo, canRedo } both on
+  // request AND whenever the cursor moves, so the pills enable/disable in
+  // lockstep with the stack.
+  useEffect(() => {
+    const onUndo = () => void runUndo()
+    const onRedo = () => void runRedo()
+    const broadcast = () =>
+      window.dispatchEvent(
+        new CustomEvent('cavecms:undo-state', {
+          detail: { canUndo, canRedo },
+        }),
+      )
+    window.addEventListener('cavecms:undo', onUndo)
+    window.addEventListener('cavecms:redo', onRedo)
+    window.addEventListener('cavecms:undo-state-request', broadcast)
+    // Announce the current state immediately so a pill that mounted before
+    // this controller (or after) converges to the right enabled state.
+    broadcast()
+    return () => {
+      window.removeEventListener('cavecms:undo', onUndo)
+      window.removeEventListener('cavecms:redo', onRedo)
+      window.removeEventListener('cavecms:undo-state-request', broadcast)
+    }
+  }, [runUndo, runRedo, canUndo, canRedo])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

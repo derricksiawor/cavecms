@@ -812,3 +812,93 @@
   position: relative;
   z-index: 6;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Inline-editor floating chrome — per-block drag handles + action
+   toolbars (the elements tagged `data-edit-chrome`). "Deepest element
+   wins" visibility.
+
+   A container's chrome shows ONLY when the pointer (or keyboard focus)
+   is on THAT element's own area — never when a more specific descendant
+   is the target. Hovering a widget shows the widget's chrome, not its
+   parent column's or section's. Hovering a column's own gutter shows
+   the column's chrome, not the enclosing section's. This replaces the
+   previous group-hover / group-focus-within Tailwind classes, which
+   propagated up the ancestor chain — so hovering one child lit up every
+   ancestor's toolbar at once.
+
+   The block being edited (its EditDrawer is open, so an
+   aside[role="dialog"] lives in its subtree) hides its chrome entirely:
+   you're editing it in the drawer, so the floating toolbar would be
+   redundant clutter sitting on the canvas behind the open panel.
+
+   Touch / no-hover: there is no hover to reveal chrome, so the SELECTED
+   block ([data-edit-selected="true"]) pins its chrome open — tap to
+   select, then tap a button.
+
+   Nesting markers consulted by :has()/:not() (always present on the
+   wrappers, independent of selection state):
+     widget  → [data-edit-block-id]
+     column  → [data-edit-column-id]
+     section → [data-edit-section-id]
+   Every widget lives inside a column, so excluding "a column is hovered"
+   from the section transitively excludes widget hovers too; excluding
+   "a widget is hovered" from the column covers the deepest level.
+   ────────────────────────────────────────────────────────────────── */
+[data-edit-chrome] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* `[data-editing]` — set on a wrapper while ITS edit drawer is open. The
+   drawer portals to <body> (so its `aside[role=dialog]` is no longer a
+   DOM descendant and can't be detected via :has), so the wrapper carries
+   this flag instead. While editing, the block's own chrome stays hidden —
+   the operator is working in the drawer, the floating toolbar would just
+   linger on the dimmed canvas behind it. */
+
+/* Widget (deepest) — reveal on its own hover/focus, unless it's being
+   edited in the drawer. No descendant containers to exclude. */
+[data-edit-block-id]:not([data-editing]):hover > [data-edit-chrome],
+[data-edit-block-id]:not([data-editing]):focus-within > [data-edit-chrome] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Column — reveal when the column itself is hovered/focused but NOT
+   when a descendant widget is, and not while it's being edited. */
+[data-edit-column-id]:not([data-editing]):hover:not(
+    :has([data-edit-block-id]:hover)
+  )
+  > [data-edit-chrome],
+[data-edit-column-id]:not([data-editing]):focus-within:not(
+    :has([data-edit-block-id]:focus-within)
+  )
+  > [data-edit-chrome] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Section — reveal when the section itself is hovered/focused but NOT
+   when a descendant column (and transitively, widget) is, and not while
+   it's being edited. */
+[data-edit-section-id]:not([data-editing]):hover:not(
+    :has([data-edit-column-id]:hover)
+  )
+  > [data-edit-chrome],
+[data-edit-section-id]:not([data-editing]):focus-within:not(
+    :has([data-edit-column-id]:focus-within)
+  )
+  > [data-edit-chrome] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Touch / no-hover: pin the SELECTED block's chrome open so operators
+   can reach the buttons after a tap (there is no hover to reveal them). */
+@media (hover: none) {
+  [data-edit-selected="true"] > [data-edit-chrome] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

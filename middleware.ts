@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest, type NextFetchEvent } from 'next/server'
 import { verifySessionJwt } from '@/lib/auth/jwt'
 import { SESSION_COOKIE } from '@/lib/auth/cookies'
 import { isBearerApiToken, tokenAllowedPath } from '@/lib/auth/apiTokenScope'
@@ -9,6 +9,12 @@ import { cidrListMatch, clientIpFromRequest } from '@/lib/security/ipMatch'
 import { classifySuspicious } from '@/lib/security/suspiciousRequest'
 import { buildCsp, type IntegrationsCspFlags } from '@/lib/security/buildCsp'
 import { isUnroutableForHsts } from '@/lib/security/hostKind'
+import {
+  compileRules,
+  matchRedirect,
+  type CompiledRuleset,
+  type RedirectRule,
+} from '@/lib/cms/redirects'
 
 // Middleware runs on the default Edge runtime. All imports above are
 // Edge-compatible:
@@ -62,6 +68,19 @@ interface SecurityConfig {
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
+
+// Redirect rules propagate within REDIRECTS_CACHE_TTL_MS of an operator
+// edit. The Edge matcher caches the compiled ruleset module-level and can't
+// be invalidated cross-runtime from the Node admin routes, so this TTL is
+// the activation latency. 3s (matching the security-config cadence) keeps a
+// freshly-saved redirect feeling live without a per-request DB read; the
+// etag still skips recompiling while the ruleset is unchanged.
+const REDIRECTS_CACHE_TTL_MS = 3000
+
+// Loopback upstream port for the internal-config + redirect feeds. The
+// standalone server binds 127.0.0.1:$PORT (default 3040 in dev). One source
+// of truth so the three loopback callers below never drift.
+const LOOPBACK_PORT = process.env['PORT'] ?? '3040'
 
 interface ConfigCache {
   ts: number
@@ -140,7 +159,7 @@ async function getSecurityConfig(_req: NextRequest, forceFresh = false): Promise
   // listener instead, matching the pattern in scripts/cron-purge.ts.
   // Forward the public Host header so any downstream host-aware logic
   // sees the originating hostname.
-  const port = process.env['PORT'] ?? '3040'
+  const port = LOOPBACK_PORT
   const url = `http://127.0.0.1:${port}/api/internal/security-config`
   try {
     const res = await fetch(url, {
@@ -178,6 +197,73 @@ async function getSecurityConfig(_req: NextRequest, forceFresh = false): Promise
   }
 }
 
+// Operator-managed redirects, pulled over the same loopback pattern as
+// the security config (bearer + loopback Host) but with a longer TTL and
+// an etag so the compiled matcher is reused while the ruleset is unchanged.
+declare global {
+  var __cavecmsRedirects:
+    | { ts: number; etag: string; compiled: CompiledRuleset }
+    | undefined
+}
+
+// Throttle feed-failure warnings to at most once per TTL window so a
+// persistent outage is visible in logs without spamming on every request.
+let redirectFeedWarnedAt = 0
+function warnRedirectFeed(reason: string): void {
+  const now = Date.now()
+  if (now - redirectFeedWarnedAt < REDIRECTS_CACHE_TTL_MS) return
+  redirectFeedWarnedAt = now
+  console.warn(`[middleware] redirect feed ${reason}; using last-known-good (redirects may be stale)`)
+}
+
+async function getRedirectMatcher(): Promise<CompiledRuleset | null> {
+  const cached = globalThis.__cavecmsRedirects
+  if (cached && Date.now() - cached.ts < REDIRECTS_CACHE_TTL_MS) return cached.compiled
+  const secret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
+  if (!secret) return cached?.compiled ?? null
+  try {
+    const res = await fetch(`http://127.0.0.1:${LOOPBACK_PORT}/api/internal/redirects`, {
+      headers: { authorization: `Bearer ${secret}`, host: `127.0.0.1:${LOOPBACK_PORT}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!res.ok) {
+      warnRedirectFeed(`returned ${res.status}`)
+      return cached?.compiled ?? null
+    }
+    const data = (await res.json()) as { etag: string; rules: RedirectRule[] }
+    if (cached && cached.etag === data.etag) {
+      // Unchanged — refresh ts, reuse compiled form (skip recompile).
+      globalThis.__cavecmsRedirects = { ...cached, ts: Date.now() }
+      return cached.compiled
+    }
+    const compiled = compileRules(data.rules)
+    globalThis.__cavecmsRedirects = { ts: Date.now(), etag: data.etag, compiled }
+    return compiled
+  } catch {
+    // Last-known-good; a transient feed hiccup must never break navigation.
+    warnRedirectFeed('unreachable')
+    return cached?.compiled ?? null
+  }
+}
+
+// Paths that must never be redirect-matched (admin/api/internal/render/
+// static + the install + login surfaces are handled by their own gates).
+function redirectMatchEligible(pathname: string, method: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false
+  if (
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/install') ||
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/uploads/') ||
+    pathname.startsWith('/cms-render')
+  ) {
+    return false
+  }
+  return true
+}
+
 // 16 random bytes → 24-char base64 string. CSP3 § 6.6.3.1 requires a
 // nonce of at least 128 bits of entropy; 16 bytes = 128 bits exactly.
 function generateNonce(): string {
@@ -194,6 +280,16 @@ function adminPath(p: string): boolean {
   return p === '/admin' || p.startsWith('/admin/') || p.startsWith('/api/admin/') || p.startsWith('/api/cms/')
 }
 
+// Public read of the navigation menus. `/api/cms/nav` matches adminPath
+// (it lives under /api/cms/), so WITHOUT this carve-out it would be caught
+// by BOTH the /admin IP-allowlist gate AND the auth gate. The GET is public
+// content (header nav + footer columns, also fetched by headless frontends);
+// only the PUT stays gated. Both gates consult this single predicate so the
+// "public" contract can't silently break under the IP-allowlist config.
+function isPublicNavRead(req: NextRequest): boolean {
+  return req.method === 'GET' && req.nextUrl.pathname === '/api/cms/nav'
+}
+
 // `tokenAllowedPath` (the surfaces a bearer token may reach) lives in the
 // edge-safe lib/auth/apiTokenScope module so middleware AND _loadAuthState
 // share one definition. The cap is enforced in BOTH places: here at the
@@ -205,6 +301,10 @@ function adminPath(p: string): boolean {
 
 async function authGate(req: NextRequest): Promise<NextResponse | null> {
   const p = req.nextUrl.pathname
+  // Public read of the navigation menus (see isPublicNavRead). Only the GET
+  // is public; PUT stays under the /api/cms/* gate below (session or bearer
+  // token, verified in the route handler).
+  if (isPublicNavRead(req)) return null
   const needsAuth = adminPath(p) || p === '/api/auth/logout'
   if (!needsAuth) return null
   const token = req.cookies.get(SESSION_COOKIE)?.value
@@ -421,7 +521,10 @@ function maybeRewriteToPageRoute(pathname: string, loginPathLower: string): stri
   return `${CMS_RENDER_PREFIX}/${captured}`
 }
 
-export async function middleware(req: NextRequest): Promise<NextResponse> {
+export async function middleware(
+  req: NextRequest,
+  event: NextFetchEvent,
+): Promise<NextResponse> {
   const pathname = req.nextUrl.pathname
 
   // Loopback security-config endpoint: bypass everything else so
@@ -531,7 +634,11 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     cfg.ipAllowlist.cidrs.length > 0 &&
     !cfg.disableIpAllowlist &&
     adminPath(pathname) &&
-    !(isBearerApiToken(req.headers.get('authorization')) && tokenAllowedPath(pathname))
+    !(isBearerApiToken(req.headers.get('authorization')) && tokenAllowedPath(pathname)) &&
+    // Anonymous public nav reads bypass the admin-only allowlist exactly as
+    // they bypass authGate — otherwise enabling the allowlist silently 404s
+    // the documented public GET /api/cms/nav for off-allowlist callers.
+    !isPublicNavRead(req)
   ) {
     if (!cidrListMatch(ip, cfg.ipAllowlist.cidrs)) return notFoundResponse()
   }
@@ -566,6 +673,54 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     !cidrListMatch(ip, cfg.maintenance.bypassIps)
   ) {
     return maintenanceResponse(cfg.maintenance.message)
+  }
+
+  // 5b. Operator-managed redirects. Site-wide, after the maintenance gate
+  //     so a 503 still wins, before the CMS rewrite so /old.html etc.
+  //     redirect even when they'd otherwise 404. Skips admin/api/internal/
+  //     render/static + non-GET. Cached ruleset, fail-open on feed error.
+  if (redirectMatchEligible(pathname, req.method)) {
+    const matcher = await getRedirectMatcher()
+    if (matcher) {
+      const hit = matchRedirect(matcher, pathname, req.nextUrl.search)
+      if (hit) {
+        // Fire-and-forget hit bump — never delays the response.
+        const hitSecret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
+        if (hitSecret) {
+          const hitPort = LOOPBACK_PORT
+          event.waitUntil(
+            fetch(`http://127.0.0.1:${hitPort}/api/internal/redirect-hit`, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${hitSecret}`,
+                host: `127.0.0.1:${hitPort}`,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({ id: hit.ruleId }),
+              cache: 'no-store',
+              signal: AbortSignal.timeout(2000),
+            }).catch(() => {}),
+          )
+        }
+        if (hit.kind === 'gone') {
+          return new NextResponse('410 Gone', {
+            status: 410,
+            headers: { 'content-type': 'text/plain; charset=utf-8' },
+          })
+        }
+        const loc = hit.location ?? '/'
+        if (/^https?:\/\//i.test(loc)) {
+          return NextResponse.redirect(loc, hit.status ?? 301)
+        }
+        // Resolve a relative target against the forwarded host so the
+        // Location header is the URL the visitor actually typed (mirrors
+        // the install-redirect host rebuild above).
+        const fwdHost = req.headers.get('host') ?? req.nextUrl.host
+        const fwdProto =
+          req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(/:$/, '')
+        return NextResponse.redirect(new URL(loc, `${fwdProto}://${fwdHost}`), hit.status ?? 301)
+      }
+    }
   }
 
   // 6. Block 1: refuse direct external hits to the internal

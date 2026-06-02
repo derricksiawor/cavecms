@@ -6,7 +6,7 @@ import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
@@ -192,6 +192,37 @@ function buildSets(
 
   return { setSql: sql.join(parts, sql`, `), applied }
 }
+
+// ─── GET /api/cms/projects/[id] — single project for editor load ────
+// Read-modify-write surface. The list endpoint returns only card fields
+// (slug, name, status, featured_order, published) — not the editable
+// scalars tagline / location / seo* / hero / brochure. Without this an
+// agent or editor could PATCH those fields but never read the current
+// value first. Returns every column a PATCH can write. Trashed rows are
+// admin + editor only (viewer → 404), mirroring the pages GET.
+export const GET = withError<RouteCtx>(async (req, { params }) => {
+  const { id: rawId } = await params
+  const id = parseId(rawId)
+  const ctx = await requireRole(['admin', 'editor', 'viewer'])
+  checkReadRate(ctx.userId)
+
+  const [rows] = (await db.execute(sql`
+    SELECT * FROM projects WHERE id = ${id}
+  `)) as unknown as [Array<ProjectRow & { deleted_at: string | null }>]
+  const project = rows[0]
+  if (!project) throw new HttpError(404, 'not_found')
+  if (project.deleted_at !== null && ctx.role === 'viewer') {
+    throw new HttpError(404, 'not_found')
+  }
+
+  return new Response(JSON.stringify({ project }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': 'private, no-store',
+    },
+  })
+})
 
 export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   const { id: rawId } = await params
