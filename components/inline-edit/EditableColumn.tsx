@@ -528,6 +528,9 @@ export function EditableColumn(p: Props) {
       data-edit-column-version={versions.blockVersion}
       data-edit-column-page-id={p.pageId}
       data-edit-selected={isSelected ? 'true' : undefined}
+      // While this column's edit drawer is open, suppress its floating
+      // chrome (see globals.css `[data-editing]`).
+      data-editing={open ? 'true' : undefined}
       onContextMenu={onContextMenu}
       onClick={onWrapperClick}
       // Chunk H: tabIndex=-1 lets the context menu's focus-restore on
@@ -581,7 +584,12 @@ export function EditableColumn(p: Props) {
         // touch-action: none required on the dnd-kit PointerSensor activator
         // — see EditableBlock for the full rationale.
         style={{ touchAction: 'none' }}
-        className="absolute -top-3 left-1/2 z-20 inline-flex h-7 w-11 -translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-full bg-near-black/90 text-cream-50 opacity-0 shadow-[0_6px_14px_-6px_rgba(5,5,5,0.5)] transition-opacity duration-quick ease-standard hover:text-copper-300 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 active:cursor-grabbing group-hover/column:opacity-100 group-focus-within/column:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:opacity-100"
+        data-edit-chrome
+        // Visibility owned by the `[data-edit-chrome]` rules in
+        // globals.css (deepest-wins) — the handle reveals only when the
+        // column's own area is hovered/focused, not when a child widget
+        // is. `coarse:h-11` (sizing) stays; visibility moved to CSS.
+        className="absolute -top-3 left-1/2 z-20 inline-flex h-7 w-11 -translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-full bg-near-black/90 text-cream-50 shadow-[0_6px_14px_-6px_rgba(5,5,5,0.5)] transition-opacity duration-quick ease-standard hover:text-copper-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 active:cursor-grabbing motion-reduce:transition-none [@media(pointer:coarse)]:h-11"
       >
         <GripVertical
           size={12}
@@ -592,16 +600,17 @@ export function EditableColumn(p: Props) {
       </button>
 
       {/* Floating action toolbar — top-right of the column. F1 — Move
-          Left/Right for keyboard + touch operators. F10 — z-20. F11 —
-          stays open while selected. */}
+          Left/Right for keyboard + touch operators. F10 — z-20.
+          Hover/focus-only on hover-capable devices; touch keeps the
+          pin-while-selected (see className below). */}
       <div
         data-edit-toolbar
-        className={clsx(
-          'absolute -top-3 right-3 z-20 flex items-center gap-0.5 rounded-full bg-near-black/95 p-0.5 shadow-[0_10px_24px_-12px_rgba(5,5,5,0.45)] backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none',
-          isSelected
-            ? 'pointer-events-auto opacity-100'
-            : 'pointer-events-none opacity-0 group-hover/column:pointer-events-auto group-hover/column:opacity-100 group-focus-within/column:pointer-events-auto group-focus-within/column:opacity-100',
-        )}
+        data-edit-chrome
+        // Visibility (hover/focus reveal limited to the column's OWN
+        // area, drawer-open hide, touch selected-pin) is owned by the
+        // `[data-edit-chrome]` rules in globals.css — hovering a child
+        // widget no longer reveals this column toolbar.
+        className="absolute -top-3 right-3 z-20 flex items-center gap-0.5 rounded-full bg-near-black/95 p-0.5 shadow-[0_10px_24px_-12px_rgba(5,5,5,0.45)] backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none"
         aria-label="Column actions"
       >
         <ToolButton

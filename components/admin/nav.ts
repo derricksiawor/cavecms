@@ -21,6 +21,7 @@ import {
   Sparkles,
   Palette,
   Type,
+  Signpost,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -67,6 +68,7 @@ export const NAV: readonly NavItem[] = [
   { label: 'Security', href: '/admin/settings/security', roles: ['admin'], icon: Lock, parent: '/admin/settings' },
   { label: 'Integrations', href: '/admin/settings/integrations', roles: ['admin'], icon: Plug, parent: '/admin/settings' },
   { label: 'API Tokens', href: '/admin/settings/api-tokens', roles: ['admin'], icon: KeyRound, parent: '/admin/settings' },
+  { label: 'Redirects', href: '/admin/settings/redirects', roles: ['admin'], icon: Signpost, parent: '/admin/settings' },
   { label: 'Email', href: '/admin/settings/email', roles: ['admin'], icon: Mail, parent: '/admin/settings' },
   { label: 'AI Assistant', href: '/admin/settings/ai', roles: ['admin'], icon: Sparkles, parent: '/admin/settings' },
   { label: 'Updates', href: '/admin/settings/updates', roles: ['admin'], icon: Download, parent: '/admin/settings' },

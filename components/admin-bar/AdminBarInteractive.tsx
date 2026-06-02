@@ -24,6 +24,8 @@ import {
   Menu as MenuIcon,
   Pencil,
   Plus,
+  Redo2,
+  Undo2,
   Upload,
   UserPlus,
   type LucideIcon,
@@ -328,6 +330,7 @@ function BarInner({
           </BarLink>
         )}
         {editMode && <OutlineTogglePill />}
+        {editMode && <UndoRedoPills />}
         <div className="ml-auto flex items-center gap-3">
           <Identity email={email} role={role} />
           <PillButton
@@ -439,6 +442,68 @@ function OutlineTogglePill() {
     >
       <Layers size={14} strokeWidth={1.8} aria-hidden />
     </PillButton>
+  )
+}
+
+// UndoRedoPills — Undo / Redo buttons for the inline editor.
+//
+// The undo ENGINE lives in UndoStackProvider (inside EditableMain); the
+// admin bar renders in the root layout, OUTSIDE that provider, so these
+// pills bridge via window events (mirrors OutlineTogglePill's pattern):
+//   - click Undo / Redo  → dispatch `cavecms:undo` / `cavecms:redo`
+//   - on mount           → dispatch `cavecms:undo-state-request`
+//   - listen             → `cavecms:undo-state` { canUndo, canRedo }
+// The UndoRedoController (inside the provider) executes the actions and
+// broadcasts the enabled state, keeping these buttons in lockstep with
+// the stack cursor (and with ⌘Z / ⇧⌘Z, which route through the same
+// runUndo / runRedo). Disabled when there's nothing to undo / redo.
+function UndoRedoPills() {
+  const [state, setState] = useState<{ canUndo: boolean; canRedo: boolean }>({
+    canUndo: false,
+    canRedo: false,
+  })
+  useEffect(() => {
+    const onState = (e: Event) => {
+      const d = (e as CustomEvent<{ canUndo?: boolean; canRedo?: boolean }>)
+        .detail
+      if (d && typeof d.canUndo === 'boolean' && typeof d.canRedo === 'boolean') {
+        setState({ canUndo: d.canUndo, canRedo: d.canRedo })
+      }
+    }
+    window.addEventListener('cavecms:undo-state', onState)
+    // Pull the current state in case the controller mounted first.
+    window.dispatchEvent(new Event('cavecms:undo-state-request'))
+    return () => window.removeEventListener('cavecms:undo-state', onState)
+  }, [])
+  const fire = (name: 'cavecms:undo' | 'cavecms:redo') => {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new Event(name))
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      <PillButton
+        variant="bar"
+        size="bar"
+        ariaLabel="Undo"
+        title="Undo (⌘Z)"
+        className="px-2.5"
+        disabled={!state.canUndo}
+        onClick={() => fire('cavecms:undo')}
+      >
+        <Undo2 size={14} strokeWidth={1.8} aria-hidden />
+      </PillButton>
+      <PillButton
+        variant="bar"
+        size="bar"
+        ariaLabel="Redo"
+        title="Redo (⇧⌘Z)"
+        className="px-2.5"
+        disabled={!state.canRedo}
+        onClick={() => fire('cavecms:redo')}
+      >
+        <Redo2 size={14} strokeWidth={1.8} aria-hidden />
+      </PillButton>
+    </span>
   )
 }
 

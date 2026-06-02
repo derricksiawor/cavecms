@@ -1,37 +1,29 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Loader2, Image as ImageIcon, ImagePlus, Star } from 'lucide-react'
-import clsx from 'clsx'
-import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
-import { useToast } from './Toast'
-import { useMediaPicker } from './MediaPickerProvider'
-import { useInsertBlock } from './InlineEditContext'
-import {
-  SEED_ENTRIES,
-  isPaletteVisible,
-  type SeedBlockType,
-} from '@/lib/cms/blockSeeds'
+import { createPortal } from 'react-dom'
+import { LayoutGrid, Plus, X } from 'lucide-react'
+import { WidgetPickerBody } from './WidgetPicker'
 
 // Notion / Wix-style "drop a block here" affordance. Rendered between
 // every pair of EditableBlock children on the public page in edit mode
 // (plus before the first block and after the last). Sits as a thin
 // invisible spacer that expands into a copper "+ Add block here" pill
-// on hover; clicking opens a small popover with the seed block types
-// (text / cta / quote — same allowlist as the empty-state CTA).
+// on hover; clicking opens the WIDGETS picker — the SAME search +
+// categorized-pill UI as the left-pinned WidgetPicker rail — as a
+// floating popover anchored beside the insert point.
 //
-// Seed-data + seed-type entries live in `lib/cms/blockSeeds.ts` —
-// shared with OutlinePanel.AddBlockMenu, EditableColumn.ColumnInlinePicker,
-// and EditModeEmptyState so all four "add a block" surfaces stay in
-// lockstep when a widget gets a new required field.
+// The popover is portaled to <body> so it "hovers" above the document
+// and is never clipped by a column's overflow / transform / stacking
+// context. It is placed on whichever horizontal side of the trigger has
+// more room (so it's never pushed off the viewport edge), its height is
+// capped to the viewport, and the option list scrolls inside — fixing
+// the old inline menu that ran off the bottom of the page.
 //
-// `position` is OPTIONAL — when omitted, the server slots the block at
-// the end. When passed, the new block lands at that position (1000-spaced
-// positions per `lib/cms/saveBlock.ts` convention; we pass the AVERAGE
-// of the surrounding positions so the new block falls between them
-// without forcing a reorder pass). The API endpoint accepts an optional
-// `afterBlockId` param to position relative to an existing block, which
-// is what this component uses.
+// `position` is OPTIONAL on the insert API — when omitted the server
+// appends at the end. The popover forwards afterBlockId / beforeBlockId
+// / parentId straight through WidgetPickerBody → useInsertBlock so the
+// new block lands at THIS slot.
 
 export function InsertBlockHere({
   pageId,
@@ -42,321 +34,179 @@ export function InsertBlockHere({
   pageId: number
   // Block id this insert-point sits AFTER. Numeric → server bisects
   // sibling positions sharing parentId. Null/undefined → defer to
-  // `beforeBlockId` (BEFORE-first pill) or append-to-tail (no
-  // neighbour info at all).
+  // `beforeBlockId` (BEFORE-first pill) or append-to-tail.
   afterBlockId?: number | null
-  // Block id this insert-point sits IMMEDIATELY BEFORE. Numeric →
-  // server bisects with the prior sibling so the new block lands at
-  // the head of the bucket (or between this and prior). Mutually
+  // Block id this insert-point sits IMMEDIATELY BEFORE. Mutually
   // exclusive with afterBlockId.
   beforeBlockId?: number | null
   // Parent column id when this affordance lives inside an editable
-  // column (Chunk C). Null/undefined → top-level loose widget under
-  // parent_id IS NULL (legacy + back-compat path).
+  // column. Null/undefined → top-level loose widget under parent_id
+  // IS NULL.
   parentId?: number | null
 }) {
-  const toast = useToast()
-  const mediaPicker = useMediaPicker()
-  const insertBlock = useInsertBlock()
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState<string | null>(null)
-  // Synchronous in-flight guard. A rapid double-click on the same
-  // picker button dispatches two events in the same React tick - both
-  // see `busy === null` from the render-closure and BOTH fire POST
-  // /api/cms/blocks, inserting a duplicate block. The ref is mutated
-  // synchronously so the second click bails immediately. (Chunk I —
-  // insertBlock itself is idempotent per call but doesn't dedupe
-  // concurrent dispatches; the guard stays here at the picker
-  // boundary where the operator's gesture originates.)
-  //
-  // No separate "picker-in-flight" guard is needed for the Picture
-  // path: MediaPickerProvider holds a single-slot state, so two
-  // rapid `mediaPicker.open(...)` calls coalesce to one modal (React
-  // batches setState; the second call's onPick replaces the first).
-  // The post-pick `add('image', ...)` call still flows through this
-  // inFlightRef, so a duplicate POST is impossible.
-  const inFlightRef = useRef(false)
-  const ref = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const firstMenuItemRef = useRef<HTMLButtonElement | null>(null)
 
-  // Outside-click + Escape close the popover. Auto-focus the first
-  // menuitem on open so keyboard operators don't have to tab from
-  // the trigger to the first option.
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    firstMenuItemRef.current?.focus()
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  // Focus restore on close (only after a real open→close transition,
-  // not on initial mount).
+  // Restore focus to the trigger when the popover closes (only after a
+  // real open→close transition, not on initial mount).
   const wasOpenRef = useRef(false)
   useEffect(() => {
-    if (!open && wasOpenRef.current) triggerRef.current?.focus()
-    wasOpenRef.current = open
+    if (open) {
+      wasOpenRef.current = true
+      return
+    }
+    if (wasOpenRef.current) triggerRef.current?.focus()
+    wasOpenRef.current = false
   }, [open])
 
-  // Chunk I — POST + refresh routed through the centralised
-  // useInsertBlock hook. The picker keeps ownership of: open/close
-  // state, in-flight guard, busy spinner key, and the toast mapping.
-  // The hook covers: body shape, default seed data lookup, response
-  // parsing, error normalisation, router.refresh.
-  const add = async (
-    blockType: SeedBlockType,
-    data?: Record<string, unknown>,
-    // Optional UI-state identifier. Defaults to blockType so callers
-    // that don't need to disambiguate keep the pre-Chunk-G behaviour.
-    // SEED_ENTRIES callers pass entry.label so duplicate-blockType
-    // entries (Counter + Stats Row) get independent busy spinners.
-    busyKey?: string,
-  ) => {
-    if (inFlightRef.current) return
-    inFlightRef.current = true
-    setBusy(busyKey ?? blockType)
-    try {
-      const res = await insertBlock(blockType, {
-        pageId,
-        data,
-        afterBlockId: afterBlockId ?? undefined,
-        beforeBlockId: beforeBlockId ?? undefined,
-        parentId: parentId ?? undefined,
-      })
-      if (!res.ok) {
-        toast.error(mapInsertBlockError(res.error).copy)
-        return
-      }
-      setOpen(false)
-    } finally {
-      setBusy(null)
-      inFlightRef.current = false
-    }
-  }
-
-  // Image (lx_figure) — open MediaPicker, on pick create the figure
-  // block with the chosen media_id. lx_figure requires `image.media_id`
-  // (MediaRef); ratio/fit/etc. fall to schema defaults. This two-step
-  // flow (pick → create) is the only valid creation path.
-  const addImage = () => {
-    if (busy) return
-    mediaPicker.open(undefined, (m) => {
-      void add(
-        'lx_figure',
-        { image: { media_id: m.media_id, alt: m.alt ?? '' } },
-        'Picture',
-      )
-    })
-  }
-  // Gallery (lx_gallery) — same MediaPicker flow as Image, seeded into
-  // lx_gallery's required images[] (min 1). Default columns = 3 (luxury
-  // 3-up grid). Operator adds more images via the EditDrawer.
-  const addGallery = () => {
-    if (busy) return
-    mediaPicker.open(undefined, (m) => {
-      void add(
-        'lx_gallery',
-        {
-          images: [{ media_id: m.media_id, alt: m.alt ?? '' }],
-          columns: 3,
-        },
-        'Gallery',
-      )
-    })
-  }
-  // Featured projects (lx_featured_projects) — no MediaPicker, no
-  // per-block selection. The grid auto-renders the projects marked
-  // Featured (Projects → Featured order), so it seeds with empty data.
-  const addFeaturedProjects = () => {
-    if (busy) return
-    void add('lx_featured_projects', {}, 'Featured projects')
-  }
-
   return (
-    <div
-      ref={ref}
-      className={clsx(
-        'group/insert relative my-1 flex h-6 items-center justify-center',
-        open && 'h-auto',
-      )}
-    >
+    <div className="group/insert relative my-1 flex h-6 items-center justify-center">
       {/* Thin divider line, invisible until hover. When hovered, a
           copper "+ Add block here" pill appears centered on the line. */}
-      {!open && (
-        <button
-          ref={triggerRef}
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Insert a new block here"
-          aria-haspopup="menu"
-          // Chunk H — when this pill lives inside a column (parentId is
-          // numeric), tag it with the column id so the context menu's
-          // column "Add widget" verb can find it via a stable selector
-          // and click() it to open the picker. Top-level / loose pills
-          // (parentId omitted) skip the attribute to keep the selector
-          // scoped to column children.
-          data-add-widget-target={typeof parentId === 'number' ? parentId : undefined}
-          className="relative flex w-full items-center justify-center text-warm-stone opacity-0 transition-opacity duration-quick ease-standard hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none motion-reduce:transition-none"
-        >
-          <span
-            aria-hidden="true"
-            className="absolute inset-x-12 top-1/2 h-px -translate-y-1/2 bg-copper-400/50"
-          />
-          <span className="relative inline-flex items-center gap-1.5 rounded-full bg-copper-500 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-cream-50 shadow-[0_6px_14px_-6px_rgba(160,90,40,0.6)]">
-            <Plus size={11} strokeWidth={2.4} />
-            Add block here
-          </span>
-        </button>
-      )}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Insert a new block here"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        // Chunk H — when this pill lives inside a column (parentId is
+        // numeric), tag it with the column id so the context menu's
+        // column "Add widget" verb can find it via a stable selector and
+        // click() it to open the picker. Loose pills skip the attribute.
+        data-add-widget-target={typeof parentId === 'number' ? parentId : undefined}
+        className="relative flex w-full items-center justify-center text-warm-stone opacity-0 transition-opacity duration-quick ease-standard hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none motion-reduce:transition-none"
+      >
+        <span
+          aria-hidden="true"
+          className="absolute inset-x-12 top-1/2 h-px -translate-y-1/2 bg-copper-400/50"
+        />
+        <span className="relative inline-flex items-center gap-1.5 rounded-full bg-copper-500 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-cream-50 shadow-[0_6px_14px_-6px_rgba(160,90,40,0.6)]">
+          <Plus size={11} strokeWidth={2.4} />
+          Add block here
+        </span>
+      </button>
 
       {open && (
-        <div
-          role="menu"
-          aria-label="Pick a block type"
-          className="relative w-full max-w-sm rounded-2xl border border-warm-stone/20 bg-cream-50 p-3 shadow-[0_22px_56px_-26px_rgba(5,5,5,0.4)] animate-cavecms-fade-in"
-        >
-          <p className="mb-2 px-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-warm-stone">
-            Insert a block
-          </p>
-          <ul className="space-y-1">
-            {SEED_ENTRIES.filter(isPaletteVisible).map((entry, i) => {
-              // `busy` is keyed by entry.label rather than entry.type
-              // because two picker entries (Counter + Stats Row) can
-              // legitimately share a block_type but should still show
-              // their loader spinners independently.
-              // isPaletteVisible gates legacy widget types per the
-              // luxury-redesign migration (see blockSeeds.ts).
-              const Icon = entry.icon
-              const isBusy = busy === entry.label
-              return (
-                <li key={entry.label}>
-                  <button
-                    ref={i === 0 ? firstMenuItemRef : undefined}
-                    type="button"
-                    role="menuitem"
-                    aria-busy={isBusy}
-                    disabled={busy !== null}
-                    onClick={() => void add(entry.type, entry.data, entry.label)}
-                    className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-copper-500/15 text-copper-500 ring-1 ring-copper-400/30">
-                      {isBusy ? (
-                        <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-                      ) : (
-                        <Icon size={12} strokeWidth={2.4} />
-                      )}
-                    </span>
-                    <span className="flex flex-col">
-                      <span className="text-sm font-semibold text-near-black">
-                        {entry.label}
-                      </span>
-                      <span className="text-[11px] text-warm-stone">
-                        {entry.description}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-            {/* Image — separate flow: open MediaPicker, then POST the
-                block. Image-block Zod requires a valid media_id, so we
-                can't seed with an empty media reference. */}
-            <li>
-              <button
-                type="button"
-                role="menuitem"
-                aria-busy={busy === 'image'}
-                disabled={busy !== null}
-                onClick={addImage}
-                className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-copper-500/15 text-copper-500 ring-1 ring-copper-400/30">
-                  {busy === 'image' ? (
-                    <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-                  ) : (
-                    <ImageIcon size={12} strokeWidth={2.4} />
-                  )}
-                </span>
-                <span className="flex flex-col">
-                  <span className="text-sm font-semibold text-near-black">
-                    Picture
-                  </span>
-                  <span className="text-[11px] text-warm-stone">
-                    Pick from the media library or upload a new one.
-                  </span>
-                </span>
-              </button>
-            </li>
-            {/* Gallery — MediaPicker seeds the first image; operator
-                adds more via the drawer. Default 3-up columns. */}
-            <li>
-              <button
-                type="button"
-                role="menuitem"
-                aria-busy={busy === 'Gallery'}
-                disabled={busy !== null}
-                onClick={addGallery}
-                className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-copper-500/15 text-copper-500 ring-1 ring-copper-400/30">
-                  {busy === 'Gallery' ? (
-                    <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-                  ) : (
-                    <ImagePlus size={12} strokeWidth={2.4} />
-                  )}
-                </span>
-                <span className="flex flex-col">
-                  <span className="text-sm font-semibold text-near-black">
-                    Gallery
-                  </span>
-                  <span className="text-[11px] text-warm-stone">
-                    Image grid (2/3/4-up) with captions.
-                  </span>
-                </span>
-              </button>
-            </li>
-            {/* Featured projects — no MediaPicker; operator picks
-                projects in the drawer. Seeds with an empty array;
-                renders nothing until projects are added. */}
-            <li>
-              <button
-                type="button"
-                role="menuitem"
-                aria-busy={busy === 'Featured projects'}
-                disabled={busy !== null}
-                onClick={addFeaturedProjects}
-                className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-copper-500/15 text-copper-500 ring-1 ring-copper-400/30">
-                  {busy === 'Featured projects' ? (
-                    <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-                  ) : (
-                    <Star size={12} strokeWidth={2.4} />
-                  )}
-                </span>
-                <span className="flex flex-col">
-                  <span className="text-sm font-semibold text-near-black">
-                    Featured projects
-                  </span>
-                  <span className="text-[11px] text-warm-stone">
-                    Curated project tiles — pick which ones in the drawer.
-                  </span>
-                </span>
-              </button>
-            </li>
-          </ul>
-        </div>
+        <InsertWidgetPopover
+          triggerRef={triggerRef}
+          onClose={() => setOpen(false)}
+          pageId={pageId}
+          afterBlockId={afterBlockId}
+          beforeBlockId={beforeBlockId}
+          parentId={parentId}
+        />
       )}
     </div>
+  )
+}
+
+function InsertWidgetPopover({
+  triggerRef,
+  onClose,
+  pageId,
+  afterBlockId,
+  beforeBlockId,
+  parentId,
+}: {
+  triggerRef: React.RefObject<HTMLButtonElement | null>
+  onClose: () => void
+  pageId: number
+  afterBlockId?: number | null
+  beforeBlockId?: number | null
+  parentId?: number | null
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const [mounted, setMounted] = useState(false)
+  // Which viewport edge to pin to. Same fixed top-28 / max-h-[calc(100vh-9rem)]
+  // footprint as the WidgetPicker rail — we only choose the horizontal side:
+  // pin to the edge FARTHER from the insert point (so the panel never sits
+  // on top of / crowds the spot the new block will land). Insert point in the
+  // left half → pin right; right half → pin left.
+  const [side, setSide] = useState<'left' | 'right'>('left')
+
+  useEffect(() => {
+    setMounted(true)
+    const r = triggerRef.current?.getBoundingClientRect()
+    if (r) {
+      const centerX = (r.left + r.right) / 2
+      setSide(centerX < window.innerWidth / 2 ? 'right' : 'left')
+    }
+  }, [triggerRef])
+
+  // Escape + outside-click close.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (panelRef.current?.contains(t)) return
+      if (triggerRef.current?.contains(t)) return
+      onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [onClose, triggerRef])
+
+  if (!mounted) return null
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-label="Insert a block"
+      // Mirror the WidgetPicker rail exactly: fixed, top-28, capped to
+      // max-h-[calc(100vh-9rem)] so it always fits the viewport with the
+      // option list scrolling inside. Only the horizontal edge flips.
+      className={
+        'fixed top-28 z-[60] flex max-h-[calc(100vh-9rem)] w-72 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl bg-obsidian/95 text-ivory shadow-[0_24px_60px_-24px_rgba(0,0,0,0.7)] ring-1 ring-champagne/30 backdrop-blur-sm animate-cavecms-fade-in lg:w-80 motion-reduce:animate-none ' +
+        (side === 'right' ? 'right-4' : 'left-4')
+      }
+    >
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-champagne/15 px-4 py-3">
+        <span className="flex items-center gap-2.5">
+          <span
+            aria-hidden="true"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-champagne/15 text-champagne ring-1 ring-champagne/30"
+          >
+            <LayoutGrid size={13} strokeWidth={2} />
+          </span>
+          <span className="flex flex-col">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-champagne">
+              Insert a block
+            </span>
+            <span className="text-[11px] font-medium text-ivory/60">
+              Search or pick a widget
+            </span>
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close insert menu"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ivory/60 transition-colors hover:bg-ivory/10 hover:text-ivory focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-champagne/50"
+        >
+          <X size={15} strokeWidth={2.2} />
+        </button>
+      </header>
+      {/* min-h-0 lets this flex child shrink so overflow-y-auto engages
+          within the height-capped panel instead of pushing it taller. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <WidgetPickerBody
+          pageId={pageId}
+          afterBlockId={afterBlockId}
+          beforeBlockId={beforeBlockId}
+          parentId={parentId}
+          onInserted={onClose}
+          autoFocusSearch
+        />
+      </div>
+    </div>,
+    document.body,
   )
 }

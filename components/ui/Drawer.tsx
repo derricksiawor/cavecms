@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { acquireScrollLock, releaseScrollLock } from '@/lib/client/bodyScrollLock'
 import { safeStorage } from '@/lib/client/safeStorage'
 
@@ -29,6 +30,7 @@ export function Drawer({
   resizable = false,
   resizeStorageKey,
   dockBelowAdminBar = false,
+  allowBackgroundScroll = false,
 }: {
   open: boolean
   onClose: () => void
@@ -45,7 +47,25 @@ export function Drawer({
   // height to match. No effect on the <sm bottom-sheet (it's anchored to
   // the viewport bottom, never overlaps the top bar).
   dockBelowAdminBar?: boolean
+  // Editor side-panel mode: when true, the DESKTOP drawer does NOT lock
+  // body scroll, so the operator can scroll the canvas behind it to reach
+  // other blocks while a block's editor is open. The <sm bottom-sheet
+  // (85vh, covers most of the screen) still locks — scrolling the page
+  // behind it is disorienting. True modals (MediaPicker, ConfirmModal)
+  // leave this false so the background stays frozen.
+  allowBackgroundScroll?: boolean
 }) {
+  // Portal the drawer to <body> so it lands in the ROOT stacking context.
+  // Editor drawers render deep inside the block tree, where an ancestor
+  // (e.g. the section grid wrapper, `position:relative z-10`) creates a
+  // stacking context that traps the drawer's z-index — making the page's
+  // own sticky header paint OVER it. Portaling to body + a z-index above
+  // the admin bar guarantees the drawer sits on top of all page chrome.
+  const [portalReady, setPortalReady] = useState(false)
+  useEffect(() => {
+    setPortalReady(true)
+  }, [])
+
   // Mirror onClose in a ref so the open-bound effect doesn't re-run
   // (and churn the scroll-lock counter + keydown listener) every time
   // a parent re-renders with a freshly-allocated callback. Post-Chunk-B
@@ -62,12 +82,8 @@ export function Drawer({
       if (e.key === 'Escape') onCloseRef.current()
     }
     window.addEventListener('keydown', onKey)
-    // Lock body scroll behind the drawer — counter-based so stacked
-    // modals (e.g. Confirm inside the drawer) all release correctly.
-    acquireScrollLock()
     return () => {
       window.removeEventListener('keydown', onKey)
-      releaseScrollLock()
     }
   }, [open])
 
@@ -121,6 +137,20 @@ export function Drawer({
     m.addEventListener('change', apply)
     return () => m.removeEventListener('change', apply)
   }, [])
+
+  // Body-scroll lock. Counter-based so stacked modals (e.g. Confirm
+  // inside the drawer) all release correctly. Split out from the
+  // keydown effect (and keyed on isDesktop + allowBackgroundScroll) so
+  // that the editor side-panel can leave the canvas scrollable on
+  // desktop while still freezing the background for the <sm bottom-
+  // sheet. Re-keying on isDesktop means a resize across the breakpoint
+  // acquires/releases the lock as the layout flips sheet↔side-panel.
+  useEffect(() => {
+    if (!open) return
+    if (allowBackgroundScroll && isDesktop) return
+    acquireScrollLock()
+    return () => releaseScrollLock()
+  }, [open, allowBackgroundScroll, isDesktop])
 
   // Viewport cap — the maximum width the drawer can RENDER at given
   // the current viewport (leaving a 40px gutter so the overlay
@@ -309,14 +339,20 @@ export function Drawer({
   // sticky header/footer's z-index inside the scroll region.
   const handleSideClass =
     side === 'right' ? 'left-0 top-0' : 'right-0 top-0'
-  return (
+  // Render nothing until the portal target is available (post-mount).
+  // `open` is operator-triggered on the client, so this one-frame gate is
+  // never visible — it only guards against an SSR createPortal call.
+  if (!portalReady) return null
+  return createPortal(
     <>
       {/* Scrim has NO backdrop-blur — the operator needs to see the
           canvas they're editing. Light alpha-dim only, just enough to
           mark the drawer as the active focus surface without obscuring
-          the block being edited. */}
+          the block being edited. z-[80] sits above the admin bar (z-60)
+          and the page's sticky header so the drawer is unambiguously on
+          top of all page chrome (toasts at z-[100] still win). */}
       <div
-        className="fixed inset-0 z-40 bg-near-black/20 animate-cavecms-fade-in"
+        className="fixed inset-0 z-[80] bg-near-black/20 animate-cavecms-fade-in"
         onClick={overlayClick}
       />
       <aside
@@ -334,8 +370,8 @@ export function Drawer({
         style={asideStyle}
         className={
           isDesktop
-            ? `fixed z-50 ${dockBelowAdminBar ? 'top-[var(--admin-bar-h)] h-[calc(100dvh-var(--admin-bar-h))] md:top-[var(--admin-bar-h-md)] md:h-[calc(100dvh-var(--admin-bar-h-md))]' : 'top-0 h-full'} ${widthClass} ${side === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_24px_60px_-12px_rgba(5,5,5,0.45)] overflow-hidden animate-cavecms-drawer-in motion-reduce:animate-none`
-            : `fixed inset-x-0 bottom-0 z-50 h-[85vh] max-h-[85vh] w-full rounded-t-3xl border-t ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_-24px_60px_-12px_rgba(5,5,5,0.45)] overflow-hidden animate-cavecms-slide-up motion-reduce:animate-none`
+            ? `fixed z-[85] ${dockBelowAdminBar ? 'top-[var(--admin-bar-h)] h-[calc(100dvh-var(--admin-bar-h))] md:top-[var(--admin-bar-h-md)] md:h-[calc(100dvh-var(--admin-bar-h-md))]' : 'top-0 h-full'} ${widthClass} ${side === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_24px_60px_-12px_rgba(5,5,5,0.45)] overflow-hidden animate-cavecms-drawer-in motion-reduce:animate-none`
+            : `fixed inset-x-0 bottom-0 z-[85] h-[85vh] max-h-[85vh] w-full rounded-t-3xl border-t ${tone === 'dark' ? 'border-cream-50/15 bg-near-black text-cream-50' : 'border-warm-stone/20 bg-cream-50'} shadow-[0_-24px_60px_-12px_rgba(5,5,5,0.45)] overflow-hidden animate-cavecms-slide-up motion-reduce:animate-none`
         }
         role="dialog"
         aria-modal="true"
@@ -396,7 +432,8 @@ export function Drawer({
           {children}
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   )
 }
 

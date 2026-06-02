@@ -992,6 +992,10 @@ export function EditableBlock(p: EditableBlockProps) {
       data-edit-page-version={versions.pageVersion}
       data-edit-parent-id={p.parentBlockId === null ? '' : p.parentBlockId}
       data-edit-selected={showSelected ? 'true' : undefined}
+      // While this block's edit drawer is open, suppress its floating
+      // chrome (see globals.css `[data-editing]`). The drawer portals to
+      // <body>, so the old :has(dialog) detection no longer applies.
+      data-editing={open ? 'true' : undefined}
       onContextMenu={onContextMenu}
       onClick={onWrapperClick}
       // Chunk H: tabIndex=-1 lets focus-restore on context-menu close
@@ -1056,24 +1060,19 @@ export function EditableBlock(p: EditableBlockProps) {
       </div>
 
       {/* Floating action toolbar. Pinned top-right with a copper-pill
-          background. Hidden by default; revealed on hover OR keyboard
-          focus on any descendant. Sticky to viewport top within the
-          block height so a tall section's toolbar stays reachable as
-          the operator scrolls. F12 — the friendly-type badge is the
-          FIRST child of the cluster so it shares the keyboard-focusable
-          group and never floats outside it. F11 — when selected, the
-          toolbar stays pinned visible regardless of hover state. */}
+          background. F12 — the friendly-type badge is the FIRST child of
+          the cluster so it shares the keyboard-focusable group and never
+          floats outside it. Visibility (hover/focus reveal, drawer-open
+          hide, touch selected-pin) is owned centrally by the
+          `[data-edit-chrome]` rules in globals.css — see that block for
+          the "deepest element wins" model. */}
       <div
         data-edit-toolbar
+        data-edit-chrome
         // F10 — widget toolbar at z-10 (section z-30 > column z-20 >
         // widget z-10) so a section's top-pinned chrome can never be
         // covered by a child widget's chrome.
-        className={clsx(
-          'absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-full bg-obsidian/95 p-1 shadow-[0_12px_30px_-12px_rgba(0,0,0,0.6)] ring-1 ring-champagne/30 backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none',
-          showSelected
-            ? 'pointer-events-auto opacity-100'
-            : 'pointer-events-none opacity-0 group-hover/edit:pointer-events-auto group-hover/edit:opacity-100 group-focus-within/edit:pointer-events-auto group-focus-within/edit:opacity-100',
-        )}
+        className="absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-full bg-obsidian/95 p-1 shadow-[0_12px_30px_-12px_rgba(0,0,0,0.6)] ring-1 ring-champagne/30 backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none"
         aria-label={`${friendlyType} block actions`}
       >
         {/* F12 — block-type label is part of the cluster now (was a
