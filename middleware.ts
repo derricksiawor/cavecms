@@ -69,11 +69,13 @@ interface SecurityConfig {
 
 const SECURITY_CACHE_TTL_MS = 3000
 
-// Redirects aren't security-sensitive — a slightly stale rule for up to
-// REDIRECTS_CACHE_TTL_MS is harmless, and a longer TTL keeps the 3s
-// security hot path lean. The compiled form is reused while the feed etag
-// is unchanged.
-const REDIRECTS_CACHE_TTL_MS = 30_000
+// Redirect rules propagate within REDIRECTS_CACHE_TTL_MS of an operator
+// edit. The Edge matcher caches the compiled ruleset module-level and can't
+// be invalidated cross-runtime from the Node admin routes, so this TTL is
+// the activation latency. 3s (matching the security-config cadence) keeps a
+// freshly-saved redirect feeling live without a per-request DB read; the
+// etag still skips recompiling while the ruleset is unchanged.
+const REDIRECTS_CACHE_TTL_MS = 3000
 
 // Loopback upstream port for the internal-config + redirect feeds. The
 // standalone server binds 127.0.0.1:$PORT (default 3040 in dev). One source

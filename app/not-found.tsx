@@ -26,9 +26,16 @@ export default async function NotFound() {
   // so the DB write never adds latency to the 404 render (and a 404 flood of
   // distinct paths can't turn the page into a synchronous DB-write amplifier).
   const h = await headers()
-  const path = h.get('x-pathname')
+  // x-pathname carries the requested path (set by middleware). For a missing
+  // single-segment slug, middleware rewrites to /cms-render/<slug> and Next
+  // 15.5 standalone re-runs middleware on that internal path, so x-pathname
+  // can arrive as "/cms-render/<slug>" — recover the original public path.
+  const raw = h.get('x-pathname')
+  const path = raw?.startsWith('/cms-render/') ? raw.slice('/cms-render'.length) : raw
   const referer = h.get('referer')
   if (path) {
+    // Record via after() so the DB write runs AFTER the response — never adds
+    // latency to the 404 render nor amplifies a 404 flood into blocking writes.
     after(() => recordNotFound(path, referer))
   }
 
