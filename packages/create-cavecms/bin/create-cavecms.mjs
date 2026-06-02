@@ -17,7 +17,7 @@
 // Pipeline (in order):
 //   1. Parse argv + detect surface
 //   2. Pre-flight: Node ≥ 20, write permission, target dir state
-//   3. Download cavecms-updates.derricksiawor.com/latest.zip (or pinned version)
+//   3. Download updates.cavecms.com/latest.zip (or pinned version)
 //   4. Verify SHA-256 against the manifest + Ed25519 signature
 //   5. Unzip into the surface's canonical install path
 //   6. Prompt for DB host/port/user/password/name, public URL, port
@@ -29,7 +29,7 @@
 //  11. Print the wizard URL + the hidden LOGIN_PATH the operator
 //      needs after walking the wizard
 //
-// All third-party-network access is via cavecms-updates.derricksiawor.com.
+// All third-party-network access is via updates.cavecms.com.
 // No bundled npm deps — everything uses Node ≥ 20 built-ins.
 
 import {
@@ -66,7 +66,7 @@ const __dirname = dirname(__filename)
 // Constants
 // ════════════════════════════════════════════════════════════════════
 
-const DEFAULT_RELEASE_HOST = 'https://cavecms-updates.derricksiawor.com'
+const DEFAULT_RELEASE_HOST = 'https://updates.cavecms.com'
 const RELEASE_HOST = process.env.CAVECMS_RELEASE_HOST ?? DEFAULT_RELEASE_HOST
 
 // Browser User-Agent for release-host downloads (see fetchToFileViaWget for
@@ -1228,7 +1228,7 @@ async function downloadAndVerify({ targetDir, version, skipSignature }) {
       die(
         `Ed25519 signature verification FAILED for ${target.downloadUrl}.\n` +
           `  This release zip does not match its declared signature.\n` +
-          `  Refusing to install. Report to security@derricksiawor.com.`,
+          `  Refusing to install. Report to support@cavecms.com.`,
       )
     }
     log.ok('Ed25519 signature verified.')
@@ -1569,7 +1569,7 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# missing or 'dev' value here disables the updater (cannot_apply_from_dev).`,
     `CAVECMS_COMMIT=${normalizeCommitSha(release?.sha)}`,
     `CAVECMS_RELEASE_TS=${new Date().toISOString()}`,
-    `# The CLI installed this from cavecms-updates.derricksiawor.com — keep this in sync`,
+    `# The CLI installed this from updates.cavecms.com — keep this in sync`,
     `# with the dist host on forks so the in-app updater stays in lockstep.`,
     `CAVECMS_RELEASE_MANIFEST_URL=${RELEASE_HOST}/updates/latest.json`,
     ``,

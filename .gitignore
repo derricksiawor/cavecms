@@ -162,12 +162,12 @@ next-env.d.ts
 # Publisher-only tooling — NEVER tracked. `scripts/release/build-zip.mjs`,
 # `publish.mjs`, the SSH known_hosts, and the releases-host nginx config
 # live locally on the publisher's box and produce + push the customer
-# zip to cavecms.derricksiawor.com. Customers + the public must not
+# zip to updates.cavecms.com. Customers + the public must not
 # see how releases are built or pushed.
 /scripts/release/
 
 # Release artifacts (built by scripts/release/build-zip.mjs) — never committed.
-# Published to cavecms-updates.derricksiawor.com by the server-side build.
+# Published to updates.cavecms.com by the server-side build.
 /dist/
 
 # Offline template-media originals cache (239 MB). As of the server-side

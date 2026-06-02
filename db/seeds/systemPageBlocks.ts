@@ -106,7 +106,7 @@ export const HOME_SECTIONS: SectionSpec[] = [
       { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Welcome', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
       { kind: 'widget', blockType: 'lx_heading', data: { text: `You're running CaveCMS.`, level: 'h1', size: 'display-2xl', alignment: 'center', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
       { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>This entire page is built from CMS blocks. Sign in to your admin URL to start editing — drag, drop, type, save.</p>', size: 'body-lg', alignment: 'center', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
-      { kind: 'widget', blockType: 'lx_action', data: { label: 'Read the docs', href: 'https://cavecms.derricksiawor.com', openInNew: true, variant: 'primary-gold', size: 'lg', alignment: 'center', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_action', data: { label: 'Read the docs', href: 'https://cavecms.com', openInNew: true, variant: 'primary-gold', size: 'lg', alignment: 'center', animation: 'fade-in' }, meta: { marginTop: 'md' } },
     ] }],
   },
 
@@ -161,7 +161,7 @@ export const HOME_SECTIONS: SectionSpec[] = [
       { kind: 'widget', blockType: 'lx_heading', data: { text: 'Docs and source', level: 'h2', size: 'display-md', alignment: 'center', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
       { kind: 'widget', blockType: 'lx_text', data: {
         body_richtext:
-          '<p>Documentation, install guides, and release notes live at <a href="https://cavecms.derricksiawor.com" target="_blank" rel="noopener noreferrer">cavecms.derricksiawor.com</a>.</p>' +
+          '<p>Documentation, install guides, and release notes live at <a href="https://cavecms.com" target="_blank" rel="noopener noreferrer">cavecms.com</a>.</p>' +
           '<p>Source and issues: <a href="https://github.com/derricksiawor/cavecms" target="_blank" rel="noopener noreferrer">github.com/derricksiawor/cavecms</a>.</p>',
         size: 'body-md', alignment: 'center', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in',
       }, meta: { marginTop: 'md' } },

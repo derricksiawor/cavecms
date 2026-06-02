@@ -5,7 +5,7 @@
   "license": "SEE LICENSE IN LICENSE.md",
   "author": "Derrick S. K. Siawor",
   "description": "CaveCMS — AI-native CMS on Next.js. Prosperity Public License 3.0.0 (free for noncommercial; 30-day commercial trial).",
-  "homepage": "https://cavecms.derricksiawor.com",
+  "homepage": "https://cavecms.com",
   "type": "module",
   "engines": {
     "node": ">=20.10.0",

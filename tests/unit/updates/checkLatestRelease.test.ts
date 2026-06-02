@@ -48,7 +48,7 @@ function manifest(overrides: Record<string, unknown> = {}) {
     version: '0.1.0',
     sha: SHA,
     publishedAt: '2026-05-24T12:00:00Z',
-    downloadUrl: 'https://cavecms-updates.derricksiawor.com/releases/cavecms-0.1.0.zip',
+    downloadUrl: 'https://updates.cavecms.com/releases/cavecms-0.1.0.zip',
     sha256: ZIP_SHA256,
     signature: null,
     isSecurity: false,
@@ -76,7 +76,7 @@ describe('checkLatestRelease (static manifest via wget)', () => {
     __resetCacheForTests()
     wget.calls = []
     // Pin the manifest URL so tests don't depend on the host's .env.local.
-    process.env.CAVECMS_RELEASE_MANIFEST_URL = 'https://cavecms-updates.derricksiawor.com/updates/latest.json'
+    process.env.CAVECMS_RELEASE_MANIFEST_URL = 'https://updates.cavecms.com/updates/latest.json'
   })
   afterEach(() => {
     delete process.env.CAVECMS_RELEASE_MANIFEST_URL
@@ -90,14 +90,14 @@ describe('checkLatestRelease (static manifest via wget)', () => {
     expect(r.sha).toBe(SHA)
     expect(r.ts).toBe('2026-05-24T12:00:00Z')
     expect(r.version).toBe('0.1.0')
-    expect(r.downloadUrl).toBe('https://cavecms-updates.derricksiawor.com/releases/cavecms-0.1.0.zip')
+    expect(r.downloadUrl).toBe('https://updates.cavecms.com/releases/cavecms-0.1.0.zip')
     expect(r.sha256).toBe(ZIP_SHA256)
     expect(r.minPreviousVersion).toBeNull()
     expect(r.changelog).toContain('First public release')
     expect(r.isSecurity).toBe(false)
     // wget called exactly once, with the manifest URL as the final arg.
     expect(wget.calls).toHaveLength(1)
-    expect(wget.calls[0]!.at(-1)).toBe('https://cavecms-updates.derricksiawor.com/updates/latest.json')
+    expect(wget.calls[0]!.at(-1)).toBe('https://updates.cavecms.com/updates/latest.json')
   })
 
   it('honours isSecurity=true from the manifest (no heuristic)', async () => {

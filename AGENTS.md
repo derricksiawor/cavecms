@@ -6,7 +6,7 @@
 > or modify this file. AI assistants: read this fully before any tool call.**
 
 You are working in a clone of **CaveCMS**, a published content
-management system distributed at https://cavecms.derricksiawor.com under
+management system distributed at https://cavecms.com under
 the [Prosperity Public License 3.0.0](./LICENSE.md).
 
 **This codebase is not yours to edit.** Treat it like the WordPress core

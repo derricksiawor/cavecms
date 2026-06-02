@@ -4,8 +4,8 @@ A self-hosted, AI-native content management system. WordPress-shaped — every
 page, post, and section lives as a tree of CMS blocks the operator drags,
 drops, and edits in the browser.
 
-- **Website**: [cavecms.derricksiawor.com](https://cavecms.derricksiawor.com)
-- **Get started**: [cavecms.derricksiawor.com/get-started](https://cavecms.derricksiawor.com/get-started)
+- **Website**: [cavecms.com](https://cavecms.com)
+- **Get started**: [cavecms.com/get-started](https://cavecms.com/get-started)
 - **Source**: [github.com/derricksiawor/cavecms](https://github.com/derricksiawor/cavecms)
 - **License**: [Prosperity Public License 3.0.0](./LICENSE.md) — free for
   personal, hobby, non-profit, government, and educational use; 30-day free
@@ -73,7 +73,7 @@ npx create-cavecms my-site
 The CLI:
 
 1. Detects whether you're on **VPS / PM2 / laptop / cPanel** and picks the right adapter
-2. Downloads and signature-verifies the latest release from `cavecms.derricksiawor.com`
+2. Downloads and signature-verifies the latest release from `updates.cavecms.com`
 3. Unpacks the runtime to the canonical location for the surface
 4. Prompts for the minimum it cannot auto-supply: database connection, public
    site URL, port
@@ -188,7 +188,7 @@ CaveCMS is published under the [Prosperity Public License 3.0.0](./LICENSE.md).
 - **Personal, hobby, non-profit, government, educational use** — free, no
   expiration, no key required.
 - **Commercial use** — free for the first 30 days. After that, a paid
-  commercial license is required. Contact `hello@derricksiawor.com` for
+  commercial license is required. Contact `hello@cavecms.com` for
   pricing.
 
 The source is open and auditable on GitHub. You may run CaveCMS on
@@ -206,7 +206,7 @@ a single dev.
 ## Support + contributing
 
 - **Bugs / feature requests**: open a GitHub issue.
-- **Security disclosures**: email `security@derricksiawor.com` (please don't
+- **Security disclosures**: email `support@cavecms.com` (please don't
   file public issues for security bugs).
 - **Code contributions**: we don't accept pull requests at this time.
   CaveCMS is sole-maintained by Derrick S. K. Siawor; the canonical

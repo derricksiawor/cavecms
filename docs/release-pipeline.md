@@ -7,11 +7,11 @@ release becomes a thing operators can install or auto-update to.
 
 ## Where releases live
 
-A static origin at **`https://cavecms.derricksiawor.com`** serves three
+A static origin at **`https://updates.cavecms.com`** serves three
 kinds of artifacts:
 
 ```
-https://cavecms.derricksiawor.com/
+https://updates.cavecms.com/
 ├── manifest.json                         ← always current; CaveCMS instances poll this
 ├── manifest.json.sig                     ← Ed25519 signature over manifest.json
 ├── pubkey.pem                            ← Ed25519 public key, published once, rotated rarely
@@ -27,9 +27,9 @@ https://cavecms.derricksiawor.com/
     └── …
 ```
 
-The marketing site (Next.js, Astro, whatever you build) is layered on top
-of the same domain at `/`, `/docs`, `/pricing`, etc. — the release files
-are reserved paths.
+The marketing site lives separately at **`cavecms.com`** (Next.js, deployed
+from the `cavecms-web` repo). `updates.cavecms.com` serves ONLY the release
+artifacts above — it runs no marketing app.
 
 ---
 
@@ -43,7 +43,7 @@ are reserved paths.
     {
       "version": "1.1.0",
       "publishedAt": "2026-06-15T10:00:00Z",
-      "downloadUrl": "https://cavecms.derricksiawor.com/releases/cavecms-1.1.0.zip",
+      "downloadUrl": "https://updates.cavecms.com/releases/cavecms-1.1.0.zip",
       "sha256": "9f2c…",
       "signature": "MEUCIQ…",
       "notes": "## What's new\n\n- Auto-resizing media library\n- Faster page render…",
@@ -53,7 +53,7 @@ are reserved paths.
     {
       "version": "1.0.1",
       "publishedAt": "2026-05-30T09:00:00Z",
-      "downloadUrl": "https://cavecms.derricksiawor.com/releases/cavecms-1.0.1.zip",
+      "downloadUrl": "https://updates.cavecms.com/releases/cavecms-1.0.1.zip",
       "sha256": "7a3e…",
       "signature": "MEYCIQD…",
       "notes": "## Security fix\n\nFixes CVE-2026-XXXX in lead-form CSRF handling. Update recommended.",
@@ -63,7 +63,7 @@ are reserved paths.
     {
       "version": "1.0.0",
       "publishedAt": "2026-04-01T12:00:00Z",
-      "downloadUrl": "https://cavecms.derricksiawor.com/releases/cavecms-1.0.0.zip",
+      "downloadUrl": "https://updates.cavecms.com/releases/cavecms-1.0.0.zip",
       "sha256": "1b9d…",
       "signature": "MEYCIQC…",
       "notes": "## First public release\n\nWelcome to CaveCMS.",
@@ -154,7 +154,7 @@ openssl pkeyutl -sign -inkey ~/.cavecms-release-private.pem \
 
 ### 4. Upload to the origin
 
-If `cavecms.derricksiawor.com` is hosted on S3/R2/static-bucket:
+If `updates.cavecms.com` is hosted on S3/R2/static-bucket:
 
 ```bash
 aws s3 cp manifest.json s3://cavecms-derricksiawor-com/manifest.json
@@ -184,7 +184,7 @@ git push origin v1.1.0
 
 ```bash
 # Pretend you're an operator
-curl -sSL https://cavecms.derricksiawor.com/manifest.json | jq .latestVersion
+curl -sSL https://updates.cavecms.com/manifest.json | jq .latestVersion
 # → "1.1.0"
 
 # Check the install banner appears on a running CaveCMS within ~12h
@@ -195,7 +195,7 @@ curl -sSL https://cavecms.derricksiawor.com/manifest.json | jq .latestVersion
 
 ## Operator's update path — what they see
 
-When `cavecms.derricksiawor.com/manifest.json` advertises a new version:
+When `updates.cavecms.com/manifest.json` advertises a new version:
 
 1. **The background scheduler** running inside every CaveCMS install
    polls the manifest every `settings.updates.checkFrequencyHours` hours
@@ -222,26 +222,26 @@ The orchestrator script is at `scripts/cavecms-update.sh`.
 - **Beta channel** (`manifest.beta.json`) for opt-in early releases
 - **Delta zips** for faster downloads (small unchanged-file count)
 - **Key rotation procedure** with operator-facing notification
-- **Telemetry dashboard** at `cavecms.derricksiawor.com/admin` that shows
+- **Telemetry dashboard** at `cavecms.com/admin` that shows
   which versions are running in the wild (opt-in for operators who tick
   "share anonymous version info")
 
 ---
 
-## What goes on `cavecms.derricksiawor.com` — division of labour
+## Host split — division of labour
 
-Domain hosts BOTH the marketing site AND the release origin. Reserved
-paths:
+The marketing site and the release origin are now on SEPARATE hosts (both
+proxied through Cloudflare):
 
-| Path | Owner |
-|---|---|
-| `/`, `/docs/*`, `/pricing`, `/blog/*` | Marketing site (separate codebase) |
-| `/manifest.json`, `/manifest.json.sig` | Release origin (this codebase's ship pipeline) |
-| `/pubkey.pem` | Release origin |
-| `/latest.zip`, `/latest.zip.sha256` | Release origin |
-| `/releases/*` | Release origin |
-| `/install.sh` *(future)* | One-line bootstrap installer |
+| Host | Owner | Paths |
+|---|---|---|
+| `cavecms.com` (+ `www`) | Marketing site (`cavecms-web` repo, separate codebase) | `/`, `/docs/*`, `/pricing`, `/blog/*` |
+| `updates.cavecms.com` | Release origin (this codebase's ship pipeline) | `/manifest.json`, `/manifest.json.sig`, `/pubkey.pem`, `/latest.zip`, `/latest.zip.sha256`, `/releases/*` |
 
-The marketing site's framework MUST NOT serve a 200 for any of the
-reserved paths. Use a server-level rewrite or a static-bucket origin in
-front of the marketing app.
+`updates.cavecms.com` runs no app — it static-serves `/var/www/cavecms-releases`
+via nginx on smokeleads. The in-app updater enforces same-origin between the
+manifest URL and each `downloadUrl`, so both MUST be on `updates.cavecms.com`.
+
+> NOTE: this doc predates the server-side build (`scripts/release/build-release.sh`
+> on smokeleads). The manual openssl/S3 flow above is historical — the real
+> pipeline is `connect deploy cavecms`. Rewrite when time allows.

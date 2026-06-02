@@ -1,4 +1,4 @@
-// Query the static release manifest at cavecms-updates.derricksiawor.com/updates/latest.json
+// Query the static release manifest at updates.cavecms.com/updates/latest.json
 // for the current stable-channel release and decide whether it represents a
 // newer revision than what's running locally.
 //
@@ -104,7 +104,7 @@ export function __resetCacheForTests(): void {
   CACHE.clear()
 }
 
-const DEFAULT_MANIFEST_URL = 'https://cavecms-updates.derricksiawor.com/updates/latest.json'
+const DEFAULT_MANIFEST_URL = 'https://updates.cavecms.com/updates/latest.json'
 
 // Cloudflare Bot Fight Mode (Free plan, account-wide — can't be scoped via
 // WAF rules) fingerprints Node's undici `fetch` (and curl) by their TLS

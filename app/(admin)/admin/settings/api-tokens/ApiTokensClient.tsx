@@ -74,7 +74,7 @@ const relativeUsed = (v: string): string => {
 }
 
 // Public HTTP API reference + agent-onboarding destinations.
-const API_DOCS_URL = 'https://cavecms.derricksiawor.com/docs/api'
+const API_DOCS_URL = 'https://cavecms.com/docs/api'
 
 // localStorage flag for "don't ask me about AI assistants next time". Scoped
 // to this browser; admins who mint many tokens can silence the optional fork.
@@ -101,7 +101,7 @@ function buildAssistantBriefing(token: string): string {
   // markdown won't swallow the `<token>` placeholder or turn the `-` lines
   // into bullets, and the structure stays intact.
   return `\`\`\`text
-I'm using CaveCMS (https://cavecms.derricksiawor.com) to run my website. Please help me edit its content through the CaveCMS HTTP API.
+I'm using CaveCMS (https://cavecms.com) to run my website. Please help me edit its content through the CaveCMS HTTP API.
 
 Setup
 - API base URL: ${origin}
