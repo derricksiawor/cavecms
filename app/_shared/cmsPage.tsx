@@ -148,7 +148,9 @@ export async function renderCmsPage(
   const pageVersion = row.version
   const pageTitle = row.title
 
-  const hydrated = await hydratePage(pageId)
+  // Editor renders the DRAFT view (operator previews pending edits); public
+  // renders the PUBLISHED view. Behaviour-neutral in Phase 0 (draft==published).
+  const hydrated = await hydratePage(pageId, { draft: editable })
   if (!hydrated) return null
 
   // Organization JSON-LD is emitted by app/layout.tsx for every

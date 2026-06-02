@@ -174,7 +174,18 @@ function parseMediaVariants(
  */
 export async function hydratePage(
   pageId: number,
+  // Draft → Publish (migration 0028). The PUBLISHED view (default) is what
+  // anonymous visitors read; the DRAFT view is what the inline editor renders
+  // so operators preview their pending, unpublished edits.
+  //   published: live data/meta/position/parent_id; EXCLUDE draft_state='added'
+  //              (not yet published); KEEP 'removed' (still live until publish).
+  //   draft:     COALESCE(draft_*, live) per field; EXCLUDE 'removed' (deleted
+  //              in the draft); INCLUDE 'added' (created in the draft).
+  // Phase 0 is behaviour-neutral: with every row draft_state='live' and draft_*
+  // NULL, the two views return byte-identical rows.
+  opts: { draft?: boolean } = {},
 ): Promise<HydratedPage | null> {
+  const draft = opts.draft === true
   // Verify the page exists before fetching blocks — distinguishes
   // "real page with zero blocks" (returns an empty-shaped HydratedPage)
   // from "no such page" (returns null so the route can 404 cleanly).
@@ -190,12 +201,26 @@ export async function hydratePage(
   // migration 0011 covers the per-parent ORDER BY position sub-scans
   // a future tree-aware query refactor would do, but a single flat
   // SELECT is simpler and faster at v1 scale (10–100 blocks per page).
-  const [blockRows] = (await db.execute(sql`
-    SELECT id, parent_id, kind, block_key, block_type, position, data, meta, version
-    FROM content_blocks
-    WHERE page_id = ${pageId} AND deleted_at IS NULL
-    ORDER BY position
-  `)) as unknown as [
+  const blockQuery = draft
+    ? sql`
+        SELECT id,
+          COALESCE(draft_parent_id, parent_id) AS parent_id,
+          kind, block_key, block_type,
+          COALESCE(draft_position, position) AS position,
+          COALESCE(draft_data, data) AS data,
+          COALESCE(draft_meta, meta) AS meta,
+          version
+        FROM content_blocks
+        WHERE page_id = ${pageId} AND deleted_at IS NULL AND draft_state <> 'removed'
+        ORDER BY COALESCE(draft_position, position)
+      `
+    : sql`
+        SELECT id, parent_id, kind, block_key, block_type, position, data, meta, version
+        FROM content_blocks
+        WHERE page_id = ${pageId} AND deleted_at IS NULL AND draft_state <> 'added'
+        ORDER BY position
+      `
+  const [blockRows] = (await db.execute(blockQuery)) as unknown as [
     Array<{
       id: number
       parent_id: number | null
