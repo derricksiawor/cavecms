@@ -82,6 +82,7 @@ export async function pullFromCloud({ env = process.env, createDest = createDest
   const dest = createDest({
     provider,
     clientId: creds.clientId,
+    clientSecret: creds.clientSecret,
     refreshToken: creds.refreshToken,
     folderId: creds.folderId,
   })

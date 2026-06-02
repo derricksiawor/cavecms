@@ -11,7 +11,7 @@ import {
   AAD_BACKUP_ONEDRIVE_REFRESH,
   AAD_BACKUP_PASSPHRASE,
 } from '@/lib/security/secretCipher'
-import { getClientId, type CloudProvider } from '@/lib/backups/cloud/clients'
+import { getClientId, getClientSecret, type CloudProvider } from '@/lib/backups/cloud/clients'
 
 // The plaintext refresh token + passphrase are handed to the spawned engine via
 // a mode-600 file in the install state dir (never argv / never the env-var
@@ -91,12 +91,14 @@ export async function prepareBackupCloudEnv(
   const creds: {
     provider: CloudProvider
     clientId: string
+    clientSecret?: string
     refreshToken: string
     folderId?: string
     passphrase?: string
   } = {
     provider: dest,
     clientId: getClientId(dest),
+    clientSecret: getClientSecret(dest),
     refreshToken: decryptSecret(conn.refreshToken, refreshAad(dest)),
     folderId: conn.folderId,
   }
@@ -136,12 +138,14 @@ export async function prepareRestoreCloudCreds(provider: CloudProvider): Promise
   const creds: {
     provider: CloudProvider
     clientId: string
+    clientSecret?: string
     refreshToken: string
     folderId?: string
     passphrase?: string
   } = {
     provider,
     clientId: getClientId(provider),
+    clientSecret: getClientSecret(provider),
     refreshToken: decryptSecret(conn.refreshToken, refreshAad(provider)),
     folderId: conn.folderId,
   }

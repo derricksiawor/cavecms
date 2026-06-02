@@ -9,7 +9,7 @@ import {
   AAD_BACKUP_GDRIVE_REFRESH,
   AAD_BACKUP_ONEDRIVE_REFRESH,
 } from '@/lib/security/secretCipher'
-import { getClientId, type CloudProvider } from '@/lib/backups/cloud/clients'
+import { getClientId, getClientSecret, type CloudProvider } from '@/lib/backups/cloud/clients'
 import { createDestination } from '@/lib/backups/cloud/destClient'
 import { installVersion } from '@/lib/backups/cloud/version'
 
@@ -76,6 +76,7 @@ export async function listRemoteBackups(provider: CloudProvider): Promise<Remote
   const dest = createDestination({
     provider,
     clientId: getClientId(provider),
+    clientSecret: getClientSecret(provider),
     refreshToken,
     folderId: conn.folderId,
     onRotate: (rt) => {

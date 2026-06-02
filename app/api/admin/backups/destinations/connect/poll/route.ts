@@ -7,7 +7,7 @@ import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
-import { getClientId, clientFingerprint } from '@/lib/backups/cloud/clients'
+import { getClientId, getClientSecret, clientFingerprint } from '@/lib/backups/cloud/clients'
 import { getSetting } from '@/lib/cms/getSettings'
 import { updateSettingValue } from '@/lib/cms/writeSetting'
 import {
@@ -62,6 +62,7 @@ export const POST = withError(async (req: Request) => {
     result = await pollDeviceToken({
       provider,
       clientId: getClientId(provider),
+      clientSecret: getClientSecret(provider),
       deviceCode,
     })
   } catch {

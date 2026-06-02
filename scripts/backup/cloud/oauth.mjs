@@ -13,7 +13,9 @@ export const PROVIDERS = {
     tokenUrl: 'https://oauth2.googleapis.com/token',
     revokeUrl: 'https://oauth2.googleapis.com/revoke',
     userInfoUrl: 'https://www.googleapis.com/oauth2/v3/userinfo',
-    scope: 'https://www.googleapis.com/auth/drive.file',
+    // openid + email so we can read the connected account's address; drive.file
+    // is the least-privilege backup scope. All three are non-sensitive.
+    scope: 'openid email https://www.googleapis.com/auth/drive.file',
     deviceGrant: 'urn:ietf:params:oauth:grant-type:device_code',
   },
   onedrive: {
@@ -74,13 +76,17 @@ export async function requestDeviceCode({ provider, clientId }) {
   }
 }
 
-export async function pollDeviceToken({ provider, clientId, deviceCode }) {
+export async function pollDeviceToken({ provider, clientId, clientSecret, deviceCode }) {
   const p = providerOrThrow(provider)
-  const { status, json } = await postForm(p.tokenUrl, {
+  // Google's device-flow token exchange REQUIRES the (non-confidential) client
+  // secret; Microsoft is a true public client and must not send one.
+  const form = {
     client_id: clientId,
     device_code: deviceCode,
     grant_type: p.deviceGrant,
-  })
+  }
+  if (clientSecret) form.client_secret = clientSecret
+  const { status, json } = await postForm(p.tokenUrl, form)
   if (status >= 200 && status < 300 && json.access_token) {
     return {
       status: 'success',
@@ -103,15 +109,18 @@ export async function pollDeviceToken({ provider, clientId, deviceCode }) {
   }
 }
 
-export async function refreshAccessToken({ provider, clientId, refreshToken }) {
+export async function refreshAccessToken({ provider, clientId, clientSecret, refreshToken }) {
   const p = providerOrThrow(provider)
-  const { status, json } = await postForm(p.tokenUrl, {
+  const form = {
     client_id: clientId,
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
     // Microsoft requires the scope on refresh to keep offline_access.
     scope: p.scope,
-  })
+  }
+  // Google requires its (non-confidential) client secret on refresh too.
+  if (clientSecret) form.client_secret = clientSecret
+  const { status, json } = await postForm(p.tokenUrl, form)
   if (status < 200 || status >= 300 || !json.access_token) {
     throw new Error(`refresh_failed:${status}:${json.error || 'unknown'}`)
   }

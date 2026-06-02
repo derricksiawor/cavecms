@@ -86,7 +86,7 @@ export async function pushToCloud({ archivePath, env = process.env, createDest =
   if (!credsFile) throw new Error('cloud-push: CAVECMS_BACKUP_CLOUD_CREDS_FILE required')
 
   const creds = JSON.parse(readFileSync(credsFile, 'utf8'))
-  const { provider, clientId, refreshToken, passphrase } = creds
+  const { provider, clientId, clientSecret, refreshToken, passphrase } = creds
   const label = PROVIDER_LABEL[provider] || 'the cloud'
   const keepLocal = env.CAVECMS_BACKUP_KEEP_LOCAL !== '0'
   const retention = Math.max(1, Number(env.CAVECMS_BACKUP_REMOTE_RETENTION || 7))
@@ -123,6 +123,7 @@ export async function pushToCloud({ archivePath, env = process.env, createDest =
     const dest = createDest({
       provider,
       clientId,
+      clientSecret,
       refreshToken,
       folderId: creds.folderId,
       onRotate: (rt) => {

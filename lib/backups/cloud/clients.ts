@@ -21,6 +21,17 @@ const ENV_OVERRIDE: Record<CloudProvider, string> = {
   onedrive: 'CAVECMS_MS_CLIENT_ID',
 }
 
+// Google "TVs and Limited Input devices" clients issue a non-confidential
+// pseudo-secret that the device-flow token exchange REQUIRES. Microsoft is a
+// true public client (no secret). Baked empty until the production app is
+// registered; the contributor dev box supplies it via the env override.
+const BAKED_CLIENT_SECRETS: Partial<Record<CloudProvider, string>> = {
+  gdrive: '',
+}
+const SECRET_ENV_OVERRIDE: Partial<Record<CloudProvider, string>> = {
+  gdrive: 'CAVECMS_GOOGLE_CLIENT_SECRET',
+}
+
 export function getClientId(provider: CloudProvider): string {
   const fromEnv = process.env[ENV_OVERRIDE[provider]]
   const id = (fromEnv && fromEnv.trim()) || BAKED_CLIENT_IDS[provider]
@@ -28,6 +39,15 @@ export function getClientId(provider: CloudProvider): string {
     throw new Error(`cloud_client_unconfigured:${provider}`)
   }
   return id
+}
+
+// The client secret for providers that need one (Google). Returns undefined for
+// providers that are true public clients (Microsoft).
+export function getClientSecret(provider: CloudProvider): string | undefined {
+  const envName = SECRET_ENV_OVERRIDE[provider]
+  const fromEnv = envName ? process.env[envName] : undefined
+  const secret = (fromEnv && fromEnv.trim()) || BAKED_CLIENT_SECRETS[provider]
+  return secret && secret.length > 0 ? secret : undefined
 }
 
 export function isProviderConfigured(provider: CloudProvider): boolean {

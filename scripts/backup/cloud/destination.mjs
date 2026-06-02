@@ -30,7 +30,7 @@ const REFRESH_SKEW_MS = 5 * 60 * 1000
 // Build a token provider. getAccessToken() caches the token and re-mints it
 // when it's within REFRESH_SKEW_MS of expiry. onRotate is called with a new
 // refresh token whenever the provider rotates it (Microsoft does, every time).
-export function makeTokenProvider({ provider, clientId, refreshToken, onRotate }) {
+export function makeTokenProvider({ provider, clientId, clientSecret, refreshToken, onRotate }) {
   let access = null
   let expiresAtMs = 0
   let currentRefresh = refreshToken
@@ -39,7 +39,7 @@ export function makeTokenProvider({ provider, clientId, refreshToken, onRotate }
     if (!forceRefresh && access && Date.now() < expiresAtMs - REFRESH_SKEW_MS) {
       return access
     }
-    const r = await refreshAccessToken({ provider, clientId, refreshToken: currentRefresh })
+    const r = await refreshAccessToken({ provider, clientId, clientSecret, refreshToken: currentRefresh })
     access = r.accessToken
     expiresAtMs = Date.now() + r.expiresInSec * 1000
     if (r.refreshToken && r.refreshToken !== currentRefresh) {
@@ -127,10 +127,10 @@ const IMPLS = { gdrive, onedrive }
 
 // Build a destination handle bound to a provider + auth context. Returns the
 // provider module's functions partially applied with the token provider.
-export function createDestination({ provider, clientId, refreshToken, folderId, onRotate }) {
+export function createDestination({ provider, clientId, clientSecret, refreshToken, folderId, onRotate }) {
   const impl = IMPLS[provider]
   if (!impl) throw new Error(`unknown_provider:${provider}`)
-  const token = makeTokenProvider({ provider, clientId, refreshToken, onRotate })
+  const token = makeTokenProvider({ provider, clientId, clientSecret, refreshToken, onRotate })
   const ctx = { token, folderId }
   return {
     provider,

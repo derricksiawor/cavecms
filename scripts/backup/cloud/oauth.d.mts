@@ -40,11 +40,13 @@ export function requestDeviceCode(a: { provider: CloudProvider; clientId: string
 export function pollDeviceToken(a: {
   provider: CloudProvider
   clientId: string
+  clientSecret?: string
   deviceCode: string
 }): Promise<PollResult>
 export function refreshAccessToken(a: {
   provider: CloudProvider
   clientId: string
+  clientSecret?: string
   refreshToken: string
 }): Promise<RefreshResult>
 export function fetchAccountEmail(a: {

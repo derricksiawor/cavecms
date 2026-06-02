@@ -12,6 +12,7 @@ vi.mock('@/lib/auth/requireCsrf', () => ({ requireCsrf: vi.fn().mockResolvedValu
 vi.mock('@/lib/auth/cmsRateLimit', () => ({ checkMutationRate: vi.fn() }))
 vi.mock('@/lib/backups/cloud/clients', () => ({
   getClientId: () => 'test-client',
+  getClientSecret: () => 'test-secret',
   clientFingerprint: () => 'fp',
 }))
 
