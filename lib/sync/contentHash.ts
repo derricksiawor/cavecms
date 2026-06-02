@@ -43,12 +43,19 @@ export function mediaBundleKey(m: {
   width: number | null
   height: number | null
   mime: string
+  // sha256 of the original bytes when known. Folding it in means two DIFFERENT
+  // files that share (name, bytes, dims, mime) get DIFFERENT keys — so they
+  // never collide on the bundle filename or collapse to one media row. NULL/
+  // absent (pre-content_hash rows) falls back to the metadata tuple as before.
+  contentHash?: string | null
 }): string {
   // mime is part of the identity so it matches the stage-time dedup tuple
   // (which keys on byte_size|original_name|mime_type|w|h) — otherwise two
   // distinct-mime files with the same name/size/dims collapse to one bundleKey.
   return createHash('sha256')
-    .update(`${m.originalName}|${m.byteSize}|${m.width ?? ''}|${m.height ?? ''}|${m.mime}`)
+    .update(
+      `${m.originalName}|${m.byteSize}|${m.width ?? ''}|${m.height ?? ''}|${m.mime}|${m.contentHash ?? ''}`,
+    )
     .digest('hex')
     .slice(0, 16)
 }

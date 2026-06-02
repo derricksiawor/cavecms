@@ -114,4 +114,23 @@ describe('mediaRemap', () => {
     expect(widgetData.image!.media_id).toBe(heroId)
     expect(widgetData.image!.alt).toBe('hero')
   })
+
+  it('resolveStagedContent rewrites post-body placeholders to target URLs', () => {
+    const key = '1234567890abcdef' // 16 hex, as mediaBundleKey emits
+    const map = new Map([
+      [key, { mediaId: 42, alt: 'x', uuid: 'tgt-uuid', variants: { md: '/uploads/variants/tgt-uuid-md.webp' } }],
+    ])
+    const posts = [
+      {
+        slug: 'p', title: 'P', excerpt: null,
+        bodyMd: `before ![pic](cavecms://m/${key}/md) after`,
+        published: true, seoTitle: null, seoDescription: null, heroImageKey: null, ogImageKey: null,
+      },
+    ]
+    const staged = resolveStagedContent({ pages: [], posts, projects: [], settings: {} }, map)
+    // placeholder rewritten to the TARGET install's variant URL…
+    expect(staged.posts[0]!.bodyMd).toBe('before ![pic](/uploads/variants/tgt-uuid-md.webp) after')
+    // …and the media_id collected so the cutover reverse-indexes it.
+    expect(staged.posts[0]!.bodyMediaIds).toEqual([42])
+  })
 })

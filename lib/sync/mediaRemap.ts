@@ -16,6 +16,7 @@ import { sql } from 'drizzle-orm'
 import type { Tx } from '@/db/client'
 import { PATHS } from '@/lib/media/storage'
 import { setMediaIdAtPath } from './mediaPaths'
+import { bodyMediaPlaceholderRe } from './bundleTypes'
 import type {
   MediaBundleEntryT,
   PageBundleT,
@@ -31,6 +32,10 @@ import type {
 export interface ResolvedMedia {
   mediaId: number
   alt: string
+  // Target-side filename_uuid + variant URL map — needed to rewrite the
+  // /uploads/<uuid> URLs that post markdown bodies embed.
+  uuid: string
+  variants: Record<string, string> | null
 }
 
 interface InsertResult {
@@ -78,23 +83,31 @@ export async function provisionBundleMedia(
     const variantGuard =
       entry.kind === 'image' ? sql`AND variants IS NOT NULL` : sql`AND variants IS NULL`
     const [dupRows] = (await tx.execute(sql`
-      SELECT id, alt_text FROM media
+      SELECT id, alt_text, filename_uuid, variants FROM media
       WHERE byte_size <=> ${entry.byteSize}
         AND original_name <=> ${entry.originalName}
         AND mime_type <=> ${entry.mime}
         AND width <=> ${entry.width}
         AND height <=> ${entry.height}
+        AND content_hash <=> ${entry.contentHash ?? null}
         AND deleted_at IS NULL
         ${variantGuard}
       LIMIT 1
-    `)) as unknown as [Array<{ id: number; alt_text: string }>]
+    `)) as unknown as [
+      Array<{ id: number; alt_text: string; filename_uuid: string; variants: unknown }>,
+    ]
     if (dupRows[0]) {
       // Same file, but the operator may have edited its alt text — sync it so a
       // re-push doesn't silently keep prod's stale alt.
       if (dupRows[0].alt_text !== entry.alt) {
         await tx.execute(sql`UPDATE media SET alt_text = ${entry.alt} WHERE id = ${dupRows[0].id}`)
       }
-      out.set(entry.bundleKey, { mediaId: dupRows[0].id, alt: entry.alt })
+      out.set(entry.bundleKey, {
+        mediaId: dupRows[0].id,
+        alt: entry.alt,
+        uuid: dupRows[0].filename_uuid,
+        variants: parseVariants(dupRows[0].variants),
+      })
       continue
     }
 
@@ -139,15 +152,51 @@ export async function provisionBundleMedia(
     // cutover (applyBundle) clears deleted_at on every media it references.
     const [insertRes] = (await tx.execute(sql`
       INSERT INTO media
-        (filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, variants, uploaded_by, created_at, deleted_at)
+        (filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, content_hash, variants, uploaded_by, created_at, deleted_at)
       VALUES
         (${uuid}, ${entry.originalName}, ${entry.mime}, ${entry.alt},
-         ${entry.width}, ${entry.height}, ${entry.byteSize},
+         ${entry.width}, ${entry.height}, ${entry.byteSize}, ${entry.contentHash ?? null},
          ${variantsJson ? JSON.stringify(variantsJson) : null}, ${null}, NOW(3), NOW(3))
     `)) as unknown as [InsertResult]
-    out.set(entry.bundleKey, { mediaId: Number(insertRes.insertId), alt: entry.alt })
+    out.set(entry.bundleKey, {
+      mediaId: Number(insertRes.insertId),
+      alt: entry.alt,
+      uuid,
+      variants: variantsJson,
+    })
   }
   return out
+}
+
+function parseVariants(v: unknown): Record<string, string> | null {
+  if (v == null) return null
+  const obj = typeof v === 'string' ? safeJsonObject(v) : (v as Record<string, string>)
+  return obj && Object.keys(obj).length ? (obj as Record<string, string>) : null
+}
+function safeJsonObject(s: string): Record<string, unknown> | null {
+  try {
+    const j = JSON.parse(s)
+    return j && typeof j === 'object' && !Array.isArray(j) ? j : null
+  } catch {
+    return null
+  }
+}
+
+// Rewrite the cavecms://m/<bundleKey>/<variant> placeholders the serializer put
+// in a post's markdown body back to the TARGET install's real /uploads URLs.
+function resolveBodyMedia(
+  bodyMd: string,
+  keyToMedia: Map<string, ResolvedMedia>,
+  collectIds?: Set<number>,
+): string {
+  return bodyMd.replace(bodyMediaPlaceholderRe(), (full, key: string, variant: string) => {
+    const m = keyToMedia.get(key.toLowerCase())
+    if (!m) return full // unresolved (shouldn't happen post-preflight) — leave placeholder
+    collectIds?.add(m.mediaId)
+    if (variant === 'original') return `/uploads/originals/${m.uuid}`
+    const url = m.variants?.[variant]
+    return url ?? full
+  })
 }
 
 function keyToId(
@@ -243,17 +292,24 @@ export function resolveStagedContent(
 
   return {
     pages,
-    posts: content.posts.map((p) => ({
-      slug: p.slug,
-      title: p.title,
-      excerpt: p.excerpt,
-      bodyMd: p.bodyMd,
-      published: p.published,
-      seoTitle: p.seoTitle,
-      seoDescription: p.seoDescription,
-      heroImageId: keyToId(p.heroImageKey, keyToMedia),
-      ogImageId: keyToId(p.ogImageKey, keyToMedia),
-    })),
+    posts: content.posts.map((p) => {
+      // Rewrite inline body-image placeholders → target URLs, collecting the
+      // target media_ids so the cutover can reverse-index + un-quarantine them.
+      const bodyMediaIds = new Set<number>()
+      const bodyMd = resolveBodyMedia(p.bodyMd, keyToMedia, bodyMediaIds)
+      return {
+        slug: p.slug,
+        title: p.title,
+        excerpt: p.excerpt,
+        bodyMd,
+        published: p.published,
+        seoTitle: p.seoTitle,
+        seoDescription: p.seoDescription,
+        heroImageId: keyToId(p.heroImageKey, keyToMedia),
+        ogImageId: keyToId(p.ogImageKey, keyToMedia),
+        bodyMediaIds: [...bodyMediaIds],
+      }
+    }),
     projects: content.projects.map((p) => ({
       slug: p.slug,
       name: p.name,

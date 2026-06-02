@@ -100,6 +100,7 @@ function payload(): StagedPayload {
         seoDescription: null,
         heroImageId: null,
         ogImageId: null,
+        bodyMediaIds: [],
       },
     ],
     projects: [

@@ -159,6 +159,26 @@ describe('buildBundleContent', () => {
     expect(c.media.find((m) => m.bundleKey === heroKey)).toBeDefined()
   })
 
+  it('lifts an inline image URL in a post body into a placeholder', async () => {
+    const uuid = '11111111-1111-1111-1111-111111111111'
+    await db.execute(sql`
+      INSERT INTO media (id, filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, variants)
+      VALUES (51, ${uuid}, 'inbody.jpg', 'image/jpeg', 'inbody', 800, 600, 4444,
+              ${JSON.stringify({ md: `/uploads/variants/${uuid}-md.webp` })})
+    `)
+    await db.execute(sql`
+      UPDATE posts SET body_md = ${`See ![pic](/uploads/variants/${uuid}-md.webp) here.`} WHERE id = 300
+    `)
+    const c = await buildBundleContent()
+    const inbodyKey = mediaBundleKey({ originalName: 'inbody.jpg', byteSize: 4444, width: 800, height: 600, mime: 'image/jpeg' })
+    const post = c.posts.find((p) => p.slug === 'hello-world')!
+    // the /uploads URL is replaced by an install-independent placeholder…
+    expect(post.bodyMd).toContain(`cavecms://m/${inbodyKey}/md`)
+    expect(post.bodyMd).not.toContain('/uploads/variants/')
+    // …and the file is included in the bundle's media list.
+    expect(c.media.find((m) => m.bundleKey === inbodyKey)).toBeDefined()
+  })
+
   it('produces a stable content hash across runs', async () => {
     const h1 = canonicalContentHash(contentGraphOf(await buildBundleContent()))
     const h2 = canonicalContentHash(contentGraphOf(await buildBundleContent()))

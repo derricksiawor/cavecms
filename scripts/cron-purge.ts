@@ -34,7 +34,7 @@ if (process.env['NODE_ENV'] !== 'production') {
   process.exit(1)
 }
 
-import { lstat, unlink } from 'node:fs/promises'
+import { lstat, unlink, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { sql } from 'drizzle-orm'
 import { db, pool } from '../db/client'
@@ -576,6 +576,78 @@ async function hardDeleteUnreferencedMedia(): Promise<{ txFailed: number }> {
   return { txFailed: totalTxFailed }
 }
 
+// Only reap an upload FILE once it's been orphaned this long — far longer than
+// any upload or sync-stage takes, so we never race an in-flight write whose
+// media row hasn't committed yet.
+const ORPHAN_FILE_MIN_AGE_SEC = 6 * 60 * 60
+
+const CANONICAL_UUID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+function uuidFromUploadFile(dir: string, name: string): string | null {
+  let m: RegExpMatchArray | null
+  if (dir === VARIANTS_DIR) m = name.match(/^([0-9a-f-]{36})-(?:thumb|md|lg|og)\.[a-z0-9]+$/i)
+  else if (dir === BROCHURES_DIR) m = name.match(/^([0-9a-f-]{36})\.pdf$/i)
+  else m = name.match(/^([0-9a-f-]{36})(?:\.[a-z0-9]+)?$/i) // originals: bare uuid
+  if (!m || !CANONICAL_UUID.test(m[1]!)) return null
+  return m[1]!
+}
+
+// Reap upload FILES with no backing media row (any state — live OR soft-deleted).
+// A process-kill mid-upload or mid-sync-stage writes the variant/PDF files BEFORE
+// (or in a transaction alongside) the media row; if the row never commits, the
+// files leak. The row-based purges above never see them (there's no row). Bounded
+// by the same backup-fresh gate as the hard-delete, and by a generous file-age
+// floor so an in-flight write is never mistaken for an orphan.
+async function reapOrphanUploadFiles(): Promise<void> {
+  let reaped = 0
+  let failed = 0
+  const nowMs = Date.now()
+  for (const dir of [VARIANTS_DIR, ORIGINALS_DIR, BROCHURES_DIR]) {
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      continue // dir absent on this install
+    }
+    const byUuid = new Map<string, string[]>() // uuid -> filenames
+    for (const name of names) {
+      const uuid = uuidFromUploadFile(dir, name)
+      if (!uuid) continue // unparseable name — never touch it
+      const list = byUuid.get(uuid)
+      if (list) list.push(name)
+      else byUuid.set(uuid, [name])
+    }
+    const uuids = [...byUuid.keys()]
+    if (uuids.length === 0) continue
+    const owned = new Set<string>()
+    for (let i = 0; i < uuids.length; i += 500) {
+      const chunk = uuids.slice(i, i + 500)
+      const [rows] = (await db.execute(
+        sql`SELECT filename_uuid FROM media WHERE filename_uuid IN (${sql.join(
+          chunk.map((u) => sql`${u}`),
+          sql`, `,
+        )})`,
+      )) as unknown as [Array<{ filename_uuid: string }>]
+      for (const r of rows) owned.add(r.filename_uuid)
+    }
+    for (const [uuid, files] of byUuid) {
+      if (owned.has(uuid)) continue // a media row owns these files
+      for (const name of files) {
+        const p = path.join(dir, name)
+        if (!isWithinUploadsRoot(p)) continue
+        try {
+          const st = await stat(p)
+          if (nowMs - st.mtimeMs < ORPHAN_FILE_MIN_AGE_SEC * 1000) continue // too new — may be in-flight
+          await unlink(p)
+          reaped += 1
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') failed += 1
+        }
+      }
+    }
+  }
+  logInfo('orphan_upload_files_reaped', { reaped, failed })
+}
+
 async function main(): Promise<void> {
   const startedAt = Date.now()
   logInfo('started')
@@ -585,6 +657,7 @@ async function main(): Promise<void> {
   await purgeSoftDeletedRows()
   await softDeleteOrphanMedia()
   const { txFailed } = await hardDeleteUnreferencedMedia()
+  await reapOrphanUploadFiles()
 
   const durationMs = Date.now() - startedAt
   logInfo('completed', { durationMs, txFailed })

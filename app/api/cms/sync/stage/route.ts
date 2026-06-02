@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process'
 import {
   mkdtempSync,
   mkdirSync,
-  writeFileSync,
   readFileSync,
   statSync,
   rmSync,
@@ -13,7 +12,7 @@ import {
 } from 'node:fs'
 import { createGunzip } from 'node:zlib'
 import { pipeline } from 'node:stream/promises'
-import { Transform } from 'node:stream'
+import { Transform, Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { withError } from '@/lib/api/withError'
@@ -36,7 +35,7 @@ const MAX_EXTRACTED_BYTES = 512 * 1024 * 1024 // decompression-bomb ceiling
 const MAX_JSON_BYTES = 64 * 1024 * 1024 // per content/*.json parse cap
 const MAX_TAR_MEMBERS = 250_000 // inode-bomb ceiling (≈50k-media site headroom)
 
-// POST /api/cms/sync/stage  (multipart/form-data, field `bundle` = .tgz)
+// POST /api/cms/sync/stage  (raw application/gzip body = the bundle .tgz)
 //   ?validateOnly=1 → preflight only, returns errors + summary, writes nothing.
 //   otherwise → validate + upload media (additive) + persist staged payload,
 //   atomically (media rows + stage row in one transaction).
@@ -51,20 +50,13 @@ export const POST = withError(async (req) => {
 
   const validateOnly = new URL(req.url).searchParams.get('validateOnly') === '1'
 
-  // Reject an over-cap upload via the declared content-length BEFORE formData()
-  // buffers the whole body into heap (the post-hoc file.size check below can't
-  // prevent the buffering OOM on its own). A forged/absent content-length still
-  // falls through to the file.size check; the streamed MAX_EXTRACTED_BYTES cap
-  // bounds the actual on-disk/decompressed footprint regardless.
+  // Reject an over-cap upload via the declared content-length BEFORE we read a
+  // single byte. A forged/absent/understated content-length is still bounded by
+  // the streamed write cap below (which aborts mid-flow at MAX_BUNDLE_BYTES).
   const declaredLen = Number(req.headers.get('content-length') ?? '0')
   if (Number.isFinite(declaredLen) && declaredLen > MAX_BUNDLE_BYTES) {
     throw new HttpError(413, 'bundle_too_large')
   }
-
-  const form = await req.formData()
-  const file = form.get('bundle')
-  if (!(file instanceof File)) throw new HttpError(400, 'bundle_required')
-  if (file.size > MAX_BUNDLE_BYTES) throw new HttpError(413, 'bundle_too_large')
 
   const work = mkdtempSync(path.join(tmpdir(), 'cavecms-sync-stage-'))
   const tgz = path.join(work, 'bundle.tgz')
@@ -72,7 +64,34 @@ export const POST = withError(async (req) => {
   const extract = path.join(work, 'x')
   const written: string[] = []
   try {
-    writeFileSync(tgz, Buffer.from(await file.arrayBuffer()))
+    // 0. STREAM the raw request body straight to disk under a HARD byte cap —
+    //    never buffer the whole compressed bundle in heap. `req.formData()` /
+    //    `arrayBuffer()` would buffer it all before any size check could fire,
+    //    so a forged request that omits/understates content-length could OOM
+    //    the shared host. Streaming with an inline counter aborts the moment the
+    //    body exceeds MAX_BUNDLE_BYTES, regardless of the declared length.
+    if (!req.body) throw new HttpError(400, 'bundle_required')
+    let received = 0
+    const sizeCap = new Transform({
+      transform(chunk, _enc, cb) {
+        received += chunk.length
+        if (received > MAX_BUNDLE_BYTES) {
+          cb(new HttpError(413, 'bundle_too_large'))
+          return
+        }
+        cb(null, chunk)
+      },
+    })
+    try {
+      // Cast: req.body is the DOM ReadableStream type; Readable.fromWeb wants
+      // node:stream/web's — structurally identical at runtime.
+      const webStream = req.body as unknown as Parameters<typeof Readable.fromWeb>[0]
+      await pipeline(Readable.fromWeb(webStream), sizeCap, createWriteStream(tgz))
+    } catch (e) {
+      if (e instanceof HttpError) throw e
+      throw new HttpError(400, 'bundle_unreadable')
+    }
+    if (received === 0) throw new HttpError(400, 'bundle_required')
 
     // 1. Stream-decompress gzip → tar with a HARD uncompressed cap enforced
     //    WHILE bytes flow — so a decompression bomb is aborted mid-stream,

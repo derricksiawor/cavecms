@@ -21,6 +21,7 @@ import { toContentGraph } from './contentGraph'
 import { setMediaIdAtPath, isSafeMediaField } from './mediaPaths'
 import {
   PUSH_SETTING_KEYS,
+  bodyMediaPlaceholderRe,
   type SyncBundleT,
   type WidgetBundleT,
 } from './bundleTypes'
@@ -203,13 +204,19 @@ export function validateBundle(
     }
   }
 
-  // 4. posts.
+  // 4. posts (+ inline body-image placeholders must resolve in the manifest).
   for (const post of bundle.posts) {
     if (!slugOk(post.slug)) {
       errors.push({ scope: 'post', ref: post.slug, reason: 'slug_invalid' })
     }
     requireMedia(post.heroImageKey, 'post', post.slug, 'heroImage')
     requireMedia(post.ogImageKey, 'post', post.slug, 'ogImage')
+    for (const m of post.bodyMd.matchAll(bodyMediaPlaceholderRe())) {
+      const key = m[1]!.toLowerCase()
+      if (!mediaKeys.has(key)) {
+        errors.push({ scope: 'post', ref: post.slug, reason: 'media_unresolved', detail: `body -> ${key}` })
+      }
+    }
   }
 
   // 5. projects.

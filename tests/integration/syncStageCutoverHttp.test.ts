@@ -82,9 +82,15 @@ describe('sync stage→cutover over HTTP', () => {
   })
 
   it('stages a real tarball then cuts over, replacing content + uploading media', async () => {
-    const fd = new FormData()
-    fd.set('bundle', new File([new Uint8Array(buildTarball())], 'b.tgz', { type: 'application/gzip' }))
-    const stageRes = await stagePOST(new Request('http://local/api/cms/sync/stage', { method: 'POST', body: fd }), {})
+    // Raw gzip body (the route streams it to disk under a cap — no multipart).
+    const stageRes = await stagePOST(
+      new Request('http://local/api/cms/sync/stage', {
+        method: 'POST',
+        headers: { 'content-type': 'application/gzip' },
+        body: new Uint8Array(buildTarball()),
+      }),
+      {},
+    )
     expect(stageRes.status).toBe(200)
     const stageBody = await stageRes.json()
     expect(stageBody.ok).toBe(true)

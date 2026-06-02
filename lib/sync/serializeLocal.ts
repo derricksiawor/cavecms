@@ -20,6 +20,7 @@ import { navigateHolder, deleteAtPath } from './mediaPaths'
 import { toContentGraph } from './contentGraph'
 import {
   PUSH_SETTING_KEYS,
+  bodyMediaPlaceholder,
   type PageBundleT,
   type PostBundleT,
   type ProjectBundleT,
@@ -39,6 +40,7 @@ interface MediaIdentity {
   width: number | null
   height: number | null
   byteSize: number
+  contentHash: string | null
   variants: Record<string, string> | null
 }
 
@@ -58,7 +60,7 @@ function asObject(v: unknown): Record<string, unknown> {
 async function loadMediaMap(): Promise<Map<number, MediaIdentity>> {
   const [rows] = (await db.execute(sql`
     SELECT id, filename_uuid, original_name, mime_type, alt_text,
-           width, height, byte_size, variants
+           width, height, byte_size, content_hash, variants
     FROM media
     WHERE deleted_at IS NULL
   `)) as unknown as [
@@ -71,6 +73,7 @@ async function loadMediaMap(): Promise<Map<number, MediaIdentity>> {
       width: number | null
       height: number | null
       byte_size: number
+      content_hash: string | null
       variants: unknown
     }>,
   ]
@@ -83,6 +86,7 @@ async function loadMediaMap(): Promise<Map<number, MediaIdentity>> {
       width: r.width,
       height: r.height,
       mime: r.mime_type,
+      contentHash: r.content_hash,
     })
     const variantsObj = asObject(r.variants) as Record<string, string>
     map.set(r.id, {
@@ -95,6 +99,7 @@ async function loadMediaMap(): Promise<Map<number, MediaIdentity>> {
       width: r.width,
       height: r.height,
       byteSize: r.byte_size,
+      contentHash: r.content_hash,
       variants: Object.keys(variantsObj).length ? variantsObj : null,
     })
   }
@@ -137,6 +142,30 @@ function liftMediaRefs(
     deleteAtPath(clone, next.field)
   }
   return { data: clone, mediaRefs }
+}
+
+// Matches a /uploads/<variants|originals>/<uuid>[-variant][.ext] URL embedded in
+// post markdown. The uuid (canonical 8-4-4-4-12) identifies the media row.
+const BODY_MEDIA_URL_RE =
+  /\/uploads\/(variants|originals)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:-(thumb|md|lg|og))?(?:\.[a-z0-9]+)?/gi
+
+// Lift inline media URLs out of a post's markdown body, replacing each with an
+// install-independent placeholder (cavecms://m/<bundleKey>/<variant>) and
+// recording the bundleKey so the file ships. The stage step rewrites the
+// placeholder back to the TARGET install's variant URL. Without this, a
+// `![](/uploads/variants/<source-uuid>-md.webp)` would 404 on the target.
+function liftBodyMedia(
+  bodyMd: string,
+  uuidToMedia: Map<string, MediaIdentity>,
+  referenced: Set<string>,
+): string {
+  return bodyMd.replace(BODY_MEDIA_URL_RE, (full, kind: string, uuid: string, variant?: string) => {
+    const ident = uuidToMedia.get(uuid.toLowerCase())
+    if (!ident) return full // unknown media (already-deleted/external) — leave verbatim
+    referenced.add(ident.bundleKey)
+    const v = variant ?? (kind === 'originals' ? 'original' : 'md')
+    return bodyMediaPlaceholder(ident.bundleKey, v)
+  })
 }
 
 function mediaKey(
@@ -257,6 +286,9 @@ export interface BundleContent {
 
 export async function buildBundleContent(): Promise<BundleContent> {
   const mediaMap = await loadMediaMap()
+  // uuid → identity, for resolving /uploads/<uuid> URLs embedded in post markdown.
+  const uuidToMedia = new Map<string, MediaIdentity>()
+  for (const m of mediaMap.values()) uuidToMedia.set(m.filenameUuid.toLowerCase(), m)
   const referenced = new Set<string>()
 
   // PAGES + their block trees.
@@ -339,7 +371,7 @@ export async function buildBundleContent(): Promise<BundleContent> {
     slug: r.slug,
     title: r.title,
     excerpt: r.excerpt,
-    bodyMd: r.body_md,
+    bodyMd: liftBodyMedia(r.body_md, uuidToMedia, referenced),
     published: !!r.published,
     seoTitle: r.seo_title,
     seoDescription: r.seo_description,
@@ -443,6 +475,7 @@ export async function buildBundleContent(): Promise<BundleContent> {
       width: ident.width,
       height: ident.height,
       byteSize: ident.byteSize,
+      contentHash: ident.contentHash,
       kind: isPdf ? 'pdf' : 'image',
       files,
     })

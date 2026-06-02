@@ -197,6 +197,13 @@
       "when": 1780324950000,
       "tag": "0029_sync_stage_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1780324960000,
+      "tag": "0030_media_content_hash",
+      "breakpoints": true
     }
   ]
 }

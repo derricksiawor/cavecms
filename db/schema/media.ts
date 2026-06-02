@@ -26,6 +26,11 @@ export const media = mysqlTable(
     width: int('width'),
     height: int('height'),
     byteSize: int('byte_size').notNull(),
+    // sha256 (hex) of the ORIGINAL uploaded bytes. Discriminates content so the
+    // sync dedup never collapses two different files that happen to share
+    // (name, bytes, dims, mime). NULL for rows uploaded before this column
+    // existed (those fall back to the metadata tuple — the prior behaviour).
+    contentHash: varchar('content_hash', { length: 64 }),
     variants: json('variants'),
     uploadedBy: int('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
     deletedAt: timestamp('deleted_at', { fsp: 3 }),

@@ -32,6 +32,17 @@ export const PUSH_SETTING_KEYS = [
 ] as const
 export type PushSettingKey = (typeof PUSH_SETTING_KEYS)[number]
 
+// Install-independent placeholder for a media URL embedded in a post's markdown
+// body: cavecms://m/<bundleKey>/<variant>. The serializer rewrites a source
+// /uploads/<uuid> URL to this; the stage step rewrites it to the TARGET's URL.
+// Factory (not a shared instance) so the global-flag lastIndex never leaks
+// between matchAll/replace callers.
+export function bodyMediaPlaceholder(bundleKey: string, variant: string): string {
+  return `cavecms://m/${bundleKey}/${variant}`
+}
+export const bodyMediaPlaceholderRe = (): RegExp =>
+  /cavecms:\/\/m\/([0-9a-f]{16})\/(thumb|md|lg|og|original)/gi
+
 // A media file shipped with the bundle. `bundleKey` is a content-addressed
 // stable id (see mediaBundleKey in contentHash.ts) so the same image hashes
 // equal across installs even though its media_id differs per install. The
@@ -47,6 +58,9 @@ export const MediaBundleEntry = z.object({
   width: z.number().int().nullable(),
   height: z.number().int().nullable(),
   byteSize: z.number().int().nonnegative(),
+  // sha256 of the original bytes (when the source row has it). Carried so the
+  // target dedup can discriminate content, not just metadata.
+  contentHash: z.string().max(64).nullable().optional(),
   kind: z.enum(['image', 'pdf']),
   files: z.object({
     thumb: z.string().optional(),

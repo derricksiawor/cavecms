@@ -48,6 +48,7 @@ import {
   closeSync,
   writeSync,
   unlinkSync,
+  realpathSync,
 } from 'node:fs'
 import { randomBytes, createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
 import { spawnSync, spawn } from 'node:child_process'
@@ -327,9 +328,14 @@ function showHelp() {
     '                                     --yes skips the confirmation prompt',
     '  status                             Show the running version + whether an update is available',
     '  version                            Print the installed version',
-    '  pull --from <url> --token <tok>    Download a source install\'s content into a bundle dir (--out)',
-    '  push --to <url> --token <tok>      Publish content to a target install (atomic, drift-gated)',
+    '  login                              Save a site URL + API token; push/pull then default to it',
+    '  logout                             Forget the saved site',
+    '  whoami                             Show the saved site',
+    '  pull                               Download the logged-in site\'s content into a bundle dir (--out)',
+    '                                     (or --from <url> --token <tok> to override the saved site)',
+    '  push --from <url>                  Publish your local content to the logged-in site (atomic, drift-gated)',
     '                                     --from <url> --from-token <tok> assembles from a source; or --bundle <dir>',
+    '                                     --to <url> --token <tok> overrides the saved site',
     '                                     --dry-run validates against the target + writes nothing; --force overrides drift',
     '  help                               Show this message',
     c('gray', '  (these command names are reserved and cannot be used as a site name)'),
@@ -2418,6 +2424,9 @@ const RECOVERY_SUBCOMMANDS = new Set([
   'backup',
   'restore',
   'backups',
+  'login',
+  'logout',
+  'whoami',
   'pull',
   'push',
 ])
@@ -3059,7 +3068,7 @@ async function commandStatus(argv) {
 // scope + the server's cutover write-set enforce that.
 
 function parseSyncArgv(argv, sub) {
-  const o = { from: null, to: null, token: null, fromToken: null, out: null, bundle: null, dryRun: false, force: false, yes: false }
+  const o = { from: null, to: null, token: null, fromToken: null, out: null, bundle: null, site: null, dryRun: false, force: false, yes: false }
   const take = (a, i, name) => {
     const v = argv[i]
     if (v === undefined || v === '' || v.startsWith('--')) die(`${name} requires a value`)
@@ -3070,6 +3079,8 @@ function parseSyncArgv(argv, sub) {
     if (a === '--dry-run') o.dryRun = true
     else if (a === '--force') o.force = true
     else if (a === '--yes' || a === '-y') o.yes = true
+    else if (a.startsWith('--site=')) o.site = a.slice('--site='.length)
+    else if (a === '--site') o.site = take(a, ++i, '--site')
     else if (a.startsWith('--from=')) o.from = a.slice('--from='.length)
     else if (a === '--from') o.from = take(a, ++i, '--from')
     else if (a.startsWith('--to=')) o.to = a.slice('--to='.length)
@@ -3211,11 +3222,19 @@ async function syncPostJson(url, token, obj) {
 }
 
 async function syncPostBundle(url, token, fileBuf) {
-  const boundary = '----cavecms' + randomBytes(16).toString('hex')
-  const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="bundle"; filename="bundle.tgz"\r\nContent-Type: application/gzip\r\n\r\n`)
-  const tail = Buffer.from(`\r\n--${boundary}--\r\n`)
-  const body = Buffer.concat([head, fileBuf, tail])
-  const r = await syncRequest('POST', url, { token, headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, accept: 'application/json', 'content-length': String(body.length) }, body })
+  // Raw gzip body (not multipart): lets the server STREAM the upload to disk
+  // under a hard byte cap instead of buffering the whole compressed bundle in
+  // heap (multipart + formData() would force the latter — a shared-host OOM
+  // vector on the receiving install).
+  const r = await syncRequest('POST', url, {
+    token,
+    headers: {
+      'content-type': 'application/gzip',
+      accept: 'application/json',
+      'content-length': String(fileBuf.length),
+    },
+    body: fileBuf,
+  })
   return { status: r.status, json: tryJson(r.body) }
 }
 
@@ -3266,12 +3285,179 @@ async function assembleSyncBundle({ fromUrl, fromToken, outDir }) {
   return manifest
 }
 
+// ── cavecms login / logout / whoami — saved site profiles ───────────────────
+// Modeled on the Stripe CLI: credentials live in ~/.config/cavecms/config.json
+// (XDG_CONFIG_HOME respected) as named profiles, one marked default. `cavecms
+// login` saves a site URL + its API token (the same `cave_…` token used across
+// /api/cms/*) and makes it the default, so `push`/`pull` just work. A single-
+// site user only ever does login → logout → login; an agency keeps one profile
+// per client and selects with `--site <name>` (no logout/login churn). Tokens
+// are sensitive → the file is mode 600.
+function cavecmsConfigPath() {
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+  return join(base, 'cavecms', 'config.json')
+}
+function readCavecmsConfig() {
+  try {
+    const j = JSON.parse(readFileSync(cavecmsConfigPath(), 'utf8'))
+    if (j && typeof j === 'object' && j.profiles && typeof j.profiles === 'object') {
+      return { default: typeof j.default === 'string' ? j.default : null, profiles: j.profiles }
+    }
+  } catch {
+    /* no config yet */
+  }
+  return { default: null, profiles: {} }
+}
+function writeCavecmsConfig(cfg) {
+  const p = cavecmsConfigPath()
+  mkdirSync(dirname(p), { recursive: true })
+  writeFileSync(p, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+  try {
+    chmodSync(p, 0o600)
+  } catch {
+    /* best-effort re-assert if the file pre-existed with looser perms */
+  }
+}
+// Resolve the active site: explicit --site name, else the default profile.
+function resolveSite(name) {
+  const cfg = readCavecmsConfig()
+  const key = name || cfg.default
+  if (!key) return null
+  const prof = cfg.profiles[key]
+  if (!prof || typeof prof.url !== 'string' || typeof prof.token !== 'string') return null
+  return { name: key, url: prof.url, token: prof.token }
+}
+function deriveSiteName(url) {
+  try {
+    return (
+      new URL(url).hostname
+        .replace(/^www\./, '')
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase() || 'site'
+    )
+  } catch {
+    return 'site'
+  }
+}
+function readSiteFlag(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a.startsWith('--site=')) return a.slice('--site='.length)
+    if (a === '--site') return argv[i + 1]
+  }
+  return null
+}
+
+async function commandLogin(argv) {
+  // Non-interactive form: cavecms login --url=… --token=… [--site name]
+  let url = null
+  let token = null
+  let name = readSiteFlag(argv)
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a.startsWith('--url=')) url = a.slice('--url='.length)
+    else if (a === '--url') url = argv[++i]
+    else if (a.startsWith('--token=')) token = a.slice('--token='.length)
+    else if (a === '--token') token = argv[++i]
+  }
+  await withReadline(async (rl) => {
+    if (!url) {
+      url = await ask(rl, 'Site URL (e.g. https://yoursite.com)', {
+        required: true,
+        validate: (v) => {
+          try {
+            return new URL(v).protocol.startsWith('http') ? null : 'Use http:// or https://'
+          } catch {
+            return 'Enter a full URL like https://yoursite.com'
+          }
+        },
+      })
+    }
+    if (!token) token = await askSecret(rl, 'API token (Settings → API Tokens)', { required: true })
+  })
+  url = url.replace(/\/+$/, '')
+  token = token.trim()
+  warnInsecureTransport(url, 'login')
+  log.info(`Verifying ${url} …`)
+  // The sync hash endpoint is ADMIN-gated, so a 200 proves three things at once:
+  // the URL is a CaveCMS install, it has content sync, and the token is a valid
+  // admin token. (Editor tokens can't push/pull, so we reject them here.)
+  let r
+  try {
+    r = await syncRequestRetry(
+      'GET',
+      `${url}/api/cms/sync/hash`,
+      { token, headers: { accept: 'application/json' } },
+      { retries: 1, label: 'login check' },
+    )
+  } catch (e) {
+    die(`Could not reach ${url}: ${e.message}`)
+  }
+  if (r.status === 401 || r.status === 403) {
+    die(`That token was rejected by ${url}. Mint an ADMIN token under Settings → API Tokens, then try again.`)
+  }
+  if (r.status === 404) {
+    die(`${url} returned 404 for the sync API — it may be an older CaveCMS without content sync, or the URL is wrong.`)
+  }
+  if (r.status < 200 || r.status >= 300) die(`${url} returned ${r.status} on the login check.`)
+  if (!tryJson(r.body)?.contentHash) die(`${url} did not return a CaveCMS sync response — check the URL.`)
+  if (!name) name = deriveSiteName(url)
+  const cfg = readCavecmsConfig()
+  cfg.profiles[name] = { url, token, loggedInAt: new Date().toISOString() }
+  cfg.default = name
+  writeCavecmsConfig(cfg)
+  log.ok(`Logged in to ${url} (site “${name}”).`)
+  console.log(c('gray', '  cavecms pull                       ← pull this site’s content into a bundle'))
+  console.log(c('gray', '  cavecms push --from=<your-local>   → publish your local content to this site'))
+  const others = Object.keys(cfg.profiles).filter((k) => k !== name)
+  if (others.length) console.log(c('gray', `  other sites: ${others.join(', ')} — select with --site <name>`))
+}
+
+function commandLogout(argv) {
+  const cfg = readCavecmsConfig()
+  if (argv.includes('--all')) {
+    writeCavecmsConfig({ default: null, profiles: {} })
+    log.ok('Logged out of all sites.')
+    return
+  }
+  const key = readSiteFlag(argv) || cfg.default
+  if (!key || !cfg.profiles[key]) {
+    log.info('You were not logged in.')
+    return
+  }
+  const { url } = cfg.profiles[key]
+  delete cfg.profiles[key]
+  if (cfg.default === key) cfg.default = Object.keys(cfg.profiles)[0] || null
+  writeCavecmsConfig(cfg)
+  log.ok(`Logged out of ${url} (site “${key}”).`)
+  if (cfg.default) console.log(c('gray', `  active site is now “${cfg.default}”`))
+}
+
+function commandWhoami(argv) {
+  const cfg = readCavecmsConfig()
+  const active = resolveSite(readSiteFlag(argv))
+  if (!active) {
+    log.info('Not logged in. Run `cavecms login`.')
+    return
+  }
+  log.ok(`Active site “${active.name}” → ${active.url}`)
+  console.log(c('gray', `  token: ${active.token.slice(0, 10)}…`))
+  const all = Object.keys(cfg.profiles)
+  if (all.length > 1) {
+    console.log(
+      c('gray', `  all sites: ${all.map((k) => (k === cfg.default ? `${k} (default)` : k)).join(', ')}`),
+    )
+  }
+}
+
 async function commandPull(argv) {
   const o = parseSyncArgv(argv, 'pull')
-  const fromUrl = (o.from || process.env.CAVECMS_SYNC_FROM || '').replace(/\/+$/, '')
-  const token = o.token || process.env.CAVECMS_SYNC_TOKEN
-  if (!fromUrl) die('`cavecms pull` requires --from=<url> (or CAVECMS_SYNC_FROM)')
-  if (!token) die('`cavecms pull` requires --token=<api-token> (or CAVECMS_SYNC_TOKEN)')
+  const site = resolveSite(o.site)
+  const fromUrl = (o.from || process.env.CAVECMS_SYNC_FROM || site?.url || '').replace(/\/+$/, '')
+  const token = o.token || process.env.CAVECMS_SYNC_TOKEN || site?.token
+  if (!fromUrl) die('`cavecms pull` needs a site — run `cavecms login`, or pass --from=<url>.')
+  if (!token) die('`cavecms pull` needs an API token — run `cavecms login`, or pass --token=<api-token>.')
   warnInsecureTransport(fromUrl, 'pull source')
   const outDir = resolve(o.out || './cavecms-bundle')
   rmSync(outDir, { recursive: true, force: true })
@@ -3298,10 +3484,11 @@ function printSyncStage(resp) {
 
 async function commandPush(argv) {
   const o = parseSyncArgv(argv, 'push')
-  const toUrl = (o.to || process.env.CAVECMS_SYNC_TO || '').replace(/\/+$/, '')
-  const token = o.token || process.env.CAVECMS_SYNC_TOKEN
-  if (!toUrl) die('`cavecms push` requires --to=<target-url> (or CAVECMS_SYNC_TO)')
-  if (!token) die('`cavecms push` requires --token=<api-token> (or CAVECMS_SYNC_TOKEN)')
+  const site = resolveSite(o.site)
+  const toUrl = (o.to || process.env.CAVECMS_SYNC_TO || site?.url || '').replace(/\/+$/, '')
+  const token = o.token || process.env.CAVECMS_SYNC_TOKEN || site?.token
+  if (!toUrl) die('`cavecms push` needs a target site — run `cavecms login`, or pass --to=<url>.')
+  if (!token) die('`cavecms push` needs an API token — run `cavecms login`, or pass --token=<api-token>.')
   warnInsecureTransport(toUrl, 'push target')
 
   let bundleDir
@@ -3427,6 +3614,9 @@ async function runSubcommand(sub, argv) {
   if (sub === 'backup') return commandBackup(argv)
   if (sub === 'restore') return commandRestore(argv)
   if (sub === 'backups') return commandListBackups(argv)
+  if (sub === 'login') return commandLogin(argv)
+  if (sub === 'logout') return commandLogout(argv)
+  if (sub === 'whoami') return commandWhoami(argv)
   if (sub === 'pull') return commandPull(argv)
   if (sub === 'push') return commandPush(argv)
   die(`Unknown command: ${sub}`)
@@ -3940,25 +4130,51 @@ async function main(argv) {
   }
 }
 
+// Run the CLI ONLY when this file is the process entry point — never when a
+// test (or any other module) `import`s it for its exported helpers. The npm
+// `.bin` shim is a SYMLINK to this file, so we compare realpath'd paths (an
+// `import.meta.url === argv[1]` check would mismatch through that symlink and
+// silently refuse to install). realpathSync resolves both the shim symlink and
+// any nvm path-canonicalisation to the same inode path.
+function invokedDirectly() {
+  const entry = process.argv[1]
+  if (!entry) return false
+  try {
+    return realpathSync(entry) === realpathSync(__filename)
+  } catch {
+    // argv[1] not statable (rare) — fall back to a plain path compare so the
+    // installer never fails CLOSED (refusing to run is worse than the tiny
+    // chance of a false-positive in a non-test context).
+    return entry === __filename
+  }
+}
+
 // Entry router. `npx create-cavecms <site>` installs; the reserved
 // first words route to the recovery subcommands instead. `help` / -h /
 // --help always show usage (so the `cavecms help` shim works without
 // trying to install a site literally named "help").
-const _argv = process.argv.slice(2)
-const _sub = _argv[0]
-let _run
-// Bare `cavecms` (the recovery shim with no args) or an explicit help flag →
-// show usage. Treating a missing first arg as help stops the recovery shim
-// from silently dropping into a NEW-site install prompt.
-if (!_sub || _sub === 'help' || _sub === '-h' || _sub === '--help') {
-  showHelp()
-  _run = Promise.resolve()
-} else if (RECOVERY_SUBCOMMANDS.has(_sub)) {
-  _run = runSubcommand(_sub, _argv.slice(1))
-} else {
-  _run = main(_argv)
+if (invokedDirectly()) {
+  const _argv = process.argv.slice(2)
+  const _sub = _argv[0]
+  let _run
+  // Bare `cavecms` (the recovery shim with no args) or an explicit help flag →
+  // show usage. Treating a missing first arg as help stops the recovery shim
+  // from silently dropping into a NEW-site install prompt.
+  if (!_sub || _sub === 'help' || _sub === '-h' || _sub === '--help') {
+    showHelp()
+    _run = Promise.resolve()
+  } else if (RECOVERY_SUBCOMMANDS.has(_sub)) {
+    _run = runSubcommand(_sub, _argv.slice(1))
+  } else {
+    _run = main(_argv)
+  }
+  _run.catch((err) => {
+    log.err(err instanceof Error ? (err.stack ?? err.message) : String(err))
+    process.exit(1)
+  })
 }
-_run.catch((err) => {
-  log.err(err instanceof Error ? (err.stack ?? err.message) : String(err))
-  process.exit(1)
-})
+
+// Test-only surface: the retry/transient helpers are pure enough to unit-test
+// against a real local http server. Exporting them does NOT change the CLI's
+// runtime behaviour (the entry router above is gated on invokedDirectly()).
+export { syncRequestRetry, isTransientStatus, syncRequest }

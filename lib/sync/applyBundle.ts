@@ -57,6 +57,10 @@ export interface StagedPost {
   seoDescription: string | null
   heroImageId: number | null
   ogImageId: number | null
+  // Media referenced by inline images in the markdown body (already remapped to
+  // target ids at stage time) — reverse-indexed so the un-quarantine makes them
+  // live.
+  bodyMediaIds: number[]
 }
 export interface StagedProject {
   slug: string
@@ -229,6 +233,9 @@ export async function applyBundle(
       const postId = Number(postRes.insertId)
       if (post.heroImageId != null) await insertRef(tx, 'post', postId, 'hero_image_id', post.heroImageId)
       if (post.ogImageId != null) await insertRef(tx, 'post', postId, 'og_image_id', post.ogImageId)
+      // Reverse-index inline body images (field 'body') so the un-quarantine
+      // step below makes a freshly-pushed in-body image live.
+      for (const mid of post.bodyMediaIds) await insertRef(tx, 'post', postId, 'body', mid)
     }
 
     // 5. Upsert projects by slug — NEVER delete (cascade would wipe the legacy

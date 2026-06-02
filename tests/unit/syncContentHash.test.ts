@@ -118,4 +118,18 @@ describe('mediaBundleKey', () => {
     const b = mediaBundleKey({ originalName: 'b.pdf', byteSize: 9, width: null, height: null, mime: 'application/pdf' })
     expect(a).toBe(b)
   })
+
+  it('content_hash discriminates two files with an identical metadata tuple', () => {
+    const base = { originalName: 'h.jpg', byteSize: 10, width: 4, height: 2, mime: 'image/jpeg' }
+    // Same tuple, DIFFERENT content → different keys (no collision / no wrong image).
+    expect(mediaBundleKey({ ...base, contentHash: 'aaaa' })).not.toBe(
+      mediaBundleKey({ ...base, contentHash: 'bbbb' }),
+    )
+    // Same tuple + same content_hash → same key (re-push dedups).
+    expect(mediaBundleKey({ ...base, contentHash: 'aaaa' })).toBe(
+      mediaBundleKey({ ...base, contentHash: 'aaaa' }),
+    )
+    // A null/absent content_hash matches the legacy tuple-only key (back-compat).
+    expect(mediaBundleKey(base)).toBe(mediaBundleKey({ ...base, contentHash: null }))
+  })
 })

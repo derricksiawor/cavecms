@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { writeFile, rm } from 'node:fs/promises'
 import { fileTypeFromBuffer } from 'file-type'
 import { sql } from 'drizzle-orm'
@@ -119,6 +119,9 @@ export const POST = withError(async (req) => {
     }
 
     const uuid = randomUUID()
+    // sha256 of the original bytes — content-addressing for the sync dedup so
+    // two different files with identical (name, bytes, dims, mime) never merge.
+    const contentHash = createHash('sha256').update(buf).digest('hex')
     const tmpDir = await tmpDirFor(uuid)
 
     // Sanitize the client-supplied filename for storage. Strip control
@@ -139,8 +142,8 @@ export const POST = withError(async (req) => {
     //    media_id whose variants are missing. Guarantees no half-written
     //    row referenced by a save before the files exist.
     const [insertArr] = (await db.execute(sql`
-      INSERT INTO media (filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, uploaded_by)
-      VALUES (${uuid}, ${safeOriginalName}, ${sniff.mime}, ${altText}, ${null}, ${null}, ${buf.byteLength}, ${ctx.userId})
+      INSERT INTO media (filename_uuid, original_name, mime_type, alt_text, width, height, byte_size, content_hash, uploaded_by)
+      VALUES (${uuid}, ${safeOriginalName}, ${sniff.mime}, ${altText}, ${null}, ${null}, ${buf.byteLength}, ${contentHash}, ${ctx.userId})
     `)) as unknown as [InsertResult]
     const insertId = Number(insertArr.insertId)
 
