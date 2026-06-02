@@ -240,6 +240,12 @@ describe('validateRedirect — regex engine (RE2, no ReDoS) + query-mode', () =>
     expect(validateRedirect({ ...base, source: '^/(', target: '/c' }).ok).toBe(false)
   })
 
+  it('rejects an oversized bounded repetition {n>100} (keeps compile trivial)', () => {
+    expect(validateRedirect({ ...base, source: '^/(ab){500}$', target: '/c' }).ok).toBe(false)
+    // small bounded repetition stays allowed
+    expect(validateRedirect({ ...base, source: '^/(ab){2,5}$', target: '/c' }).ok).toBe(true)
+  })
+
   it('allows a safe single-quantifier regex with a capture', () => {
     expect(validateRedirect({ ...base, source: '^/p/(\\d+)$', target: '/q/$1' }).ok).toBe(true)
   })
