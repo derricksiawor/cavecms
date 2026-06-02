@@ -22,7 +22,7 @@ import {
   FontWeightPickerField,
   IconPickerField,
 } from './pickers'
-import type { ColorToken, FontFamilyToken, FontWeightToken } from '@/lib/cms/designTokens'
+import type { ColorToken, FontWeightToken } from '@/lib/cms/designTokens'
 
 // Visual-form renderer. The `kind` discriminator drives which premium
 // widget the field uses. Server-side Zod schemas validate the final
@@ -475,19 +475,17 @@ function FieldRenderer({
         <FontFamilyPickerField
           label={shape.label}
           help={shape.help}
-          value={
-            typeof value === 'string'
-              ? (value as FontFamilyToken)
-              : undefined
-          }
+          value={typeof value === 'string' ? value : undefined}
           onChange={(v) => onChange(v)}
         />
       )
 
     case 'font_weight': {
+      // `family` is a role token OR a catalog font key — passed through as a
+      // plain string so the weight picker can gate weights for either.
       const fam =
         shape.familyKey && typeof parent[shape.familyKey] === 'string'
-          ? (parent[shape.familyKey] as FontFamilyToken)
+          ? (parent[shape.familyKey] as string)
           : undefined
       return (
         <FontWeightPickerField
@@ -1557,9 +1555,16 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       help: 'Champagne is the signature editorial kicker tone.',
     },
     {
+      kind: 'font_family',
+      key: 'family',
+      label: 'Font family',
+      help: 'Defaults to the body role. Pick a role or any catalog font.',
+    },
+    {
       kind: 'font_weight',
       key: 'weight',
       label: 'Font weight',
+      familyKey: 'family',
       help: 'Eyebrows traditionally sit at semibold/bold for crisp uppercase.',
     },
     {
@@ -2159,6 +2164,18 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'md', label: 'Medium' },
         { value: 'lg', label: 'Large' },
       ],
+    },
+    {
+      kind: 'font_family',
+      key: 'family',
+      label: 'Font family',
+      help: 'Defaults to the body role. Pick a role or any catalog/custom font.',
+    },
+    {
+      kind: 'font_weight',
+      key: 'weight',
+      label: 'Font weight',
+      familyKey: 'family',
     },
     {
       kind: 'select', key: 'alignment', label: 'Alignment',

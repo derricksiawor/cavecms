@@ -52,6 +52,11 @@ const MIME: Record<string, string> = {
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.txt': 'text/plain; charset=utf-8',
+  // Operator-uploaded custom fonts (served self-hosted from /uploads/fonts/).
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
 }
 
 function safeJoin(root: string, segments: string[]): string | null {

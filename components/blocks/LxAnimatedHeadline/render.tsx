@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { BlockData } from '@/lib/cms/block-registry'
 import {
-  FAMILY_TAILWIND,
+  resolveFamilyRender,
   fontWeightClass,
   isColorToken,
   resolveColorValue,
@@ -110,8 +110,8 @@ export function LxAnimatedHeadline({
   }, [reduced, data.effect, data.intervalMs, words])
 
   const Tag = data.level
-  const family = data.family
-  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-serif'
+  const fam = resolveFamilyRender(data.family)
+  const familyClass = fam.className ?? 'font-serif'
   const weightClass = data.weight ? fontWeightClass(data.weight) : 'font-bold'
   const toneClass = isColorToken(data.tone) ? TOKEN_TEXT_CLASS[data.tone] : undefined
   const toneStyle = !isColorToken(data.tone) ? { color: resolveColorValue(data.tone) } : undefined
@@ -135,7 +135,7 @@ export function LxAnimatedHeadline({
         toneClass,
         outerClass,
       )}
-      style={toneStyle}
+      style={{ ...toneStyle, ...fam.style }}
     >
       {data.prefix && <span>{data.prefix} </span>}
       <span className="text-champagne" suppressHydrationWarning>

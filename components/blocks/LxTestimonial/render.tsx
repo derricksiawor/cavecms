@@ -6,7 +6,7 @@ import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { RenderContext } from '..'
 import {
-  FAMILY_TAILWIND,
+  resolveFamilyRender,
   fontWeightClass,
   isColorToken,
   resolveColorValue,
@@ -49,8 +49,8 @@ export function LxTestimonial({
   const attribTone = isToken ? TONE_ATTRIB[tone] : undefined
   const toneStyle = !isToken ? { color: resolveColorValue(tone) } : undefined
 
-  const family = data.family
-  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-serif'
+  const fam = resolveFamilyRender(data.family)
+  const familyClass = fam.className ?? 'font-serif'
   const overrideWeight = data.weight
   const weightClass = overrideWeight ? fontWeightClass(overrideWeight) : 'font-semibold'
 
@@ -76,7 +76,7 @@ export function LxTestimonial({
           'text-2xl sm:text-3xl md:text-4xl',
           quoteTone,
         )}
-        style={toneStyle}
+        style={{ ...toneStyle, ...fam.style }}
       >
         {data.quote}
       </blockquote>

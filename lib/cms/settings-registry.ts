@@ -7,6 +7,9 @@ import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
 import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
 import { encryptedSecretSchema } from '@/lib/security/secretCipher'
 import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
+import { isFontKeySlug, TYPOGRAPHY_ROLES_DEFAULT } from '@/lib/typography/catalog'
+import { CUSTOM_FONT_KEY_RE, CUSTOM_FONT_FILE_RE } from '@/lib/typography/customFonts'
+import { GOOGLE_FONT_KEY_RE, GOOGLE_FONT_FILE_RE } from '@/lib/typography/googleFontKeys'
 
 // One Zod schema per `settings.key`. getSetting() parses every value
 // through this registry on read — so a tampered DB cell or a
@@ -236,6 +239,59 @@ const themePalette = z.object({
   surfaceDark: z.string().regex(HEX_COLOR_RE).default('#050505'),
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
 })
+
+// Global typography roles (the "Global Fonts" tier). Each role stores a
+// font key — a bundled catalog slug OR a runtime custom-font key — so the
+// validator is the loose slug shape, not the static catalog membership (the
+// settings layer can't see the runtime custom-font registry). roleVarsCss
+// fails closed to the default for a key that isn't ACTIVE at render time.
+// Token-writable so an AI agent can rebrand the site's typefaces via the
+// API — these are presentational, not security-sensitive like siteUrl.
+const fontKey = z
+  .string()
+  .max(64)
+  .refine((v) => isFontKeySlug(v), { message: 'unknown_font' })
+const typographyRoles = z.object({
+  display: fontKey.default(TYPOGRAPHY_ROLES_DEFAULT.display),
+  body: fontKey.default(TYPOGRAPHY_ROLES_DEFAULT.body),
+})
+
+// Operator-uploaded custom fonts. Managed ONLY by the /api/admin/fonts
+// endpoint (which validates the on-disk binary + writes this row) — the
+// generic settings PATCH rejects this key so no one can point it at an
+// arbitrary file. getSetting parses it on read; the layout emits its
+// @font-face from here.
+const customFontEntry = z.object({
+  key: z.string().regex(CUSTOM_FONT_KEY_RE),
+  family: z.string().min(1).max(60),
+  category: z.enum(['serif', 'sans', 'display', 'mono']),
+  file: z.string().regex(CUSTOM_FONT_FILE_RE),
+  format: z.enum(['woff2', 'woff', 'ttf', 'otf']),
+  weightRange: z.tuple([z.number().int(), z.number().int()]).nullable().optional(),
+  staticWeight: z.number().int().optional(),
+  italic: z.boolean().optional(),
+})
+const customFonts = z.array(customFontEntry).max(50)
+
+// Activated Google fonts. SAME shape as customFontEntry (so the CSS emitter,
+// picker, and renderer treat both lists identically) but with the `gf-`
+// key/file regexes. Managed ONLY by /api/admin/fonts/google (which fetches
+// the woff2 server-side, stores it self-hosted, and writes this row) — the
+// generic settings PATCH rejects this key, exactly like custom_fonts, so no
+// one can point it at an arbitrary file. getSetting parses it on read; the
+// layout emits its @font-face from here. Cap 100 (the activation endpoint
+// enforces the same ceiling under its mutex).
+const googleFontEntry = z.object({
+  key: z.string().regex(GOOGLE_FONT_KEY_RE),
+  family: z.string().min(1).max(80),
+  category: z.enum(['serif', 'sans', 'display', 'mono']),
+  file: z.string().regex(GOOGLE_FONT_FILE_RE),
+  format: z.literal('woff2'),
+  weightRange: z.tuple([z.number().int(), z.number().int()]).nullable().optional(),
+  staticWeight: z.number().int().optional(),
+  italic: z.boolean().optional(),
+})
+const googleFonts = z.array(googleFontEntry).max(100)
 
 // Prune abandoned rows before item validation. Runs on every parse — INCLUDING
 // reads (getSetting → safeParse) — so it MUST be non-destructive to data an
@@ -1161,6 +1217,26 @@ export const registry = {
       surfaceDark: '#050505',
       surfaceLight: '#F5F1EA',
     } satisfies z.infer<typeof themePalette>,
+  },
+  // ─── Typography roles (Settings → Typography) ───
+  typography_roles: {
+    schema: typographyRoles,
+    default: {
+      display: TYPOGRAPHY_ROLES_DEFAULT.display,
+      body: TYPOGRAPHY_ROLES_DEFAULT.body,
+    } satisfies z.infer<typeof typographyRoles>,
+  },
+  // ─── Operator-uploaded custom fonts (managed by /api/admin/fonts) ───
+  custom_fonts: {
+    schema: customFonts,
+    default: [] satisfies z.infer<typeof customFonts>,
+  },
+  // ─── Activated Google fonts (managed by /api/admin/fonts/google) ───
+  // Operator picks from the ~1,934-family catalog; the server fetches the
+  // woff2 ONCE and self-hosts it. Visitors never touch Google.
+  google_fonts: {
+    schema: googleFonts,
+    default: [] satisfies z.infer<typeof googleFonts>,
   },
   // ─── Self-update preferences ───
   updates: {

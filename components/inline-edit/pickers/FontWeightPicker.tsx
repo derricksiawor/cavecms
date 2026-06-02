@@ -1,10 +1,15 @@
 'use client'
+import { useEffect } from 'react'
 import {
-  FONT_FAMILY_TOKENS,
   FONT_WEIGHT_TOKENS,
-  type FontFamilyToken,
+  shippedWeightTokensFor,
   type FontWeightToken,
 } from '@/lib/cms/designTokens'
+import {
+  FONT_CATALOG,
+  isTypographyRole,
+  TYPOGRAPHY_ROLE_META,
+} from '@/lib/typography/catalog'
 
 // Segmented control of font-weight tokens. Greys out any weight the
 // currently-selected family doesn't ship — Elementor's GitHub
@@ -21,10 +26,10 @@ interface FontWeightPickerFieldProps {
   help?: string
   value: FontWeightToken | undefined
   onChange: (v: FontWeightToken | undefined) => void
-  // When set, the picker checks the family's `shippedWeights` and
-  // greys out any weight not present. When undefined, every weight is
+  // When set (a role token OR a catalog font key), the picker greys out
+  // any weight the family can't render. When undefined, every weight is
   // enabled — operator can override regardless of family.
-  family?: FontFamilyToken | undefined
+  family?: string | undefined
 }
 
 export function FontWeightPickerField({
@@ -34,9 +39,25 @@ export function FontWeightPickerField({
   onChange,
   family,
 }: FontWeightPickerFieldProps) {
-  const familyMeta = family ? FONT_FAMILY_TOKENS[family] : null
-  const isShipped = (w: FontWeightToken) =>
-    !familyMeta || familyMeta.shippedWeights.includes(w)
+  // Weights the chosen family can render — role `shippedWeights` or a
+  // catalog font's variable wght range (null = no family → all enabled).
+  const allowed = shippedWeightTokensFor(family)
+  const familyLabel = !family
+    ? null
+    : isTypographyRole(family)
+      ? TYPOGRAPHY_ROLE_META[family].label
+      : (FONT_CATALOG[family]?.family ?? null)
+  const isShipped = (w: FontWeightToken) => !allowed || allowed.includes(w)
+
+  // Self-heal: if the family changes to one that can't render the currently
+  // selected weight (e.g. switching to Cormorant, max 700, while 'black'/900
+  // is set), clear the override so the renderer falls back to a weight the
+  // font actually ships — otherwise the save would 400 on refineFamilyWeight
+  // with a generic error and the operator would be stuck re-saving. Guarded
+  // + idempotent (no-op once value is valid/cleared), so it can't loop.
+  useEffect(() => {
+    if (value && allowed && !allowed.includes(value)) onChange(undefined)
+  }, [value, allowed, onChange])
 
   const weights = Object.entries(FONT_WEIGHT_TOKENS) as Array<
     [FontWeightToken, (typeof FONT_WEIGHT_TOKENS)[FontWeightToken]]
@@ -80,7 +101,7 @@ export function FontWeightPickerField({
               title={
                 shipped
                   ? meta.label
-                  : `${meta.label} — not shipped by ${familyMeta?.label}`
+                  : `${meta.label} — not available in ${familyLabel}`
               }
               className={
                 'flex-1 px-2 py-2 text-center text-[11px] uppercase tracking-[0.14em] transition-all duration-quick ' +
@@ -105,8 +126,8 @@ export function FontWeightPickerField({
       <div className="text-[10.5px] tracking-[0.14em] text-cream-50/55">
         {value
           ? FONT_WEIGHT_TOKENS[value].label
-          : familyMeta
-            ? `Uses ${familyMeta.label.toLowerCase()} default`
+          : familyLabel
+            ? `Uses ${familyLabel.toLowerCase()} default`
             : 'Uses renderer default'}
       </div>
 

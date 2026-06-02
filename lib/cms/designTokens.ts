@@ -16,6 +16,8 @@
  * needs editing, not every block renderer.
  */
 
+import { FONT_CATALOG, isFontKeySlug, fontCatalogVar } from '@/lib/typography/catalog'
+
 // ──────────────────────────────────────────────────────────────────
 // Color palette — tight by design. Luxury brands have ~6 tokens, not
 // 60. Adding a 7th requires brand-owner approval.
@@ -110,32 +112,26 @@ export const SPACING_TOKENS: Record<SpacingToken, { label: string; px: number }>
 } as const
 
 // ──────────────────────────────────────────────────────────────────
-// Typography scale — Fraunces display, Inter body. Operators pick a
-// named size; the renderer applies the matching font-family.
+// Global typography ROLES (display = serif/headings, body = sans). The
+// face each role uses is operator-configurable (Settings → Typography /
+// the typography_roles setting) and resolved at render via the
+// --font-display / --font-body CSS vars; the only thing keyed off here
+// now is each role's curated weight set (used by shippedWeightTokensFor
+// to gate the weight picker). The shipped display role default is a
+// static-400 serif (Marcellus), so a heading at a heavier weight is
+// browser-synthesised — historical CaveCMS behaviour, preserved.
 // ──────────────────────────────────────────────────────────────────
 
 export type FontFamilyToken = 'display' | 'body'
 
 export const FONT_FAMILY_TOKENS: Record<
   FontFamilyToken,
-  { label: string; cssVar: string; stack: string; previewName: string; shippedWeights: ReadonlyArray<FontWeightToken> }
+  { shippedWeights: ReadonlyArray<FontWeightToken> }
 > = {
-  display: {
-    label: 'Display',
-    cssVar: '--font-display',
-    stack: 'var(--font-display)',
-    previewName: 'Montserrat Display',
-    // Montserrat ships 100–900 but CLAUDE.md forbids light weights —
-    // expose 400+ only so the picker can't construct a "light" heading.
-    shippedWeights: ['regular', 'medium', 'semibold', 'bold', 'black'] as const,
-  },
-  body: {
-    label: 'Body',
-    cssVar: '--font-body',
-    stack: 'var(--font-body)',
-    previewName: 'Montserrat Body',
-    shippedWeights: ['regular', 'medium', 'semibold', 'bold'] as const,
-  },
+  // Light weights are intentionally omitted (CLAUDE.md forbids them) so the
+  // role weight picker can't construct a "light" heading.
+  display: { shippedWeights: ['regular', 'medium', 'semibold', 'bold', 'black'] as const },
+  body: { shippedWeights: ['regular', 'medium', 'semibold', 'bold'] as const },
 } as const
 
 // ──────────────────────────────────────────────────────────────────
@@ -256,17 +252,11 @@ export function fontSizeClass(token: TextSizeToken): string {
   return `text-${token}`
 }
 
-export function fontFamilyClass(token: FontFamilyToken): string {
-  return `font-${token}`
-}
-
-// Centralised map for renderers — replaces per-block FAMILY_CLASS
-// duplicates. Same shape as fontFamilyClass() but pre-resolved so
-// callers can index directly without a function call.
-export const FAMILY_TAILWIND: Record<FontFamilyToken, string> = {
-  display: 'font-display',
-  body: 'font-body',
-}
+// Role families ('display'/'body') resolve to the Tailwind utilities
+// font-display / font-body directly in resolveFamilyRender below; catalog
+// fonts resolve to an inline var. (The old FAMILY_TAILWIND map +
+// fontFamilyClass helper were removed — resolveFamilyRender is the single
+// resolver now.)
 
 // ──────────────────────────────────────────────────────────────────
 // Tone resolver — given a tone token, return the bg + text + accent
@@ -322,6 +312,53 @@ export function resolveColorValue(value: string | undefined | null): string | un
 
 export function fontWeightClass(token: FontWeightToken): string {
   return FONT_WEIGHT_TOKENS[token].tailwindClass
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Family resolution — a block's `family` is EITHER a global role token
+// ('display' | 'body', which tracks Settings → Typography) OR a direct
+// catalog font key ('cormorant-garamond', …). Roles emit a Tailwind
+// utility (cacheable, follows the role var); catalog keys can't have a
+// static utility per font, so they emit an inline `font-family` var that
+// the layout's --font-cat-* map resolves. undefined → neither (the
+// renderer keeps its built-in baseline).
+// ──────────────────────────────────────────────────────────────────
+
+export function resolveFamilyRender(family: string | undefined | null): {
+  className?: string
+  style?: { fontFamily: string }
+} {
+  if (!family) return {}
+  if (family === 'display' || family === 'body') return { className: `font-${family}` }
+  // Any well-formed font-key slug (bundled catalog OR a runtime custom/Google
+  // font) emits the inline var. The var is DEFINED only for active fonts
+  // (catalogVarsCss / customFontFaceCss), so an unknown-but-valid slug
+  // resolves to nothing and the element keeps its inherited face.
+  if (isFontKeySlug(family)) {
+    return { style: { fontFamily: `var(${fontCatalogVar(family)})` } }
+  }
+  return {}
+}
+
+// Which weight tokens a family can actually render — used by the weight
+// picker to grey out unavailable weights. Roles use their curated
+// `shippedWeights`; catalog fonts use their variable wght range (or the
+// single static weight). null = "no family chosen → leave all enabled".
+export function shippedWeightTokensFor(
+  family: string | undefined | null,
+): FontWeightToken[] | null {
+  if (!family) return null
+  if (family === 'display' || family === 'body') {
+    return [...FONT_FAMILY_TOKENS[family].shippedWeights]
+  }
+  const f = FONT_CATALOG[family]
+  if (!f) return null
+  return (Object.keys(FONT_WEIGHT_TOKENS) as FontWeightToken[]).filter((w) => {
+    const n = FONT_WEIGHT_TOKENS[w].weight
+    return f.weightRange
+      ? n >= f.weightRange[0] && n <= f.weightRange[1]
+      : f.staticWeight === n
+  })
 }
 
 // Validation regex re-exported for Zod schemas widening color enums to

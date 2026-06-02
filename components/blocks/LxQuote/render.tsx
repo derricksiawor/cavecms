@@ -5,7 +5,7 @@ import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import {
-  FAMILY_TAILWIND,
+  resolveFamilyRender,
   fontWeightClass,
   isColorToken,
   resolveColorValue,
@@ -48,8 +48,8 @@ export function LxQuote({
   const attribToneClass = isToken ? TONE_ATTRIBUTION_CLASS[tone] : undefined
   const toneStyle = !isToken ? { color: resolveColorValue(tone) } : undefined
 
-  const family = data.family
-  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-sans'
+  const fam = resolveFamilyRender(data.family)
+  const familyClass = fam.className ?? 'font-sans'
   const overrideWeight = data.weight
   const weightClass = overrideWeight ? fontWeightClass(overrideWeight) : 'font-bold'
 
@@ -73,11 +73,11 @@ export function LxQuote({
       initialValue={data.quote}
       as="blockquote"
       className={quoteClass}
-      style={toneStyle}
+      style={{ ...toneStyle, ...fam.style }}
       placeholder="A closing thought…"
     />
   ) : (
-    <blockquote className={quoteClass} style={toneStyle}>
+    <blockquote className={quoteClass} style={{ ...toneStyle, ...fam.style }}>
       {data.quote}
     </blockquote>
   )

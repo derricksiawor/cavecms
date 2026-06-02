@@ -36,31 +36,52 @@ const colorTokenOrHex = <T extends readonly [string, ...string[]]>(
 // block. These are optional `family`/`weight` props that, when set,
 // override the renderer's defaults. Clearing reverts to the block's
 // hard-coded baseline (e.g. lx_heading defaults to display + bold).
-const fontFamilyToken = z.enum(['display', 'body']).optional()
+//
+// `family` accepts EITHER a global role token ('display' | 'body', which
+// tracks Settings → Typography) OR a direct catalog font key
+// ('cormorant-garamond', …) — the per-element override (Elementor's
+// model). Role tokens and catalog keys share one value space and never
+// collide (no catalog font is named display/body).
+const fontFamilyToken = z
+  .string()
+  // Cap before the refine so an oversized value is rejected cheaply (longest
+  // catalog key is ~19 chars); mirrors how iconName caps before its regex.
+  .max(64)
+  .refine(
+    // Role token OR any valid font-key slug. Custom fonts live in a
+    // runtime `custom_fonts` setting, so a static schema can't check a
+    // value against the bundled catalog — it must accept any well-formed
+    // slug. The render path emits `var(--font-cat-<key>)`; the var is
+    // only defined for active fonts, so an unknown slug fails closed to
+    // the inherited face. Bundled keys are valid slugs → no regression.
+    (v) => v === 'display' || v === 'body' || isFontKeySlug(v),
+    { message: 'unknown_font_family' },
+  )
+  .optional()
 const fontWeightToken = z
   .enum(['regular', 'medium', 'semibold', 'bold', 'black'])
   .optional()
 
 // Cross-field refine for typography blocks: when both `family` and
-// `weight` are set, the chosen weight must be in the family's
-// `shippedWeights` list (Body ships up to bold; Display ships through
-// black). Without this, a payload with `{family:'body', weight:'black'}`
-// would survive validation and the browser would render faux-bold —
-// a brand-quality regression. Picker UI greys out the bad combinations
-// (FontWeightPicker), but the schema is the authoritative gate.
-//
-// Implemented as a helper that wraps any z.object so the renderers'
-// optional family/weight props get the refine without re-typing it
-// per-schema. Imports FONT_FAMILY_TOKENS from designTokens (TS-only,
-// safe to import server-side — no DOM access).
-import { FONT_FAMILY_TOKENS } from './designTokens'
+// `weight` are set, the chosen weight must be one the family can actually
+// render — a role's curated `shippedWeights`, or a catalog font's variable
+// wght range. Without this, a payload like `{family:'cormorant-garamond',
+// weight:'black'}` (Cormorant tops out at 700) would survive validation
+// and the browser would render faux-bold — a brand-quality regression.
+// The picker greys out bad combinations (FontWeightPicker); the schema is
+// the authoritative gate. shippedWeightTokensFor handles both role + catalog.
+import { shippedWeightTokensFor } from './designTokens'
+import { isFontKeySlug } from '@/lib/typography/catalog'
 function refineFamilyWeight<S extends z.ZodObject<z.ZodRawShape>>(schema: S): S {
   return schema.refine(
     (d) => {
-      const o = d as { family?: 'display' | 'body'; weight?: 'regular' | 'medium' | 'semibold' | 'bold' | 'black' }
+      const o = d as {
+        family?: string
+        weight?: 'regular' | 'medium' | 'semibold' | 'bold' | 'black'
+      }
       if (!o.family || !o.weight) return true
-      const shipped = FONT_FAMILY_TOKENS[o.family].shippedWeights
-      return (shipped as ReadonlyArray<string>).includes(o.weight)
+      const allowed = shippedWeightTokensFor(o.family)
+      return !allowed || allowed.includes(o.weight)
     },
     { message: 'weight_not_shipped_by_family' },
   ) as unknown as S
@@ -347,14 +368,17 @@ export const blockSchemas = {
   // (a thin champagne hairline that animates in left-to-right when
   // animation: 'gold-rule' is set). Renders <p> — NOT a heading
   // element — because semantically it's a label.
-  lx_eyebrow: z.object({
-    text: safeRequiredText(1, TEXT_MAX.caption),
-    prefix: z.enum(['rule', 'none']).default('none'),
-    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_eyebrow).default('champagne'),
-    alignment: z.enum(['left', 'center', 'right']).default('left'),
-    weight: fontWeightToken,
-    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
-  }),
+  lx_eyebrow: refineFamilyWeight(
+    z.object({
+      text: safeRequiredText(1, TEXT_MAX.caption),
+      prefix: z.enum(['rule', 'none']).default('none'),
+      tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_eyebrow).default('champagne'),
+      alignment: z.enum(['left', 'center', 'right']).default('left'),
+      family: fontFamilyToken,
+      weight: fontWeightToken,
+      animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+    }),
+  ),
 
   // Luxury CTA action. Variants: primary-gold (champagne fill on
   // obsidian text), secondary-outline (gold outline on transparent),
@@ -362,17 +386,21 @@ export const blockSchemas = {
   // The animation: 'magnetic' opt-in attaches the cursor-follow
   // pointer behaviour for buttons that warrant it (the canonical
   // single hero CTA, not 12 magnetic CTAs on a page).
-  lx_action: z.object({
-    label: safeRequiredText(1, TEXT_MAX.ctaText),
-    href: safeCtaHref(TEXT_MAX.url),
-    openInNew: z.boolean().default(false),
-    variant: z
-      .enum(['primary-gold', 'secondary-outline', 'ghost', 'link-arrow'])
-      .default('primary-gold'),
-    size: z.enum(['sm', 'md', 'lg']).default('md'),
-    alignment: z.enum(['left', 'center', 'right']).default('left'),
-    animation: z.enum(['none', 'fade-in', 'slide-up', 'magnetic']).default('none'),
-  }),
+  lx_action: refineFamilyWeight(
+    z.object({
+      label: safeRequiredText(1, TEXT_MAX.ctaText),
+      href: safeCtaHref(TEXT_MAX.url),
+      openInNew: z.boolean().default(false),
+      variant: z
+        .enum(['primary-gold', 'secondary-outline', 'ghost', 'link-arrow'])
+        .default('primary-gold'),
+      size: z.enum(['sm', 'md', 'lg']).default('md'),
+      alignment: z.enum(['left', 'center', 'right']).default('left'),
+      family: fontFamilyToken,
+      weight: fontWeightToken,
+      animation: z.enum(['none', 'fade-in', 'slide-up', 'magnetic']).default('none'),
+    }),
+  ),
 
   // Luxury figure (image with optional caption + parallax + overlay).
   // Image required via MediaRef (media_id + alt at the schema layer
