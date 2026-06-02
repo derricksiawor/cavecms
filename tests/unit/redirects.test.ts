@@ -186,16 +186,16 @@ describe('matchRedirect', () => {
     expect(matchRedirect(c, '/FOO', '')?.location).toBe('/ci')
   })
 
-  it('a long path is not matched against dynamic rules (ReDoS input bound)', () => {
+  it('matches a long path against a wildcard in linear time (RE2, no input cap needed)', () => {
     const c = compileRules([
       rule({ matchType: 'wildcard', source: '/x/*', target: '/y' }),
     ])
     const longPath = '/x/' + 'a'.repeat(5000)
-    expect(matchRedirect(c, longPath, '')).toBeNull()
+    expect(matchRedirect(c, longPath, '')?.location).toBe('/y')
   })
 })
 
-describe('validateRedirect — ReDoS + query-mode hardening', () => {
+describe('validateRedirect — regex engine (RE2, no ReDoS) + query-mode', () => {
   const base = {
     source: '/p',
     matchType: 'regex' as const,
@@ -208,27 +208,44 @@ describe('validateRedirect — ReDoS + query-mode hardening', () => {
     notes: null,
   }
 
-  it('rejects a nested-quantifier (catastrophic) regex', () => {
-    const r = validateRedirect({ ...base, source: '^/(a+)+$' })
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toMatch(/unsafe/i)
+  // Patterns that catastrophically backtrack in JS's native engine are
+  // ACCEPTED here — RE2JS runs them in linear time, so there is no ReDoS to
+  // reject and no usability tax on the operator.
+  it('accepts a repeated alternation like (a|b)+ (linear under RE2)', () => {
+    expect(validateRedirect({ ...base, source: '^/(a|b)+$', target: '/c' }).ok).toBe(true)
   })
 
-  it('rejects a quantified overlapping alternation (exponential)', () => {
-    // (a|a)+ is the classic exponential-backtracking shape hasNestedQuantifier missed.
-    expect(validateRedirect({ ...base, source: '^/(a|a)+$' }).ok).toBe(false)
+  it('accepts a nested-quantifier pattern like (a+)+ (linear under RE2)', () => {
+    expect(validateRedirect({ ...base, source: '^/(a+)+$', target: '/c' }).ok).toBe(true)
   })
 
-  it('rejects a quantified alternation conservatively (use a char class instead)', () => {
-    expect(validateRedirect({ ...base, source: '^/(a|b)+$' }).ok).toBe(false)
+  it('runs a would-be-catastrophic pattern in linear time without hanging', () => {
+    // (a|a)+ hangs the native engine for ~minutes on 40+ chars; RE2 is instant.
+    // The test completing at all is the proof; assert the match too.
+    const c = compileRules([
+      rule({ matchType: 'regex', source: '^/(a|a)+$', target: '/ok' }),
+    ])
+    expect(matchRedirect(c, '/' + 'a'.repeat(60), '')?.location).toBe('/ok')
   })
 
-  it('still allows alternation that is NOT repeated', () => {
-    expect(validateRedirect({ ...base, source: '^/(red|blue)/x$', target: '/c' }).ok).toBe(true)
+  it('rejects an unsupported lookahead (RE2 has no backtracking features)', () => {
+    expect(validateRedirect({ ...base, source: '^/x(?=y)', target: '/c' }).ok).toBe(false)
   })
 
-  it('allows a safe single-quantifier regex', () => {
+  it('rejects an unsupported backreference', () => {
+    expect(validateRedirect({ ...base, source: '^/(a)\\1$', target: '/c' }).ok).toBe(false)
+  })
+
+  it('rejects a syntactically invalid regex', () => {
+    expect(validateRedirect({ ...base, source: '^/(', target: '/c' }).ok).toBe(false)
+  })
+
+  it('allows a safe single-quantifier regex with a capture', () => {
     expect(validateRedirect({ ...base, source: '^/p/(\\d+)$', target: '/q/$1' }).ok).toBe(true)
+  })
+
+  it('allows alternation that is NOT repeated', () => {
+    expect(validateRedirect({ ...base, source: '^/(red|blue)/x$', target: '/c' }).ok).toBe(true)
   })
 
   it('rejects a target containing a CR/LF control char', () => {
