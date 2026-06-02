@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { headers } from 'next/headers'
+import { after } from 'next/server'
 import { recordNotFound } from '@/lib/cms/notFoundLog'
 
 // Themed 404 page — matches the error.tsx aesthetic. Triggered by
@@ -20,12 +21,15 @@ export const dynamic = 'force-dynamic'
 
 export default async function NotFound() {
   // Middleware sets x-pathname to the ORIGINAL requested path on every
-  // request (middleware.ts), surviving the CMS rewrite. Record the 404
-  // for the operator's 404 log (best-effort, never blocks the page).
+  // request (middleware.ts), surviving the CMS rewrite. Record the 404 for
+  // the operator's 404 log via after() — it runs AFTER the response is sent,
+  // so the DB write never adds latency to the 404 render (and a 404 flood of
+  // distinct paths can't turn the page into a synchronous DB-write amplifier).
   const h = await headers()
   const path = h.get('x-pathname')
+  const referer = h.get('referer')
   if (path) {
-    await recordNotFound(path, h.get('referer'))
+    after(() => recordNotFound(path, referer))
   }
 
   return (

@@ -33,11 +33,20 @@ export async function POST(req: Request): Promise<Response> {
     id = 0
   }
   if (id > 0) {
-    await db.execute(sql`
-      UPDATE redirects
-      SET hit_count = hit_count + 1, last_hit_at = NOW(3)
-      WHERE id = ${id}
-    `)
+    try {
+      // `updated_at = updated_at` explicitly preserves the column so the
+      // ON UPDATE CURRENT_TIMESTAMP auto-bump does NOT fire — otherwise
+      // every hit would advance the feed etag (max(updated_at)) and defeat
+      // the middleware's compiled-ruleset reuse. Hit counting is best-effort
+      // telemetry, so a failed bump is swallowed (always return 204).
+      await db.execute(sql`
+        UPDATE redirects
+        SET hit_count = hit_count + 1, last_hit_at = NOW(3), updated_at = updated_at
+        WHERE id = ${id}
+      `)
+    } catch {
+      // best-effort — never surface a 500 that spams logs on every hit
+    }
   }
   return new Response(null, { status: 204 })
 }

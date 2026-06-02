@@ -73,6 +73,9 @@ id_ed25519*
 .cursor
 .superpowers
 .notes
+# Brainstorming specs + implementation plans — local planning artifacts,
+# never shipped to customers or pushed to GitHub (global rule #0.55 / #1).
+docs/superpowers/
 # Project-level Claude instructions — local-only per global rule #1
 # (NEVER commit files with "claude" in the name).
 /CLAUDE.md

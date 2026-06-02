@@ -37,7 +37,7 @@ export const redirects = mysqlTable(
     statusCode: smallint('status_code'),
     queryHandling: varchar('query_handling', {
       length: 16,
-      enum: ['passthrough', 'ignore', 'exact'],
+      enum: ['passthrough', 'ignore'],
     })
       .notNull()
       .default('passthrough'),

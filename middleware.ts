@@ -75,6 +75,11 @@ const SECURITY_CACHE_TTL_MS = 3000
 // is unchanged.
 const REDIRECTS_CACHE_TTL_MS = 30_000
 
+// Loopback upstream port for the internal-config + redirect feeds. The
+// standalone server binds 127.0.0.1:$PORT (default 3040 in dev). One source
+// of truth so the three loopback callers below never drift.
+const LOOPBACK_PORT = process.env['PORT'] ?? '3040'
+
 interface ConfigCache {
   ts: number
   data: SecurityConfig | null
@@ -152,7 +157,7 @@ async function getSecurityConfig(_req: NextRequest, forceFresh = false): Promise
   // listener instead, matching the pattern in scripts/cron-purge.ts.
   // Forward the public Host header so any downstream host-aware logic
   // sees the originating hostname.
-  const port = process.env['PORT'] ?? '3040'
+  const port = LOOPBACK_PORT
   const url = `http://127.0.0.1:${port}/api/internal/security-config`
   try {
     const res = await fetch(url, {
@@ -194,10 +199,19 @@ async function getSecurityConfig(_req: NextRequest, forceFresh = false): Promise
 // the security config (bearer + loopback Host) but with a longer TTL and
 // an etag so the compiled matcher is reused while the ruleset is unchanged.
 declare global {
-  // eslint-disable-next-line no-var
   var __cavecmsRedirects:
     | { ts: number; etag: string; compiled: CompiledRuleset }
     | undefined
+}
+
+// Throttle feed-failure warnings to at most once per TTL window so a
+// persistent outage is visible in logs without spamming on every request.
+let redirectFeedWarnedAt = 0
+function warnRedirectFeed(reason: string): void {
+  const now = Date.now()
+  if (now - redirectFeedWarnedAt < REDIRECTS_CACHE_TTL_MS) return
+  redirectFeedWarnedAt = now
+  console.warn(`[middleware] redirect feed ${reason}; using last-known-good (redirects may be stale)`)
 }
 
 async function getRedirectMatcher(): Promise<CompiledRuleset | null> {
@@ -205,14 +219,16 @@ async function getRedirectMatcher(): Promise<CompiledRuleset | null> {
   if (cached && Date.now() - cached.ts < REDIRECTS_CACHE_TTL_MS) return cached.compiled
   const secret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
   if (!secret) return cached?.compiled ?? null
-  const port = process.env['PORT'] ?? '3040'
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/internal/redirects`, {
-      headers: { authorization: `Bearer ${secret}`, host: `127.0.0.1:${port}` },
+    const res = await fetch(`http://127.0.0.1:${LOOPBACK_PORT}/api/internal/redirects`, {
+      headers: { authorization: `Bearer ${secret}`, host: `127.0.0.1:${LOOPBACK_PORT}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(2000),
     })
-    if (!res.ok) return cached?.compiled ?? null
+    if (!res.ok) {
+      warnRedirectFeed(`returned ${res.status}`)
+      return cached?.compiled ?? null
+    }
     const data = (await res.json()) as { etag: string; rules: RedirectRule[] }
     if (cached && cached.etag === data.etag) {
       // Unchanged — refresh ts, reuse compiled form (skip recompile).
@@ -224,6 +240,7 @@ async function getRedirectMatcher(): Promise<CompiledRuleset | null> {
     return compiled
   } catch {
     // Last-known-good; a transient feed hiccup must never break navigation.
+    warnRedirectFeed('unreachable')
     return cached?.compiled ?? null
   }
 }
@@ -668,7 +685,7 @@ export async function middleware(
         // Fire-and-forget hit bump — never delays the response.
         const hitSecret = process.env['INTERNAL_REVALIDATE_SECRET'] ?? ''
         if (hitSecret) {
-          const hitPort = process.env['PORT'] ?? '3040'
+          const hitPort = LOOPBACK_PORT
           event.waitUntil(
             fetch(`http://127.0.0.1:${hitPort}/api/internal/redirect-hit`, {
               method: 'POST',

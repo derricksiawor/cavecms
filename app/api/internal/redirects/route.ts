@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { env } from '@/lib/env'
 import { db } from '@/db/client'
-import { rulesetEtag, type RedirectRule } from '@/lib/cms/redirects'
+import { rulesetEtag, rowToRule, type RedirectFeedRow, type RedirectRule } from '@/lib/cms/redirects'
 
 // Internal middleware-feeding endpoint. The Edge middleware can't call
 // Drizzle directly, so it pulls the enabled redirect ruleset over loopback
@@ -25,54 +25,47 @@ function authorized(req: Request): boolean {
   return presented.length === expected.length && timingSafeEqual(padded, expected)
 }
 
-interface Row {
-  id: number
-  source: string
-  match_type: RedirectRule['matchType']
-  action: RedirectRule['action']
-  target: string | null
-  status_code: number | null
-  query_handling: RedirectRule['queryHandling']
-  case_insensitive: number
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
+  })
+}
+
+interface FeedRow extends RedirectFeedRow {
   updated_at: string | Date
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (!authorized(req)) {
-    return new Response(JSON.stringify({ error: 'unauthorized' }), {
-      status: 401,
-      headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
-    })
+  if (!authorized(req)) return jsonResponse({ error: 'unauthorized' }, 401)
+
+  let rows: FeedRow[]
+  try {
+    // Defensive LIMIT: operator rule counts are small (tens–hundreds); the
+    // cap stops a runaway table from ever shipping a giant payload + an
+    // unbounded per-request matcher loop.
+    const [r] = (await db.execute(sql`
+      SELECT id, source, match_type, action, target, status_code,
+             query_handling, case_insensitive, updated_at
+      FROM redirects
+      WHERE enabled = 1
+      ORDER BY position ASC, id ASC
+      LIMIT 5000
+    `)) as unknown as [FeedRow[]]
+    rows = r
+  } catch {
+    // DB hiccup → 503 so the middleware keeps its last-known-good ruleset
+    // (it treats any non-2xx as "reuse cache"). Never throw a framework 500
+    // that spams logs every 30s during an outage.
+    return jsonResponse({ error: 'unavailable' }, 503)
   }
-  const [rows] = (await db.execute(sql`
-    SELECT id, source, match_type, action, target, status_code,
-           query_handling, case_insensitive, updated_at
-    FROM redirects
-    WHERE enabled = 1
-    ORDER BY position ASC, id ASC
-  `)) as unknown as [Row[]]
 
   let maxUpdated = 0
   const rules: RedirectRule[] = rows.map((r) => {
     const t = new Date(r.updated_at).getTime()
     if (t > maxUpdated) maxUpdated = t
-    return {
-      id: r.id,
-      source: r.source,
-      matchType: r.match_type,
-      action: r.action,
-      target: r.target,
-      statusCode: r.status_code,
-      queryHandling: r.query_handling,
-      caseInsensitive: r.case_insensitive === 1,
-    }
+    return rowToRule(r)
   })
 
-  return new Response(
-    JSON.stringify({ etag: rulesetEtag(rules.length, maxUpdated), rules }),
-    {
-      status: 200,
-      headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
-    },
-  )
+  return jsonResponse({ etag: rulesetEtag(rules.length, maxUpdated), rules }, 200)
 }

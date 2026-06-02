@@ -39,9 +39,12 @@ export async function recordNotFound(
       VALUES (${path}, 1, ${ref})
       ON DUPLICATE KEY UPDATE hits = hits + 1, last_seen_at = NOW(3), referrer = VALUES(referrer)
     `)
-    // Opportunistic prune (~1 in 50 writes): keep the 1000 most-recent rows.
-    // Time-based gate (not Math.random) so this stays deterministic.
-    if (Math.floor(Date.now() / 1000) % 50 === 0) {
+    // Opportunistic prune: a true per-write 2% sample (≈1 in 50 writes),
+    // keeping the 1000 most-recent rows. A uniform random gate spreads the
+    // prune load evenly — a time-bucket gate would fire for an entire
+    // wall-clock second and let a 404 burst run the DELETE many times at
+    // once. (This is a Node runtime module, so Math.random is available.)
+    if (Math.random() < 0.02) {
       await db.execute(sql`
         DELETE FROM not_found_log
         WHERE id NOT IN (

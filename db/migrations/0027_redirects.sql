@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `redirects` (
 	CONSTRAINT `idx_redirects_source_type` UNIQUE(`source`,`match_type`),
 	KEY `idx_redirects_enabled_pos` (`enabled`,`position`),
 	CONSTRAINT `redirects_created_by_users_id_fk` FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC;
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `not_found_log` (
 	`id` int AUTO_INCREMENT NOT NULL,
@@ -31,4 +31,4 @@ CREATE TABLE IF NOT EXISTS `not_found_log` (
 	CONSTRAINT `not_found_log_id` PRIMARY KEY(`id`),
 	CONSTRAINT `idx_not_found_path` UNIQUE(`path`),
 	KEY `idx_not_found_last_seen` (`last_seen_at`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC;

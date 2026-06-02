@@ -164,4 +164,75 @@ describe('matchRedirect', () => {
     ])
     expect(matchRedirect(c, '/good', '')?.location).toBe('/ok')
   })
+
+  // ── Regressions: case-sensitivity (was: lowercased fallback hit every rule) ──
+
+  it('a case-SENSITIVE exact rule does NOT match a differing-case path', () => {
+    const c = compileRules([
+      rule({ source: '/Foo', target: '/sensitive', caseInsensitive: false }),
+    ])
+    expect(matchRedirect(c, '/Foo', '')?.location).toBe('/sensitive') // exact case hits
+    expect(matchRedirect(c, '/foo', '')).toBeNull() // differing case must NOT hit
+  })
+
+  it('a case-sensitive and a case-insensitive rule sharing a lowercased key do not collide', () => {
+    const c = compileRules([
+      rule({ id: 1, source: '/foo', target: '/cs', caseInsensitive: false }),
+      rule({ id: 2, source: '/FOO', target: '/ci', caseInsensitive: true }),
+    ])
+    // exact-case '/foo' → the case-sensitive rule
+    expect(matchRedirect(c, '/foo', '')?.location).toBe('/cs')
+    // '/FOO' → the case-insensitive rule (not dropped by a Map collision)
+    expect(matchRedirect(c, '/FOO', '')?.location).toBe('/ci')
+  })
+
+  it('a long path is not matched against dynamic rules (ReDoS input bound)', () => {
+    const c = compileRules([
+      rule({ matchType: 'wildcard', source: '/x/*', target: '/y' }),
+    ])
+    const longPath = '/x/' + 'a'.repeat(5000)
+    expect(matchRedirect(c, longPath, '')).toBeNull()
+  })
+})
+
+describe('validateRedirect — ReDoS + query-mode hardening', () => {
+  const base = {
+    source: '/p',
+    matchType: 'regex' as const,
+    action: 'redirect' as const,
+    target: '/q',
+    statusCode: 301,
+    queryHandling: 'passthrough' as const,
+    caseInsensitive: true,
+    enabled: true,
+    notes: null,
+  }
+
+  it('rejects a nested-quantifier (catastrophic) regex', () => {
+    const r = validateRedirect({ ...base, source: '^/(a+)+$' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/unsafe|nested/i)
+  })
+
+  it('allows a safe single-quantifier regex', () => {
+    expect(validateRedirect({ ...base, source: '^/p/(\\d+)$', target: '/q/$1' }).ok).toBe(true)
+  })
+
+  it('rejects a target containing a CR/LF control char', () => {
+    expect(
+      validateRedirect({ ...base, matchType: 'exact', source: '/a', target: '/b\r\nX: y' }).ok,
+    ).toBe(false)
+  })
+
+  it('no longer accepts queryHandling="exact"', () => {
+    expect(
+      validateRedirect({
+        ...base,
+        matchType: 'exact',
+        source: '/a',
+        target: '/b',
+        queryHandling: 'exact' as unknown as 'passthrough',
+      }).ok,
+    ).toBe(false)
+  })
 })

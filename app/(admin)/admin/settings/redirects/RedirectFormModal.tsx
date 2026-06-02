@@ -17,7 +17,6 @@ const STATUS = [
 const QUERY = [
   { v: 'passthrough', label: 'Pass through', hint: 'Append ?query to target' },
   { v: 'ignore', label: 'Ignore', hint: 'Drop the query' },
-  { v: 'exact', label: 'Exact', hint: 'Query must match' },
 ] as const
 
 export interface FormSeed {
@@ -125,6 +124,16 @@ export function RedirectFormModal({ editing, seed, onClose, onSaved }: Props) {
           ))}
         </div>
 
+        {matchType === 'regex' && (
+          <p className="mt-2 text-[12px] leading-relaxed text-warm-stone">
+            Patterns match the normalized path (no trailing slash, collapsed
+            slashes). Anchor with <span className="font-mono">^</span> and{' '}
+            <span className="font-mono">$</span>; use{' '}
+            <span className="font-mono">$1</span>…<span className="font-mono">$9</span> in
+            the target for captured groups.
+          </p>
+        )}
+
         <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-warm-stone">
           Action
         </p>
@@ -176,7 +185,7 @@ export function RedirectFormModal({ editing, seed, onClose, onSaved }: Props) {
             <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-warm-stone">
               Query string
             </p>
-            <div className="mt-2 grid grid-cols-3 gap-2">
+            <div className="mt-2 grid grid-cols-2 gap-2">
               {QUERY.map((q) => (
                 <button
                   key={q.v}
