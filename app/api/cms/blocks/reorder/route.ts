@@ -310,15 +310,25 @@ export const POST = withError(async (req) => {
     // that previously created a deadlock window when two TXs visited
     // overlapping parents in different JS-set iteration orders.
     //
+    // DRAFT-AWARE: `draft_state = 'removed'` rows are excluded from the
+    // living set. A removed-in-draft block keeps deleted_at = NULL (it's
+    // only soft-deleted at Publish), but the editor hydrate omits it — so
+    // the client's reorder payload never lists it. Counting it as living
+    // here made EVERY reorder after a draft-delete in the same parent 409
+    // with 'drift'. Excluding it realigns the completeness demand with
+    // exactly what the editor submits (added rows stay counted: they carry
+    // deleted_at = NULL + draft_state = 'added' and the editor DOES list
+    // them, with their parent in the live parent_id column).
+    //
     // NOTE (draft imprecision, acceptable for MVP): affected parents +
-    // living-child sets are computed from the LIVE parent_id column, NOT
-    // from COALESCE(draft_parent_id, parent_id). If a sibling was reparented
+    // living-child sets are still bucketed by the LIVE parent_id column,
+    // NOT COALESCE(draft_parent_id, parent_id). If a sibling was reparented
     // in an EARLIER draft write, its draft_parent_id has moved but its live
     // parent_id still points at the old parent — so this check reasons over
-    // the published tree. That keeps the completeness demand sound for the
-    // published membership (and the cap/cycle guards stay correct against
-    // live data); it only means a draft-only reparent of a third block won't
-    // relax the "list every living child" requirement here.
+    // the published membership for cross-parent draft moves. The cap/cycle
+    // guards stay correct against live data; it only means a draft-only
+    // reparent of a third block won't relax the "list every living child"
+    // requirement here.
     const affectedParents = new Set<number | null>()
     for (const r of submittedRows) affectedParents.add(r.parent_id)
     for (const p of resolvedParentById.values()) affectedParents.add(p)
@@ -330,6 +340,7 @@ export const POST = withError(async (req) => {
         FROM content_blocks
         WHERE page_id = ${body.pageId}
           AND deleted_at IS NULL
+          AND draft_state <> 'removed'
           AND (${parentFragment})
         ORDER BY id
         FOR UPDATE

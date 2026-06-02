@@ -4,9 +4,10 @@ import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { checkReadRate } from '@/lib/auth/cmsRateLimit'
 
 // GET /api/cms/pages/[id]/draft-status — report whether the page has a
-// pending draft, its draft cursor, and the count of changed rows
-// (getPageDraftStatus). Drives the editor's "you have unpublished changes"
-// banner + the advisory "draft changed elsewhere" signal.
+// pending draft, its draft cursor, the count of changed rows, and whether
+// undo/redo are available (getPageDraftStatus). Drives the admin-bar
+// DraftBar: the "N unpublished" count, the Undo/Redo enabled state, and the
+// advisory "draft changed elsewhere" signal.
 //
 // Admin/editor only. NO CSRF — this is a read GET; CSRF guards mutations.
 // Read rate-limit, matching the sibling page-load GET.
@@ -26,9 +27,10 @@ export const GET = withError<RouteCtx>(async (_req, { params }) => {
   const ctx = await requireRole(['admin', 'editor'])
   checkReadRate(ctx.userId)
 
-  const { hasDraft, draftVersion, changeCount } = await getPageDraftStatus(id)
+  const { hasDraft, draftVersion, changeCount, canUndo, canRedo } =
+    await getPageDraftStatus(id)
   return new Response(
-    JSON.stringify({ hasDraft, draftVersion, changeCount }),
+    JSON.stringify({ hasDraft, draftVersion, changeCount, canUndo, canRedo }),
     {
       status: 200,
       headers: {
