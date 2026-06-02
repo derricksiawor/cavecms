@@ -12,14 +12,17 @@ import {
   type RefCallback,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { useRouter } from 'next/navigation'
 import clsx from 'clsx'
 import {
+  Check,
   ChevronDown,
   FilePlus,
   FileText,
   FolderPlus,
   Layers,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Menu as MenuIcon,
   Pencil,
@@ -27,7 +30,9 @@ import {
   Redo2,
   Undo2,
   Upload,
+  UploadCloud,
   UserPlus,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/auth/requireRole'
@@ -331,6 +336,7 @@ function BarInner({
         )}
         {editMode && <OutlineTogglePill />}
         {editMode && <UndoRedoPills />}
+        {editMode && <DraftPublishControls />}
         <div className="ml-auto flex items-center gap-3">
           <Identity email={email} role={role} />
           <PillButton
@@ -503,6 +509,179 @@ function UndoRedoPills() {
       >
         <Redo2 size={14} strokeWidth={1.8} aria-hidden />
       </PillButton>
+    </span>
+  )
+}
+
+// DraftPublishControls — the global Draft → Publish surface for the inline
+// editor. Edits autosave into the page draft (invisible to the public);
+// THIS is where the operator pushes the whole draft live, or throws it away.
+//
+// The admin bar renders in the root layout, outside the page's React tree, so
+// it discovers the current page id from the `data-page-id` attribute the
+// editor's <main> exposes, and talks to the page draft endpoints directly:
+//   GET  /api/cms/pages/[id]/draft-status   → { hasDraft, draftVersion, changeCount }
+//   POST /api/cms/pages/[id]/publish        → materialise draft → live
+//   POST /api/cms/pages/[id]/discard-draft  → throw the draft away
+// Status is polled (cheap) so the pill stays in lockstep as the operator edits.
+function DraftPublishControls() {
+  const router = useRouter()
+  const toast = useToast()
+  const [pageId, setPageId] = useState<number | null>(null)
+  const [changeCount, setChangeCount] = useState(0)
+  const [busy, setBusy] = useState<'publish' | 'discard' | null>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+
+  // Discover the page id from the editor's <main data-page-id>. Re-read on an
+  // interval so a soft-nav between pages keeps the controls page-accurate.
+  useEffect(() => {
+    const read = () => {
+      const el = document.querySelector('[data-page-id]')
+      const raw = el?.getAttribute('data-page-id')
+      const n = raw ? Number(raw) : NaN
+      setPageId(Number.isInteger(n) && n > 0 ? n : null)
+    }
+    read()
+    const t = setInterval(read, 2000)
+    return () => clearInterval(t)
+  }, [])
+
+  const refetch = useCallback(async (id: number) => {
+    try {
+      const r = await fetch(`/api/cms/pages/${id}/draft-status`, {
+        headers: { accept: 'application/json' },
+      })
+      if (r.ok) {
+        const j = (await r.json()) as { changeCount?: number }
+        setChangeCount(typeof j.changeCount === 'number' ? j.changeCount : 0)
+      }
+    } catch {
+      /* transient — keep the last-known count */
+    }
+  }, [])
+
+  // Poll draft status while a page is in scope.
+  useEffect(() => {
+    if (!pageId) {
+      setChangeCount(0)
+      return
+    }
+    void refetch(pageId)
+    const t = setInterval(() => void refetch(pageId), 4000)
+    return () => clearInterval(t)
+  }, [pageId, refetch])
+
+  const publish = async () => {
+    if (!pageId || busy) return
+    setBusy('publish')
+    try {
+      const res = await csrfFetch(`/api/cms/pages/${pageId}/publish`, {
+        method: 'POST',
+      })
+      if (res.ok) {
+        toast.success('Published — your changes are now live.')
+        setChangeCount(0)
+        router.refresh()
+      } else {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        toast.error(
+          j.error === 'html_id_collision'
+            ? 'Two blocks share the same HTML id — fix one, then publish.'
+            : "Couldn't publish. Try again in a moment.",
+        )
+      }
+    } catch {
+      toast.error("We can't reach the server right now.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const discard = async () => {
+    if (!pageId || busy) return
+    setBusy('discard')
+    try {
+      const res = await csrfFetch(`/api/cms/pages/${pageId}/discard-draft`, {
+        method: 'POST',
+      })
+      if (res.ok) {
+        toast.success('Draft discarded — back to the published version.')
+        setChangeCount(0)
+        setConfirmDiscard(false)
+        router.refresh()
+      } else {
+        toast.error("Couldn't discard the draft. Try again.")
+      }
+    } catch {
+      toast.error("We can't reach the server right now.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!pageId) return null
+
+  if (changeCount === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.16em] text-cream-50/40">
+        <Check size={12} strokeWidth={2.2} aria-hidden />
+        All changes published
+      </span>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+      <span
+        className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-copper-300"
+        title={`${changeCount} unpublished draft change${changeCount === 1 ? '' : 's'}`}
+      >
+        <span className="inline-flex h-2 w-2 rounded-full bg-copper-400" />
+        {changeCount} unpublished
+      </span>
+      <button
+        type="button"
+        onClick={publish}
+        disabled={busy !== null}
+        className="inline-flex items-center gap-1.5 rounded-full bg-champagne px-3.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-obsidian transition-colors hover:bg-antique-gold hover:text-cream-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy === 'publish' ? (
+          <Loader2 size={12} strokeWidth={2.4} className="animate-spin" aria-hidden />
+        ) : (
+          <UploadCloud size={12} strokeWidth={2.2} aria-hidden />
+        )}
+        Publish
+      </button>
+      {confirmDiscard ? (
+        <span className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            onClick={discard}
+            disabled={busy !== null}
+            className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-red-300 transition-colors hover:bg-red-500/15 disabled:opacity-50"
+          >
+            {busy === 'discard' ? 'Discarding…' : 'Confirm discard'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmDiscard(false)}
+            disabled={busy !== null}
+            aria-label="Keep editing"
+            className="rounded-full p-1 text-cream-50/50 transition-colors hover:bg-cream-50/10 hover:text-cream-50"
+          >
+            <X size={12} strokeWidth={2.2} aria-hidden />
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmDiscard(true)}
+          disabled={busy !== null}
+          className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream-50/55 transition-colors hover:bg-cream-50/10 hover:text-cream-50 disabled:opacity-50"
+        >
+          Discard
+        </button>
+      )}
     </span>
   )
 }

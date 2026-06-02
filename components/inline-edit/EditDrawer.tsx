@@ -13,12 +13,11 @@ import clsx from 'clsx'
 import { Drawer } from '@/components/ui/Drawer'
 import { csrfFetch } from '@/lib/client/csrf'
 import { safeStorage } from '@/lib/client/safeStorage'
-import { ConfirmModal } from './ConfirmModal'
 import { SHAPES_FOR_BLOCK, ZodForm, type FieldShape } from './ZodForm'
 import { CrmDestinationsPanel } from './CrmDestinationsPanel'
 import { SEED_ENTRIES, type SeedBlockType } from '@/lib/cms/blockSeeds'
 import { useToast } from './Toast'
-import { useRecordCommand, useUndoActions } from './UndoStackProvider'
+import { useRecordCommand } from './UndoStackProvider'
 import { emitSaveBegin, emitSaveEnd } from './SaveStatusIndicator'
 import {
   useEffectiveVersions,
@@ -269,7 +268,6 @@ export function EditDrawer({
   const router = useRouter()
   const toast = useToast()
   const recordCommand = useRecordCommand()
-  const { runUndo } = useUndoActions()
   const dispatch = useInlineEditDispatch()
   const [, startTransition] = useTransition()
   const inFlightRef = useRef(false)
@@ -393,7 +391,6 @@ export function EditDrawer({
     return initialTabFor(shapes)
   })
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
-  const [confirmClose, setConfirmClose] = useState(false)
   const eyebrow = eyebrowFor(blockType)
   const kindNoun = blockType === 'section'
     ? 'Section'
@@ -512,47 +509,18 @@ export function EditDrawer({
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty])
 
-  // Custom unsaved-changes confirmation. the project standards ban
-  // alert/confirm/prompt — switching to a state-driven modal that
-  // matches the rest of the editor's chrome (cream + copper, custom
-  // dialog with auto-focus + Esc).
+  // Draft-autosave close. There is no "discard changes?" prompt anymore —
+  // every edit is already autosaved into the page draft (the public site is
+  // unaffected until the operator Publishes), and the whole-page Discard lives
+  // in the admin bar. Closing just flushes the un-saved tail into the draft.
+  // `flushSaveRef` is wired by an effect AFTER save() is defined, so tryClose
+  // (declared before save) can reach it without a temporal-dead-zone error.
+  const flushSaveRef = useRef<() => void>(() => {})
   const tryClose = useCallback(() => {
-    // Save-in-flight close-block. The X / footer Close buttons are
-    // already `disabled={busy}` at the DOM level, but the Drawer's
-    // Escape handler + overlay click both route here without the
-    // disabled gate. Without this check, an operator who hits
-    // Esc mid-save can discard-and-close while the PATCH continues
-    // to commit server-side — the server's data persists, the
-    // post-await block-saved dispatch (mountedRef gated, but the
-    // server commit is independent) still lands, contradicting
-    // the operator's "discard" intent.
-    if (inFlightRef.current) return
-    if (!dirty) {
-      // Defensive clear — set-preview overlays from earlier mutations
-      // that landed back at the persisted shape would otherwise leak
-      // through the close.
-      closingRef.current = true
-      dispatch({ type: 'clear-preview', blockId })
-      onClose()
-      return
-    }
-    setConfirmClose(true)
-  }, [blockId, dirty, dispatch, onClose])
-  const discardAndClose = useCallback(() => {
     closingRef.current = true
-    safeStorage.remove(draftKey)
-    // F7 — write the discard sentinel so that if a stale draft for
-    // this block resurfaces from another tab / hot-reload / error
-    // boundary, the next mount can compare savedAt vs discardedAt
-    // and treat the draft as absent when the operator explicitly
-    // dropped it.
-    safeStorage.set(discardKey, String(Date.now()))
-    setConfirmClose(false)
-    // Drop any pending preview overlay so the canvas reverts to the
-    // persisted shape immediately.
-    dispatch({ type: 'clear-preview', blockId })
+    flushSaveRef.current()
     onClose()
-  }, [blockId, discardKey, dispatch, draftKey, onClose])
+  }, [onClose])
 
   // Container kinds (section/column) PATCH `meta` instead of `data`.
   // The blockType column carries the literal kind name for containers
@@ -863,12 +831,9 @@ export function EditDrawer({
         // unreachable for any payload the PATCH could have carried.
       }
       saveOk = true
-      toast.success(`${kindNoun} saved.`, {
-        label: 'Undo',
-        // Routes through runUndo so the cursor moves. Subsequent ⌘Z
-        // targets the NEXT command on the stack.
-        onClick: () => void runUndo(),
-      })
+      // No success toast — this is a debounced autosave into the draft, not
+      // an explicit action; the drawer footer's "Saved to draft" pill is the
+      // feedback. (Undo lives in the admin bar + ⌘Z.)
     } catch (e) {
       if (!mountedRef.current) return
       // closingRef gate: an operator who already discarded shouldn't
@@ -914,9 +879,34 @@ export function EditDrawer({
     pageId,
     recordCommand,
     router,
-    runUndo,
     toast,
   ])
+
+  // ── Draft autosave ──
+  // No explicit Save button anymore — a short debounce after the last change
+  // flushes the edit into the page draft (the public site is untouched until
+  // Publish). The localStorage draft + in-flight buffering already handle
+  // mid-save typing; this just schedules the server write.
+  useEffect(() => {
+    if (!dirty) return
+    if (inFlightRef.current) return
+    const t = setTimeout(() => {
+      void save()
+    }, 700)
+    return () => clearTimeout(t)
+  }, [data, dirty, save])
+
+  // Wire the close-flush (used by tryClose, declared before save). On close:
+  // persist the un-saved tail to the draft, else just clear the live preview.
+  useEffect(() => {
+    flushSaveRef.current = () => {
+      if (dirty && !inFlightRef.current) {
+        void save()
+      } else if (!inFlightRef.current) {
+        dispatch({ type: 'clear-preview', blockId })
+      }
+    }
+  }, [dirty, save, dispatch, blockId])
 
   // Preview-overlay cleanup safety net. Every documented close path
   // (tryClose, discardAndClose, post-save) sets closingRef and
@@ -1144,95 +1134,42 @@ export function EditDrawer({
          wrap row, so a wrapped status sits flush right on its own
          line — preserves the "actions on the left, state on the
          right" reading order at every width. */}
+      {/* Autosave footer — no Save button. Edits stream into the page draft
+         automatically; the operator Publishes the whole page from the admin
+         bar. The status reads the live autosave state; "Done" just closes. */}
       <footer className="sticky bottom-0 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-cream-50/12 bg-near-black/95 px-6 py-4 backdrop-blur-md">
         <button
           type="button"
-          disabled={busy || !dirty || allShapes.length === 0}
-          onClick={save}
-          className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-copper-500 px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black shadow-[0_8px_22px_-10px_rgba(184,115,51,0.55)] transition-all hover:bg-copper-400 hover:shadow-[0_10px_28px_-10px_rgba(184,115,51,0.65)] disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none"
-        >
-          {busy ? (
-            <>
-              <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-              Saving…
-            </>
-          ) : (
-            <>
-              <Check size={12} strokeWidth={2.4} />
-              Save changes
-            </>
-          )}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
           onClick={tryClose}
-          className="shrink-0 whitespace-nowrap rounded-full border border-cream-50/30 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-cream-50 transition-colors hover:border-cream-50 disabled:opacity-50"
+          className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-copper-500 px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-near-black shadow-[0_8px_22px_-10px_rgba(184,115,51,0.55)] transition-all hover:bg-copper-400 hover:shadow-[0_10px_28px_-10px_rgba(184,115,51,0.65)] motion-reduce:transition-none"
         >
-          Close
+          <Check size={12} strokeWidth={2.4} />
+          Done
         </button>
         <div className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.16em]">
-          {dirty ? (
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-copper-300">
+          {busy ? (
+            <span className="inline-flex items-center gap-1.5 text-copper-300">
+              <Loader2 size={11} strokeWidth={2.4} className="animate-spin" />
+              Saving…
+            </span>
+          ) : dirty ? (
+            <span className="inline-flex items-center gap-1.5 text-cream-50/55">
               <span className="inline-flex h-2 w-2 rounded-full bg-copper-400 animate-cavecms-pulse-copper" />
-              Unsaved
+              Saving draft…
             </span>
           ) : lastSavedAt !== null ? (
-            // Post-save: show the "Saved" pill AND a persistent Undo
-            // link. The page-level toast's "Undo" carries the same
-            // affordance but auto-fades; the drawer's button is the
-            // mouse-user fallback for when the toast already
-            // dismissed. Click routes through runUndo + closes the
-            // drawer (the form fields would otherwise hold the new
-            // value the canvas just reverted from — re-open to see
-            // the reverted state). Audit finding E6 (Chunk K).
-            <span className="inline-flex items-center gap-2 whitespace-nowrap">
-              <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-copper-300">
-                <Check size={11} strokeWidth={2.6} />
-                Saved
-              </span>
-              <button
-                type="button"
-                // Disabled while a save is in flight — `runUndo` would
-                // otherwise fire the inverse PATCH while the forward
-                // save's `inFlightRef` is still set in the
-                // UndoStackProvider, and the resulting double-flight
-                // would race the optimistic-state dispatches. The
-                // post-save state can't actually appear with busy=true
-                // (lastSavedAt is set INSIDE the save success path
-                // AFTER busy is reset), but the guard is defensive
-                // for any future code path that flips busy back on.
-                disabled={busy}
-                onClick={() => {
-                  void runUndo()
-                  onClose()
-                }}
-                className="inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-copper-200/80 underline decoration-copper-200/40 underline-offset-2 transition-colors hover:bg-cream-50/5 hover:text-copper-100 hover:decoration-copper-200/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300/50 disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="Undo the last save"
-              >
-                Undo
-              </button>
+            <span className="inline-flex items-center gap-1.5 text-copper-300">
+              <Check size={11} strokeWidth={2.6} />
+              Saved to draft
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-cream-50/50">
+            <span className="inline-flex items-center gap-1.5 text-cream-50/40">
               <CloudOff size={11} strokeWidth={2} />
               No changes yet
             </span>
           )}
         </div>
       </footer>
-      {confirmClose && (
-        <ConfirmModal
-          ariaLabel="Discard unsaved changes?"
-          title="Discard your changes?"
-          description={`You have unsaved edits to this ${kindNoun.toLowerCase()}. Closing now drops them — there is no undo.`}
-          confirmLabel="Discard changes"
-          cancelLabel="Keep editing"
-          destructive
-          onCancel={() => setConfirmClose(false)}
-          onConfirm={discardAndClose}
-        />
-      )}
     </Drawer>
   )
 }
