@@ -57,6 +57,205 @@ async function bumpPageDraft(
   return rows[0]?.draft_version ?? 0
 }
 
+// ─── Undo/redo via server-side draft revisions (migration 0029) ───
+// Each committed draft change records a FULL-TREE snapshot as a revision row.
+// Undo/redo restore a revision by reconciling the live+draft columns of every
+// block to match the snapshot. The cursor (pages.draft_undo_cursor) is the seq
+// of the current state; seq 0 is the baseline (clean draft) recorded before the
+// first edit so undo can return to the published state.
+
+const MAX_DRAFT_REVISIONS = 80
+
+interface SnapRow {
+  id: number
+  parent_id: number | null
+  kind: string
+  block_key: string | null
+  block_type: string
+  position: number
+  data: string
+  meta: string | null
+  version: number
+  draft_data: string | null
+  draft_meta: string | null
+  draft_position: number | null
+  draft_parent_id: number | null
+  draft_state: string
+}
+
+// Full snapshot of a page's draft-relevant rows (everything not hard-deleted).
+async function snapshotPageDraft(tx: Tx, pageId: number): Promise<string> {
+  const [rows] = (await tx.execute(sql`
+    SELECT id, parent_id, kind, block_key, block_type, position, data, meta, version,
+           draft_data, draft_meta, draft_position, draft_parent_id, draft_state
+    FROM content_blocks
+    WHERE page_id = ${pageId} AND deleted_at IS NULL
+    ORDER BY id
+  `)) as unknown as [SnapRow[]]
+  return JSON.stringify(rows)
+}
+
+// Record the clean baseline (seq 0) the first time a page's draft is touched —
+// called BEFORE the change is applied so undo can return to the published state.
+export async function ensureDraftBaseline(
+  tx: Tx,
+  pageId: number,
+  userId: number,
+): Promise<void> {
+  const [cnt] = (await tx.execute(sql`
+    SELECT COUNT(*) AS n FROM page_draft_revisions WHERE page_id = ${pageId}
+  `)) as unknown as [Array<{ n: number }>]
+  if (Number(cnt[0]?.n ?? 0) > 0) return
+  const snap = await snapshotPageDraft(tx, pageId)
+  await tx.execute(sql`
+    INSERT INTO page_draft_revisions (page_id, seq, snapshot, label, created_by)
+    VALUES (${pageId}, 0, ${snap}, 'Baseline', ${userId})
+  `)
+  await tx.execute(sql`UPDATE pages SET draft_undo_cursor = 0 WHERE id = ${pageId}`)
+}
+
+// Record a new revision = the CURRENT (post-change) draft state. Truncates any
+// redo tail, appends seq = cursor+1, advances the cursor, prunes to the cap.
+export async function recordDraftRevision(
+  tx: Tx,
+  pageId: number,
+  userId: number,
+  label: string,
+): Promise<void> {
+  const [pr] = (await tx.execute(sql`
+    SELECT draft_undo_cursor AS c FROM pages WHERE id = ${pageId}
+  `)) as unknown as [Array<{ c: number }>]
+  const cursor = Number(pr[0]?.c ?? 0)
+  // Drop any redo tail (revisions ahead of the cursor).
+  await tx.execute(sql`
+    DELETE FROM page_draft_revisions WHERE page_id = ${pageId} AND seq > ${cursor}
+  `)
+  const nextSeq = cursor + 1
+  const snap = await snapshotPageDraft(tx, pageId)
+  await tx.execute(sql`
+    INSERT INTO page_draft_revisions (page_id, seq, snapshot, label, created_by)
+    VALUES (${pageId}, ${nextSeq}, ${snap}, ${label.slice(0, 120)}, ${userId})
+  `)
+  await tx.execute(sql`UPDATE pages SET draft_undo_cursor = ${nextSeq} WHERE id = ${pageId}`)
+  // Cap the history depth (oldest first).
+  const [c2] = (await tx.execute(sql`
+    SELECT COUNT(*) AS n FROM page_draft_revisions WHERE page_id = ${pageId}
+  `)) as unknown as [Array<{ n: number }>]
+  if (Number(c2[0]?.n ?? 0) > MAX_DRAFT_REVISIONS) {
+    await tx.execute(sql`
+      DELETE FROM page_draft_revisions WHERE page_id = ${pageId}
+      ORDER BY seq ASC LIMIT 1
+    `)
+  }
+}
+
+// Reconcile the page's draft rows to EXACTLY match a snapshot.
+async function restoreSnapshot(
+  tx: Tx,
+  pageId: number,
+  snapshotJson: string,
+): Promise<void> {
+  const snap = JSON.parse(snapshotJson) as SnapRow[]
+  const snapById = new Map(snap.map((r) => [r.id, r]))
+  const [curRows] = (await tx.execute(sql`
+    SELECT id, kind FROM content_blocks WHERE page_id = ${pageId} AND deleted_at IS NULL
+  `)) as unknown as [Array<{ id: number; kind: string }>]
+  const curIds = new Set(curRows.map((r) => r.id))
+
+  // 1. Delete rows that exist now but weren't in the snapshot (created after).
+  //    FK ON DELETE CASCADE removes any added descendants automatically.
+  for (const r of curRows) {
+    if (!snapById.has(r.id)) {
+      await tx.execute(sql`
+        DELETE FROM content_blocks WHERE id = ${r.id} AND page_id = ${pageId}
+      `)
+    }
+  }
+  // 2. Re-insert rows that were in the snapshot but hard-deleted since (parents
+  //    first so FK parent_id resolves).
+  const order: Record<string, number> = { section: 0, column: 1, widget: 2 }
+  const missing = snap
+    .filter((r) => !curIds.has(r.id))
+    .sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9))
+  for (const r of missing) {
+    await tx.execute(sql`
+      INSERT INTO content_blocks
+        (id, page_id, parent_id, kind, block_key, block_type, position, data, meta,
+         version, draft_data, draft_meta, draft_position, draft_parent_id, draft_state)
+      VALUES
+        (${r.id}, ${pageId}, ${r.parent_id}, ${r.kind}, ${r.block_key}, ${r.block_type},
+         ${r.position}, ${r.data}, ${r.meta}, ${r.version}, ${r.draft_data}, ${r.draft_meta},
+         ${r.draft_position}, ${r.draft_parent_id}, ${r.draft_state})
+    `)
+  }
+  // 3. Update every still-present snapshot row to its snapshot column values.
+  for (const r of snap) {
+    if (curIds.has(r.id)) {
+      await tx.execute(sql`
+        UPDATE content_blocks SET
+          parent_id = ${r.parent_id}, position = ${r.position},
+          data = ${r.data}, meta = ${r.meta},
+          draft_data = ${r.draft_data}, draft_meta = ${r.draft_meta},
+          draft_position = ${r.draft_position}, draft_parent_id = ${r.draft_parent_id},
+          draft_state = ${r.draft_state}
+        WHERE id = ${r.id} AND page_id = ${pageId}
+      `)
+    }
+  }
+}
+
+// After a restore: point the cursor, bump draft_version, recompute has_draft.
+async function applyCursor(
+  tx: Tx,
+  pageId: number,
+  userId: number,
+  cursor: number,
+): Promise<number> {
+  const [h] = (await tx.execute(sql`
+    SELECT COUNT(*) AS n FROM content_blocks
+    WHERE page_id = ${pageId} AND draft_state <> 'live' AND deleted_at IS NULL
+  `)) as unknown as [Array<{ n: number }>]
+  const hasDraft = Number(h[0]?.n ?? 0) > 0 ? 1 : 0
+  await tx.execute(sql`
+    UPDATE pages SET draft_undo_cursor = ${cursor}, draft_version = draft_version + 1,
+        has_draft = ${hasDraft}, draft_updated_at = NOW(3), draft_updated_by = ${userId}
+    WHERE id = ${pageId}
+  `)
+  const [dv] = (await tx.execute(sql`
+    SELECT draft_version FROM pages WHERE id = ${pageId}
+  `)) as unknown as [Array<{ draft_version: number }>]
+  return dv[0]?.draft_version ?? 0
+}
+
+async function step(
+  pageId: number,
+  userId: number,
+  dir: 1 | -1,
+): Promise<{ ok: boolean; draftVersion: number }> {
+  return db.transaction(async (tx) => {
+    const [pr] = (await tx.execute(sql`
+      SELECT draft_undo_cursor AS c FROM pages
+      WHERE id = ${pageId} AND deleted_at IS NULL FOR UPDATE
+    `)) as unknown as [Array<{ c: number }>]
+    if (!pr[0]) throw new NotFoundError()
+    const cursor = Number(pr[0].c)
+    const target = cursor + dir
+    const [rev] = (await tx.execute(sql`
+      SELECT snapshot FROM page_draft_revisions
+      WHERE page_id = ${pageId} AND seq = ${target}
+    `)) as unknown as [Array<{ snapshot: string }>]
+    if (!rev[0]) return { ok: false, draftVersion: 0 }
+    await restoreSnapshot(tx, pageId, rev[0].snapshot)
+    const draftVersion = await applyCursor(tx, pageId, userId, target)
+    return { ok: true, draftVersion }
+  })
+}
+
+export const undoDraft = (pageId: number, userId: number) =>
+  step(pageId, userId, -1)
+export const redoDraft = (pageId: number, userId: number) =>
+  step(pageId, userId, 1)
+
 /** Save a widget's data into the draft overlay. Last-write-wins. */
 export async function saveDraftBlockData(args: {
   blockId: number
@@ -82,12 +281,14 @@ export async function saveDraftBlockData(args: {
     // An 'added' row keeps its state (it's draft-only either way); a 'live'
     // row becomes 'modified'. 'removed' rows aren't editable from the canvas.
     const nextState = row.draft_state === 'added' ? 'added' : 'modified'
+    await ensureDraftBaseline(tx, args.pageId, args.userId)
     await tx.execute(sql`
       UPDATE content_blocks
       SET draft_data = ${parsedJson}, draft_state = ${nextState}
       WHERE id = ${args.blockId}
     `)
     const draftVersion = await bumpPageDraft(tx, args.pageId, args.userId)
+    await recordDraftRevision(tx, args.pageId, args.userId, `Edit ${row.block_type}`)
     return { draftVersion }
   })
 }
@@ -119,12 +320,14 @@ export async function saveDraftBlockMeta(args: {
     if (row.kind !== args.expectedKind) throw new WrongKindError()
 
     const nextState = row.draft_state === 'added' ? 'added' : 'modified'
+    await ensureDraftBaseline(tx, args.pageId, args.userId)
     await tx.execute(sql`
       UPDATE content_blocks
       SET draft_meta = ${args.metaJson}, draft_state = ${nextState}
       WHERE id = ${args.blockId}
     `)
     const draftVersion = await bumpPageDraft(tx, args.pageId, args.userId)
+    await recordDraftRevision(tx, args.pageId, args.userId, `Edit ${row.kind} settings`)
     return { draftVersion }
   })
 }
@@ -178,6 +381,7 @@ export async function deleteDraftBlock(args: {
     }
     const idList = sql.join(subtreeIds, sql.raw(','))
 
+    await ensureDraftBaseline(tx, args.pageId, args.userId)
     // Hard-delete the rows that were added in THIS draft (never published);
     // flip the rest to 'removed'.
     await tx.execute(sql`
@@ -190,6 +394,7 @@ export async function deleteDraftBlock(args: {
       WHERE page_id = ${args.pageId} AND id IN (${idList}) AND draft_state <> 'added'
     `)
     const draftVersion = await bumpPageDraft(tx, args.pageId, args.userId)
+    await recordDraftRevision(tx, args.pageId, args.userId, `Delete ${row.kind}`)
     return { draftVersion, removedIds: subtreeIds }
   })
 }
@@ -205,6 +410,7 @@ export async function setDraftOrder(args: {
   blocks: Array<{ id: number; position: number; parentId?: number | null }>
 }): Promise<{ draftVersion: number }> {
   return db.transaction(async (tx) => {
+    await ensureDraftBaseline(tx, args.pageId, args.userId)
     for (const b of args.blocks) {
       if (b.parentId === undefined) {
         await tx.execute(sql`
@@ -224,6 +430,7 @@ export async function setDraftOrder(args: {
       }
     }
     const draftVersion = await bumpPageDraft(tx, args.pageId, args.userId)
+    await recordDraftRevision(tx, args.pageId, args.userId, 'Reorder blocks')
     return { draftVersion }
   })
 }
@@ -233,24 +440,37 @@ export interface DraftStatus {
   draftVersion: number
   /** count of rows with a pending change (modified + added + removed) */
   changeCount: number
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export async function getPageDraftStatus(pageId: number): Promise<DraftStatus> {
   const [pageRows] = (await db.execute(sql`
-    SELECT has_draft, draft_version FROM pages WHERE id = ${pageId}
-  `)) as unknown as [Array<{ has_draft: number; draft_version: number }>]
+    SELECT has_draft, draft_version, draft_undo_cursor FROM pages WHERE id = ${pageId}
+  `)) as unknown as [
+    Array<{ has_draft: number; draft_version: number; draft_undo_cursor: number }>,
+  ]
   const p = pageRows[0]
-  if (!p) return { hasDraft: false, draftVersion: 0, changeCount: 0 }
+  if (!p)
+    return { hasDraft: false, draftVersion: 0, changeCount: 0, canUndo: false, canRedo: false }
   const [cnt] = (await db.execute(sql`
     SELECT COUNT(*) AS n FROM content_blocks
     WHERE page_id = ${pageId} AND draft_state <> 'live'
       AND (deleted_at IS NULL OR draft_state = 'removed')
   `)) as unknown as [Array<{ n: number }>]
   const changeCount = Number(cnt[0]?.n ?? 0)
+  const [seqRange] = (await db.execute(sql`
+    SELECT MIN(seq) AS mn, MAX(seq) AS mx FROM page_draft_revisions WHERE page_id = ${pageId}
+  `)) as unknown as [Array<{ mn: number | null; mx: number | null }>]
+  const cursor = Number(p.draft_undo_cursor ?? 0)
+  const mn = seqRange[0]?.mn
+  const mx = seqRange[0]?.mx
   return {
     hasDraft: p.has_draft === 1 || changeCount > 0,
     draftVersion: p.draft_version,
     changeCount,
+    canUndo: mn != null && cursor > Number(mn),
+    canRedo: mx != null && cursor < Number(mx),
   }
 }
 
@@ -344,13 +564,16 @@ export async function publishPageDraft(args: {
     const newPageVersion = pageRow.version + 1
     await tx.execute(sql`
       UPDATE pages
-      SET has_draft = 0, draft_version = 0, draft_updated_at = NULL, draft_updated_by = NULL,
+      SET has_draft = 0, draft_version = 0, draft_undo_cursor = 0,
+          draft_updated_at = NULL, draft_updated_by = NULL,
           version = ${newPageVersion},
           published = 1,
           published_at = COALESCE(published_at, NOW(3)),
           updated_by = ${args.userId}, updated_at = NOW(3)
       WHERE id = ${args.pageId}
     `)
+    // The draft is now live — wipe its undo/redo history.
+    await tx.execute(sql`DELETE FROM page_draft_revisions WHERE page_id = ${args.pageId}`)
 
     // 5. Audit the publish (one summary row, not per-block).
     await tx.insert(auditLog).values({
@@ -407,9 +630,11 @@ export async function discardPageDraft(args: {
     `)
     await tx.execute(sql`
       UPDATE pages
-      SET has_draft = 0, draft_version = 0, draft_updated_at = NULL, draft_updated_by = NULL
+      SET has_draft = 0, draft_version = 0, draft_undo_cursor = 0,
+          draft_updated_at = NULL, draft_updated_by = NULL
       WHERE id = ${args.pageId}
     `)
+    await tx.execute(sql`DELETE FROM page_draft_revisions WHERE page_id = ${args.pageId}`)
   })
   return { ok: true }
 }

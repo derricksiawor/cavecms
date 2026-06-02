@@ -13,6 +13,7 @@ import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { blockSchemas, FIXED_BLOCK_KEYS_PER_PAGE } from '@/lib/cms/block-registry'
 import { AUDIT_DIFF_CAP } from '@/lib/cms/saveBlock'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
+import { ensureDraftBaseline, recordDraftRevision } from '@/lib/cms/draft'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import {
   ColumnMetaSchema,
@@ -494,6 +495,12 @@ export const POST = withError(async (req) => {
       }
     }
 
+    // 4b. Capture the pre-insert draft baseline for undo. Idempotent — a
+    //     no-op once a baseline (or any revision) already exists for the
+    //     page. MUST run BEFORE any INSERT so the snapshot reflects the
+    //     draft state the operator can revert TO.
+    await ensureDraftBaseline(tx, body.pageId, ctx.userId)
+
     // 5. INSERT. block_key stays NULL (freeform; cannot be a fixed slot
     //    — POST is the only entry point and fixed slots are seeded at
     //    page-template install). For containers, block_type is the
@@ -628,6 +635,17 @@ export const POST = withError(async (req) => {
           draft_updated_by = ${ctx.userId}
       WHERE id = ${body.pageId}
     `)
+
+    // 9. Record the post-insert draft state as a new undo revision. Runs
+    //    AFTER the draft cursor bump so the snapshot includes the freshly
+    //    inserted row(s). Label uses the widget block_type (or the
+    //    container kind) — the same value persisted as the row's block_type.
+    await recordDraftRevision(
+      tx,
+      body.pageId,
+      ctx.userId,
+      `Insert ${insertBlockType}`,
+    )
     return { blockId, childColumnIds }
   })
 

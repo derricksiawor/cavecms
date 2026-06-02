@@ -63,6 +63,9 @@ export const pages = mysqlTable(
     //   draftUpdatedAt / draftUpdatedBy — last draft autosave audit
     hasDraft: boolean('has_draft').notNull().default(false),
     draftVersion: int('draft_version').notNull().default(0),
+    // Undo/redo cursor — seq of the current draft state in page_draft_revisions
+    // (migration 0029). canUndo = a revision with seq < cursor exists.
+    draftUndoCursor: int('draft_undo_cursor').notNull().default(0),
     draftUpdatedAt: timestamp('draft_updated_at', { fsp: 3 }),
     draftUpdatedBy: int('draft_updated_by'),
     updatedBy: int('updated_by').references(() => users.id, { onDelete: 'set null' }),
