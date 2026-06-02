@@ -11,7 +11,7 @@ export interface RedirectItem {
   action: 'redirect' | 'gone'
   target: string | null
   statusCode: number | null
-  queryHandling: 'passthrough' | 'ignore' | 'exact'
+  queryHandling: 'passthrough' | 'ignore'
   caseInsensitive: boolean
   enabled: boolean
   position: number

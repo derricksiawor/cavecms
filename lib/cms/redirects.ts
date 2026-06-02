@@ -14,8 +14,10 @@ export type RedirectStatus = (typeof REDIRECT_STATUS_CODES)[number]
 
 // Longest pathname we will run operator-supplied regex/wildcard rules
 // against. Pathnames longer than this never legitimately match a redirect
-// rule, and the cap bounds worst-case regex backtracking (ReDoS defence).
-const MAX_REGEX_INPUT = 2048
+// rule. Exponential patterns are rejected up front (hasUnsafeQuantifier), so
+// this cap only needs to bound the remaining POLYNOMIAL backtracking — 1024
+// keeps a degree-2 pattern at ~1M steps (sub-millisecond).
+const MAX_REGEX_INPUT = 1024
 
 // The DB-shaped rule the matcher consumes (subset projected by the feed).
 export interface RedirectRule {
@@ -84,13 +86,21 @@ export function normalizePath(p: string): string {
   return out || '/'
 }
 
-// Heuristic ReDoS guard: reject "star height >= 2" — a quantified group
-// whose body itself contains a quantifier (e.g. (a+)+, (a*)*, (.*)+,
-// ([a-z]+)*, (a{2,})+). These are the classic catastrophic-backtracking
-// shapes. Best-effort + dependency-free: pairs with MAX_REGEX_INPUT so the
-// worst case stays bounded even if a pathological pattern slips through.
-export function hasNestedQuantifier(src: string): boolean {
+// ReDoS guard against EXPONENTIAL backtracking in JS's native regex engine.
+// Rejects a quantified group `( … )<quant>` whose body contains EITHER:
+//   - another quantifier  → "star height >= 2", e.g. (a+)+, (a*)*, (.*)+, (a{2,})+
+//   - a top-level alternation `|`  → e.g. (a|a)+, (a|ab)+, (a|b)+
+// Both families blow up exponentially (a 30-char request to (a|a)+ backtracks
+// for ~60s, pinning the single-threaded Edge worker — a remote DoS triggerable
+// by any anonymous visitor). The native RegExp engine cannot be swapped for a
+// linear matcher (RE2) on the Edge runtime, so we reject these shapes at
+// authoring AND compile time. This is conservative — it also rejects some
+// safe quantified alternations like (a|b)+; operators should use a character
+// class ([ab]+) instead. The remaining (polynomial) patterns are bounded by
+// MAX_REGEX_INPUT at match time. Dependency-free; pairs with that cap.
+export function hasUnsafeQuantifier(src: string): boolean {
   const quant: boolean[] = [false] // quant[d] = a quantifier seen at group depth d
+  const alt: boolean[] = [false] // alt[d]   = a top-level '|' seen at group depth d
   let depth = 0
   for (let i = 0; i < src.length; i++) {
     const ch = src[i]
@@ -110,17 +120,22 @@ export function hasNestedQuantifier(src: string): boolean {
     if (ch === '(') {
       depth++
       quant[depth] = false
+      alt[depth] = false
       continue
     }
     if (ch === ')') {
-      const bodyHadQuant = quant[depth] === true
+      const ambiguousBody = quant[depth] === true || alt[depth] === true
       depth = Math.max(0, depth - 1)
       const next = src[i + 1]
       const repeated = next === '*' || next === '+' || next === '{'
       if (repeated) {
-        if (bodyHadQuant) return true // (X<quant>)<quant> → star height >= 2
+        if (ambiguousBody) return true // (…<quant>)<quant> or (…|…)<quant>
         quant[depth] = true // enclosing scope now contains a quantified group
       }
+      continue
+    }
+    if (ch === '|') {
+      alt[depth] = true
       continue
     }
     if (ch === '*' || ch === '+' || ch === '{') {
@@ -146,10 +161,11 @@ export function validateRedirect(raw: unknown): ValidateResult {
     if (v.source.length > 300) {
       return { ok: false, error: 'Regex source too long' }
     }
-    if (hasNestedQuantifier(v.source)) {
+    if (hasUnsafeQuantifier(v.source)) {
       return {
         ok: false,
-        error: 'Regex looks unsafe (nested quantifiers) — simplify the pattern',
+        error:
+          'Regex looks unsafe (a repeated group with nested quantifiers or alternation can hang the server) — simplify it, e.g. use a character class like [ab]+ instead of (a|b)+',
       }
     }
     try {
@@ -242,7 +258,7 @@ export function compileRules(rules: RedirectRule[]): CompiledRuleset {
       } else {
         // ReDoS defence: never compile a catastrophic regex even if one
         // somehow reached the DB (validation blocks authoring it).
-        if (r.matchType === 'regex' && hasNestedQuantifier(r.source)) continue
+        if (r.matchType === 'regex' && hasUnsafeQuantifier(r.source)) continue
         const body =
           r.matchType === 'wildcard' ? wildcardToRegExpBody(r.source) : r.source
         const flags = r.caseInsensitive ? 'i' : ''

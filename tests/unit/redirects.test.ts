@@ -211,7 +211,20 @@ describe('validateRedirect — ReDoS + query-mode hardening', () => {
   it('rejects a nested-quantifier (catastrophic) regex', () => {
     const r = validateRedirect({ ...base, source: '^/(a+)+$' })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toMatch(/unsafe|nested/i)
+    if (!r.ok) expect(r.error).toMatch(/unsafe/i)
+  })
+
+  it('rejects a quantified overlapping alternation (exponential)', () => {
+    // (a|a)+ is the classic exponential-backtracking shape hasNestedQuantifier missed.
+    expect(validateRedirect({ ...base, source: '^/(a|a)+$' }).ok).toBe(false)
+  })
+
+  it('rejects a quantified alternation conservatively (use a char class instead)', () => {
+    expect(validateRedirect({ ...base, source: '^/(a|b)+$' }).ok).toBe(false)
+  })
+
+  it('still allows alternation that is NOT repeated', () => {
+    expect(validateRedirect({ ...base, source: '^/(red|blue)/x$', target: '/c' }).ok).toBe(true)
   })
 
   it('allows a safe single-quantifier regex', () => {

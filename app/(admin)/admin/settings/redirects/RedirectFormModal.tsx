@@ -130,7 +130,10 @@ export function RedirectFormModal({ editing, seed, onClose, onSaved }: Props) {
             slashes). Anchor with <span className="font-mono">^</span> and{' '}
             <span className="font-mono">$</span>; use{' '}
             <span className="font-mono">$1</span>…<span className="font-mono">$9</span> in
-            the target for captured groups.
+            the target for captured groups. Avoid a repeated group that contains
+            a quantifier or <span className="font-mono">|</span> (e.g.{' '}
+            <span className="font-mono">(a|b)+</span>) — use a character class
+            like <span className="font-mono">[ab]+</span> instead.
           </p>
         )}
 
