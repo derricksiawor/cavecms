@@ -80,6 +80,11 @@ docs/superpowers/
 # (NEVER commit files with "claude" in the name).
 /CLAUDE.md
 
+# Local release/prestage tooling caches (local↔remote sync) — regenerable
+# state, ~144MB each; never tracked (global rule #0.55 production-only).
+/.source-state
+/.target-state
+
 # uploads live on disk (mounted dir), not in git
 /public/uploads
 /public/uploads*
