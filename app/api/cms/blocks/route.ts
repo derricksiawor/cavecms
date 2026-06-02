@@ -14,8 +14,6 @@ import { blockSchemas, FIXED_BLOCK_KEYS_PER_PAGE } from '@/lib/cms/block-registr
 import { AUDIT_DIFF_CAP } from '@/lib/cms/saveBlock'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
-import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
-import { tagsForBlockSave } from '@/lib/cache/tags'
 import {
   ColumnMetaSchema,
   MAX_SECTION_COLUMNS,
@@ -514,9 +512,13 @@ export const POST = withError(async (req) => {
     // caller provided a non-empty WidgetMetaSchema payload.
     const insertMetaJson =
       body.kind === 'widget' ? widgetMetaJson : containerMetaJson
+    // Draft insert: the row is created with draft_state='added' so the
+    // editor's draft hydrate INCLUDES it while the public hydrate EXCLUDES
+    // it. The live columns carry the content; Publish materialises the row
+    // into the public render (flipping draft_state back to 'live').
     const [insertResultArr] = (await tx.execute(sql`
       INSERT INTO content_blocks
-        (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by)
+        (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by, draft_state)
       VALUES (
         ${body.pageId},
         ${parentId},
@@ -526,7 +528,8 @@ export const POST = withError(async (req) => {
         ${insertData},
         ${insertMetaJson},
         0,
-        ${ctx.userId}
+        ${ctx.userId},
+        'added'
       )
     `)) as unknown as [InsertResult]
     const blockId = Number(insertResultArr.insertId)
@@ -558,7 +561,7 @@ export const POST = withError(async (req) => {
         const colPos = (i + 1) * 1000
         const [colInsertArr] = (await tx.execute(sql`
           INSERT INTO content_blocks
-            (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by)
+            (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by, draft_state)
           VALUES (
             ${body.pageId},
             ${blockId},
@@ -568,7 +571,8 @@ export const POST = withError(async (req) => {
             '{}',
             ${emptyColumnMeta},
             0,
-            ${ctx.userId}
+            ${ctx.userId},
+            'added'
           )
         `)) as unknown as [InsertResult]
         childColumnIds.push(Number(colInsertArr.insertId))
@@ -611,20 +615,20 @@ export const POST = withError(async (req) => {
       requestId,
     })
 
-    // 8. Durable revalidate intent. Containers AND widgets both
-    //    invalidate the same page tag — sections/columns rendering
-    //    affects every block on the page. block_type passed to
-    //    tagsForBlockSave only matters for the cross-cutting
-    //    `featured_projects` extra tag (containers never trigger it).
-    const tagBlockType =
-      body.kind === 'widget' ? widgetBlockType! : undefined
-    const tags = tagsForBlockSave(pageSlug, tagBlockType).tags
-    const queueRowId = await enqueueRevalidate(tx, tags)
-    return { blockId, queueRowId, tags, childColumnIds }
-  })
-
-  queueMicrotask(() => {
-    void drainRevalidate(txResult.queueRowId, txResult.tags)
+    // 8. Bump the page DRAFT cursor (not the published pages.version) and
+    //    flag has_draft. A draft insert does NOT change the public render,
+    //    so there is NO revalidate here — Publish materialises the row and
+    //    handles cache invalidation. The draft cursor advance lets a second
+    //    editor tab detect "draft changed elsewhere".
+    await tx.execute(sql`
+      UPDATE pages
+      SET draft_version = draft_version + 1,
+          has_draft = 1,
+          draft_updated_at = NOW(3),
+          draft_updated_by = ${ctx.userId}
+      WHERE id = ${body.pageId}
+    `)
+    return { blockId, childColumnIds }
   })
 
   // childColumnIds populated only when kind='section' + withColumns was

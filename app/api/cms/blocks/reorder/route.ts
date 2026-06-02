@@ -8,14 +8,24 @@ import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
-import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
-import { tagsForBlockSave } from '@/lib/cache/tags'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import { MAX_SECTION_COLUMNS, type BlockKind } from '@/lib/cms/blockMeta'
 
-// Per-block optimistic-lock token. Migration 0011 makes `position`
-// per-parent. This endpoint serves THREE modes that all collapse to
-// the same atomic UPDATE pass:
+// Draft → Publish: reorder writes the DRAFT overlay, never the live
+// position/parent_id. Each affected row gets draft_position (and
+// draft_parent_id on a cross-parent move) and flips 'live' → 'modified'
+// (CASE WHEN draft_state='added' THEN 'added' ELSE 'modified' END). The
+// public site is unaffected until the operator clicks Publish, which
+// COALESCEs the draft columns into the live ones.
+//
+// Because the draft is one operator's private working copy, draft writes
+// are LAST-WRITE-WINS: the per-block dual-axis optimistic-lock check is
+// GONE (no stale_version 409, no per-block version compare) and
+// pages.version is NOT bumped. Instead pages.draft_version advances + has_draft
+// flips on each write so a second tab can detect "draft changed elsewhere".
+//
+// This endpoint still serves THREE modes that all collapse to the same
+// atomic UPDATE pass:
 //
 //   1. Legacy within-parent reorder (pre-Chunk-B callers): body has
 //      no `parentId` and no per-block `newParentId`. The handler
@@ -31,6 +41,16 @@ import { MAX_SECTION_COLUMNS, type BlockKind } from '@/lib/cms/blockMeta'
 //      for every affected parent (source AND destination) — drift
 //      check rejects partial submissions to avoid leaving siblings at
 //      stale positions.
+//
+// Structural validation (kind-transition, complete-living-child-set drift,
+// column-count cap, cross-parent rules) STILL applies and still guards tree
+// integrity. It reads the LIVE parent_id/position columns. For MVP this is
+// acceptable; one imprecision is noted at the drift check (Step 7) — a prior
+// DRAFT reparent of a sibling isn't reflected in the live parent_id the drift
+// check reads, so the "complete child set" is computed against the published
+// tree, not the draft tree. The submission still has to be complete for the
+// LIVE membership, which keeps the cap/cycle guards sound; it only means a
+// draft-only reparent of a third block doesn't relax the completeness demand.
 //
 // Lock order (deadlock pre-emption per saveBlock contract): pages
 // FOR UPDATE first, then content_blocks FOR UPDATE. All content_blocks
@@ -174,13 +194,14 @@ export const POST = withError(async (req) => {
     }
     const currentById = new Map(submittedRows.map((r) => [r.id, r]))
 
-    // Step 3: optimistic-lock check on every submitted block.
+    // Step 3: existence/drift check on every submitted block. The
+    // per-block optimistic-lock VERSION compare is intentionally GONE —
+    // draft writes are last-write-wins (see file header). We still verify
+    // the row exists + belongs to this page (a forged/foreign id → drift)
+    // so structural validation below operates on a real, locked row set.
     for (const b of body.blocks) {
       const cur = currentById.get(b.id)
       if (!cur) throw new HttpError(409, 'drift')
-      if (cur.version !== b.version) {
-        throw new HttpError(409, 'stale_version')
-      }
     }
 
     // Step 4: resolve newParent per block according to mode.
@@ -288,6 +309,16 @@ export const POST = withError(async (req) => {
     // parents at once, eliminating the per-parent round-trip loop
     // that previously created a deadlock window when two TXs visited
     // overlapping parents in different JS-set iteration orders.
+    //
+    // NOTE (draft imprecision, acceptable for MVP): affected parents +
+    // living-child sets are computed from the LIVE parent_id column, NOT
+    // from COALESCE(draft_parent_id, parent_id). If a sibling was reparented
+    // in an EARLIER draft write, its draft_parent_id has moved but its live
+    // parent_id still points at the old parent — so this check reasons over
+    // the published tree. That keeps the completeness demand sound for the
+    // published membership (and the cap/cycle guards stay correct against
+    // live data); it only means a draft-only reparent of a third block won't
+    // relax the "list every living child" requirement here.
     const affectedParents = new Set<number | null>()
     for (const r of submittedRows) affectedParents.add(r.parent_id)
     for (const p of resolvedParentById.values()) affectedParents.add(p)
@@ -362,11 +393,17 @@ export const POST = withError(async (req) => {
       }
     }
 
-    // Step 8: apply via a SINGLE batched UPDATE with CASE expressions
-    // — collapses N per-block round-trips (which previously held
-    // page-wide row-locks during each network RTT) into one. Position
-    // is assigned by submission order within each resolved-parent
-    // bucket; version bumps by 1; updated_by stamps the actor.
+    // Step 8: apply to the DRAFT overlay (NOT the live columns). Each
+    // affected row gets draft_position; cross-parent moves also get
+    // draft_parent_id. draft_state flips 'live' → 'modified' (an 'added'
+    // row stays 'added'). The live position/parent_id/version are left
+    // UNTOUCHED — Publish later COALESCEs the draft columns in.
+    //
+    // Position is assigned by submission order within each resolved-parent
+    // bucket. We split the rows into two batched UPDATEs: one for rows
+    // whose parent is unchanged (write draft_position only) and one for
+    // cross-parent moves (write draft_position + draft_parent_id). This
+    // keeps within-parent reorders from spuriously stamping draft_parent_id.
     const orderByParent = new Map<number | null, number[]>()
     for (const b of body.blocks) {
       const p = resolvedParentById.get(b.id) as number | null
@@ -374,56 +411,93 @@ export const POST = withError(async (req) => {
       arr.push(b.id)
       orderByParent.set(p, arr)
     }
+    const newPosById = new Map<number, number>()
+    for (const b of body.blocks) {
+      const newParent = resolvedParentById.get(b.id) as number | null
+      const orderInGroup = orderByParent.get(newParent)!.indexOf(b.id)
+      newPosById.set(b.id, (orderInGroup + 1) * 1000)
+    }
 
-    const positionCases = body.blocks.map((b) => {
+    // Partition: cross-parent (live parent_id !== resolved) vs within-parent.
+    const movedBlocks = body.blocks.filter((b) => {
       const newParent = resolvedParentById.get(b.id) as number | null
-      const orderInGroup = orderByParent.get(newParent)!.indexOf(b.id)
-      const newPos = (orderInGroup + 1) * 1000
-      return sql`WHEN ${b.id} THEN ${newPos}`
+      return currentById.get(b.id)!.parent_id !== newParent
     })
-    const parentCases = body.blocks.map((b) => {
+    const positionOnlyBlocks = body.blocks.filter((b) => {
       const newParent = resolvedParentById.get(b.id) as number | null
-      return sql`WHEN ${b.id} THEN ${newParent}`
+      return currentById.get(b.id)!.parent_id === newParent
     })
-    const idList = body.blocks.map((b) => b.id)
-    await tx.execute(sql`
-      UPDATE content_blocks
-      SET position  = CASE id ${sql.join(positionCases, sql.raw(' '))} END,
-          parent_id = CASE id ${sql.join(parentCases, sql.raw(' '))} END,
-          version   = version + 1,
-          updated_by = ${ctx.userId}
-      WHERE id IN (${sql.join(idList, sql.raw(','))})
-        AND page_id = ${body.pageId}
-        AND deleted_at IS NULL
-    `)
+
+    const draftStateCase = sql.raw(
+      "CASE WHEN draft_state = 'added' THEN 'added' ELSE 'modified' END",
+    )
+
+    if (positionOnlyBlocks.length > 0) {
+      const posCases = positionOnlyBlocks.map(
+        (b) => sql`WHEN ${b.id} THEN ${newPosById.get(b.id)!}`,
+      )
+      const posIds = positionOnlyBlocks.map((b) => b.id)
+      await tx.execute(sql`
+        UPDATE content_blocks
+        SET draft_position = CASE id ${sql.join(posCases, sql.raw(' '))} END,
+            draft_state = ${draftStateCase}
+        WHERE id IN (${sql.join(posIds, sql.raw(','))})
+          AND page_id = ${body.pageId}
+          AND deleted_at IS NULL
+      `)
+    }
+
+    if (movedBlocks.length > 0) {
+      const posCases = movedBlocks.map(
+        (b) => sql`WHEN ${b.id} THEN ${newPosById.get(b.id)!}`,
+      )
+      const parentCases = movedBlocks.map((b) => {
+        const newParent = resolvedParentById.get(b.id) as number | null
+        return sql`WHEN ${b.id} THEN ${newParent}`
+      })
+      const movedIds = movedBlocks.map((b) => b.id)
+      await tx.execute(sql`
+        UPDATE content_blocks
+        SET draft_position = CASE id ${sql.join(posCases, sql.raw(' '))} END,
+            draft_parent_id = CASE id ${sql.join(parentCases, sql.raw(' '))} END,
+            draft_state = ${draftStateCase}
+        WHERE id IN (${sql.join(movedIds, sql.raw(','))})
+          AND page_id = ${body.pageId}
+          AND deleted_at IS NULL
+      `)
+    }
+
+    // Response rows. Backward-compatible shape: report each block's
+    // CURRENT (unchanged) version, its new draft_position as `position`,
+    // and its EFFECTIVE parent (draft_parent_id ?? parent_id) as
+    // `parentId`. The client applies these as a no-op; router.refresh
+    // re-hydrates the draft view (which orders by COALESCE(draft_position,
+    // position) + parents by COALESCE(draft_parent_id, parent_id)).
     const result = body.blocks.map((b) => {
+      const cur = currentById.get(b.id)!
       const newParent = resolvedParentById.get(b.id) as number | null
-      const orderInGroup = orderByParent.get(newParent)!.indexOf(b.id)
       return {
         id: b.id,
-        version: b.version + 1,
-        position: (orderInGroup + 1) * 1000,
+        version: cur.version,
+        position: newPosById.get(b.id)!,
         parentId: newParent,
       }
     })
 
-    // F11 — bump pages.version in the SAME TX. Reorder mutates the
-    // page's structural ordering, which is the same axis any block
-    // PATCH or DELETE serialises through pageVersion. Without this
-    // bump, a concurrent PATCH holding the pre-reorder pageVersion
-    // would commit successfully against a tree that has shifted —
-    // operator A's reorder lands; operator B's pageVersion-cursored
-    // PATCH then commits unaware. Bumping here closes that window:
-    // any in-flight PATCH against the old pageVersion now 409s and
-    // the FE refreshes to pick up the new order.
+    // Bump the page's DRAFT cursor (draft_version + has_draft +
+    // draft_updated_at/_by) in the SAME TX — NOT pages.version. The
+    // published version is untouched (Publish bumps it). draft_version
+    // advancing lets a second tab detect "draft changed elsewhere".
     await tx.execute(sql`
       UPDATE pages
-      SET version = version + 1,
-          updated_at = NOW(3),
-          updated_by = ${ctx.userId}
+      SET draft_version = draft_version + 1,
+          has_draft = 1,
+          draft_updated_at = NOW(3),
+          draft_updated_by = ${ctx.userId}
       WHERE id = ${body.pageId}
     `)
-    const newPageVersion = (pageRows[0]?.version ?? 0) + 1
+    // Echo back the CURRENT (unchanged) published version.
+    const newPageVersion = pageRows[0]?.version ?? 0
 
     // Step 9: audit. ONE row per reorder gesture, capturing the
     // per-parent groups so a forensic replay can reconstruct both
@@ -457,17 +531,16 @@ export const POST = withError(async (req) => {
       requestId,
     })
 
-    const tags = tagsForBlockSave(pageSlug).tags
-    const queueRowId = await enqueueRevalidate(tx, tags)
-    return { result, queueRowId, tags, pageVersion: newPageVersion }
+    // Draft reorder does NOT change the public render → no revalidation
+    // (that happens on Publish).
+    return { result, pageVersion: newPageVersion }
   })
 
-  queueMicrotask(() => {
-    void drainRevalidate(txResult.queueRowId, txResult.tags)
-  })
-  // F11 — return pageVersion so clients can advance their cursors.
-  // Existing callers reading only `blocks` keep working; new callers
-  // can opt in by reading `pageVersion`.
+  // Backward-compatible response. `blocks` carries each row's unchanged
+  // version + new draft position + effective parent; `pageVersion` is the
+  // unchanged published version. Existing callers reading only `blocks`
+  // keep working; the FE applies these (a no-op) then router.refresh
+  // re-hydrates the draft view.
   return new Response(
     JSON.stringify({
       blocks: txResult.result,
