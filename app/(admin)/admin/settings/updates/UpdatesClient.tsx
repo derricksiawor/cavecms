@@ -359,8 +359,137 @@ export function UpdatesClient({
     ? `Last updated ${relativeDays(new Date(current.ts))}`
     : 'Running locally'
 
+  // The actionable "Update available" card. Extracted so it can render
+  // FIRST — above the running-version + "what's new in your current
+  // version" cards. When an update is waiting, that's the single most
+  // important thing on the page; it must not sit buried below the
+  // current-version essay.
+  const availableUpdateCard = release ? (
+    <article
+      className={`relative overflow-hidden rounded-2xl border p-6 shadow-[0_24px_60px_-30px_rgba(184,115,51,0.45)] backdrop-blur-sm sm:p-8 ${
+        release.isSecurity
+          ? 'border-red-300/60 bg-red-50/40'
+          : 'border-copper-300/60 bg-cream-50/80'
+      }`}
+    >
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none absolute -top-16 -right-12 h-48 w-48 rounded-full blur-3xl ${
+          release.isSecurity ? 'bg-red-300/30' : 'bg-copper-300/30'
+        }`}
+      />
+      <header className="relative flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p
+            className={`flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.28em] ${
+              release.isSecurity ? 'text-red-700' : 'text-copper-700'
+            }`}
+          >
+            {release.isSecurity ? (
+              <>
+                <ShieldAlert className="h-3.5 w-3.5" />
+                Security update available
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3.5 w-3.5" />
+                Update available
+              </>
+            )}
+          </p>
+          <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-near-black">
+            {release.title}
+          </h2>
+          <p className="mt-2 text-xs text-warm-stone">
+            {release.versionLabel} · {release.releasedAbsolute}
+          </p>
+          {/* Pre-staged → installing skips the download entirely. */}
+          {stagedReady && (
+            <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+              <CheckCircle2 className="h-3 w-3" />
+              Downloaded and ready — installs in seconds
+            </p>
+          )}
+        </div>
+        <Button
+          type="button"
+          onClick={() => void handleApply()}
+          disabled={applying || isDev}
+          title={
+            isDev ? 'In-app updates are disabled while running locally.' : undefined
+          }
+        >
+          <Download className="h-4 w-4" />
+          {applying ? 'Starting…' : 'Update now'}
+        </Button>
+      </header>
+      {release.body && (
+        <div className="relative mt-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
+            What&rsquo;s new
+          </p>
+          <div className="mt-2">
+            <ReleaseNotesMarkdown>{release.body}</ReleaseNotesMarkdown>
+          </div>
+        </div>
+      )}
+    </article>
+  ) : null
+
+  // The "you're up to date" + recovery (Re-run install) card. Only shown
+  // once a check has completed and found no newer release. Stays in its
+  // natural position below the running-version card.
+  const upToDateCard =
+    !release && !checking && checkedAt ? (
+      <article className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-6 backdrop-blur-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+            <div>
+              <h2 className="font-serif text-xl font-bold tracking-tight text-near-black">
+                You&rsquo;re up to date
+              </h2>
+              <p className="mt-1 text-sm text-warm-stone">
+                CaveCMS checks for new releases each time you open this page.
+              </p>
+            </div>
+          </div>
+          {/* Re-run install — recovery affordance for a stuck migration,
+              corrupted .next/ cache, or a previously-interrupted update.
+              Same modal flow as a normal update; the orchestrator script
+              honours --force by wiping .next/ before rebuild and re-running
+              any idempotent migrations. */}
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void handleForceApply()}
+              disabled={applying || isDev}
+              title={
+                isDev
+                  ? 'Re-run install is disabled while running locally.'
+                  : 'Re-run install on the current version. Use this if your last update left the site in a broken state.'
+              }
+            >
+              <RefreshCw className="h-4 w-4" />
+              {applying ? 'Starting…' : 'Re-run install'}
+            </Button>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-warm-stone/70">
+              Recovery
+            </p>
+          </div>
+        </div>
+      </article>
+    ) : null
+
   return (
     <section className="mt-10 space-y-6">
+      {/* Available update — promoted ABOVE the running-version + what's-new
+          cards so the actionable card is the first thing the operator sees.
+          Null when no update is available. */}
+      {availableUpdateCard}
+
       {/* Current version card */}
       <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
         <header className="min-w-0">
@@ -410,124 +539,10 @@ export function UpdatesClient({
         />
       )}
 
-      {/* Available update card (or up-to-date state) */}
-      {release ? (
-        <article
-          className={`relative overflow-hidden rounded-2xl border p-6 shadow-[0_24px_60px_-30px_rgba(184,115,51,0.45)] backdrop-blur-sm sm:p-8 ${
-            release.isSecurity
-              ? 'border-red-300/60 bg-red-50/40'
-              : 'border-copper-300/60 bg-cream-50/80'
-          }`}
-        >
-          <div
-            aria-hidden="true"
-            className={`pointer-events-none absolute -top-16 -right-12 h-48 w-48 rounded-full blur-3xl ${
-              release.isSecurity ? 'bg-red-300/30' : 'bg-copper-300/30'
-            }`}
-          />
-          <header className="relative flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p
-                className={`flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.28em] ${
-                  release.isSecurity ? 'text-red-700' : 'text-copper-700'
-                }`}
-              >
-                {release.isSecurity ? (
-                  <>
-                    <ShieldAlert className="h-3.5 w-3.5" />
-                    Security update available
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Update available
-                  </>
-                )}
-              </p>
-              <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-near-black">
-                {release.title}
-              </h2>
-              <p className="mt-2 text-xs text-warm-stone">
-                {release.versionLabel} · {release.releasedAbsolute}
-              </p>
-              {/* Pre-staged → installing skips the download entirely. */}
-              {stagedReady && (
-                <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Downloaded and ready — installs in seconds
-                </p>
-              )}
-            </div>
-            <Button
-              type="button"
-              onClick={() => void handleApply()}
-              disabled={applying || isDev}
-              title={
-                isDev ? 'In-app updates are disabled while running locally.' : undefined
-              }
-            >
-              <Download className="h-4 w-4" />
-              {applying ? 'Starting…' : 'Update now'}
-            </Button>
-          </header>
-          {release.body && (
-            <div className="relative mt-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
-                What&rsquo;s new
-              </p>
-              <div className="mt-2">
-                <ReleaseNotesMarkdown>{release.body}</ReleaseNotesMarkdown>
-              </div>
-            </div>
-          )}
-        </article>
-      ) : (
-        !checking &&
-        checkedAt && (
-          <article className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-6 backdrop-blur-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                <div>
-                  <h2 className="font-serif text-xl font-bold tracking-tight text-near-black">
-                    You&rsquo;re up to date
-                  </h2>
-                  <p className="mt-1 text-sm text-warm-stone">
-                    CaveCMS checks for new releases each time you open
-                    this page.
-                  </p>
-                </div>
-              </div>
-              {/* Re-run install — recovery affordance for a stuck
-                  migration, corrupted .next/ cache, or a previously-
-                  interrupted update. Same modal flow as a normal
-                  update; the orchestrator script honours --force by
-                  wiping .next/ before rebuild and re-running any
-                  idempotent migrations. */}
-              <div className="flex flex-col items-end gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void handleForceApply()}
-                  disabled={applying || isDev}
-                  title={
-                    isDev
-                      ? 'Re-run install is disabled while running locally.'
-                      : 'Re-run install on the current version. Use this if your last update left the site in a broken state.'
-                  }
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  {applying ? 'Starting…' : 'Re-run install'}
-                </Button>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-warm-stone/70">
-                  Recovery
-                </p>
-              </div>
-            </div>
-          </article>
-        )
-      )}
+      {/* Up to date / recovery — only renders when a check found no newer
+          release. The actionable update card (when present) lives at the
+          TOP of the section instead. */}
+      {upToDateCard}
 
       {/* Preferences */}
       <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
