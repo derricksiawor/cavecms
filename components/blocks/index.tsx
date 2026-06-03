@@ -74,11 +74,15 @@ export interface RenderContext {
    *  loop renderer needs. Undefined on every other page (and for recent-
    *  mode-only pages): the loop renderer then renders its empty state. */
   postsLoop?: {
-    items: Array<{ id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null; reading_minutes: number }>
+    items: Array<{ id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null; reading_minutes: number; categories: Array<{ slug: string; name: string }> }>
     page: number
     perPage: number
     hasPrev: boolean
     hasNext: boolean
+    /** Pager base path (see hydrate.ts HydratedPostsLoop.basePath). The loop
+     *  renderer builds prev/next hrefs from this so an archive's pager stays on
+     *  the archive. Defaults to /blog when absent. */
+    basePath?: string
   }
   /** Public preCsrf nonce minted once per page render. Only set when
    *  the page tree contains a block that submits a public form (today:

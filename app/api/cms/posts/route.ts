@@ -15,7 +15,12 @@ import { tagsForPostCreate } from '@/lib/cache/tags'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 
 import { SLUG_RE, SLUG_MAX } from '@/lib/cms/slug'
+import { TAXONOMY_RESERVED } from '@/lib/cms/taxonomy-slug'
 import { insertPostBodyPage } from '@/lib/cms/postBodyPage'
+import {
+  syncPostTaxonomy,
+  MAX_TERMS_PER_POST,
+} from '@/lib/cms/syncPostTaxonomy'
 
 const CreateBody = z
   .object({
@@ -23,8 +28,17 @@ const CreateBody = z
       .string()
       .min(2)
       .max(SLUG_MAX)
-      .regex(SLUG_RE, 'slug_invalid_format'),
+      .regex(SLUG_RE, 'slug_invalid_format')
+      // Reject the words that name /blog sub-paths (category/tag/feed/page):
+      // a post slug equal to one would shadow the archive/feed namespace
+      // under /blog. Mirrors validateTermSlug's taxonomy-reserved guard.
+      .refine((s) => !TAXONOMY_RESERVED.has(s.toLowerCase()), 'slug_reserved'),
     title: z.string().min(1).max(220),
+    // Optional taxonomy assignment at create. Each is a bounded list of
+    // existing category/tag ids; syncPostTaxonomy validates they exist + wires
+    // the junctions in the same TX. Omitted → no terms (the common case).
+    categoryIds: z.array(z.number().int().positive()).max(MAX_TERMS_PER_POST).optional(),
+    tagIds: z.array(z.number().int().positive()).max(MAX_TERMS_PER_POST).optional(),
   })
   .strict()
 
@@ -75,6 +89,18 @@ export const POST = withError(async (req) => {
         UPDATE posts SET body_page_id = ${bodyPageId} WHERE id = ${postId}
       `)
 
+      // Wire any taxonomy passed at create. The junctions reference the new
+      // post id (just inserted) so this is order-safe within the TX. Validates
+      // every term id exists (clean 400 on a stale id). Empty/omitted → no-op.
+      const taxResult =
+        body.categoryIds !== undefined || body.tagIds !== undefined
+          ? await syncPostTaxonomy(tx, {
+              postId,
+              categoryIds: body.categoryIds,
+              tagIds: body.tagIds,
+            })
+          : null
+
       await tx.insert(auditLog).values({
         userId: ctx.userId,
         action: 'create',
@@ -82,7 +108,13 @@ export const POST = withError(async (req) => {
         resourceId: String(postId),
         diff: {
           kind: AUDIT_KIND.create,
-          data: { slug: body.slug, title: body.title, body_page_id: bodyPageId },
+          data: {
+            slug: body.slug,
+            title: body.title,
+            body_page_id: bodyPageId,
+            category_ids: taxResult?.finalCategoryIds ?? [],
+            tag_ids: taxResult?.finalTagIds ?? [],
+          },
         } as unknown as object,
         ip: meta.ip,
         userAgent: meta.userAgent,

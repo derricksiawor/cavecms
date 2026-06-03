@@ -6,6 +6,7 @@ import { parseForRead, parseProjectSectionForRead } from './parse'
 import { collectMediaPaths } from './mediaRefs'
 import { getProjectRow } from './getProjectRow'
 import { getSetting } from './getSettings'
+import { categoryUrl, tagUrl } from '@/lib/blog/urls'
 import { isMissingTable } from '@/lib/db/errors'
 import type { BlockData } from './block-registry'
 import type { BlockKind } from './blockMeta'
@@ -112,6 +113,11 @@ export interface HydratedPostLoopItem {
    *  fetch from the body character length — bounded + cheap, never the full
    *  body text into app memory. */
   reading_minutes: number
+  /** Up to 2 categories for the loop-card cross-link pills (#0.592). Batch-
+   *  fetched for the WHOLE page slice in ONE query (no N+1) and capped per
+   *  card so a post in 20 categories doesn't blow the card layout. Empty when
+   *  the post has no categories. */
+  categories: Array<{ slug: string; name: string }>
 }
 
 // The paginated, filtered slice a loop-mode lx_posts block renders.
@@ -126,6 +132,12 @@ export interface HydratedPostsLoop {
   perPage: number
   hasPrev: boolean
   hasNext: boolean
+  /** Base path the pager builds prev/next hrefs from. Defaults to the blog
+   *  index (`/blog`); the archive routes set it to the term archive
+   *  (`/blog/category/<slug>` etc.) so paging within an archive stays on the
+   *  archive instead of bouncing to the plain /blog index. Always a
+   *  route-safe path (composed by lib/blog/urls), never user input. */
+  basePath?: string
 }
 
 export interface HydratedPage {
@@ -216,6 +228,15 @@ export async function hydratePage(
      *  fetched for THIS page number; the recent-mode posts Map is
      *  unaffected. */
     loopPage?: number
+    /** Archive override: force the first loop-mode lx_posts block's taxonomy
+     *  filter to a specific category OR tag slug, REGARDLESS of the block's
+     *  own `category`/`tag` data. Used by the /blog/category/<slug> and
+     *  /blog/tag/<slug> archive routes, which reuse the operator-styled /blog
+     *  page shell but pin the loop to the archive's term. The slug is
+     *  SLUG_RE-validated by the route before it reaches here, so it's a safe
+     *  parameter for the junction join. When unset, the block's own filter
+     *  (usually none on a plain /blog) applies. */
+    loopFilter?: { category: string } | { tag: string }
   },
 ): Promise<HydratedPage | null> {
   // Verify the page exists before fetching blocks — distinguishes
@@ -429,11 +450,29 @@ export async function hydratePage(
       const blogSettings = await getSetting('blog_settings')
       perPage = blogSettings.postsPerPage
     }
+    // Archive override wins over the block's own filter. The override pins the
+    // loop to exactly ONE term (category XOR tag); when present it replaces
+    // BOTH of the block's filter fields so a stray block-level filter can't
+    // leak through alongside the archive's term.
+    const override = opts?.loopFilter
+    const filterCategory =
+      override && 'category' in override ? override.category : override ? undefined : loopData.category
+    const filterTag =
+      override && 'tag' in override ? override.tag : override ? undefined : loopData.tag
+    // Pager base path: an archive override pins paging to its term archive so
+    // ?page=N stays on /blog/category/<slug>; a plain /blog leaves it default.
+    let basePath: string | undefined
+    if (override && 'category' in override) {
+      basePath = categoryUrl(override.category)
+    } else if (override && 'tag' in override) {
+      basePath = tagUrl(override.tag)
+    }
     postsLoop = await fetchPostsLoopSlice({
       page: opts?.loopPage ?? 1,
       perPage: Math.min(50, Math.max(1, Math.floor(perPage))),
-      category: loopData.category,
-      tag: loopData.tag,
+      category: filterCategory,
+      tag: filterTag,
+      basePath,
     })
     for (const p of postsLoop.items) {
       if (p.hero_image_id) mediaIds.add(p.hero_image_id)
@@ -527,6 +566,7 @@ async function fetchPostsLoopSlice(args: {
   perPage: number
   category?: string
   tag?: string
+  basePath?: string
 }): Promise<HydratedPostsLoop> {
   const perPage = Math.min(50, Math.max(1, Math.floor(args.perPage)))
   const page = Math.min(MAX_LOOP_PAGE, Math.max(1, Math.floor(args.page)))
@@ -586,6 +626,30 @@ async function fetchPostsLoopSlice(args: {
 
     const start = (page - 1) * perPage
     const pageRows = rows.slice(start, start + perPage)
+
+    // Batch-fetch the categories for ALL posts on this page in ONE query
+    // (no N+1), ordered by (post, category position) so each card's pills are
+    // stable. Capped to 2 per post at render to keep the card tidy. Only runs
+    // when the page has posts.
+    const catByPost = new Map<number, Array<{ slug: string; name: string }>>()
+    if (pageRows.length > 0) {
+      const ids = pageRows.map((r) => r.id)
+      const [pcRows] = (await db.execute(sql`
+        SELECT pc.post_id, c.slug, c.name
+        FROM post_categories pc
+        JOIN categories c ON c.id = pc.category_id
+        WHERE pc.post_id IN (${sql.join(ids, sql.raw(','))})
+        ORDER BY pc.post_id, c.position, c.id
+      `)) as unknown as [
+        Array<{ post_id: number; slug: string; name: string }>,
+      ]
+      for (const pc of pcRows) {
+        const list = catByPost.get(pc.post_id) ?? []
+        list.push({ slug: pc.slug, name: pc.name })
+        catByPost.set(pc.post_id, list)
+      }
+    }
+
     const items: HydratedPostLoopItem[] = pageRows.map((r) => ({
       id: r.id,
       slug: r.slug,
@@ -594,6 +658,9 @@ async function fetchPostsLoopSlice(args: {
       published_at: r.published_at,
       hero_image_id: r.hero_image_id,
       reading_minutes: Math.max(1, Number(r.reading_minutes) || 1),
+      // Cap at 2 categories per card so a heavily-categorised post doesn't
+      // overflow the card chrome.
+      categories: (catByPost.get(r.id) ?? []).slice(0, 2),
     }))
     return {
       items,
@@ -603,10 +670,18 @@ async function fetchPostsLoopSlice(args: {
       // A NEXT page exists when the window over-fetched past this page —
       // i.e. we saw more rows than `page*perPage`.
       hasNext: rows.length > page * perPage,
+      basePath: args.basePath,
     }
   } catch (err) {
     if (isMissingTable(err)) {
-      return { items: [], page, perPage, hasPrev: page > 1, hasNext: false }
+      return {
+        items: [],
+        page,
+        perPage,
+        hasPrev: page > 1,
+        hasNext: false,
+        basePath: args.basePath,
+      }
     }
     throw err
   }

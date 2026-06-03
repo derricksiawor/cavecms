@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
+import { postUrl, categoryUrl } from '@/lib/blog/urls'
 import { MediaImg } from '../MediaImg'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
@@ -43,14 +44,18 @@ interface PostCard {
   published_at: Date | string | null
   hero_image_id: number | null
   readingMinutes?: number
+  // Loop-mode only: up to 2 categories for the card cross-link pills (#0.592).
+  // Recent mode leaves it empty.
+  categories?: Array<{ slug: string; name: string }>
 }
 
-// Build the loop pager href. Loop pages live under /blog?page=N today; the
-// configurable permalink segment is a Phase 5 concern (a single
-// lib/blog/urls helper) — this renderer uses the literal default to match
-// the recent-mode card links (`/blog/<slug>`) already shipping.
-function pageHref(page: number): string {
-  return page <= 1 ? '/blog' : `/blog?page=${page}`
+// Build the loop pager href off the slice's basePath (the blog index by
+// default, or a term archive like /blog/category/<slug> when this loop is an
+// archive). The configurable permalink SEGMENT is a Phase 5 concern; the
+// basePath already routes through lib/blog/urls so a segment change updates it
+// in one place. Page 1 → bare base; page >1 → `?page=N`.
+function pageHref(base: string, page: number): string {
+  return page <= 1 ? base : `${base}?page=${page}`
 }
 
 export function LxPosts({
@@ -86,6 +91,7 @@ export function LxPosts({
         published_at: p.published_at,
         hero_image_id: p.hero_image_id,
         readingMinutes: p.reading_minutes,
+        categories: p.categories,
       }))
     : [...(posts?.values() ?? [])].slice(0, data.limit)
 
@@ -134,7 +140,7 @@ export function LxPosts({
           return (
             <li key={p.id}>
               <a
-                href={`/blog/${p.slug}`}
+                href={postUrl(p.slug)}
                 className={clsx('group block', isList && 'flex flex-col gap-5 sm:flex-row sm:items-center sm:gap-8')}
               >
                 <div className={clsx('overflow-hidden rounded-2xl', isList && 'sm:w-2/5 sm:shrink-0')}>
@@ -181,6 +187,27 @@ export function LxPosts({
                   )}
                 </div>
               </a>
+              {/* Category cross-link pills — rendered OUTSIDE the card anchor
+                  (no nested <a>) so each pill is its own link to the term
+                  archive (#0.592). Loop mode only; recent-mode cards omit. */}
+              {isLoop && p.categories && p.categories.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {p.categories.map((c) => (
+                    <a
+                      key={c.slug}
+                      href={categoryUrl(c.slug)}
+                      className={clsx(
+                        'inline-flex w-fit items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-eyebrow ring-1 transition-colors',
+                        onDark
+                          ? 'bg-ivory/10 text-ivory ring-ivory/20 hover:bg-ivory/15'
+                          : 'bg-copper-500/12 text-copper-700 ring-copper-400/30 hover:bg-copper-500/20',
+                      )}
+                    >
+                      {c.name}
+                    </a>
+                  ))}
+                </div>
+              )}
             </li>
           )
         })}
@@ -193,7 +220,7 @@ export function LxPosts({
         >
           {postsLoop.hasPrev ? (
             <a
-              href={pageHref(postsLoop.page - 1)}
+              href={pageHref(postsLoop.basePath ?? '/blog', postsLoop.page - 1)}
               rel="prev"
               className={clsx(
                 'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
@@ -215,7 +242,7 @@ export function LxPosts({
 
           {postsLoop.hasNext ? (
             <a
-              href={pageHref(postsLoop.page + 1)}
+              href={pageHref(postsLoop.basePath ?? '/blog', postsLoop.page + 1)}
               rel="next"
               className={clsx(
                 'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',

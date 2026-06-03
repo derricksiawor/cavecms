@@ -9,9 +9,11 @@ import { EditableMain } from '@/components/inline-edit/EditableMain'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { mintPublicPreCsrfForBlocks } from '@/app/_shared/cmsPage'
 import { blogPostingLd } from '@/lib/seo/jsonLd'
+import { postBreadcrumbLd } from '@/lib/seo/blog-jsonld'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
+import { TaxonomyPills, type TermLink } from '@/components/post-sections/TaxonomyPills'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +163,30 @@ export default async function BlogPost({
     ? new Date(post.published_at)
     : new Date()
 
+  // Load this post's categories + tags for the cross-link pills + breadcrumb.
+  // Two small junction-PK-indexed reads; ordered by category position / tag
+  // name so the rendered pills are stable. The FIRST category (lowest
+  // position) is the "primary" category for the breadcrumb middle crumb.
+  const [[catRows], [tagRows]] = await Promise.all([
+    db.execute(sql`
+      SELECT c.slug, c.name
+      FROM post_categories pc
+      JOIN categories c ON c.id = pc.category_id
+      WHERE pc.post_id = ${post.id}
+      ORDER BY c.position, c.id
+    `) as unknown as Promise<[Array<{ slug: string; name: string }>]>,
+    db.execute(sql`
+      SELECT t.slug, t.name
+      FROM post_tags pt
+      JOIN tags t ON t.id = pt.tag_id
+      WHERE pt.post_id = ${post.id}
+      ORDER BY t.name, t.id
+    `) as unknown as Promise<[Array<{ slug: string; name: string }>]>,
+  ])
+  const categories: TermLink[] = catRows
+  const tags: TermLink[] = tagRows
+  const primaryCategory = categories[0] ?? null
+
   const siteOrigin = await getSiteOrigin()
   const ld = blogPostingLd({
     title: post.title,
@@ -169,6 +195,15 @@ export default async function BlogPost({
     excerpt: post.excerpt,
     heroImage: heroVariants?.lg ?? null,
     author: post.author_name ?? 'CaveCMS',
+    siteOrigin,
+  })
+  // BreadcrumbList: Home › Blog › [Primary Category] › Post. Kept in the
+  // blog-specific helper (lib/seo/blog-jsonld) per spec §11 so the shared
+  // jsonLd.ts stays untouched for the parallel SEO worktree.
+  const breadcrumb = postBreadcrumbLd({
+    postTitle: post.title,
+    postSlug: post.slug,
+    primaryCategory,
     siteOrigin,
   })
 
@@ -184,6 +219,10 @@ export default async function BlogPost({
         // never break out of the script tag.
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
       />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: safeJsonForScript(breadcrumb) }}
+      />
       <h1 className="text-3xl font-semibold tracking-tight">{post.title}</h1>
       <time
         className="text-xs uppercase tracking-wide text-copper-600 mt-2 inline-block"
@@ -192,6 +231,9 @@ export default async function BlogPost({
         {publishedAt.toISOString().slice(0, 10)}
         {post.author_name ? ` · ${post.author_name}` : null}
       </time>
+      {/* Taxonomy cross-link pills — categories + tags link to their archives
+          so the post connects into the taxonomy graph (#0.592). */}
+      <TaxonomyPills categories={categories} tags={tags} className="mt-4" />
       {heroVariants?.lg && (
         // eslint-disable-next-line @next/next/no-img-element
         <img

@@ -17,6 +17,7 @@ import { useAutoSave } from '@/hooks/useAutoSave'
 import { SaveStatus } from '@/components/inline-edit/SaveStatus'
 import type { MediaRef } from '@/components/inline-edit/MediaPickerProvider'
 import { previewMarkdown } from './preview/action'
+import { TaxonomyChips, type TermOption } from './TaxonomyChips'
 
 export interface EditorPost {
   id: number
@@ -34,6 +35,13 @@ export interface EditorPost {
 
 import { SLUG_RE } from '@/lib/cms/slug'
 
+// Order-independent signature of an id set — sorted + comma-joined. Used to
+// detect taxonomy dirtiness with a cheap string compare instead of Set diffing
+// on every render.
+function sigOf(ids: number[]): string {
+  return [...ids].sort((a, b) => a - b).join(',')
+}
+
 // Blog post editor. The body is now a full markdown editor with a
 // toolbar and live preview pane — no more raw mono-font textarea. SEO
 // fields show a Google snippet preview with character counters. Slug
@@ -42,10 +50,18 @@ export function Editor({
   post,
   canPublish,
   readonly,
+  categoryOptions: initialCategoryOptions,
+  tagOptions: initialTagOptions,
+  assignedCategoryIds,
+  assignedTagIds,
 }: {
   post: EditorPost
   canPublish: boolean
   readonly: boolean
+  categoryOptions: TermOption[]
+  tagOptions: TermOption[]
+  assignedCategoryIds: number[]
+  assignedTagIds: number[]
 }) {
   const toast = useToast()
   const router = useRouter()
@@ -63,6 +79,21 @@ export function Editor({
   const [busy, setBusy] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(false)
 
+  // Taxonomy chip state. `categoryOptions` / `tagOptions` are mutable so an
+  // inline-created term is appended to the catalog. Selected-id Sets drive the
+  // chips; the pristine copies (sorted arrays) detect dirtiness + reset on
+  // discard.
+  const [categoryOptions, setCategoryOptions] = useState<TermOption[]>(
+    initialCategoryOptions,
+  )
+  const [tagOptions, setTagOptions] = useState<TermOption[]>(initialTagOptions)
+  const [categoryIds, setCategoryIds] = useState<Set<number>>(
+    () => new Set(assignedCategoryIds),
+  )
+  const [tagIds, setTagIds] = useState<Set<number>>(
+    () => new Set(assignedTagIds),
+  )
+
   const [pristine, setPristine] = useState({
     title: post.title,
     slug: post.slug,
@@ -73,6 +104,10 @@ export function Editor({
     seoTitle: post.seo_title ?? '',
     seoDescription: post.seo_description ?? '',
     published: post.published,
+    // Pristine id arrays for the chip pickers. dirty-detection compares the
+    // order-independent signature (cheap); discard resets the Sets from these.
+    categoryIdsArr: assignedCategoryIds,
+    tagIdsArr: assignedTagIds,
   })
 
   const dirty =
@@ -84,7 +119,9 @@ export function Editor({
     (og?.media_id ?? null) !== pristine.og ||
     seoTitle !== pristine.seoTitle ||
     seoDescription !== pristine.seoDescription ||
-    published !== pristine.published
+    published !== pristine.published ||
+    sigOf([...categoryIds]) !== sigOf(pristine.categoryIdsArr) ||
+    sigOf([...tagIds]) !== sigOf(pristine.tagIdsArr)
 
   const slugInvalid = useMemo(() => {
     if (!canPublish) return null
@@ -115,6 +152,15 @@ export function Editor({
     if (canPublish) {
       if (slug !== pristine.slug) patch.slug = slug
       if (published !== pristine.published) patch.published = published
+    }
+    // Taxonomy: send the FULL desired id set for an axis only when it changed
+    // (the API leaves an unsent axis untouched). categoryIds/tagIds are an
+    // editor capability (not gated on canPublish).
+    if (sigOf([...categoryIds]) !== sigOf(pristine.categoryIdsArr)) {
+      patch.categoryIds = [...categoryIds]
+    }
+    if (sigOf([...tagIds]) !== sigOf(pristine.tagIdsArr)) {
+      patch.tagIds = [...tagIds]
     }
     return patch
   }
@@ -170,6 +216,8 @@ export function Editor({
         seoTitle,
         seoDescription,
         published,
+        categoryIdsArr: [...categoryIds],
+        tagIdsArr: [...tagIds],
       })
       return { ok: true }
     } finally {
@@ -197,6 +245,8 @@ export function Editor({
     setSeoTitle(pristine.seoTitle)
     setSeoDescription(pristine.seoDescription)
     setPublished(pristine.published)
+    setCategoryIds(new Set(pristine.categoryIdsArr))
+    setTagIds(new Set(pristine.tagIdsArr))
     toast.info('Changes undone.')
   }
 
@@ -366,6 +416,36 @@ export function Editor({
             value={og ?? undefined}
             onChange={(m) => setOg(m ?? null)}
           />
+
+          <div className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-5 space-y-5">
+            <TaxonomyChips
+              kind="category"
+              label="Categories"
+              help="The main sections this post belongs to."
+              options={categoryOptions}
+              selectedIds={categoryIds}
+              onChange={setCategoryIds}
+              onTermCreated={(term) => {
+                setCategoryOptions((prev) => [...prev, term])
+                setCategoryIds((prev) => new Set(prev).add(term.id))
+              }}
+              disabled={readonly}
+            />
+            <TaxonomyChips
+              kind="tag"
+              label="Tags"
+              help="Lighter labels to connect related posts."
+              options={tagOptions}
+              selectedIds={tagIds}
+              onChange={setTagIds}
+              onTermCreated={(term) => {
+                setTagOptions((prev) => [...prev, term])
+                setTagIds((prev) => new Set(prev).add(term.id))
+              }}
+              disabled={readonly}
+            />
+          </div>
+
           {canPublish && (
             <div className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-5">
               <Switch

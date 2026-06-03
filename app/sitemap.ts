@@ -4,6 +4,8 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { env } from '@/lib/env'
 import { isMissingTable } from '@/lib/db/errors'
+// blog-system worktree: taxonomy archive URL construction (Phase-5 seam)
+import { categoryUrl, tagUrl } from '@/lib/blog/urls'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,10 +103,66 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         return []
       }
     })(),
+    // ── blog-system worktree: taxonomy archives (do not interleave) ─────
+    // Category + tag archive URLs — ONLY for terms with ≥1 published, non-
+    // trashed post (an empty archive is a thin/soft-404 page Google
+    // shouldn't index). EXISTS keeps the gate sargable. lastModified is the
+    // newest published post in the term so crawlers get an honest signal.
+    // Missing-table-safe (taxonomy may not exist on an early-migration box).
+    (async () => {
+      try {
+        const [rows] = (await db.execute(sql`
+          SELECT c.slug,
+                 (SELECT MAX(p.updated_at)
+                  FROM post_categories pc
+                  JOIN posts p ON p.id = pc.post_id
+                  WHERE pc.category_id = c.id
+                    AND p.published = TRUE AND p.deleted_at IS NULL) AS last_mod
+          FROM categories c
+          WHERE EXISTS (
+            SELECT 1 FROM post_categories pc
+            JOIN posts p ON p.id = pc.post_id
+            WHERE pc.category_id = c.id
+              AND p.published = TRUE AND p.deleted_at IS NULL
+          )
+        `)) as unknown as [Array<{ slug: string; last_mod: Date | null }>]
+        return rows
+      } catch (err) {
+        if (!isMissingTable(err)) throw err
+        return []
+      }
+    })(),
+    (async () => {
+      try {
+        const [rows] = (await db.execute(sql`
+          SELECT t.slug,
+                 (SELECT MAX(p.updated_at)
+                  FROM post_tags pt
+                  JOIN posts p ON p.id = pt.post_id
+                  WHERE pt.tag_id = t.id
+                    AND p.published = TRUE AND p.deleted_at IS NULL) AS last_mod
+          FROM tags t
+          WHERE EXISTS (
+            SELECT 1 FROM post_tags pt
+            JOIN posts p ON p.id = pt.post_id
+            WHERE pt.tag_id = t.id
+              AND p.published = TRUE AND p.deleted_at IS NULL
+          )
+        `)) as unknown as [Array<{ slug: string; last_mod: Date | null }>]
+        return rows
+      } catch (err) {
+        if (!isMissingTable(err)) throw err
+        return []
+      }
+    })(),
+    // ── end blog-system worktree taxonomy archives ─────────────────────
   ])
   const pageRowsResult = settled[0]
   const projectRowsResult = settled[1]
   const postRowsResult = settled[2]
+  // blog-system worktree: taxonomy archive results
+  const categoryRowsResult = settled[3]
+  const tagRowsResult = settled[4]
   function unwrap<T>(
     result: PromiseSettledResult<T>,
     label: string,
@@ -123,6 +181,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const pageRows = unwrap(pageRowsResult, 'pages') ?? []
   const projectRows = unwrap(projectRowsResult, 'projects') ?? []
   const postRows = unwrap(postRowsResult, 'posts') ?? []
+  // blog-system worktree: taxonomy archive rows
+  const categoryRows = unwrap(categoryRowsResult, 'categories') ?? []
+  const tagRows = unwrap(tagRowsResult, 'tags') ?? []
 
   if (pageRows.length > SITEMAP_PAGE_CAP) {
     console.warn(
@@ -164,5 +225,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${origin}/blog/${p.slug}`,
       lastModified: p.updated_at,
     })),
+    // ── blog-system worktree: taxonomy archive URLs (do not interleave) ──
+    // Category + tag archives with ≥1 live post. lastModified falls back to
+    // the release timestamp when the MAX() subquery returned NULL (shouldn't
+    // happen given the EXISTS gate, but defends against a race). URLs route
+    // through lib/blog/urls so a Phase-5 segment change updates them here too.
+    ...categoryRows.map((c) => ({
+      url: `${origin}${categoryUrl(c.slug)}`,
+      lastModified: c.last_mod ?? RELEASE_LAST_MOD,
+    })),
+    ...tagRows.map((t) => ({
+      url: `${origin}${tagUrl(t.slug)}`,
+      lastModified: t.last_mod ?? RELEASE_LAST_MOD,
+    })),
+    // ── end blog-system worktree taxonomy archive URLs ──────────────────
   ]
 }

@@ -30,6 +30,15 @@ export const tag = {
   pageSlugResolver: (slug: string) => `page-slug-resolver:${slug}`,
   projectSlugResolver: (slug: string) => `project-slug-resolver:${slug}`,
   postSlugResolver: (slug: string) => `post-slug-resolver:${slug}`,
+  // ── blog-system worktree: taxonomy archives (do not interleave) ────
+  // Per-term archive caches for /blog/category/<slug> and /blog/tag/<slug>.
+  // A term rename/delete, or a post's taxonomy set changing, busts the
+  // affected archive(s). `taxonomyIndex` covers the admin taxonomy list
+  // (so a create/edit/delete refreshes the management table).
+  categoryArchive: (slug: string) => `category-archive:${slug}`,
+  tagArchive: (slug: string) => `tag-archive:${slug}`,
+  taxonomyIndex: 'taxonomy-index',
+  // ── end blog-system worktree taxonomy archives ────────────────────
 } as const
 
 export interface TagSet {
@@ -329,3 +338,80 @@ export function tagsForPageRestore(
   if (opts.wasHome) t.add(tag.home)
   return { tags: [...t] }
 }
+
+// ── blog-system worktree: taxonomy (do not interleave) ──────────────────────
+// Taxonomy surfaces: the admin management table (`taxonomyIndex`), the per-term
+// archive page (`category-archive:<slug>` / `tag-archive:<slug>`), the blog
+// index + sitemap when a term that has live posts changes name/slug (the index
+// pills + sitemap archive URLs derive from term metadata). A bare create or
+// delete of an EMPTY term (no posts attached) only touches the admin list; the
+// public archive/index/sitemap have nothing to invalidate yet, but we bust them
+// anyway on rename/delete because the slug-keyed archive cache + the sitemap's
+// "terms with ≥1 post" set may already reference the old slug.
+
+type TaxKind = 'category' | 'tag'
+
+function termArchiveTag(kind: TaxKind, slug: string): string {
+  return kind === 'category' ? tag.categoryArchive(slug) : tag.tagArchive(slug)
+}
+
+// Create: a new term is empty (no posts), so only the admin list cares.
+export function tagsForTaxonomyCreate(): TagSet {
+  return { tags: [tag.taxonomyIndex] }
+}
+
+// Update: term name/slug/description/parent changed. Always busts the admin
+// list + the term's archive (the header renders the name/description). On a
+// slug rename, the OLD archive cache + the sitemap (archive URL set) + the
+// posts index (pills link by slug) also invalidate.
+export function tagsForTaxonomyUpdate(
+  kind: TaxKind,
+  slug: string,
+  opts: { slugChanged?: boolean; oldSlug?: string } = {},
+): TagSet {
+  if (opts.slugChanged && !opts.oldSlug) {
+    throw new Error('tagsForTaxonomyUpdate: slugChanged=true requires oldSlug')
+  }
+  const t = new Set<string>([
+    tag.taxonomyIndex,
+    termArchiveTag(kind, slug),
+  ])
+  if (opts.slugChanged && opts.oldSlug && opts.oldSlug !== slug) {
+    t.add(termArchiveTag(kind, opts.oldSlug))
+    t.add(tag.sitemap)
+    t.add(tag.postsIndex)
+  }
+  return { tags: [...t] }
+}
+
+// Delete: the term + its junction rows are gone. Bust the admin list, the
+// term's archive (now 404), the sitemap (archive URL drops), and the posts
+// index (pills referencing it disappear).
+export function tagsForTaxonomyDelete(kind: TaxKind, slug: string): TagSet {
+  return {
+    tags: [
+      tag.taxonomyIndex,
+      termArchiveTag(kind, slug),
+      tag.sitemap,
+      tag.postsIndex,
+    ],
+  }
+}
+
+// A post's category/tag assignment changed (from the post editor). Bust every
+// affected term archive (added AND removed, both directions) + the posts index
+// (cards/pills) + the post's own page. The post's slug-keyed page tag fires so
+// the detail-page pills re-render.
+export function tagsForPostTaxonomySync(
+  postSlug: string,
+  affected: {
+    categorySlugs: readonly string[]
+    tagSlugs: readonly string[]
+  },
+): TagSet {
+  const t = new Set<string>([tag.post(postSlug), tag.postsIndex])
+  for (const s of affected.categorySlugs) t.add(tag.categoryArchive(s))
+  for (const s of affected.tagSlugs) t.add(tag.tagArchive(s))
+  return { tags: [...t] }
+}
+// ── end blog-system worktree taxonomy ───────────────────────────────────────

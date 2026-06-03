@@ -22,6 +22,7 @@ import {
   Palette,
   Type,
   Signpost,
+  FolderTree,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -58,6 +59,13 @@ export const NAV: readonly NavItem[] = [
   // has a stable, known href (i.e. no dynamic [id] segments).
   { label: 'Newsletter', href: '/admin/leads/newsletter', roles: ['admin', 'editor', 'viewer'], icon: AtSign, parent: '/admin/leads' },
   { label: 'Posts', href: '/admin/blog', roles: ['admin', 'editor'], icon: FileText },
+  // Categories & tags — child of Posts. Strict-equality isActive() lights up
+  // /admin/blog only on /admin/blog exactly (Posts gains a child here), and
+  // this child on /admin/blog/taxonomy. The post EDITOR route /admin/blog/[id]
+  // therefore no longer lights up Posts (hasChildren flips it to strict-eq) —
+  // acceptable: the editor is a leaf the breadcrumb/back-link covers, and the
+  // sidebar Posts item lighting up only on the list is the cleaner signal.
+  { label: 'Categories', href: '/admin/blog/taxonomy', roles: ['admin', 'editor'], icon: FolderTree, parent: '/admin/blog' },
   { label: 'Pages', href: '/admin/pages', roles: ['admin', 'editor'], icon: FileEdit },
   { label: 'Media', href: '/admin/media', roles: ['admin', 'editor'], icon: Library },
   { label: 'Trash', href: '/admin/trash', roles: ['admin', 'editor'], icon: Trash2 },

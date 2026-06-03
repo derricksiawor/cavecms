@@ -1,4 +1,5 @@
 import 'server-only'
+import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -6,6 +7,8 @@ import { hydratePage, MAX_LOOP_PAGE } from '@/lib/cms/hydrate'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { ensurePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
+import { BlockTreeRenderer } from '@/components/inline-edit/BlockTreeRenderer'
+import { blogIndexUrl } from '@/lib/blog/urls'
 
 // Block types that submit to a public lead endpoint. When any one of
 // these appears in a page's hydrated tree, the page-level renderer
@@ -215,3 +218,133 @@ export async function renderCmsPage(
     </EditableMain>
   )
 }
+
+// ── blog-system worktree: taxonomy archive render (do not interleave) ────────
+export interface BlogArchiveTerm {
+  kind: 'category' | 'tag'
+  slug: string
+  name: string
+  description?: string | null
+}
+
+/**
+ * Renders a category/tag ARCHIVE page. Reuses the operator-styled `/blog`
+ * system page shell verbatim — same hero/intro/CTA blocks the operator edits
+ * under /admin/pages — but (a) pins the page's loop-mode `lx_posts` block to
+ * the archive's term via hydratePage's `loopFilter` override, and (b) prepends
+ * an archive header (breadcrumb + term name + description). This is the
+ * "renderCmsPage('blog') with a loop-filter override" path the spec offers;
+ * chosen over duplicating the loop markup so the archive inherits the
+ * operator's styling for free and a /blog redesign carries to archives with
+ * zero extra work.
+ *
+ * The archive is READ-ONLY (rendered via BlockTreeRenderer, not EditableMain):
+ * it's a virtual view of the /blog page filtered to a term — there is nothing
+ * to inline-edit here (the operator edits the underlying /blog page itself).
+ *
+ * Returns null when the `blog` system page row is missing (a seed/deploy bug,
+ * surfaced as notFound() by the caller). The term itself is resolved + 404'd by
+ * the route BEFORE calling this.
+ */
+export async function renderCmsBlogArchive(
+  term: BlogArchiveTerm,
+  opts?: { search?: Record<string, string | string[] | undefined> },
+): Promise<React.ReactElement | null> {
+  const [pageRows] = (await db.execute(sql`
+    SELECT id, title FROM pages
+    WHERE slug = 'blog'
+      AND deleted_at IS NULL
+      AND published = 1
+      AND kind = 'page'
+    LIMIT 1
+  `)) as unknown as [Array<{ id: number; title: string }>]
+  const row = pageRows[0]
+  if (!row) return null
+
+  const loopFilter =
+    term.kind === 'category'
+      ? ({ category: term.slug } as const)
+      : ({ tag: term.slug } as const)
+
+  const hydrated = await hydratePage(row.id, {
+    loopPage: parseLoopPage(opts?.search),
+    loopFilter,
+  })
+  if (!hydrated) return null
+  const { blocks, media, projects, posts, postsLoop } = hydrated
+
+  // An undefined postsLoop means the operator's `/blog` system page has no
+  // loop-mode lx_posts block, so the archive can't list any posts (it still
+  // renders the shell + header). That's a misconfiguration, not a crash —
+  // warn (structured, diagnosable) so it surfaces in logs without breaking
+  // the page.
+  if (postsLoop === undefined) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'blog_archive_no_loop_block',
+        term_kind: term.kind,
+        term_slug: term.slug,
+      }),
+    )
+  }
+
+  const csrf = await mintPublicPreCsrfForBlocks(blocks, 'blog')
+
+  const kindLabel = term.kind === 'category' ? 'Category' : 'Tag'
+
+  return (
+    <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:py-16">
+      {/* Archive header — breadcrumb + term name + optional description. The
+          <h1> is the archive's semantic top-level heading (the /blog shell's
+          own heading, if any, renders below as an h2-level section). */}
+      <header className="mb-10">
+        <nav aria-label="Breadcrumb" className="mb-4">
+          <ol className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-eyebrow text-warm-stone">
+            <li>
+              <Link href="/" className="transition-colors hover:text-near-black">
+                Home
+              </Link>
+            </li>
+            <li aria-hidden className="text-warm-stone/50">
+              /
+            </li>
+            <li>
+              <Link
+                href={blogIndexUrl()}
+                className="transition-colors hover:text-near-black"
+              >
+                Blog
+              </Link>
+            </li>
+            <li aria-hidden className="text-warm-stone/50">
+              /
+            </li>
+            <li className="text-near-black">{term.name}</li>
+          </ol>
+        </nav>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
+          {kindLabel}
+        </p>
+        <h1 className="mt-3 font-serif text-4xl font-bold tracking-tight text-near-black sm:text-5xl">
+          {term.name}
+        </h1>
+        {term.description && term.description.trim() !== '' && (
+          <p className="mt-4 max-w-2xl text-base leading-relaxed text-warm-stone">
+            {term.description}
+          </p>
+        )}
+      </header>
+
+      <BlockTreeRenderer
+        blocks={blocks}
+        media={media}
+        projects={projects}
+        posts={posts}
+        postsLoop={postsLoop}
+        csrf={csrf}
+      />
+    </main>
+  )
+}
+// ── end blog-system worktree taxonomy archive render ─────────────────────────

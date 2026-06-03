@@ -53,6 +53,19 @@ export const AUDIT_KIND = {
   savedBlockCreate: 'saved_block_create',
   savedBlockDelete: 'saved_block_delete',
   savedBlockInstantiate: 'saved_block_instantiate',
+  // ── blog-system worktree: taxonomy (do not interleave) ────────────
+  // CRUD on categories / tags. The generic create/patch/delete kinds
+  // would lose the term-type + slug signal a taxonomy forensic query
+  // needs; these carry the resource ('category'|'tag') in resourceType
+  // and the term slug/name in the diff payload. taxonomyAssign records
+  // a post's category/tag set being synced from the post editor (diff
+  // carries the added/removed id lists) so a "who tagged this post"
+  // query reads one row, not N junction-row inserts.
+  taxonomyCreate: 'taxonomy_create',
+  taxonomyUpdate: 'taxonomy_update',
+  taxonomyDelete: 'taxonomy_delete',
+  taxonomyAssign: 'taxonomy_assign',
+  // ── end blog-system worktree taxonomy ─────────────────────────────
 } as const
 
 export type AuditKind = (typeof AUDIT_KIND)[keyof typeof AUDIT_KIND]

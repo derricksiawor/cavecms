@@ -13,9 +13,18 @@ import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
-import { tagsForPostSave, tagsForPostDelete } from '@/lib/cache/tags'
+import {
+  tagsForPostSave,
+  tagsForPostDelete,
+  tagsForPostTaxonomySync,
+} from '@/lib/cache/tags'
+import {
+  syncPostTaxonomy,
+  MAX_TERMS_PER_POST,
+} from '@/lib/cms/syncPostTaxonomy'
 
 import { SLUG_RE, SLUG_MAX } from '@/lib/cms/slug'
+import { TAXONOMY_RESERVED } from '@/lib/cms/taxonomy-slug'
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/
 // MediumText column on MySQL holds 16MB; cap inbound body_md well
 // under readJsonBody's 256KB envelope cap. Worst-case JSON escaping
@@ -32,6 +41,13 @@ function parseId(raw: string): number {
 
 // Editor allowlist: every editable column except publishing controls
 // (published, slug). All optimistic-lock PATCHes carry `version`.
+//
+// categoryIds / tagIds are NOT posts columns — they sync the post_categories /
+// post_tags junctions via syncPostTaxonomy AFTER the row UPDATE, so they are
+// deliberately excluded from EDITOR_COLS / the buildSets exhaustiveness guard.
+// Editors (not just admins) may assign taxonomy, so they live on the base
+// EditorSchema. Each is a bounded list of existing term ids; omitted = leave
+// the post's taxonomy untouched (a body-only save never wipes terms).
 const EditorSchema = z
   .object({
     title: z.string().min(1).max(220).optional(),
@@ -41,6 +57,8 @@ const EditorSchema = z
     seoTitle: z.string().max(180).nullable().optional(),
     seoDescription: z.string().max(320).nullable().optional(),
     ogImageId: z.number().int().positive().nullable().optional(),
+    categoryIds: z.array(z.number().int().positive()).max(MAX_TERMS_PER_POST).optional(),
+    tagIds: z.array(z.number().int().positive()).max(MAX_TERMS_PER_POST).optional(),
     version: z.number().int().nonnegative(),
   })
   .strict()
@@ -56,6 +74,9 @@ const AdminSchema = EditorSchema.extend({
     .min(2)
     .max(SLUG_MAX)
     .regex(SLUG_RE, 'slug_invalid_format')
+    // Reject the /blog sub-path words (category/tag/feed/page) on a slug
+    // rename too — same shadowing guard as POST create / validateTermSlug.
+    .refine((s) => !TAXONOMY_RESERVED.has(s.toLowerCase()), 'slug_reserved')
     .optional(),
 }).strict()
 
@@ -80,9 +101,13 @@ interface PostRow {
 type RouteCtx = { params: Promise<{ id: string }> }
 
 // `version` is the optimistic-lock token, not a column the editor
-// can rewrite directly. Excluded so the buildSets loop's `field`
-// type stays narrow and no runtime guard is needed.
-type EditorFieldNoVersion = Exclude<keyof EditorBody, 'version'>
+// can rewrite directly. `categoryIds`/`tagIds` are junction syncs, not
+// posts columns. All three are excluded so the buildSets loop's `field`
+// type maps 1:1 to a real posts column and no runtime guard is needed.
+type EditorFieldNoVersion = Exclude<
+  keyof EditorBody,
+  'version' | 'categoryIds' | 'tagIds'
+>
 
 const EDITOR_COLS: ReadonlyArray<readonly [EditorFieldNoVersion, string]> = [
   ['title', 'title'],
@@ -363,25 +388,49 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         publishedTransition,
       )
 
+      // Sync taxonomy junctions (post_categories / post_tags) BEFORE the
+      // short-circuit so a taxonomy-only PATCH (just categoryIds/tagIds +
+      // version) still applies. syncPostTaxonomy validates every term id
+      // exists (clean 400 on a stale id), diffs against the current set
+      // (zero rows touched when unchanged), and returns the slugs of the
+      // terms whose membership changed — for cache invalidation. `undefined`
+      // for an axis leaves it untouched (a body-only save never wipes terms).
+      const taxResult =
+        body.categoryIds !== undefined || body.tagIds !== undefined
+          ? await syncPostTaxonomy(tx, {
+              postId: id,
+              categoryIds: body.categoryIds,
+              tagIds: body.tagIds,
+            })
+          : null
+      const taxonomyChanged =
+        taxResult !== null &&
+        (taxResult.changedCategorySlugs.length > 0 ||
+          taxResult.changedTagSlugs.length > 0)
+
       // coreChanged: any field that influences /blog index render.
       // Excerpt is shown on the index card; title is the link text;
       // heroImageId would feed a future thumbnail. Body_md changes
       // affect only the detail page — those land via the post-slug
-      // tag below without invalidating the whole index.
+      // tag below without invalidating the whole index. A taxonomy change
+      // also affects the index (pills) + archive surfaces.
       const coreChanged =
         applied.title !== undefined ||
         applied.excerpt !== undefined ||
-        applied.heroImageId !== undefined
+        applied.heroImageId !== undefined ||
+        taxonomyChanged
 
       // No-op short-circuit. If nothing actually changed AND no
       // version-affecting side effects are needed, return the
       // current version untouched — idempotent client retries hit
-      // this path on the second attempt.
+      // this path on the second attempt. A taxonomy change counts as
+      // "something changed" so the version bumps + the row UPDATE runs.
       const nothingApplied = Object.keys(applied).length === 0
       if (
         nothingApplied &&
         publishedTransition === 'none' &&
-        !slugChanged
+        !slugChanged &&
+        !taxonomyChanged
       ) {
         return {
           newVersion: row.version,
@@ -471,6 +520,19 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           // forensic triage can correlate a stale-index report
           // against the exact save that should have busted it.
           coreChanged,
+          // Taxonomy assignment — final id sets + the changed-slug lists
+          // (empty when the PATCH didn't touch taxonomy). Lets a "who
+          // tagged this post" forensic query read one row.
+          ...(taxResult
+            ? {
+                taxonomy: {
+                  category_ids: taxResult.finalCategoryIds,
+                  tag_ids: taxResult.finalTagIds,
+                  changed_category_slugs: taxResult.changedCategorySlugs,
+                  changed_tag_slugs: taxResult.changedTagSlugs,
+                },
+              }
+            : {}),
         } as unknown as object,
         ip: meta.ip,
         userAgent: meta.userAgent,
@@ -489,8 +551,24 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         coreChanged,
       }).tags
 
-      const queueRowId = await enqueueRevalidate(tx, tagSet)
-      return { newVersion: row.version + 1, queueRowId, tags: tagSet }
+      // Merge per-term archive invalidation when this PATCH changed the
+      // post's taxonomy — only the archives whose membership actually
+      // changed (added ∪ removed) are busted, plus the posts index (pills).
+      // Deduped via a Set so a slug touched by both sources isn't queued
+      // twice.
+      const allTags = new Set(tagSet)
+      if (taxResult && taxonomyChanged) {
+        for (const t of tagsForPostTaxonomySync(newSlug, {
+          categorySlugs: taxResult.changedCategorySlugs,
+          tagSlugs: taxResult.changedTagSlugs,
+        }).tags) {
+          allTags.add(t)
+        }
+      }
+      const finalTags = [...allTags]
+
+      const queueRowId = await enqueueRevalidate(tx, finalTags)
+      return { newVersion: row.version + 1, queueRowId, tags: finalTags }
     })
 
     if (txResult.queueRowId !== null) {

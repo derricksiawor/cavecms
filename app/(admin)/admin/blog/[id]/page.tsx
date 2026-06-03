@@ -5,6 +5,7 @@ import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { MediaPickerProvider } from '@/components/inline-edit/MediaPickerProvider'
 import { Editor, type EditorPost } from './Editor'
+import type { TermOption } from './TaxonomyChips'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,6 +53,49 @@ export default async function PostEditor({ params }: { params: Params }) {
   const row = rows[0]
   if (!row) notFound()
 
+  // Load the taxonomy catalogs + this post's current assignments for the chip
+  // pickers (#0.59). Three small reads (catalogs are capped 1000; the post's
+  // assigned-id reads hit the junction PK index). All run after the post is
+  // confirmed to exist so a 404 short-circuits before the extra queries.
+  const [
+    [allCats],
+    [allTags],
+    [assignedCats],
+    [assignedTags],
+  ] = await Promise.all([
+    db.execute(sql`
+      SELECT id, slug, name, parent_id
+      FROM categories
+      ORDER BY COALESCE(parent_id, id), (parent_id IS NOT NULL), position, id
+      LIMIT 1000
+    `) as unknown as Promise<
+      [Array<{ id: number; slug: string; name: string; parent_id: number | null }>]
+    >,
+    db.execute(sql`
+      SELECT id, slug, name FROM tags ORDER BY name, id LIMIT 1000
+    `) as unknown as Promise<[Array<{ id: number; slug: string; name: string }>]>,
+    db.execute(sql`
+      SELECT category_id AS id FROM post_categories WHERE post_id = ${id}
+    `) as unknown as Promise<[Array<{ id: number }>]>,
+    db.execute(sql`
+      SELECT tag_id AS id FROM post_tags WHERE post_id = ${id}
+    `) as unknown as Promise<[Array<{ id: number }>]>,
+  ])
+
+  const categoryOptions: TermOption[] = allCats.map((c) => ({
+    id: c.id,
+    slug: c.slug,
+    name: c.name,
+    parentId: c.parent_id,
+  }))
+  const tagOptions: TermOption[] = allTags.map((t) => ({
+    id: t.id,
+    slug: t.slug,
+    name: t.name,
+  }))
+  const assignedCategoryIds = assignedCats.map((r) => r.id)
+  const assignedTagIds = assignedTags.map((r) => r.id)
+
   const post: EditorPost = {
     id: row.id,
     slug: row.slug,
@@ -76,6 +120,10 @@ export default async function PostEditor({ params }: { params: Params }) {
         post={post}
         canPublish={ctx.role === 'admin'}
         readonly={ctx.role === 'viewer'}
+        categoryOptions={categoryOptions}
+        tagOptions={tagOptions}
+        assignedCategoryIds={assignedCategoryIds}
+        assignedTagIds={assignedTagIds}
       />
     </MediaPickerProvider>
   )

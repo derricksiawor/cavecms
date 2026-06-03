@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { Input } from '@/components/ui/Input'
+import { slugify } from '@/lib/cms/slugify'
 
 // Slug input with live URL preview and an auto-suggest toggle. When
 // `lock` is false (default), the slug auto-derives from the title
@@ -84,16 +85,6 @@ export function SlugInput({
       )}
     </div>
   )
-}
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
 }
 
 function LockClosed() {
