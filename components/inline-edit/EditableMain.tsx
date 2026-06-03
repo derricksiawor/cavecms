@@ -9,6 +9,8 @@ import { OutlinePanel } from './OutlinePanel'
 import { WidgetPicker } from './WidgetPicker'
 import { ToastProvider } from './Toast'
 import { SelectionProvider } from './SelectionContext'
+import { ColorSwatchesProvider } from './ColorSwatchesContext'
+import { getSetting } from '@/lib/cms/getSettings'
 import { SaveStatusIndicator } from './SaveStatusIndicator'
 import type {
   HydratedBlock,
@@ -340,9 +342,14 @@ export async function EditableMain(p: Props) {
     </main>
   )
   if (!isEditor) return main
+  // E18 — load operator-defined brand swatches for the colour pickers.
+  const swatchSetting = await getSetting('theme_swatches')
+  const brandSwatches = swatchSetting?.swatches ?? []
   return (
     <ToastProvider>
-      <MediaPickerProvider>{main}</MediaPickerProvider>
+      <ColorSwatchesProvider swatches={brandSwatches}>
+        <MediaPickerProvider>{main}</MediaPickerProvider>
+      </ColorSwatchesProvider>
     </ToastProvider>
   )
 }

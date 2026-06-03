@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Countdown (Elementor: Countdown). Counts down to an ISO target.
 // Hydration-safe: the server renders a deterministic snapshot (the
@@ -40,9 +41,11 @@ function remainingTo(targetMs: number, nowMs: number): Remaining {
 export function LxCountdown({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_countdown'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const targetMs = Date.parse(data.target)
   // Deterministic server snapshot: assume the full duration remains
@@ -63,10 +66,11 @@ export function LxCountdown({
       ? { days: 0, hours: 0, minutes: 0, seconds: 0, expired: false }
       : remainingTo(targetMs, now)
 
-  const isToken = isColorToken(data.tone)
-  const digitClass = isToken ? TONE_DIGIT[data.tone] : undefined
-  const labelClass = isToken ? TONE_LABEL[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const digitClass = isToken ? TONE_DIGIT[tone] : undefined
+  const labelClass = isToken ? TONE_LABEL[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
 
   const units: Array<[boolean, number, string]> = [
     [data.showDays, r.days, 'Days'],

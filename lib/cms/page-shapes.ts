@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { SLUG_MAX, SLUG_MIN, SLUG_RE } from './slug'
+import { SeoEditorFields } from './seoEditorFields'
 
 // Pages CMS Zod schemas — single source of truth for body validation
 // across server (API routes) AND client (editor inline-field validation).
@@ -67,6 +68,9 @@ export const PageEditorPatch = z
     seoDescription: seoDescriptionSchema,
     heroImageId: mediaIdSchema,
     ogImageId: mediaIdSchema,
+    // Per-entity SEO fields (migration 0032) — content fields any
+    // editor may set, same tier as seoTitle/seoDescription.
+    ...SeoEditorFields,
     // Optimistic-lock token. Required on every PATCH so a concurrent
     // edit from another tab/operator surfaces as 409 stale_version
     // instead of silently overwriting.

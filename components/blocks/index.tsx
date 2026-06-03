@@ -7,6 +7,8 @@ import { LxText } from './LxText/render'
 import { LxRichtext } from './LxRichtext/render'
 import { LxEyebrow } from './LxEyebrow/render'
 import { LxAction } from './LxAction/render'
+import { LxIcon } from './LxIcon/render'
+import { LxForm } from './LxForm/render'
 import { LxCoverImage } from './LxCoverImage/render'
 import { LxFigure } from './LxFigure/render'
 import { LxImagePair } from './LxImagePair/render'
@@ -270,11 +272,11 @@ const BLOCK_RENDERERS = defineRenderers({
   // the editor surface is active), outerClass (Chunk E spacing-
   // toolbar override). Animation choice lives inside data and is
   // routed through MotionTarget by the renderer itself.
-  lx_heading: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_heading'>>) => (
-    <LxHeading data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_heading: ({ data, inlineEdit, outerClass, sectionMeta, blockId }: BlockRendererArgs<BlockData<'lx_heading'>>) => (
+    <LxHeading data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} blockId={blockId} />
   ),
-  lx_text: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_text'>>) => (
-    <LxText data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_text: ({ data, inlineEdit, outerClass, sectionMeta, blockId }: BlockRendererArgs<BlockData<'lx_text'>>) => (
+    <LxText data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} blockId={blockId} />
   ),
   // lx_richtext renders its markdown via renderMarkdownSync (synchronous,
   // client-bundle-safe) — no inlineEdit (the markdown is edited via the
@@ -283,11 +285,17 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_richtext: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_richtext'>>) => (
     <LxRichtext data={data} outerClass={outerClass} />
   ),
-  lx_eyebrow: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_eyebrow'>>) => (
-    <LxEyebrow data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_eyebrow: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_eyebrow'>>) => (
+    <LxEyebrow data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_action: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_action'>>) => (
     <LxAction data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  lx_icon: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_icon'>>) => (
+    <LxIcon data={data} outerClass={outerClass} />
+  ),
+  lx_form: ({ data, csrf, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_form'>>) => (
+    <LxForm data={data} csrf={csrf} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_figure: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_figure'>>) => (
     <LxFigure data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
@@ -305,29 +313,29 @@ const BLOCK_RENDERERS = defineRenderers({
     <LxSpace data={data} outerClass={outerClass} />
   ),
   // Composite luxury widgets.
-  lx_channel_card: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_channel_card'>>) => (
-    <LxChannelCard data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_channel_card: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_channel_card'>>) => (
+    <LxChannelCard data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_stat: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_stat'>>) => (
-    <LxStat data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_stat: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_stat'>>) => (
+    <LxStat data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_quote: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_quote'>>) => (
-    <LxQuote data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_quote: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_quote'>>) => (
+    <LxQuote data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_testimonial: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_testimonial'>>) => (
-    <LxTestimonial data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_testimonial: ({ data, media, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_testimonial'>>) => (
+    <LxTestimonial data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_video: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_video'>>) => (
     <LxVideo data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
   ),
-  lx_accordion: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_accordion'>>) => (
-    <LxAccordion data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_accordion: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_accordion'>>) => (
+    <LxAccordion data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_tabs: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_tabs'>>) => (
-    <LxTabs data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_tabs: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_tabs'>>) => (
+    <LxTabs data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_icon_list: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_icon_list'>>) => (
-    <LxIconList data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_icon_list: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_icon_list'>>) => (
+    <LxIconList data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_icon_box: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_icon_box'>>) => (
     <LxIconBox data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
@@ -338,27 +346,27 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_social_icons: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_social_icons'>>) => (
     <LxSocialIcons data={data} outerClass={outerClass} />
   ),
-  lx_cta_banner: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_cta_banner'>>) => (
-    <LxCtaBanner data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_cta_banner: ({ data, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_cta_banner'>>) => (
+    <LxCtaBanner data={data} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_gallery: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_gallery'>>) => (
-    <LxGallery data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />
+  lx_gallery: ({ data, media, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_gallery'>>) => (
+    <LxGallery data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_featured_projects: ({ data, projects, media, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_featured_projects'>>) => (
     <LxFeaturedProjects data={data} projects={projects} media={media} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   // ─── Elementor-parity blocks ─────────────────────────────────────
-  lx_carousel: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_carousel'>>) => (
-    <LxCarousel data={data} media={media} outerClass={outerClass} />
+  lx_carousel: ({ data, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_carousel'>>) => (
+    <LxCarousel data={data} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_testimonial_carousel: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_testimonial_carousel'>>) => (
-    <LxTestimonialCarousel data={data} media={media} outerClass={outerClass} />
+  lx_testimonial_carousel: ({ data, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_testimonial_carousel'>>) => (
+    <LxTestimonialCarousel data={data} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_star_rating: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_star_rating'>>) => (
     <LxStarRating data={data} outerClass={outerClass} />
   ),
-  lx_pricing_table: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_pricing_table'>>) => (
-    <LxPricingTable data={data} outerClass={outerClass} />
+  lx_pricing_table: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_pricing_table'>>) => (
+    <LxPricingTable data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_pricing_list: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_pricing_list'>>) => (
     <LxPricingList data={data} outerClass={outerClass} />
@@ -366,14 +374,14 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_reviews: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_reviews'>>) => (
     <LxReviews data={data} media={media} outerClass={outerClass} />
   ),
-  lx_progress_tracker: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_progress_tracker'>>) => (
-    <LxProgressTracker data={data} outerClass={outerClass} />
+  lx_progress_tracker: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_progress_tracker'>>) => (
+    <LxProgressTracker data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_animated_headline: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_animated_headline'>>) => (
-    <LxAnimatedHeadline data={data} outerClass={outerClass} />
+  lx_animated_headline: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_animated_headline'>>) => (
+    <LxAnimatedHeadline data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_countdown: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_countdown'>>) => (
-    <LxCountdown data={data} outerClass={outerClass} />
+  lx_countdown: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_countdown'>>) => (
+    <LxCountdown data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_flip_box: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_flip_box'>>) => (
     <LxFlipBox data={data} media={media} outerClass={outerClass} />
@@ -381,14 +389,14 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_hotspot: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_hotspot'>>) => (
     <LxHotspot data={data} media={media} outerClass={outerClass} />
   ),
-  lx_progress: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_progress'>>) => (
-    <LxProgress data={data} outerClass={outerClass} />
+  lx_progress: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_progress'>>) => (
+    <LxProgress data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_menu_anchor: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_menu_anchor'>>) => (
     <LxMenuAnchor data={data} outerClass={outerClass} />
   ),
-  lx_toc: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_toc'>>) => (
-    <LxToc data={data} outerClass={outerClass} />
+  lx_toc: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_toc'>>) => (
+    <LxToc data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_share: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_share'>>) => (
     <LxShare data={data} outerClass={outerClass} />
@@ -404,17 +412,17 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_code: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_code'>>) => (
     <LxCode data={data} outerClass={outerClass} />
   ),
-  lx_marquee: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_marquee'>>) => (
-    <LxMarquee data={data} media={media} outerClass={outerClass} />
+  lx_marquee: ({ data, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_marquee'>>) => (
+    <LxMarquee data={data} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_before_after: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_before_after'>>) => (
     <LxBeforeAfter data={data} media={media} outerClass={outerClass} />
   ),
-  lx_comparison_table: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_comparison_table'>>) => (
-    <LxComparisonTable data={data} outerClass={outerClass} />
+  lx_comparison_table: ({ data, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_comparison_table'>>) => (
+    <LxComparisonTable data={data} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
-  lx_timeline: ({ data, media, outerClass }: BlockRendererArgs<BlockData<'lx_timeline'>>) => (
-    <LxTimeline data={data} media={media} outerClass={outerClass} />
+  lx_timeline: ({ data, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_timeline'>>) => (
+    <LxTimeline data={data} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   // ─── Project lead-form blocks (only project-specific blocks) ────
   // read RenderContext.project (project_id/name/brochure_pdf_id) +

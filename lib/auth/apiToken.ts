@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import type { Role } from '@/lib/auth/types'
-import { API_TOKEN_PREFIX } from '@/lib/auth/apiTokenScope'
+import { API_TOKEN_PREFIX, parseScopes } from '@/lib/auth/apiTokenScope'
 
 // Chars of the token persisted for display (prefix + a few entropy chars).
 const PREFIX_DISPLAY_LEN = 12
@@ -12,7 +12,9 @@ export interface VerifiedApiToken {
   tokenId: number
   // created_by — the real user the token attributes content writes to.
   userId: number
-  role: Extract<Role, 'admin' | 'editor'>
+  role: Role
+  // Per-resource grants, or null = unrestricted within role.
+  scopes: string[] | null
 }
 
 // 256-bit secret, base64url so it survives copy/paste, shell, and env
@@ -59,6 +61,7 @@ interface TokenRow {
   created_by: number
   expires_at: Date | null
   revoked_at: Date | null
+  scopes: unknown
 }
 
 // Verifies an `Authorization` header value. Returns null on any failure
@@ -76,7 +79,7 @@ export async function verifyApiToken(
   let rows: TokenRow[]
   try {
     ;[rows] = (await db.execute(sql`
-      SELECT id, role, created_by, expires_at, revoked_at
+      SELECT id, role, created_by, expires_at, revoked_at, scopes
       FROM api_tokens
       WHERE token_hash = ${hash}
       LIMIT 1
@@ -92,7 +95,7 @@ export async function verifyApiToken(
   // Validate the role at the auth boundary (fail-closed) instead of trusting
   // a downstream allowlist — a row whose role is somehow outside the enum
   // must not flow into the role clamp as a raw string.
-  if (row.role !== 'admin' && row.role !== 'editor') {
+  if (row.role !== 'admin' && row.role !== 'editor' && row.role !== 'viewer') {
     lastTouch.delete(row.id)
     return null
   }
@@ -119,6 +122,7 @@ export async function verifyApiToken(
     tokenId: row.id,
     userId: row.created_by,
     role: row.role as VerifiedApiToken['role'],
+    scopes: parseScopes(row.scopes),
   }
 }
 
@@ -143,6 +147,16 @@ async function touchLastUsed(tokenId: number): Promise<void> {
   }
 }
 
+// Drop the in-memory last_used_at throttle entry for a token. Called after a
+// ROTATION resets last_used_at = NULL in the DB: without this, a stale recent
+// timestamp in `lastTouch` would suppress the next last_used_at write for up
+// to 60s, so a freshly-rotated, actively-used token would read "Never" in the
+// management UI. Mirrors the lastTouch.delete cleanup on the revoke/expiry
+// branches in verifyApiToken.
+export function clearTokenTouch(tokenId: number): void {
+  lastTouch.delete(tokenId)
+}
+
 // Metadata-only row for the management surfaces. NEVER includes the token
 // secret or its hash. Timestamps are typed Date | string because mysql2
 // returns JSON/TIMESTAMP columns differently depending on driver config;
@@ -152,6 +166,7 @@ export interface ApiTokenListRow {
   name: string
   token_prefix: string
   role: string
+  scopes: unknown
   created_at: Date | string
   last_used_at: Date | string | null
   expires_at: Date | string | null
@@ -164,7 +179,7 @@ export interface ApiTokenListRow {
 // tokens first, then revoked, newest within each group.
 export async function listApiTokens(): Promise<ApiTokenListRow[]> {
   const [rows] = (await db.execute(sql`
-    SELECT t.id, t.name, t.token_prefix, t.role, t.created_at,
+    SELECT t.id, t.name, t.token_prefix, t.role, t.scopes, t.created_at,
            t.last_used_at, t.expires_at, t.revoked_at,
            u.email AS created_by_email
     FROM api_tokens t

@@ -8,6 +8,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury gallery — grid of editorial photos. Each tile is sharp-
 // cornered (architectural), with a subtle hover lift + photo scale.
@@ -39,13 +40,15 @@ export function LxGallery({
   // later doesn't require schema work. Operators edit via the drawer.
   inlineEdit: _inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_gallery'>
   media: RenderContext['media']
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const captionClass = isToken ? TONE_CAPTION[tone] : undefined
   const customStyle = !isToken ? { color: resolveColorValue(tone) } : undefined

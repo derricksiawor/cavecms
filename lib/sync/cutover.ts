@@ -85,7 +85,7 @@ function liveContentHash(): Promise<string> {
 // pre-cutover content snapshot for manual revert.
 export async function runCutover(
   args: { stageId: string; force?: boolean },
-  ctx: { userId: number },
+  ctx: { userId: number; tokenId?: number | null },
 ): Promise<CutoverOutcome> {
   const stage = await getStage(args.stageId)
   if (!stage) return { ok: false, reason: 'stage_not_found' }

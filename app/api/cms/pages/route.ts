@@ -3,10 +3,10 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -22,6 +22,7 @@ import { getCustomSegmentReservedSet } from '@/lib/blog/resolveSegments'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
+import { notifyIndexNow } from '@/lib/seo/indexnow/notify'
 import { env } from '@/lib/env'
 
 // POST /api/cms/pages — create. Per spec §4.1.
@@ -71,7 +72,8 @@ const TEMPLATE_SLUGS: Record<string, string> = {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(adminPolicy('createPage'))
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'write')
+  checkCmsMutationRate(ctx)
 
   const raw = await readJsonBody(req)
   const Schema = ctx.role === 'admin' ? CreatePageAdminBody : CreatePageEditorBody
@@ -108,6 +110,7 @@ export const POST = withError(async (req) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'page',
           resourceId: '0',
@@ -325,6 +328,7 @@ export const POST = withError(async (req) => {
 
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'page',
         resourceId: String(pageId),
@@ -351,6 +355,15 @@ export const POST = withError(async (req) => {
     queueMicrotask(() => {
       void drainRevalidate(txResult.queueRowId, txResult.tags)
     })
+
+    // IndexNow: a brand-new page created directly in the published state
+    // (admin sent `published: true`) is immediately live — announce its
+    // public URL. A new page is never the home row (is_home inserted as 0)
+    // so the canonical path is always `/{slug}`. Draft creates skip this.
+    // Fire-and-forget — never awaited, never throws, never blocks the save.
+    if (wantPublished) {
+      void notifyIndexNow([`/${body.slug}`])
+    }
 
     return new Response(JSON.stringify({ id: txResult.insertId, slug: body.slug }), {
       status: 201,
@@ -394,6 +407,7 @@ interface PageListRow {
 export const GET = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'pages', 'read')
 
   const url = new URL(req.url)
   const trashed = url.searchParams.get('trashed') === '1'

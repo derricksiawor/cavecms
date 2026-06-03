@@ -4,10 +4,10 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -60,7 +60,8 @@ interface InsertResult {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(adminPolicy('createProject'))
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'projects', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = CreateBody.parse(await readJsonBody(req))
   const meta = auditMetaFromRequest(req)
@@ -125,6 +126,7 @@ export const POST = withError(async (req) => {
 
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'project',
         resourceId: String(projectId),
@@ -183,22 +185,29 @@ interface ProjectListRow {
 }
 
 export const GET = withError(async (req) => {
-  await requireRole(['admin', 'editor', 'viewer'])
+  const ctx = await requireRole(['admin', 'editor', 'viewer'])
+  requireScope(ctx, 'projects', 'read')
   const url = new URL(req.url)
   const showArchived = url.searchParams.get('archived') === '1'
 
+  // LIMIT 1000 is a safety ceiling, not pagination: the admin grid fetches the
+  // full set to drag-reorder featured_order, so a tight cap would regress it —
+  // but an unbounded scan/payload (an MCP agent listing a pathological table)
+  // is bounded here. A portfolio never realistically reaches 1000 projects.
   const [rows] = (await db.execute(
     showArchived
       ? sql`
           SELECT id, slug, name, status, featured_order, published, deleted_at, updated_at
           FROM projects
           ORDER BY featured_order IS NULL, featured_order, name
+          LIMIT 1000
         `
       : sql`
           SELECT id, slug, name, status, featured_order, published, deleted_at, updated_at
           FROM projects
           WHERE deleted_at IS NULL
           ORDER BY featured_order IS NULL, featured_order, name
+          LIMIT 1000
         `,
   )) as unknown as [ProjectListRow[]]
 

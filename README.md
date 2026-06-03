@@ -1,13 +1,15 @@
 # CaveCMS
 
-A self-hosted, AI-native content management system. WordPress-shaped — every
-page, post, and section lives as a tree of CMS blocks the operator drags,
-drops, and edits in the browser.
+The speed and polish of a hand-coded Next.js site, with a CMS anyone can edit.
+Self-hosted, AI-native, batteries included. Every page, post, and section is a
+tree of blocks your clients drag, drop, and edit in the browser, or that your
+AI agent edits over a real API.
 
 - **Website**: [cavecms.com](https://cavecms.com)
 - **Get started**: [cavecms.com/get-started](https://cavecms.com/get-started)
+- **Docs**: [cavecms.com/docs](https://cavecms.com/docs)
 - **Source**: [github.com/derricksiawor/cavecms](https://github.com/derricksiawor/cavecms)
-- **License**: [Prosperity Public License 3.0.0](./LICENSE.md) — free for
+- **License**: [Prosperity Public License 3.0.0](./LICENSE.md). Free for
   personal, hobby, non-profit, government, and educational use; 30-day free
   commercial trial; paid license required for ongoing commercial use.
 
@@ -15,54 +17,76 @@ drops, and edits in the browser.
 
 ## What CaveCMS is
 
-A single Next.js app + MariaDB pair. One process, one DB, one filesystem
-root for uploads. No managed cloud, no S3, no Vercel. Designed to run on
-a single VPS the way WordPress runs on shared hosting.
+A single Next.js app plus a MariaDB database. One process, one DB, one
+filesystem root for uploads. No managed cloud, no S3, no Vercel. It runs on a
+single VPS the way WordPress runs on shared hosting, and installs on a laptop
+or shared cPanel just as easily.
 
 | Layer | Choice |
 |---|---|
 | App | Next.js 15.5 standalone + React 19 + TypeScript 5.9 |
-| DB | MariaDB 10.11 (via mysql2 + drizzle-orm) |
+| DB | MariaDB 10.11 (mysql2 + drizzle-orm) |
 | Auth | Self-hosted JWT (jose) + scrypt + CSRF + lockout, all DB-configurable |
 | Media | sharp + filesystem (no S3) |
 | Mail | SMTP via nodemailer + a persistent retry queue |
-| Process | PM2 single-fork |
-| Reverse-proxy | nginx + certbot |
-| Updates | Built-in. One click in the admin dashboard. |
+| Process | PM2 / systemd / Passenger, by surface |
+| Reverse proxy | nginx or Apache + certbot |
+| Updates | Built in. One click in the dashboard, or one command in the shell. |
 
-Everything an operator would configure — SMTP, site URL, reCAPTCHA, login
-path, session timeouts, IP allowlists, lockout policy, integrations — lives
-in `settings.*` rows you edit from the dashboard. **No `.env` editing after
-install.**
+Everything an operator configures (SMTP, site URL, reCAPTCHA, login path,
+session timeouts, IP allowlists, lockout policy, API tokens, backups,
+integrations) lives in the database and is edited from the dashboard.
+**No `.env` editing after install.**
 
 ---
 
-## Install — one command, then a browser wizard
+## What you can do with it
 
-> **TL;DR**: `npx create-cavecms my-site` on your server, open the URL it
+- **Edit in the browser.** Click any word on any page and change it, autosaved.
+  Drag sections between columns and pages. Type `/` to drop in a block from a
+  library of 30+ (hero, gallery, pricing, FAQ, contact form, and more).
+- **Edit with AI, inline.** Highlight any text and ask AI to rewrite, shorten,
+  or translate it, in your voice, through your own Gemini key.
+- **Edit with AI agents, over a real API.** A scoped, revocable `cave_` token
+  lets Cursor, Claude Code, Windsurf, or Codex read and edit your live site
+  (pages, posts, the block tree, media, branding) through a real HTTP API, or
+  through the built-in **MCP server**. No browser in the loop.
+- **Ship local to production.** Build on a laptop or staging copy, then promote
+  the whole site to your live URL in one command with `cavecms push`:
+  drift-guarded, atomic, and backed up first.
+- **Back up automatically.** Scheduled, optionally AES-256-encrypted backups of
+  your whole site (database, media, and secrets if you want them) to Google
+  Drive, OneDrive, or local disk, with one-click restore.
+- **Stay current safely.** Every release installs in one click behind a
+  maintenance screen, signature-verified and health-checked, with automatic
+  rollback if anything fails.
+
+SEO, security headers, redirects, sitemaps, and structured data are built in,
+not bolted on as plugins.
+
+---
+
+## Install: one command, then a browser wizard
+
+> **TL;DR**: run `npx create-cavecms my-site` on your server, open the URL it
 > prints, finish the browser wizard.
 
 CaveCMS installs on four surfaces with the same one command:
 
-- **VPS** (Ubuntu/Debian 22.04 LTS+ with systemd + nginx, own the whole box)
-- **PM2** (shared Linux host already running other Next.js apps via PM2,
-  e.g. a portfolio box serving multiple domains)
-- **Laptop** (macOS / Linux dev box, for local evaluation)
-- **cPanel** (shared host with Node.js Selector + Passenger)
+- **VPS** (Ubuntu/Debian 22.04 LTS+ with systemd + nginx; you own the box)
+- **PM2** (a shared Linux host already running other Next.js apps via PM2)
+- **Laptop** (macOS / Linux, for local evaluation)
+- **cPanel** (shared host with the Node.js Selector + Passenger)
 
 ### Prerequisites
 
-- **Node 20+** on the target machine (via [nvm](https://github.com/nvm-sh/nvm)
-  on Linux, the installer on macOS, or Node.js Selector on cPanel)
-- **MariaDB 10.11+** reachable from the install target (local socket on VPS /
-  PM2; local install on a laptop; provider-managed on cPanel)
-- On VPS only: a domain pointed at the box (for HTTPS via Let's Encrypt) and
-  sudo access during the CLI run
-- On PM2 only: `pm2` installed, `www-data` user present, `/var/www/.pm2`
-  initialised, and root/passwordless-sudo. The CLI registers a per-install
-  PM2 app named `cavecms-<site>` under the existing `www-data` daemon and
-  prints an nginx vhost block for the operator to paste into their existing
-  vhost file
+- **Node 20+** on the target machine
+- **MariaDB 10.11+** reachable from the install target (10.6 is the hard
+  minimum; pure MySQL is not supported)
+- On VPS: a domain pointed at the box (for HTTPS via Let's Encrypt) and sudo
+  during the CLI run
+- On PM2: `pm2` installed, `www-data` present, `/var/www/.pm2` initialised, and
+  passwordless sudo
 
 ### One command
 
@@ -70,69 +94,93 @@ CaveCMS installs on four surfaces with the same one command:
 npx create-cavecms my-site
 ```
 
-The CLI:
-
-1. Detects whether you're on **VPS / PM2 / laptop / cPanel** and picks the right adapter
-2. Downloads and signature-verifies the latest release from `updates.cavecms.com`
-3. Unpacks the runtime to the canonical location for the surface
-4. Prompts for the minimum it cannot auto-supply: database connection, public
-   site URL, port
-5. Generates **every** bootstrap secret (JWT, CSRF, preview, brochure, internal
-   revalidate, secrets-encryption key, hidden login path)
-6. Writes **one** sealed `env.production` file (mode `600`, owned by the
-   service user) that you **never open or edit**
-7. Runs database migrations
-8. Starts the service (systemd on VPS, PM2 daemon on PM2, foreground on laptop,
-   Passenger on cPanel)
-
-On VPS installs the CLI also writes a ready-to-use nginx vhost. Total time:
-about 2 minutes. Output:
+The CLI detects your surface, downloads and signature-verifies the latest
+release, unpacks it, prompts only for what it cannot auto-supply (database
+connection, public URL, port), generates every bootstrap secret, writes one
+sealed `env.production` (mode 600) you never open, runs migrations, and starts
+the service. On VPS it also writes a ready-to-use nginx vhost. About two
+minutes.
 
 ```
 ✓ CaveCMS is running on https://your-domain.com
 ✓ Open https://your-domain.com/install to finish setup.
 ```
 
-### Finish setup in the browser
+### Finish in the browser
 
-The install wizard takes 3-5 minutes and writes everything to the database
-— never to any file:
-
-1. **Welcome**
-2. **Admin account** — create your administrator user (email + 12+ char password)
-3. **Site identity** — public site URL + site name
-4. **Branding** — logo, brand color, footer text
-5. **Contact info** — phone, email, address (used by contact forms + footer)
-6. **Email (SMTP)** — paste credentials + test-send, or skip and configure later
-7. **Security baseline** — pick a memorable login path, add reCAPTCHA keys, set
-   an IP allowlist (all optional)
-8. **Done** — sign in at the hidden admin path the wizard shows you
-
-That's the whole install. There is **no** `wp-config.php` to edit, **no**
-`.env` to fill in, **no** SSH after the CLI finishes. Everything operator-facing
-lives in the dashboard.
+The wizard takes 3-5 minutes and writes everything to the database, never to a
+file: admin account, site identity, branding, contact info, SMTP (or skip), and
+a security baseline (a memorable hidden login path, optional reCAPTCHA, optional
+IP allowlist). There is no `wp-config.php` to edit, no `.env` to fill in, no SSH
+after the CLI finishes. The full per-surface walkthrough (including cPanel) lives
+at [cavecms.com/get-started](https://cavecms.com/get-started).
 
 ---
 
-## Updating
+## Day two: update, recover, sync
 
-When a new release ships, every admin sees a banner across the top of the
-dashboard: *"A new version of CaveCMS is ready to install."*
+Every release shows as a banner in the dashboard (Settings → Updates). Click
+**Update now** and a six-step install runs behind a maintenance screen, with
+automatic rollback if the new version does not come up healthy. Operators can
+set a notification email to hear about releases even when logged out.
 
-Click **Update Now**. A modal walks through the six-step install:
+The same engine runs from the shell. The `cavecms` shortcut is set up at install
+time (from any install directory `./cavecms <command>` or
+`npx create-cavecms@latest <command>` is equivalent):
 
-1. Getting ready
-2. Downloading the new version
-3. Preparing your data
-4. Building your site
-5. Restarting
-6. Making sure everything works
+```bash
+cavecms status              # what's running, and is an update waiting
+cavecms update              # install the latest, auto-rolls back on failure
+cavecms rollback            # restore the previous version, even offline
+cavecms push --from=<url>   # promote a local or staging site onto this one
+```
 
-If anything fails, CaveCMS automatically rolls back to the previous
-version. Your site stays online the whole time.
+`cavecms update --version=X.Y.Z` pins a release; `cavecms update --force`
+re-installs the current one to recover a broken build; `cavecms help` lists
+everything.
 
-Operators can also configure an email address under Settings → Updates to
-be notified when a new release is published, even if no admin is logged in.
+---
+
+## Edit your site with AI agents (the HTTP API + MCP)
+
+CaveCMS treats programmatic editing as a first-class feature. There are two ways
+an AI tool drives your live site, both landing on the same validated, audited
+engine the dashboard uses:
+
+1. **The built-in MCP server.** Every install runs a Model Context Protocol
+   server at `/api/cms/mcp`. Connect Claude Code, Cursor, or Windsurf with one
+   command and your AI gets typed, named tools for your site.
+2. **The HTTP API.** Generate a token in **Settings → API Tokens**, send
+   `Authorization: Bearer cave_…`, and read or edit pages, posts, the
+   section → column → widget block tree, media, and branding. A single batch
+   endpoint (`POST /api/cms/pages/{id}/batch`) applies many edits in one
+   transaction.
+
+Tokens are **scoped** (one role, editor or admin), **capped** to content and
+branding (never user accounts, security settings, secrets, or the updater, even
+for an admin token), **shown once** (stored only as a hash), and **revocable**
+instantly. Every install also ships an [`AGENTS.md`](./AGENTS.md) that AI coding
+tools read automatically.
+
+Reference: the [API docs](https://cavecms.com/docs/api), the
+[MCP guide](https://cavecms.com/docs/mcp), and
+[connecting an assistant](https://cavecms.com/docs/agents).
+
+> **For AI assistants working in a CaveCMS clone:** read [`AGENTS.md`](./AGENTS.md)
+> first. You must NOT modify CaveCMS source code (`app/`, `components/`, `lib/`,
+> `db/`, config); that breaks the update path and the license. Build the
+> operator's *site* through the API or MCP with their token; never edit the
+> *engine*. Keep `AGENTS.md` in place; do not delete or edit it.
+
+---
+
+## Backups
+
+**Settings → Backups** schedules backups of your whole site (database, uploaded
+media, and optionally your secrets) on a daily or weekly cadence, to **Google
+Drive**, **OneDrive**, or **local disk**. Turn on a passphrase and each archive
+is AES-256 encrypted before it leaves the box. Restore from the cloud or a local
+file in one click, with a safety snapshot taken first.
 
 ---
 
@@ -143,41 +191,33 @@ Every operator-configurable knob lives in the dashboard:
 | Where | What |
 |---|---|
 | Settings → General | Site URL, site name |
+| Settings → Branding | Logo, colors, fonts, favicon |
 | Settings → Email | SMTP host/port/user/password/from + lead-notification recipient |
-| Settings → Security | Login path, reCAPTCHA, IP allow/blocklists, lockout thresholds, maintenance mode, session lifetimes |
+| Settings → Security | Login path, reCAPTCHA, IP allow/blocklists, lockout, maintenance mode, session lifetimes |
+| Settings → API Tokens | Scoped, revocable `cave_` tokens for the API + MCP |
+| Settings → Backups | Destination (Google Drive / OneDrive / local), schedule, encryption, retention |
 | Settings → Integrations | GTM, GA4, Google Ads, Hotjar, Zoho SalesIQ, HubSpot, Zoho CRM |
-| Settings → AI Assistant | Gemini API key for AI-driven content |
+| Settings → AI Assistant | Gemini API key for inline AI |
 | Settings → Updates | Auto-apply security patches, notification email |
 
-The only things that stay in `/etc/cavecms/env.production` are
-**bootstrap-time** values that must exist before the database connects:
-`DATABASE_URL`, `JWT_SECRET`, `CSRF_SECRET`, `PREVIEW_SECRET`,
-`BROCHURE_SECRET`, `INTERNAL_REVALIDATE_SECRET`, `SECRETS_ENCRYPTION_KEY`,
-`LOGIN_PATH`, and `UPLOADS_ROOT`. The bootstrap script generates all of
-those for you; you should never need to touch them.
+The only values in `env.production` are bootstrap secrets the CLI generates
+(`DATABASE_URL`, `JWT_SECRET`, `CSRF_SECRET`, `SECRETS_ENCRYPTION_KEY`,
+`LOGIN_PATH`, `UPLOADS_ROOT`, and a few more). You should never need to touch
+them.
 
 ---
 
-## Using AI Assistants with your CaveCMS install
+## Security
 
-If you're using Claude Code, Cursor, Windsurf, ChatGPT, Codex, or any other
-AI coding assistant on a CaveCMS install: **read [`AGENTS.md`](./AGENTS.md)
-first.** Short version:
-
-> AI assistants must NOT modify CaveCMS source code. To build your site,
-> use the CMS — create pages, drop in blocks, edit content via the admin
-> API. But first the assistant has to **find your running instance** (its
-> port lives in `env.production`) and **authenticate** — you log in as admin
-> and hand it the session cookie (there's no API-token surface); from there
-> it works through scripts against the admin API. It can't just start
-> building blind, and it must never scrape secrets from `env.production`.
-> That admin API is the only legitimate AI surface.
-> Editing `app/`, `components/`, `lib/`, `db/`, or any other code path
-> breaks updates, voids your license terms, and is forbidden.
-
-The `AGENTS.md` file is read automatically by every major AI coding tool
-that supports the convention (Claude Code, Cursor, Windsurf, Aider, Codex
-CLI, OpenHands). Keep it in place; do not delete or edit it.
+- **Hidden admin URL.** A random login path per install; the middleware never
+  leaks it in a redirect or error message.
+- **JWT + CSRF + rate limits.** HS256 session tokens (jose), CSRF on every
+  mutation, per-IP and per-email login limits with progressive lockout.
+- **Strict CSP.** Per-request nonce, no `unsafe-eval` in production; an
+  integration's origins appear in the policy only when the operator toggles that
+  integration on.
+- **Sealed secrets.** Bootstrap secrets are generated once, written mode 600,
+  and never hand-edited; all later config flows through the database.
 
 ---
 
@@ -185,32 +225,31 @@ CLI, OpenHands). Keep it in place; do not delete or edit it.
 
 CaveCMS is published under the [Prosperity Public License 3.0.0](./LICENSE.md).
 
-- **Personal, hobby, non-profit, government, educational use** — free, no
+- **Personal, hobby, non-profit, government, educational use**: free, no
   expiration, no key required.
-- **Commercial use** — free for the first 30 days. After that, a paid
-  commercial license is required. Contact `hello@cavecms.com` for
-  pricing.
+- **Commercial use**: free for the first 30 days. After that, a paid commercial
+  license is required. Contact `hello@cavecms.com` for pricing.
 
-The source is open and auditable on GitHub. You may run CaveCMS on
-infrastructure you control under either tier above. You may NOT redistribute
-modified copies, sublicense, or host CaveCMS as a service to third parties
-without a separate commercial agreement.
-
-This model is the same one used by [Sentry](https://sentry.io),
-[Plausible Analytics](https://plausible.io), and
-[Cal.com](https://cal.com) — open enough to trust, closed enough to sustain
-a single dev.
+The source is open and auditable. You may run CaveCMS on infrastructure you
+control under either tier. You may NOT redistribute modified copies, sublicense,
+or host CaveCMS as a service to third parties without a separate commercial
+agreement. This is the same model used by [Sentry](https://sentry.io),
+[Plausible](https://plausible.io), and [Cal.com](https://cal.com): open enough to
+trust, closed enough to sustain a single maintainer.
 
 ---
 
-## Support + contributing
+## Support and contributing
 
 - **Bugs / feature requests**: open a GitHub issue.
-- **Security disclosures**: email `support@cavecms.com` (please don't
-  file public issues for security bugs).
-- **Code contributions**: we don't accept pull requests at this time.
-  CaveCMS is sole-maintained by Derrick S. K. Siawor; the canonical
-  branch is closed to outside commits. The source is open so you can
-  audit and fork for personal use, but the upstream is one-way.
+- **Security disclosures**: email `support@cavecms.com` (please do not file
+  public issues for security bugs).
+- **Code contributions**: pull requests are not accepted at this time. CaveCMS is
+  sole-maintained by Derrick S. K. Siawor; the canonical branch is closed to
+  outside commits. The source is open so you can audit and fork for personal use.
+- **Support the project**: CaveCMS is free for personal, hobby, and non-profit use,
+  and built and maintained by one person. If it is useful to you, a
+  [donation](https://donate.stripe.com/9B6cN41Lr78i4Wg9e74ZG0e) is appreciated and
+  entirely optional. Commercial use is covered by the license above.
 
-Roadmap: see [GitHub Projects](https://github.com/derricksiawor/cavecms/projects).
+Roadmap: [GitHub Projects](https://github.com/derricksiawor/cavecms/projects).

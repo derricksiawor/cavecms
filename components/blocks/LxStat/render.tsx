@@ -12,6 +12,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury animated stat — count-up number + label. Per ~/.claude/CLAUDE.md
 // "Large icons with glow effects... primary color highlights." The
@@ -54,10 +55,12 @@ export function LxStat({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_stat'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const prefix = data.prefix ?? ''
   const suffix = data.suffix ?? ''
@@ -77,7 +80,7 @@ export function LxStat({
     format,
   })
 
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const valueToneClass = isToken ? TONE_VALUE_CLASS[tone] : undefined
   const labelToneClass = isToken ? TONE_LABEL_CLASS[tone] : undefined

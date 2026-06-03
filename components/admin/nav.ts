@@ -27,6 +27,12 @@ import {
   Link2,
   // blog-system worktree (Phase 6): Blog settings sub-page icon.
   Newspaper,
+  TrendingUp,
+  LayoutTemplate,
+  Share2,
+  Map as MapIcon,
+  PlugZap,
+  Cookie,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -79,6 +85,7 @@ export const NAV: readonly NavItem[] = [
   { label: 'Typography', href: '/admin/settings/typography', roles: ['admin'], icon: Type, parent: '/admin/settings' },
   { label: 'Security', href: '/admin/settings/security', roles: ['admin'], icon: Lock, parent: '/admin/settings' },
   { label: 'Integrations', href: '/admin/settings/integrations', roles: ['admin'], icon: Plug, parent: '/admin/settings' },
+  { label: 'Cookies', href: '/admin/settings/cookies', roles: ['admin'], icon: Cookie, parent: '/admin/settings' },
   { label: 'API Tokens', href: '/admin/settings/api-tokens', roles: ['admin'], icon: KeyRound, parent: '/admin/settings' },
   { label: 'Redirects', href: '/admin/settings/redirects', roles: ['admin'], icon: Signpost, parent: '/admin/settings' },
   { label: 'Email', href: '/admin/settings/email', roles: ['admin'], icon: Mail, parent: '/admin/settings' },
@@ -92,6 +99,17 @@ export const NAV: readonly NavItem[] = [
   //    as Permalinks so the parallel SEO-settings worktree's appended entry
   //    merges cleanly beside both) ──
   { label: 'Blog', href: '/admin/settings/blog', roles: ['admin'], icon: Newspaper, parent: '/admin/settings' },
+  // ─── SEO ───
+  // Top-level group with five children. Overview (`/admin/seo`) is the
+  // hub; it doubles as the group's own href, so isActive() uses strict
+  // equality (it hasChildren) and the parent lights up only on the
+  // dashboard itself, not on /admin/seo/titles etc.
+  { label: 'SEO', href: '/admin/seo', roles: ['admin'], icon: TrendingUp },
+  { label: 'Overview', href: '/admin/seo', roles: ['admin'], icon: LayoutDashboard, parent: '/admin/seo' },
+  { label: 'Titles & Meta', href: '/admin/seo/titles', roles: ['admin'], icon: LayoutTemplate, parent: '/admin/seo' },
+  { label: 'Social & Schema', href: '/admin/seo/social', roles: ['admin'], icon: Share2, parent: '/admin/seo' },
+  { label: 'Sitemaps & Crawl', href: '/admin/seo/sitemaps', roles: ['admin'], icon: MapIcon, parent: '/admin/seo' },
+  { label: 'Connect & Verify', href: '/admin/seo/connect', roles: ['admin'], icon: PlugZap, parent: '/admin/seo' },
   { label: 'Activity', href: '/admin/activity', roles: ['admin'], icon: ShieldCheck },
   { label: 'Help', href: '/admin/help', roles: ['admin', 'editor', 'viewer'], icon: HelpCircle },
 ]

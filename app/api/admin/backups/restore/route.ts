@@ -5,7 +5,7 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, requireScope, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
@@ -33,6 +33,7 @@ const Body = z
 
 export const POST = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
+  requireScope(ctx, 'backups', 'delete')
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   checkMutationRate(ctx.userId)
   const body = Body.parse(await readJsonBody(req))
@@ -80,6 +81,7 @@ export const POST = withError(async (req: Request) => {
   try {
     await db.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'restore',
       resourceType: 'backups',
       resourceId: body.file.slice(0, 60),

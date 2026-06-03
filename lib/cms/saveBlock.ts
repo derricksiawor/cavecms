@@ -106,6 +106,9 @@ interface BlockRow {
 export async function saveBlock(args: {
   blockId: number
   userId: number
+  // Acting API token id (null for cookie-session writes) — stamped on the
+  // audit row so content writes attribute to the agent that made them.
+  tokenId: number | null
   ip: string | null
   userAgent: string | null
   requestId: string | null
@@ -253,6 +256,7 @@ export async function saveBlock(args: {
       : { ...(cappedDiff as object), kind: AUDIT_KIND.patchTruncated }
     await tx.insert(auditLog).values({
       userId: args.userId,
+      tokenId: args.tokenId,
       action: 'update',
       resourceType: 'content_block',
       resourceId: String(args.blockId),
@@ -347,6 +351,8 @@ export class InvalidMetaJsonError extends Error {
 export async function saveBlockMeta(args: {
   blockId: number
   userId: number
+  // Acting API token id (null for cookie-session writes) — see saveBlock.
+  tokenId: number | null
   ip: string | null
   userAgent: string | null
   requestId: string | null
@@ -448,6 +454,7 @@ export async function saveBlockMeta(args: {
     // truncation branch needed.
     await tx.insert(auditLog).values({
       userId: args.userId,
+      tokenId: args.tokenId,
       action: 'update',
       resourceType: 'content_block',
       resourceId: String(args.blockId),

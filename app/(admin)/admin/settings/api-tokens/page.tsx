@@ -1,5 +1,6 @@
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { listApiTokens } from '@/lib/auth/apiToken'
+import { parseScopes } from '@/lib/auth/apiTokenScope'
 import { ApiTokensClient, type TokenListItem } from './ApiTokensClient'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +24,7 @@ export default async function AdminApiTokens() {
     name: r.name,
     token_prefix: r.token_prefix,
     role: r.role,
+    scopes: parseScopes(r.scopes),
     created_at: iso(r.created_at)!, // created_at is NOT NULL in the DB
     last_used_at: iso(r.last_used_at),
     expires_at: iso(r.expires_at),

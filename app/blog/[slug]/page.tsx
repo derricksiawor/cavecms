@@ -9,7 +9,6 @@ import { EditableMain } from '@/components/inline-edit/EditableMain'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { mintPublicPreCsrfForBlocks } from '@/app/_shared/cmsPage'
 import { blogPostingLd } from '@/lib/seo/jsonLd'
-import { postBreadcrumbLd } from '@/lib/seo/blog-jsonld'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 // Phase 7: blog_settings (showReadingTime / relatedPostsCount) for the detail chrome.
 import { getSetting } from '@/lib/cms/getSettings'
@@ -22,7 +21,7 @@ import { SimilarPostsRailSection } from '@/components/post-sections/SimilarPosts
 // per request and thread into the URL helpers so canonical / slug-redirect /
 // taxonomy-pill URLs honor a custom segment + post-path structure.
 import { resolveSegments } from '@/lib/blog/resolveSegments'
-import { postUrl } from '@/lib/blog/urls'
+import { postUrl, blogIndexUrl, categoryUrl } from '@/lib/blog/urls'
 // blog-system worktree (Phase 8): public post-visibility gate. The PUBLIC lookup
 // + generateMetadata both apply it (so a scheduled post is hidden until its
 // time); the EDITOR PREVIEW branch (admin/editor in edit mode) is deliberately
@@ -31,6 +30,10 @@ import { publicPostGateSql } from '@/lib/cms/postStatus'
 // F14: single source of truth for the reading-time SQL (shared with the Blog
 // Loop slice in lib/cms/hydrate) so the formula + magic constant can't drift.
 import { readingTimeSql } from '@/lib/cms/readingTime'
+// SEO Suite (main): per-entity JSON-LD + post-level SEO meta (og/twitter
+// overrides, schema defaults) parsed from the post's seo_meta JSON.
+import { extraSchemaForEntity } from '@/lib/seo/schema/forPage'
+import { parseSeoMeta, schemaDefaultsFromSetting } from '@/lib/seo/seoMeta'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,7 +50,8 @@ export async function generateMetadata({ params }: { params: Params }) {
   // app/cms-render/[slug]/page.tsx's metadata discipline. Aliased `p` so the
   // shared gate fragment applies cleanly.
   const [rows] = (await db.execute(sql`
-    SELECT p.title, p.excerpt, p.seo_title, p.seo_description, p.published_at
+    SELECT p.title, p.excerpt, p.seo_title, p.seo_description, p.published_at,
+           p.robots_noindex, p.robots_nofollow, p.canonical_url, p.seo_meta
     FROM posts p
     WHERE p.slug = ${slug}
       ${publicPostGateSql('p')}
@@ -58,16 +62,33 @@ export async function generateMetadata({ params }: { params: Params }) {
       seo_title: string | null
       seo_description: string | null
       published_at: Date | string | null
+      robots_noindex: number | null
+      robots_nofollow: number | null
+      canonical_url: string | null
+      seo_meta: unknown
     }>,
   ]
   const r = rows[0]
-  // Phase 5: canonical honors the configured segment + post-path structure.
+  const meta = parseSeoMeta(r?.seo_meta)
+  // Phase 5: canonical honors the configured permalink segment + post-path structure.
   const segments = await resolveSegments()
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? r?.excerpt ?? null,
     fallbackTitle: r?.title ?? 'Post',
+    // Phase 5: segment-aware canonical (honors a custom blog segment +
+    // post-path structure). An operator-set canonical_url still wins via
+    // canonicalOverride below (resolveMetadata prefers the override).
     canonicalPath: postUrl(slug, segments, r?.published_at ?? null),
+    contentType: 'post',
+    templateVars: { title: r?.title ?? undefined, excerpt: r?.excerpt ?? undefined },
+    noindex: !!r?.robots_noindex,
+    nofollow: !!r?.robots_nofollow,
+    canonicalOverride: r?.canonical_url,
+    ogTitle: meta.ogTitle,
+    ogDescription: meta.ogDescription,
+    twitterTitle: meta.twitterTitle,
+    twitterDescription: meta.twitterDescription,
   })
 }
 
@@ -102,6 +123,10 @@ interface PostDetailRow {
   // body source of truth even after the
   // block-tree migration, so it stays the word-count source for both surfaces.
   reading_minutes: number | string | bigint
+  // SEO Suite (main): post-level SEO description + seo_meta JSON (og/twitter
+  // overrides, schema defaults) consumed by the JSON-LD + meta resolution.
+  seo_description: string | null
+  seo_meta: unknown
 }
 
 // NOTE: do NOT wrap the body of this function in try/catch. Next.js
@@ -161,6 +186,7 @@ export default async function BlogPost({
            p.published, p.published_at, p.updated_at, p.hero_image_id,
            u.name AS author_name,
            m.variants AS hero_variants,
+           p.seo_description, p.seo_meta,
            ${readingTimeSql('p')} AS reading_minutes
     FROM posts p
     LEFT JOIN users u ON u.id = p.author_id
@@ -272,21 +298,57 @@ export default async function BlogPost({
     author: post.author_name ?? 'CaveCMS',
     siteOrigin,
   })
-  // BreadcrumbList: Home › Blog › [Primary Category] › Post. Kept in the
-  // blog-specific helper (lib/seo/blog-jsonld) per spec §11 so the shared
-  // jsonLd.ts stays untouched for the parallel SEO worktree.
-  const breadcrumb = postBreadcrumbLd({
-    postTitle: post.title,
-    postSlug: post.slug,
-    primaryCategory,
-    siteOrigin,
-    // Phase 5: breadcrumb URLs honor the configured segment + structure.
-    segments,
-    publishedAt,
+  // Per-page structured data (SEO Suite, main) — ADDITIONS-ONLY on top of the
+  // legacy blogPostingLd PRIMARY emitted above. This emits ONLY (a) the
+  // BreadcrumbList (Home › Blog › Post) and (b) the explicit per-page override
+  // shape when the operator flips schemaType (e.g. to FAQPage / NewsArticle).
+  // It NEVER emits a default Article — that would duplicate the BlogPosting
+  // primary the legacy builder already produced for this URL.
+  //
+  // MERGE NOTE: the entity + breadcrumb URLs are built from the blog branch's
+  // segment-aware helpers (postUrl / blogIndexUrl) so a custom permalink
+  // segment + post-path structure carries into the schema graph, AND prefixed
+  // with siteOrigin like main did. This SUPERSEDES the branch's separate
+  // postBreadcrumbLd emission below (dropped to avoid a duplicate
+  // BreadcrumbList): extraSchemaForEntity already builds the breadcrumb here
+  // and additionally honors the operator's per-page schema override.
+  const seoMeta = parseSeoMeta(post.seo_meta)
+  const seoSchema = await getSetting('seo_schema')
+  const postPath = postUrl(post.slug, segments, post.published_at ?? null)
+  const blogPath = blogIndexUrl(1, segments)
+  const postAbsUrl = siteOrigin ? `${siteOrigin}${postPath}` : postPath
+  const abs = (path: string) => (siteOrigin ? `${siteOrigin}${path}` : path)
+  // Home › Blog › [Primary Category] › Post. The primary-category crumb (the
+  // post's lowest-position category) is preserved from the blog branch's
+  // postBreadcrumbLd, threaded through main's extraSchemaForEntity so the
+  // trail stays category-aware AND segment-aware while also gaining the SEO
+  // suite's per-page schema override.
+  const breadcrumbs = [
+    { name: 'Home', url: abs('/') },
+    { name: 'Blog', url: abs(blogPath) },
+    ...(primaryCategory
+      ? [{ name: primaryCategory.name, url: abs(categoryUrl(primaryCategory.slug, 1, segments)) }]
+      : []),
+    { name: post.title, url: postAbsUrl },
+  ]
+  const schemaGraph = extraSchemaForEntity({
+    entity: {
+      kind: 'post',
+      title: post.title,
+      description: post.seo_description ?? post.excerpt ?? undefined,
+      url: postAbsUrl,
+      datePublished: publishedAt,
+      dateModified: post.updated_at ? new Date(post.updated_at) : undefined,
+      author: post.author_name ?? undefined,
+      image: heroVariants?.lg ?? undefined,
+    },
+    override: { schemaType: seoMeta.schemaType, schemaData: seoMeta.schemaData },
+    defaults: schemaDefaultsFromSetting(seoSchema),
+    breadcrumbs,
   })
 
-  // Shared post chrome (h1 + byline + hero). Rendered around the body in
-  // BOTH branches so the editable and read-only views look identical;
+  // Shared post chrome (h1 + byline + hero + JSON-LD). Rendered around the body
+  // in BOTH the editable and read-only branches so the two views look identical;
   // only the body render differs.
   const chrome = (
     <>
@@ -297,10 +359,20 @@ export default async function BlogPost({
         // never break out of the script tag.
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
       />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: safeJsonForScript(breadcrumb) }}
-      />
+      {/* Per-page schema ADDITIONS + breadcrumbs (SEO Suite, main).
+          extraSchemaForEntity returns an already-filtered ordered array (no
+          nulls, no default primary) including the segment-aware BreadcrumbList;
+          each object is emitted via safeJsonForScript like the legacy
+          BlogPosting primary above. This replaces the branch's standalone
+          postBreadcrumbLd <script> (its BreadcrumbList is now produced here,
+          additionally honoring the operator's per-page schema override). */}
+      {schemaGraph.map((node, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: safeJsonForScript(node) }}
+        />
+      ))}
       {/* h1 inherits the body foreground (--brand-base-fg) so the title stays
           readable on BOTH a light and a dark theme — no fixed dark token. */}
       <h1 className="text-3xl font-semibold tracking-tight">{post.title}</h1>

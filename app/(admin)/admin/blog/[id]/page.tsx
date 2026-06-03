@@ -4,6 +4,7 @@ import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { MediaPickerProvider } from '@/components/inline-edit/MediaPickerProvider'
+import { parseSeoMeta } from '@/lib/seo/seoMeta'
 import { Editor, type EditorPost } from './Editor'
 import type { TermOption } from './TaxonomyChips'
 // F15: resolve the operator's configured permalink segments server-side so the
@@ -26,6 +27,12 @@ interface PostEditorRow {
   og_alt: string | null
   seo_title: string | null
   seo_description: string | null
+  focus_keyphrase: string | null
+  robots_noindex: number
+  robots_nofollow: number
+  canonical_url: string | null
+  cornerstone: number
+  seo_meta: unknown
   version: number
   published: number
   // Phase 8: current publish/schedule instant for the editor's status pill +
@@ -50,7 +57,9 @@ export default async function PostEditor({ params }: { params: Params }) {
            p.published, p.published_at,
            p.hero_image_id, hm.alt_text AS hero_alt,
            p.og_image_id, om.alt_text AS og_alt,
-           p.seo_title, p.seo_description
+           p.seo_title, p.seo_description,
+           p.focus_keyphrase, p.robots_noindex, p.robots_nofollow,
+           p.canonical_url, p.cornerstone, p.seo_meta
     FROM posts p
     LEFT JOIN media hm ON hm.id = p.hero_image_id AND hm.deleted_at IS NULL
     LEFT JOIN media om ON om.id = p.og_image_id AND om.deleted_at IS NULL
@@ -119,6 +128,12 @@ export default async function PostEditor({ params }: { params: Params }) {
       : null,
     seo_title: row.seo_title,
     seo_description: row.seo_description,
+    focus_keyphrase: row.focus_keyphrase,
+    robots_noindex: row.robots_noindex === 1,
+    robots_nofollow: row.robots_nofollow === 1,
+    canonical_url: row.canonical_url,
+    cornerstone: row.cornerstone === 1,
+    seo_meta: parseSeoMeta(row.seo_meta),
     version: row.version,
     published: row.published === 1,
     // Normalize to an ISO string (or null) so the client editor's schedule

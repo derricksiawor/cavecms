@@ -103,6 +103,7 @@ export async function GET(req: Request): Promise<Response> {
     hubspot,
     installed,
     permalinks,
+    indexnow,
   ] = await Promise.all([
     getResolvedLoginPath(),
     getSetting('security_ip_lists'),
@@ -120,6 +121,10 @@ export async function GET(req: Request): Promise<Response> {
     // blog-system worktree (Phase 5): resolved + collision-safe permalink
     // segments for the middleware segment rewrite + dynamic reserved set.
     resolveSegments(),
+    // IndexNow key — middleware serves the `/{key}.txt` verification
+    // file at the edge (it can't read the DB). Only the key string
+    // crosses loopback, and only when IndexNow is enabled.
+    getSetting('seo_indexnow'),
   ])
 
   return jsonResponse(
@@ -158,6 +163,10 @@ export async function GET(req: Request): Promise<Response> {
         projectsSegment: permalinks.projects,
         blogStructure: permalinks.structure,
       },
+      // null unless IndexNow is enabled AND a key is generated. The
+      // schema validates the key charset, so middleware can safely build
+      // the `/{key}.txt` path from it without re-sanitising.
+      indexNowKey: indexnow.enabled && indexnow.key ? indexnow.key : null,
     },
     200,
   )

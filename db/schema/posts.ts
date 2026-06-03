@@ -4,6 +4,7 @@ import {
   varchar,
   mediumtext,
   boolean,
+  json,
   timestamp,
   index,
   uniqueIndex,
@@ -46,6 +47,15 @@ export const posts = mysqlTable(
     seoTitle: varchar('seo_title', { length: 180 }),
     seoDescription: varchar('seo_description', { length: 320 }),
     ogImageId: int('og_image_id'),
+    // ─── SEO suite (migration 0034) ───
+    focusKeyphrase: varchar('focus_keyphrase', { length: 160 }),
+    robotsNoindex: boolean('robots_noindex').notNull().default(false),
+    robotsNofollow: boolean('robots_nofollow').notNull().default(false),
+    canonicalUrl: varchar('canonical_url', { length: 500 }),
+    cornerstone: boolean('cornerstone').notNull().default(false),
+    seoScore: int('seo_score'),
+    readabilityScore: int('readability_score'),
+    seoMeta: json('seo_meta'),
     version: int('version').notNull().default(0),
     deletedAt: timestamp('deleted_at', { fsp: 3 }),
     updatedBy: int('updated_by').references(() => users.id, {

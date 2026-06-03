@@ -4,6 +4,7 @@ import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { registry } from '@/lib/cms/settings-registry'
 import { THEME_PALETTE_DEFAULT, type ThemePalette } from '@/lib/cms/themeCss'
 import { ThemeSettingsClient } from './ThemeSettingsClient'
+import { BrandSwatchesEditor } from './BrandSwatchesEditor'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,11 +24,29 @@ export default async function ThemeSettingsPage() {
   const [rows] = (await db.execute(sql`
     SELECT \`key\`, value, version
     FROM settings
-    WHERE \`key\` = 'theme_palette'
-    LIMIT 1
+    WHERE \`key\` IN ('theme_palette', 'theme_swatches')
   `)) as unknown as [SettingRow[]]
 
-  const raw = rows[0]
+  const raw = rows.find((r) => r.key === 'theme_palette')
+  const swatchRow = rows.find((r) => r.key === 'theme_swatches')
+  const swatchValue =
+    swatchRow && typeof swatchRow.value === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(swatchRow.value as string)
+          } catch {
+            return registry.theme_swatches.default
+          }
+        })()
+      : (swatchRow?.value ?? registry.theme_swatches.default)
+  const swatchesInitial = {
+    value: {
+      swatches: Array.isArray((swatchValue as { swatches?: unknown })?.swatches)
+        ? ((swatchValue as { swatches: { label: string; color: string }[] }).swatches)
+        : [],
+    },
+    version: swatchRow?.version ?? 0,
+  }
   const parsedValue =
     raw && typeof raw.value === 'string'
       ? (() => {
@@ -73,6 +92,8 @@ export default async function ThemeSettingsPage() {
       <ThemeSettingsClient
         initial={{ value: palette, version: raw?.version ?? 0 }}
       />
+
+      <BrandSwatchesEditor initial={swatchesInitial} />
     </div>
   )
 }

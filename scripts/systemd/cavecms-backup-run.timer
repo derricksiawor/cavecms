@@ -1,0 +1,16 @@
+[Unit]
+Description=CaveCMS scheduled-backup tick timer
+
+[Timer]
+# Fire 5 minutes after boot, then hourly. The endpoint is a cheap no-op unless a
+# backup is actually due (schedule + scheduleHour), so an hourly tick gives
+# at-most-one-hour granularity for daily/weekly schedules. Random delay staggers
+# the call so many installs don't synchronise on the wall clock.
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=10min
+Persistent=true
+Unit=cavecms-backup-run.service
+
+[Install]
+WantedBy=timers.target

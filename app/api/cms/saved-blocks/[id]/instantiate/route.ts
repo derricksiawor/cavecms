@@ -3,9 +3,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
@@ -61,7 +61,8 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
 
     const ctx = await requireRole(['admin', 'editor'])
     await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-    checkMutationRate(ctx.userId)
+    requireScope(ctx, 'blocks', 'write')
+    checkCmsMutationRate(ctx)
 
     const body = SavedBlockInstantiateBody.parse(await readJsonBody(req))
 
@@ -91,9 +92,16 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
     if (!(saved.block_type in blockSchemas)) {
       throw new HttpError(422, 'invalid_saved_block')
     }
+    // The JSON `data`/`meta` columns come back as STRINGS from the raw
+    // db.execute() read (mysql2 doesn't parse JSON on the raw path — same as
+    // saveBlock.ts), so coerce to objects before re-validating. Without this,
+    // parseAndSanitize sees a JSON string and the widget schema rejects it →
+    // a spurious 422 on EVERY paste (dashboard + MCP alike).
     let parsedData: unknown
     try {
-      parsedData = parseAndSanitize(saved.block_type, saved.data)
+      const dataObj =
+        typeof saved.data === 'string' ? JSON.parse(saved.data) : saved.data
+      parsedData = parseAndSanitize(saved.block_type, dataObj)
     } catch {
       throw new HttpError(422, 'invalid_saved_block')
     }
@@ -102,9 +110,19 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
     // create time but defence-in-depth: strip again before WidgetMetaSchema.
     let widgetMetaJson: string | null = null
     if (saved.meta !== null && saved.meta !== undefined) {
+      let metaParsed: unknown = saved.meta
+      if (typeof saved.meta === 'string') {
+        try {
+          metaParsed = JSON.parse(saved.meta)
+        } catch {
+          throw new HttpError(422, 'invalid_saved_block')
+        }
+      }
       const metaObj =
-        typeof saved.meta === 'object' && !Array.isArray(saved.meta)
-          ? { ...(saved.meta as Record<string, unknown>) }
+        metaParsed !== null &&
+        typeof metaParsed === 'object' &&
+        !Array.isArray(metaParsed)
+          ? { ...(metaParsed as Record<string, unknown>) }
           : null
       if (metaObj !== null) {
         delete metaObj['htmlId']
@@ -314,6 +332,7 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
       // other.
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'content_block',
         resourceId: String(blockId),
@@ -328,6 +347,7 @@ export const POST = withError<{ params: Promise<{ id: string }> }>(
       })
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'instantiate',
         resourceType: 'saved_block',
         resourceId: String(savedBlockId),

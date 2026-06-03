@@ -119,3 +119,15 @@ export async function getSetting<K extends SettingsKey>(
     throw err
   }
 }
+
+// UNCACHED single-row read — bypasses the 60s unstable_cache wrapper entirely.
+// For operational keys where a read-after-write in the SAME warm process must be
+// immediately consistent and `revalidateTag('settings')` is not reliably honoured
+// from a passthrough/in-process call (e.g. the MCP sync-target tools:
+// configure → list in one session). Costs one DB round-trip per call; only used
+// by the low-frequency target-management reads, never the hot render path.
+export async function getSettingUncached<K extends SettingsKey>(
+  key: K,
+): Promise<SettingsValue<K>> {
+  return (await readSetting(key)) as SettingsValue<K>
+}

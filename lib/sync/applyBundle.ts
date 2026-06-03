@@ -107,7 +107,7 @@ async function insertRef(
 
 export async function applyBundle(
   payload: StagedPayload,
-  ctx: { userId: number },
+  ctx: { userId: number; tokenId?: number | null },
 ): Promise<CutoverResult> {
   await db.transaction(async (tx) => {
     // The session-var SETs live INSIDE the try so the `finally` restore ALWAYS
@@ -329,10 +329,11 @@ export async function applyBundle(
         )
       }
 
-      // 8. One audit row attributing the push to the token's creator.
+      // 8. One audit row attributing the push to the token's creator AND the
+      //    acting API token (token_id null for a cookie-session cutover).
       await tx.execute(sql`
-        INSERT INTO audit_log (user_id, action, resource_type, resource_id, diff, created_at)
-        VALUES (${ctx.userId}, 'sync.cutover', 'site', NULL,
+        INSERT INTO audit_log (user_id, token_id, action, resource_type, resource_id, diff, created_at)
+        VALUES (${ctx.userId}, ${ctx.tokenId ?? null}, 'sync.cutover', 'site', NULL,
                 ${JSON.stringify({
                   pages: payload.pages.length,
                   posts: payload.posts.length,

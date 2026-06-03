@@ -246,6 +246,9 @@ export async function applyInlineProposalByToken(
       const result = await saveBlock({
         blockId: op.blockId,
         userId: args.userId,
+        // Session-only path (/api/ai/* is not token-reachable), so no token
+        // attribution — the human operator applied this proposal.
+        tokenId: null,
         ip: args.ip,
         userAgent: args.userAgent,
         requestId: args.requestId,

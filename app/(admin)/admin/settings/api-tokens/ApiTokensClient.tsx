@@ -8,12 +8,19 @@ import {
   Copy,
   Check,
   Trash2,
+  RotateCw,
   Sparkles,
   BookOpen,
   FileCode2,
   ArrowUpRight,
 } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
+import {
+  SCOPE_RESOURCES,
+  SCOPE_ACTIONS,
+  type ScopeResource,
+  type ScopeAction,
+} from '@/lib/auth/apiTokenScope'
 import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -29,6 +36,8 @@ export interface TokenListItem {
   name: string
   token_prefix: string
   role: string
+  // null = unrestricted within role; else the per-resource grant array.
+  scopes: string[] | null
   created_at: string
   last_used_at: string | null
   expires_at: string | null
@@ -140,8 +149,20 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
   const reauth = reauthCtl.ensureReauth
 
   const [name, setName] = useState('')
-  const [role, setRole] = useState<'admin' | 'editor'>('editor')
+  const [role, setRole] = useState<'admin' | 'editor' | 'viewer'>('editor')
   const [expiryIdx, setExpiryIdx] = useState(0)
+  // Access mode: 'full' = unrestricted within role (scopes omitted); 'custom'
+  // = the per-resource grant grid below. Highest action per resource wins.
+  const [scopeMode, setScopeMode] = useState<'full' | 'custom'>('full')
+  const [scopeGrants, setScopeGrants] = useState<
+    Record<ScopeResource, ScopeAction | 'none'>
+  >(
+    () =>
+      Object.fromEntries(SCOPE_RESOURCES.map((r) => [r, 'none'])) as Record<
+        ScopeResource,
+        ScopeAction | 'none'
+      >,
+  )
   const [createError, setCreateError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -167,6 +188,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
   const generateBtnRef = useRef<HTMLButtonElement>(null)
 
   const [pendingRevoke, setPendingRevoke] = useState<TokenListItem | null>(null)
+  const [pendingRotate, setPendingRotate] = useState<TokenListItem | null>(null)
 
   // Client-side pagination — keeps a long token list from running off the
   // bottom of the page. Controls only appear past one page (PAGE_SIZE).
@@ -213,11 +235,31 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
       setCreateError('Give the token a name so you can recognise it later.')
       return
     }
+    // Custom mode with nothing granted = a deny-everything token (the array is
+    // []), which silently 403s on every mutation. Catch it here with an
+    // actionable message instead of minting a useless credential.
+    if (
+      scopeMode === 'custom' &&
+      SCOPE_RESOURCES.every((r) => scopeGrants[r] === 'none')
+    ) {
+      setCreateError(
+        'Grant at least one resource access, or choose Full access.',
+      )
+      return
+    }
     setBusy(true)
     try {
       // reauth() never throws — usePasswordReauth settles its own state and
       // returns false on a network/timeout failure (surfacing a fatal toast).
       if (!(await reauth())) return
+      // 'full' → omit scopes (unrestricted within role). 'custom' → one
+      // "<resource>:<action>" grant per resource the operator gave access to.
+      const scopes =
+        scopeMode === 'full'
+          ? undefined
+          : SCOPE_RESOURCES.flatMap((res) =>
+              scopeGrants[res] === 'none' ? [] : [`${res}:${scopeGrants[res]}`],
+            )
       let r: Response
       try {
         r = await csrfFetch('/api/admin/api-tokens', {
@@ -227,6 +269,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
             name: name.trim(),
             role,
             expiresInDays: EXPIRY_OPTIONS[expiryIdx]!.days,
+            scopes,
           }),
         })
       } catch {
@@ -433,6 +476,53 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
     }
   }
 
+  async function onConfirmRotate() {
+    if (!pendingRotate || busy) return
+    const target = pendingRotate
+    setPendingRotate(null)
+    setBusy(true)
+    try {
+      if (!(await reauth())) return
+      let r: Response
+      try {
+        r = await csrfFetch(`/api/admin/api-tokens/${target.id}/rotate`, {
+          method: 'POST',
+        })
+      } catch {
+        toast.error(
+          "We couldn't reach the server. Check your connection and try again.",
+        )
+        return
+      }
+      if (!r.ok) {
+        toast.error('Rotate failed — refresh and try again.')
+        return
+      }
+      // The new secret is in THIS response only — drop into the same one-time
+      // reveal flow so the operator copies it (and can re-brief their agent).
+      let token: string | undefined
+      try {
+        const j = (await r.json()) as { token?: unknown }
+        if (typeof j.token === 'string' && j.token.length > 0) token = j.token
+      } catch {
+        /* fall through */
+      }
+      if (!token) {
+        toast.error(
+          'Rotated, but the new secret could not be shown. Rotate again to get a fresh one.',
+        )
+        router.refresh()
+        return
+      }
+      setCopied(false)
+      setBriefingCopied(false)
+      setStage('token')
+      setRevealed({ token, name: target.name, role: target.role })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const pageCount = Math.max(1, Math.ceil(initial.length / PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
   const pageItems = initial.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
@@ -465,11 +555,14 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
               </span>
               <select
                 value={role}
-                onChange={(e) => setRole(e.target.value as 'admin' | 'editor')}
+                onChange={(e) =>
+                  setRole(e.target.value as 'admin' | 'editor' | 'viewer')
+                }
                 disabled={busy}
                 className="w-full rounded-lg border border-warm-stone/30 bg-cream-50 px-3 py-2 text-sm text-near-black"
                 aria-label="Role"
               >
+                <option value="viewer">Viewer (read-only)</option>
                 <option value="editor">Editor (edit content)</option>
                 <option value="admin">Admin (content + branding)</option>
               </select>
@@ -492,6 +585,71 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                 ))}
               </select>
             </label>
+          </div>
+          {/* Access — visual per-resource scope picker (not a list of names). */}
+          <div className="block">
+            <span className="mb-1.5 block text-xs font-medium text-near-black">
+              Access
+            </span>
+            <div className="flex gap-2">
+              {(['full', 'custom'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setScopeMode(m)}
+                  disabled={busy}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                    scopeMode === m
+                      ? 'bg-copper-600 text-cream-50'
+                      : 'bg-cream-100 text-warm-stone hover:bg-cream-200'
+                  }`}
+                >
+                  {m === 'full' ? 'Full access' : 'Custom scopes'}
+                </button>
+              ))}
+            </div>
+            {scopeMode === 'full' ? (
+              <p className="mt-2 text-xs text-warm-stone">
+                The token can do anything its role allows, across all content.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-1.5 rounded-lg border border-warm-stone/20 bg-cream-50/60 p-3">
+                <p className="mb-2 text-[11px] leading-relaxed text-warm-stone">
+                  Grant the least each resource needs. Write includes read;
+                  delete includes write.
+                </p>
+                {SCOPE_RESOURCES.map((res) => (
+                  <div
+                    key={res}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="text-xs font-medium capitalize text-near-black">
+                      {res}
+                    </span>
+                    <div className="flex gap-1">
+                      {(['none', ...SCOPE_ACTIONS] as const).map((act) => (
+                        <button
+                          key={act}
+                          type="button"
+                          onClick={() =>
+                            setScopeGrants((g) => ({ ...g, [res]: act }))
+                          }
+                          disabled={busy}
+                          aria-pressed={scopeGrants[res] === act}
+                          className={`rounded-md px-2 py-1 text-[11px] font-semibold capitalize transition-colors disabled:opacity-50 ${
+                            scopeGrants[res] === act
+                              ? 'bg-copper-600 text-cream-50'
+                              : 'bg-cream-100 text-warm-stone hover:bg-cream-200'
+                          }`}
+                        >
+                          {act}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex">
             <Button
@@ -538,7 +696,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
               </thead>
               <tbody>
                 {pageItems.map((t) => {
-                  const inactive = t.revoked_at !== null
+                  const inactive = t.status !== 'active'
                   return (
                     <tr
                       key={t.id}
@@ -552,8 +710,20 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                       <td className="px-4 py-3 font-mono text-warm-stone">
                         {t.token_prefix}&middot;&middot;&middot;&middot;
                       </td>
-                      <td className="px-4 py-3 capitalize text-near-black">
-                        {t.role}
+                      <td className="px-4 py-3 text-near-black">
+                        <span className="capitalize">{t.role}</span>
+                        {t.scopes !== null && (
+                          <span
+                            title={
+                              t.scopes.length
+                                ? t.scopes.join(', ')
+                                : 'no grants'
+                            }
+                            className="ml-1.5 inline-block rounded-full bg-warm-stone/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-warm-stone"
+                          >
+                            scoped
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-warm-stone">
                         {t.last_used_at ? (
@@ -585,16 +755,28 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                       </td>
                       <td className="px-4 py-3 text-right">
                         {!inactive && (
-                          <button
-                            type="button"
-                            onClick={() => setPendingRevoke(t)}
-                            disabled={busy}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
-                            aria-label={`Revoke ${t.name}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Revoke
-                          </button>
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setPendingRotate(t)}
+                              disabled={busy}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-near-black hover:bg-cream-100 disabled:opacity-50"
+                              aria-label={`Rotate ${t.name}`}
+                            >
+                              <RotateCw className="h-3.5 w-3.5" />
+                              Rotate
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingRevoke(t)}
+                              disabled={busy}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
+                              aria-label={`Revoke ${t.name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Revoke
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -607,7 +789,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
           {/* Mobile — stacked cards (below md) so nothing is clipped or hidden */}
           <div className="mt-6 space-y-3 md:hidden">
             {pageItems.map((t) => {
-              const inactive = t.revoked_at !== null
+              const inactive = t.status !== 'active'
               return (
                 <div
                   key={t.id}
@@ -631,8 +813,18 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                       <dt className="text-[10px] uppercase tracking-[0.14em] text-warm-stone">
                         Role
                       </dt>
-                      <dd className="mt-0.5 capitalize text-near-black">
-                        {t.role}
+                      <dd className="mt-0.5 text-near-black">
+                        <span className="capitalize">{t.role}</span>
+                        {t.scopes !== null && (
+                          <span
+                            title={
+                              t.scopes.length ? t.scopes.join(', ') : 'no grants'
+                            }
+                            className="ml-1.5 inline-block rounded-full bg-warm-stone/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-warm-stone"
+                          >
+                            scoped
+                          </span>
+                        )}
                       </dd>
                     </div>
                     <div>
@@ -677,16 +869,28 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                     </div>
                   </dl>
                   {!inactive && (
-                    <button
-                      type="button"
-                      onClick={() => setPendingRevoke(t)}
-                      disabled={busy}
-                      className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-copper-300/60 px-3 py-1.5 text-xs font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
-                      aria-label={`Revoke ${t.name}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Revoke
-                    </button>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPendingRotate(t)}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-warm-stone/30 px-3 py-1.5 text-xs font-semibold text-near-black hover:bg-cream-100 disabled:opacity-50"
+                        aria-label={`Rotate ${t.name}`}
+                      >
+                        <RotateCw className="h-3.5 w-3.5" />
+                        Rotate
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingRevoke(t)}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-copper-300/60 px-3 py-1.5 text-xs font-semibold text-copper-700 hover:bg-copper-50 disabled:opacity-50"
+                        aria-label={`Revoke ${t.name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Revoke
+                      </button>
+                    </div>
                   )}
                 </div>
               )
@@ -965,6 +1169,21 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
         onConfirm={onConfirmRevoke}
         onCancel={() => {
           if (!busy) setPendingRevoke(null)
+        }}
+      />
+      <ConfirmModal
+        open={pendingRotate !== null}
+        title="Rotate this token?"
+        description={
+          pendingRotate
+            ? `A fresh secret will be issued for "${pendingRotate.name}" and the current one stops working immediately. Any tool or assistant using the old secret must be updated with the new one. The role and scopes stay the same.`
+            : ''
+        }
+        confirmLabel="Rotate"
+        busy={busy}
+        onConfirm={onConfirmRotate}
+        onCancel={() => {
+          if (!busy) setPendingRotate(null)
         }}
       />
     </section>

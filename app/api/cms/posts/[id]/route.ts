@@ -5,9 +5,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
@@ -23,6 +23,14 @@ import {
   MAX_TERMS_PER_POST,
 } from '@/lib/cms/syncPostTaxonomy'
 import { trashPostInTx } from '@/lib/cms/trashPost'
+import { notifyIndexNow } from '@/lib/seo/indexnow/notify'
+import { SeoEditorFields } from '@/lib/cms/seoEditorFields'
+import { buildSeoSetParts } from '@/lib/cms/seoEditorPersist'
+// blog-system: the public post URL is permalink-segment-aware, so the IndexNow
+// ping path must be built from the configured segments (NOT a hardcoded /blog/),
+// or a custom-segment install would announce a 404 URL to search engines.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
+import { postUrl } from '@/lib/blog/urls'
 
 import { SLUG_RE, SLUG_MAX } from '@/lib/cms/slug'
 import { TAXONOMY_RESERVED } from '@/lib/cms/taxonomy-slug'
@@ -60,6 +68,7 @@ const EditorSchema = z
     ogImageId: z.number().int().positive().nullable().optional(),
     categoryIds: z.array(z.number().int().positive()).max(MAX_TERMS_PER_POST).optional(),
     tagIds: z.array(z.number().int().positive()).max(MAX_TERMS_PER_POST).optional(),
+    ...SeoEditorFields,
     version: z.number().int().nonnegative(),
   })
   .strict()
@@ -112,6 +121,13 @@ type EditorBody = z.infer<typeof EditorSchema>
 type AdminBody = z.infer<typeof AdminSchema>
 type Body = AdminBody
 
+// The SEO editor fields (migration 0032) are persisted via the shared
+// buildSeoSetParts helper, NOT the generic EDITOR_COLS loop (booleans →
+// TINYINT, seoMeta → JSON need bespoke serialization). Subtract their
+// keys from the generic-loop field type so the exhaustiveness guards
+// below don't demand them in EDITOR_COLS / EDITOR_ROW_COL.
+type SeoEditorKey = keyof typeof SeoEditorFields
+
 interface PostRow {
   id: number
   slug: string
@@ -129,17 +145,28 @@ interface PostRow {
   // as Date or ISO string (dateStrings); compared via epoch ms.
   published_at: Date | string | null
   version: number
+  // SEO columns (migration 0032). Booleans come back as 0|1 from raw
+  // SQL; seo_meta is the raw JSON string (MariaDB JSON ≡ LONGTEXT).
+  focus_keyphrase: string | null
+  robots_noindex: number
+  robots_nofollow: number
+  canonical_url: string | null
+  cornerstone: number
+  seo_score: number | null
+  readability_score: number | null
+  seo_meta: unknown
 }
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
 // `version` is the optimistic-lock token, not a column the editor
 // can rewrite directly. `categoryIds`/`tagIds` are junction syncs, not
-// posts columns. All three are excluded so the buildSets loop's `field`
-// type maps 1:1 to a real posts column and no runtime guard is needed.
+// posts columns; the SEO fields are handled by buildSeoSetParts. All are
+// excluded so the buildSets loop's `field` type maps 1:1 to a real posts
+// column and no runtime guard is needed.
 type EditorFieldNoVersion = Exclude<
   keyof EditorBody,
-  'version' | 'categoryIds' | 'tagIds'
+  'version' | 'categoryIds' | 'tagIds' | SeoEditorKey
 >
 
 const EDITOR_COLS: ReadonlyArray<readonly [EditorFieldNoVersion, string]> = [
@@ -263,6 +290,14 @@ function buildSets(
     parts.push(sql`${sql.raw(col)} = ${v}`)
     ;(applied as Record<string, unknown>)[field] = v
   }
+
+  // SEO editor fields (migration 0032) — booleans → TINYINT, seoMeta →
+  // JSON string, scores → INT|null. Editor-writable like seo_title, so
+  // they apply for both roles (outside the admin-only branch).
+  const seo = buildSeoSetParts(body, row)
+  parts.push(...seo.parts)
+  Object.assign(applied as Record<string, unknown>, seo.applied)
+
   if (role === 'admin') {
     for (const [field, col] of ADMIN_ONLY_COLS) {
       const v = body[field]
@@ -293,6 +328,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'posts', 'read')
 
   const [rows] = (await db.execute(sql`
     SELECT * FROM posts WHERE id = ${id}
@@ -317,7 +353,8 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'posts', 'write')
+  checkCmsMutationRate(ctx)
 
   const raw = await readJsonBody(req)
   const Schema = ctx.role === 'admin' ? AdminSchema : EditorSchema
@@ -337,6 +374,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'post',
           resourceId: String(id),
@@ -362,6 +400,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         .insert(auditLog)
         .values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'post',
           resourceId: String(id),
@@ -384,11 +423,18 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   // future uniques) surface as a generic 409 conflict — keeps audit
   // triage honest.
   let slugChangedOuter = false
+  // blog-system: resolve the configured permalink segments once so the
+  // IndexNow ping below announces the REAL public post URL (a custom blog
+  // segment / date-based structure changes the path), not a hardcoded /blog/.
+  const permalinkSegments = await resolveSegments()
   try {
     const txResult = await db.transaction(async (tx) => {
       const [rows] = (await tx.execute(sql`
         SELECT id, slug, title, excerpt, body_md, hero_image_id,
                seo_title, seo_description, og_image_id,
+               focus_keyphrase, robots_noindex, robots_nofollow,
+               canonical_url, cornerstone, seo_score, readability_score,
+               seo_meta,
                published, published_at, version
         FROM posts
         WHERE id = ${id} AND deleted_at IS NULL
@@ -530,6 +576,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           newVersion: row.version,
           queueRowId: null as number | null,
           tags: [] as string[],
+          indexNowPath: null as string | null,
         }
       }
 
@@ -585,6 +632,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const prevBodyMdLen = Buffer.byteLength(row.body_md, 'utf8')
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'update',
         resourceType: 'post',
         resourceId: String(id),
@@ -600,8 +648,20 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             seo_title: row.seo_title,
             seo_description: row.seo_description,
             og_image_id: row.og_image_id,
+            focus_keyphrase: row.focus_keyphrase,
+            robots_noindex: row.robots_noindex === 1,
+            robots_nofollow: row.robots_nofollow === 1,
+            canonical_url: row.canonical_url,
+            cornerstone: row.cornerstone === 1,
+            seo_score: row.seo_score,
+            readability_score: row.readability_score,
             published: row.published === 1,
-            // Phase 8: published_at IS now selected by the FOR UPDATE query
+            // seo_meta intentionally omitted from the audit `from` — the
+            // raw JSON blob can be large + the `to` map already records
+            // the new value; forensic triage reads the prior value from
+            // the previous audit row's `to`. Mirrors the body_md
+            // fingerprint rationale above (bound audit payload).
+            // Phase 8: published_at IS selected by the FOR UPDATE query
             // (needed for the scheduling diff), so the prior publish/schedule
             // timestamp is recorded here as an ISO string — a "who rescheduled
             // this post and from when" forensic query reads one row. Normalized
@@ -667,7 +727,39 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const finalTags = [...allTags]
 
       const queueRowId = await enqueueRevalidate(tx, finalTags)
-      return { newVersion: row.version + 1, queueRowId, tags: finalTags }
+
+      // IndexNow: announce the post's public URL when this save leaves it
+      // LIVE — on a publish transition, or any content edit while already
+      // published (we're past the no-op short-circuit here, so a real
+      // change happened). Never on draft saves (post not published) or on
+      // unpublish (publishedTransition === 'off'). The path is built from
+      // the post-rename slug; computed here, pinged after the TX commits.
+      const finalPublished =
+        publishedTransition === 'on' ||
+        (row.published === 1 && publishedTransition !== 'off')
+      // Never ping a noindexed post — IndexNow announcing a URL the
+      // sitemap excludes (excludeNoindex) is a contradictory crawl
+      // signal. Final noindex state = applied delta when this PATCH
+      // changed it, else the loaded row value.
+      const finalNoindex =
+        applied.robotsNoindex !== undefined
+          ? applied.robotsNoindex
+          : row.robots_noindex === 1
+      // blog-system: build the announced path from the configured permalink
+      // segments + the EFFECTIVE published_at (explicit schedule wins, else the
+      // row's existing date, else NOW for a first publish) so date-based blog
+      // structures resolve to the correct dated URL.
+      const effectivePublishedAt: Date | string | null =
+        scheduleAt ?? row.published_at ?? new Date()
+      return {
+        newVersion: row.version + 1,
+        queueRowId,
+        tags: finalTags,
+        indexNowPath:
+          finalPublished && !finalNoindex
+            ? postUrl(newSlug, permalinkSegments, effectivePublishedAt)
+            : (null as string | null),
+      }
     })
 
     if (txResult.queueRowId !== null) {
@@ -676,6 +768,12 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       queueMicrotask(() => {
         void drainRevalidate(rowId, tags)
       })
+    }
+
+    // Fire-and-forget IndexNow ping — never awaited, never throws, never
+    // blocks the save response (the standalone server is long-lived).
+    if (txResult.indexNowPath !== null) {
+      void notifyIndexNow([txResult.indexNowPath])
     }
 
     return new Response(
@@ -704,7 +802,8 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'posts', 'delete')
+  checkCmsMutationRate(ctx)
 
   const meta = auditMetaFromRequest(req)
 
@@ -732,6 +831,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'post',
       resourceId: String(id),

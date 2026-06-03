@@ -4,9 +4,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkReadRate, checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { requireFreshReauth } from '@/lib/auth/reauth'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { registry, type SettingsKey } from '@/lib/cms/settings-registry'
@@ -28,6 +28,7 @@ import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
 import { clearZohoAccessTokenCache } from '@/lib/crm/zoho'
 import {
   AAD_AI_CONFIG_API_KEY,
+  AAD_SEO_INDEXING_API,
   encryptSecret,
   last4 as last4Of,
 } from '@/lib/security/secretCipher'
@@ -74,13 +75,47 @@ const CREDENTIAL_FIELDS_BY_KEY: Record<string, string[]> = {
   // shouldn't get the envelope to take offline. The UI shows
   // `apiKeyLast4` ("ends in 1234") to confirm a key is on file.
   ai_config: ['apiKey'],
+  // Encrypted Google Indexing API service-account JSON envelope. Redact
+  // even the ciphertext on GET — the operator confirms it's on file via
+  // the cleartext `serviceAccountEmail` display field.
+  seo_indexing_api: ['serviceAccountJson'],
+}
+
+// Operational keys whose SECRETS are NESTED (an array of targets, or sub-objects)
+// rather than flat top-level strings — so the CREDENTIAL_FIELDS_BY_KEY loop can't
+// reach them. We null the ciphertext envelopes before serving any GET, exactly
+// like ai_config.apiKey (defence-in-depth: a stolen admin SESSION shouldn't walk
+// off with the encrypted blobs). These keys are ALSO never returned to API
+// tokens (the TOKEN_WRITABLE_SETTINGS GET filter), so this hardens the
+// cookie-admin GET specifically. The dedicated Backups + sync-targets routes own
+// reads that legitimately need connection state (which they redact themselves).
+const DEEP_REDACT_KEYS = new Set<string>(['sync_targets', 'backups', 'backups_state'])
+function deepRedactOperationalSecrets(key: string, v: Record<string, unknown>): void {
+  const nullify = (obj: unknown, field: string) => {
+    if (obj && typeof obj === 'object' && field in (obj as Record<string, unknown>)) {
+      ;(obj as Record<string, unknown>)[field] = null
+    }
+  }
+  if (key === 'sync_targets') {
+    const targets = v['targets']
+    if (Array.isArray(targets)) for (const t of targets) nullify(t, 'token')
+  } else if (key === 'backups') {
+    nullify(v['gdrive'], 'refreshToken')
+    nullify(v['onedrive'], 'refreshToken')
+    nullify(v['encryption'], 'passphrase')
+  } else if (key === 'backups_state') {
+    nullify(v['gdrivePending'], 'deviceCode')
+    nullify(v['onedrivePending'], 'deviceCode')
+  }
 }
 
 function redactSettingsRow(row: SettingRow): SettingRow {
   const fields = CREDENTIAL_FIELDS_BY_KEY[row.key]
-  if (!fields) return row
+  const hasDeep = DEEP_REDACT_KEYS.has(row.key)
+  if (!fields && !hasDeep) return row
   // Value may arrive as a JSON string (MariaDB LONGTEXT-aliased JSON
-  // column) or a parsed object (some drivers). Handle both.
+  // column) or a parsed object (some drivers). Handle both; deep-clone the
+  // object case so the nested redaction can never mutate the DB query result.
   let parsed: Record<string, unknown>
   if (typeof row.value === 'string') {
     try {
@@ -89,15 +124,25 @@ function redactSettingsRow(row: SettingRow): SettingRow {
       return row
     }
   } else if (row.value && typeof row.value === 'object' && !Array.isArray(row.value)) {
-    parsed = { ...(row.value as Record<string, unknown>) }
+    parsed = JSON.parse(JSON.stringify(row.value)) as Record<string, unknown>
   } else {
     return row
   }
-  for (const f of fields) {
-    if (typeof parsed[f] === 'string' && (parsed[f] as string).length > 0) {
-      parsed[f] = ''
+  if (fields) {
+    for (const f of fields) {
+      // Blank ANY present credential, not just string-shaped ones. The
+      // CRM/SMTP/reCAPTCHA secrets are strings, but ai_config.apiKey and
+      // seo_indexing_api.serviceAccountJson are object-shaped EncryptedSecret
+      // ENVELOPES — a `typeof === 'string'` check let their ciphertext cross
+      // the wire on GET. The UI confirms "on file" via the cleartext
+      // apiKeyLast4 / serviceAccountEmail fields, never the envelope itself.
+      const v = parsed[f]
+      if (v != null && v !== '') {
+        parsed[f] = ''
+      }
     }
   }
+  if (hasDeep) deepRedactOperationalSecrets(row.key, parsed)
   // Return same wire-shape as the original (string vs object).
   return {
     ...row,
@@ -126,12 +171,32 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
   // branding, same trust level as theme_palette. An AI agent can restyle the
   // site's typefaces via the API.
   'typography_roles',
+  // Site-wide font pairing + GDPR cookie-consent banner — presentational /
+  // operator-config, token-writable like the other branding keys.
+  'typography',
+  'cookie_consent',
   // NOTE: site_general is deliberately NOT here — its `siteUrl` sets the
   // origin of outbound tokenized email links (newsletter confirm/unsubscribe,
   // brochure) and the canonical host, so a token writing it could harvest
   // per-recipient tokens / hijack the canonical host. siteUrl changes stay
   // interactive-admin + reauth only.
   'mobile_cta',
+  // ─── SEO suite (programmatic SEO is a first-class use case) ───
+  // An AI agent / automation can manage title templates, social/schema
+  // defaults, sitemap config, verification codes, IndexNow, the analysis
+  // engine config, robots additions, and the global index policy via the
+  // API. These are content/meta-class, same trust level as default_seo.
+  // seo_indexing_api is DELIBERATELY excluded — it holds the AES-GCM
+  // service-account secret and is reauth-gated like ai_config.
+  'seo_titles',
+  'seo_indexing',
+  'seo_social',
+  'seo_schema',
+  'seo_sitemap',
+  'seo_webmaster',
+  'seo_indexnow',
+  'seo_robots',
+  'seo_analysis',
   // `satisfies SettingsKey[]` makes the build FAIL if any literal stops being
   // a real registry key (rename/typo), so the cap can't silently drift open.
 ] satisfies SettingsKey[])
@@ -139,6 +204,7 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
 export const GET = withError(async () => {
   const ctx = await requireRole(['admin'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'settings', 'read')
   const [rows] = (await db.execute(sql`
     SELECT \`key\`, value, version, updated_at
     FROM settings
@@ -182,7 +248,12 @@ interface UpdateResult {
 export const PATCH = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  // A scoped API token must hold settings:write to mutate any setting. No-op
+  // for cookie sessions and NULL-scope tokens; the per-key allowlist below
+  // still applies on top (defense in depth — tokens write content/branding
+  // keys only). Makes the `settings` scope a live, honest grant.
+  requireScope(ctx, 'settings', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = Body.parse(await readJsonBody(req))
   const entry = (registry as Record<string, { schema: z.ZodTypeAny }>)[body.key]
@@ -236,6 +307,9 @@ export const PATCH = withError(async (req: Request) => {
     // the AI key (would let an attacker proxy all AI traffic through
     // their own key + harvest block content + prompts).
     'ai_config',
+    // Google Indexing API service-account JSON — credential-class (a
+    // GCP key granting indexing-API write on the operator's property).
+    'seo_indexing_api',
   ])
   if (body.key.startsWith('security_') || REAUTH_KEYS.has(body.key)) {
     await requireFreshReauth(ctx.jti)
@@ -403,6 +477,89 @@ export const PATCH = withError(async (req: Request) => {
       // Anything else (object, number, boolean) is operator error
       // or a malformed client. Fail closed.
       throw new HttpError(400, 'invalid_api_key_value')
+    }
+    valueForValidation = merged
+  }
+
+  // ─── seo_indexing_api: encrypt-on-write credential merge ───
+  // Same discipline as ai_config. The form sends serviceAccountJson as a
+  // PLAINTEXT JSON string (the operator pasted the GCP key file); the
+  // schema expects an EncryptedSecret envelope. We encrypt here.
+  //   '' or undefined → preserve stored envelope + serviceAccountEmail.
+  //   null            → clear stored (operator "Remove key").
+  //   "<json>"        → encrypt with AAD; derive serviceAccountEmail from
+  //                     the JSON's client_email (display-only confirmation).
+  if (body.key === 'seo_indexing_api') {
+    const [existingRows] = (await db.execute(sql`
+      SELECT value FROM settings WHERE \`key\` = 'seo_indexing_api'
+    `)) as unknown as [Array<{ value: unknown }>]
+    const existing: Record<string, unknown> =
+      existingRows[0]
+        ? typeof existingRows[0].value === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(existingRows[0].value as string) as Record<string, unknown>
+              } catch {
+                return {}
+              }
+            })()
+          : ((existingRows[0].value as Record<string, unknown>) ?? {})
+        : {}
+    const incoming =
+      body.value && typeof body.value === 'object' && !Array.isArray(body.value)
+        ? (body.value as Record<string, unknown>)
+        : {}
+    const merged: Record<string, unknown> = { ...incoming }
+    // serviceAccountEmail is SERVER-DERIVED from the pasted JSON's
+    // client_email — NEVER trust the client's value (same discipline as
+    // ai_config stripping client-supplied apiKeyLast4). Drop it up front;
+    // the branches below re-establish it from the stored row or the
+    // freshly-parsed key, so a hand-edited email can't desync from the
+    // credential actually on file.
+    delete merged.serviceAccountEmail
+    const preserveExisting = () => {
+      if (existing.serviceAccountJson !== undefined) {
+        merged.serviceAccountJson = existing.serviceAccountJson
+      } else {
+        delete merged.serviceAccountJson
+      }
+      if (typeof existing.serviceAccountEmail === 'string') {
+        merged.serviceAccountEmail = existing.serviceAccountEmail
+      }
+    }
+    const incomingKey = merged.serviceAccountJson
+    if (incomingKey === undefined || incomingKey === '') {
+      preserveExisting()
+    } else if (incomingKey === null) {
+      // Explicit clear — serviceAccountEmail already stripped above.
+      delete merged.serviceAccountJson
+    } else if (typeof incomingKey === 'string') {
+      const trimmed = incomingKey.trim()
+      if (trimmed.length === 0) {
+        preserveExisting()
+      } else {
+        // Normalise before encrypting: if the paste is valid JSON, minify
+        // it (reformatted/pretty-printed JSON can't then inflate the
+        // ciphertext past the envelope cap) and derive client_email for
+        // the display-only confirmation field. If it isn't valid JSON,
+        // encrypt the raw text — the operator learns it's wrong when they
+        // test indexing, not via a cryptic 400 here.
+        let plaintext = trimmed
+        try {
+          const sa = JSON.parse(trimmed) as Record<string, unknown>
+          if (sa && typeof sa === 'object' && !Array.isArray(sa)) {
+            plaintext = JSON.stringify(sa)
+            if (typeof sa.client_email === 'string' && sa.client_email.length <= 200) {
+              merged.serviceAccountEmail = sa.client_email
+            }
+          }
+        } catch {
+          /* not JSON — encrypt raw, leave serviceAccountEmail unset */
+        }
+        merged.serviceAccountJson = encryptSecret(plaintext, AAD_SEO_INDEXING_API)
+      }
+    } else {
+      throw new HttpError(400, 'invalid_service_account_value')
     }
     valueForValidation = merged
   }
@@ -594,6 +751,7 @@ export const PATCH = withError(async (req: Request) => {
       `)
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'setting',
         resourceId: body.key,
@@ -632,6 +790,7 @@ export const PATCH = withError(async (req: Request) => {
     }
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'update',
       resourceType: 'setting',
       resourceId: body.key,
@@ -680,11 +839,22 @@ export const PATCH = withError(async (req: Request) => {
     }
   }
 
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: {
-      'content-type': 'application/json',
-      'cache-control': 'private, no-store',
+  // Return the AUTHORITATIVE post-write version so the client stays in
+  // sync even on a no-op save. When `changed` is true the stored version
+  // was bumped to body.version + 1; when false (value unchanged) the
+  // optimistic lock above guarantees the stored version still equals
+  // body.version, so we echo it back. Purely additive — existing settings
+  // clients that ignore the field keep their current behavior; SEO clients
+  // adopt this value instead of blindly incrementing, which previously
+  // drifted client/server versions on no-op saves and 409'd the next save.
+  return new Response(
+    JSON.stringify({ ok: true, version: changed ? body.version + 1 : body.version }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'private, no-store',
+      },
     },
-  })
+  )
 })

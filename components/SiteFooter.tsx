@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { ensurePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
 import { getSetting } from '@/lib/cms/getSettings'
+import { CookieReopenLink } from '@/components/consent/CookieReopenLink'
 import { resolveMedia } from '@/lib/cms/resolveMedia'
 import { isLikelyExternal, externalRel } from '@/lib/url/external'
 import { NewsletterForm } from '@/components/leads/NewsletterForm'
@@ -90,7 +91,15 @@ export async function SiteFooter() {
     getSetting('footer'),
     getSetting('site_header'),
     getSetting('mobile_cta'),
+    getSetting('cookie_consent'),
   ])
+  // Cookie-consent reopen link (Feature B) — shown in the legal row when the
+  // banner is enabled + showReopenLink. Degrades to hidden on read failure.
+  let cookieReopen: { label: string } | null = null
+  if (settled[5] && settled[5].status === 'fulfilled') {
+    const cc = settled[5].value
+    if (cc.enabled && cc.showReopenLink) cookieReopen = { label: cc.reopenLabel }
+  }
   const logDegraded = (key: string, err: unknown) => {
     // Scrub the log — mysql2 messages can echo SQL fragments + bound
     // parameter values on certain errno classes. Keep only the
@@ -287,7 +296,7 @@ export async function SiteFooter() {
           <span>
             © {new Date().getFullYear()} {copyrightText}. All rights reserved.
           </span>
-          {legalLinks.length > 0 && (
+          {(legalLinks.length > 0 || cookieReopen) && (
             <nav aria-label="Legal" className="flex flex-wrap items-center gap-4">
               {legalLinks.map((l) => (
                 <Link
@@ -300,6 +309,12 @@ export async function SiteFooter() {
                   {l.text}
                 </Link>
               ))}
+              {cookieReopen && (
+                <CookieReopenLink
+                  label={cookieReopen.label}
+                  className={`${ft.strong} transition-colors ${ft.strongHover}`}
+                />
+              )}
             </nav>
           )}
         </div>

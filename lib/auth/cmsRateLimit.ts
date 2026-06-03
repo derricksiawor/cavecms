@@ -71,6 +71,65 @@ export function checkMutationRate(userId: number): void {
   }
 }
 
+// Per-TOKEN mutation budget — keyed by token id so an automated agent
+// (MCP / script) cannot starve the human operator's per-user bucket. Higher
+// ceiling than the human bucket (300/min) because agents legitimately batch
+// fast; still a hard cap so a runaway client trips at a bounded rate.
+const limitTokenMutations = rateLimit('cms:mutation:token', {
+  limit: 600,
+  windowSec: 60,
+})
+
+export function checkMutationRateForToken(tokenId: number): void {
+  if (!limitTokenMutations(`t${tokenId}`)) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Single dispatcher every CMS mutation route calls. Token requests draw on
+// the per-token bucket; cookie sessions on the per-user bucket. This is the
+// drop-in replacement for `checkMutationRate(ctx.userId)` at mutation sites.
+export function checkCmsMutationRate(ctx: {
+  userId: number
+  viaApiToken: boolean
+  tokenId: number | null
+}): void {
+  if (ctx.viaApiToken && ctx.tokenId !== null) {
+    checkMutationRateForToken(ctx.tokenId)
+  } else {
+    checkMutationRate(ctx.userId)
+  }
+}
+
+// Per-TOKEN upload budget — the upload path is heavier (sharp/disk) so it
+// stays tighter than the mutation bucket, but a token gets its OWN upload
+// budget so an agent's uploads don't starve the minting human's per-user
+// upload bucket (10/min, the tightest CMS bucket).
+const limitTokenUploads = rateLimit('cms:upload:token', {
+  limit: 30,
+  windowSec: 60,
+})
+
+export function checkUploadRateForToken(tokenId: number): void {
+  if (!limitTokenUploads(`t${tokenId}`)) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Dispatcher for the media-upload route: token requests draw on the per-token
+// upload bucket; cookie sessions on the per-user upload bucket.
+export function checkCmsUploadRate(ctx: {
+  userId: number
+  viaApiToken: boolean
+  tokenId: number | null
+}): void {
+  if (ctx.viaApiToken && ctx.tokenId !== null) {
+    checkUploadRateForToken(ctx.tokenId)
+  } else {
+    checkUploadRate(ctx.userId)
+  }
+}
+
 export function checkUploadRate(userId: number): void {
   if (!limitUploads(String(userId))) {
     throw new HttpError(429, 'rate_limited')
@@ -80,6 +139,37 @@ export function checkUploadRate(userId: number): void {
 export function checkReadRate(userId: number): void {
   if (!limitReads(String(userId))) {
     throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Per-TOKEN read budget — keyed by token id so an automated agent (MCP /
+// script) walking pages/themes cannot starve the human operator's per-user
+// read bucket (which the dashboard's lazy-loaded grids draw on). Higher
+// ceiling than the human bucket because agents legitimately batch reads;
+// still a hard cap so a runaway client trips at a bounded rate.
+const limitTokenReads = rateLimit('cms:read:token', {
+  limit: 240,
+  windowSec: 60,
+})
+
+export function checkReadRateForToken(tokenId: number): void {
+  if (!limitTokenReads(`t${tokenId}`)) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Dispatcher every CMS read site calls: token requests draw on the per-token
+// read bucket; cookie sessions on the per-user read bucket. Drop-in for
+// `checkReadRate(ctx.userId)` at read sites.
+export function checkCmsReadRate(ctx: {
+  userId: number
+  viaApiToken: boolean
+  tokenId: number | null
+}): void {
+  if (ctx.viaApiToken && ctx.tokenId !== null) {
+    checkReadRateForToken(ctx.tokenId)
+  } else {
+    checkReadRate(ctx.userId)
   }
 }
 
@@ -100,4 +190,17 @@ export function checkAiVerifyRate(userId: number): void {
  *  per-minute budget. */
 export function checkAiChatRate(userId: number): boolean {
   return limitAiChat(String(userId))
+}
+
+// Status-poll bucket (ported from main's backup/update progress polling). A
+// generous ceiling so a 1/s poll never trips, while still capping a stolen
+// cookie on an endpoint that leaks nothing.
+const limitStatusPoll = rateLimit('cms:status-poll:user', {
+  limit: 240,
+  windowSec: 60,
+})
+export function checkStatusPollRate(userId: number): void {
+  if (!limitStatusPoll(String(userId))) {
+    throw new HttpError(429, 'rate_limited')
+  }
 }

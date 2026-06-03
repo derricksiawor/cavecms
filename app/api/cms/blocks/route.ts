@@ -4,18 +4,17 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { blockSchemas, FIXED_BLOCK_KEYS_PER_PAGE } from '@/lib/cms/block-registry'
 import { AUDIT_DIFF_CAP } from '@/lib/cms/saveBlock'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
+import { ensureDraftBaseline, recordDraftRevision } from '@/lib/cms/draft'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
-import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
-import { tagsForBlockSave } from '@/lib/cache/tags'
 import {
   ColumnMetaSchema,
   MAX_SECTION_COLUMNS,
@@ -158,7 +157,8 @@ export async function respaceParent(
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'blocks', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = PostBody.parse(await readJsonBody(req))
 
@@ -496,6 +496,12 @@ export const POST = withError(async (req) => {
       }
     }
 
+    // 4b. Capture the pre-insert draft baseline for undo. Idempotent — a
+    //     no-op once a baseline (or any revision) already exists for the
+    //     page. MUST run BEFORE any INSERT so the snapshot reflects the
+    //     draft state the operator can revert TO.
+    await ensureDraftBaseline(tx, body.pageId, ctx.userId)
+
     // 5. INSERT. block_key stays NULL (freeform; cannot be a fixed slot
     //    — POST is the only entry point and fixed slots are seeded at
     //    page-template install). For containers, block_type is the
@@ -514,9 +520,13 @@ export const POST = withError(async (req) => {
     // caller provided a non-empty WidgetMetaSchema payload.
     const insertMetaJson =
       body.kind === 'widget' ? widgetMetaJson : containerMetaJson
+    // Draft insert: the row is created with draft_state='added' so the
+    // editor's draft hydrate INCLUDES it while the public hydrate EXCLUDES
+    // it. The live columns carry the content; Publish materialises the row
+    // into the public render (flipping draft_state back to 'live').
     const [insertResultArr] = (await tx.execute(sql`
       INSERT INTO content_blocks
-        (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by)
+        (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by, draft_state)
       VALUES (
         ${body.pageId},
         ${parentId},
@@ -526,7 +536,8 @@ export const POST = withError(async (req) => {
         ${insertData},
         ${insertMetaJson},
         0,
-        ${ctx.userId}
+        ${ctx.userId},
+        'added'
       )
     `)) as unknown as [InsertResult]
     const blockId = Number(insertResultArr.insertId)
@@ -558,7 +569,7 @@ export const POST = withError(async (req) => {
         const colPos = (i + 1) * 1000
         const [colInsertArr] = (await tx.execute(sql`
           INSERT INTO content_blocks
-            (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by)
+            (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by, draft_state)
           VALUES (
             ${body.pageId},
             ${blockId},
@@ -568,7 +579,8 @@ export const POST = withError(async (req) => {
             '{}',
             ${emptyColumnMeta},
             0,
-            ${ctx.userId}
+            ${ctx.userId},
+            'added'
           )
         `)) as unknown as [InsertResult]
         childColumnIds.push(Number(colInsertArr.insertId))
@@ -602,6 +614,7 @@ export const POST = withError(async (req) => {
         : createPayload
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'create',
       resourceType: 'content_block',
       resourceId: String(blockId),
@@ -611,20 +624,31 @@ export const POST = withError(async (req) => {
       requestId,
     })
 
-    // 8. Durable revalidate intent. Containers AND widgets both
-    //    invalidate the same page tag — sections/columns rendering
-    //    affects every block on the page. block_type passed to
-    //    tagsForBlockSave only matters for the cross-cutting
-    //    `featured_projects` extra tag (containers never trigger it).
-    const tagBlockType =
-      body.kind === 'widget' ? widgetBlockType! : undefined
-    const tags = tagsForBlockSave(pageSlug, tagBlockType).tags
-    const queueRowId = await enqueueRevalidate(tx, tags)
-    return { blockId, queueRowId, tags, childColumnIds }
-  })
+    // 8. Bump the page DRAFT cursor (not the published pages.version) and
+    //    flag has_draft. A draft insert does NOT change the public render,
+    //    so there is NO revalidate here — Publish materialises the row and
+    //    handles cache invalidation. The draft cursor advance lets a second
+    //    editor tab detect "draft changed elsewhere".
+    await tx.execute(sql`
+      UPDATE pages
+      SET draft_version = draft_version + 1,
+          has_draft = 1,
+          draft_updated_at = NOW(3),
+          draft_updated_by = ${ctx.userId}
+      WHERE id = ${body.pageId}
+    `)
 
-  queueMicrotask(() => {
-    void drainRevalidate(txResult.queueRowId, txResult.tags)
+    // 9. Record the post-insert draft state as a new undo revision. Runs
+    //    AFTER the draft cursor bump so the snapshot includes the freshly
+    //    inserted row(s). Label uses the widget block_type (or the
+    //    container kind) — the same value persisted as the row's block_type.
+    await recordDraftRevision(
+      tx,
+      body.pageId,
+      ctx.userId,
+      `Insert ${insertBlockType}`,
+    )
+    return { blockId, childColumnIds }
   })
 
   // childColumnIds populated only when kind='section' + withColumns was

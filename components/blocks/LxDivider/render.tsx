@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 import { MotionTarget } from '@/components/motion/MotionTarget'
+import { IconByName } from '@/components/project-sections/_shared/IconByName'
 import type { BlockData } from '@/lib/cms/block-registry'
 import {
   isColorToken,
@@ -68,7 +69,49 @@ export function LxDivider({
   const customStyle = !isToken ? { borderColor: resolveColorValue(tone) } : undefined
   const customDiamondStyle = !isToken ? { backgroundColor: resolveColorValue(tone) } : undefined
 
-  const composed = data.style === 'fleuron' ? (
+  // Exact overrides (E10): width % + thickness px override the presets.
+  const resolved = resolveColorValue(tone) ?? 'currentColor'
+  const widthStyle = data.widthPercent ? { width: `${data.widthPercent}%` } : undefined
+  const thickStyle = data.thicknessPx ? { borderTopWidth: `${data.thicknessPx}px` } : undefined
+  const hasLabel = !!(data.label || data.labelIcon)
+  // A rule segment for the label divider — flanks the centred text/icon.
+  const ruleSeg = (
+    <div
+      className={clsx(
+        'flex-1',
+        STYLE_CLASS[data.style],
+        data.thicknessPx ? 'border-t' : THICKNESS_CLASS[data.thickness],
+      )}
+      style={{ borderTopColor: resolved, ...thickStyle }}
+    />
+  )
+
+  const composed = hasLabel ? (
+    <div
+      className={clsx(
+        'flex items-center justify-center gap-4 py-1',
+        !data.widthPercent && WIDTH_CLASS[data.width],
+        ALIGN_CLASS[data.alignment],
+        outerClass,
+      )}
+      style={widthStyle}
+      role="separator"
+      aria-orientation="horizontal"
+    >
+      {ruleSeg}
+      <span
+        className="shrink-0 font-sans text-xs font-semibold uppercase tracking-eyebrow"
+        style={{ color: resolved }}
+      >
+        {data.labelIcon ? (
+          <IconByName name={data.labelIcon} size={18} strokeWidth={1.75} aria-hidden="true" />
+        ) : (
+          data.label
+        )}
+      </span>
+      {ruleSeg}
+    </div>
+  ) : data.style === 'fleuron' ? (
     <div
       className={clsx(
         'flex items-center justify-center gap-4 py-2',
@@ -102,14 +145,14 @@ export function LxDivider({
     // `border-0` could win, rendering an invisible rule.
     <hr
       className={clsx(
-        WIDTH_CLASS[data.width],
+        !data.widthPercent && WIDTH_CLASS[data.width],
         ALIGN_CLASS[data.alignment],
         THICKNESS_CLASS[data.thickness],
         STYLE_CLASS[data.style],
         borderClass,
         outerClass,
       )}
-      style={customStyle}
+      style={{ ...(customStyle ?? {}), ...(widthStyle ?? {}), ...(thickStyle ?? {}) }}
     />
   )
 

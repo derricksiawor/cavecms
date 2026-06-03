@@ -1136,7 +1136,7 @@ export const MENU_ITEMS_BY_KIND: Record<BlockKind, MenuItem[]> = {
         const ok = await ctx.confirmDelete({
           title: 'Remove this section?',
           description:
-            'The section, every column, and every widget inside will be hidden from the public site right away. You can restore from the admin trash within 30 days.',
+            'The section, every column, and every widget inside stay on the live site until you publish. Removing it here adds the change to your draft — undo or discard before publishing to keep it.',
           confirmLabel: 'Remove',
         })
         if (!ok) return
@@ -1221,7 +1221,7 @@ export const MENU_ITEMS_BY_KIND: Record<BlockKind, MenuItem[]> = {
         const ok = await ctx.confirmDelete({
           title: 'Remove this column?',
           description:
-            "The column and every widget inside will be hidden from the public site right away. The section's grid will re-flow to fit the remaining columns.",
+            "The column and every widget inside stay on the live site until you publish. Removing it here adds the change to your draft; the section's grid re-flows to fit the remaining columns. Undo or discard before publishing to keep it.",
           confirmLabel: 'Remove',
         })
         if (!ok) return
@@ -1332,7 +1332,7 @@ export const MENU_ITEMS_BY_KIND: Record<BlockKind, MenuItem[]> = {
         const ok = await ctx.confirmDelete({
           title: 'Remove this block?',
           description:
-            "It'll be hidden from the public site right away. You can restore from the admin trash within 30 days.",
+            "It stays on the live site until you publish. Removing it here adds the change to your draft — undo or discard before publishing to keep it.",
           confirmLabel: 'Remove',
         })
         if (!ok) return

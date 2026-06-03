@@ -398,10 +398,22 @@
     --brand-bone:          #E8E1D4;  /* derived divider; injection overrides when light surface changes */
     --brand-base-bg:       #F5F1EA;  /* light mode default */
     --brand-base-fg:       #050505;
+    /* CONTRAST-ANCHORED ink poles. `ivory` (the LIGHT pole — light text on
+       dark surfaces) and `obsidian` (the DARK pole — dark text / dark surfaces)
+       must NEVER follow a re-skinned surface into the wrong end of the scale.
+       A dark-site operator legitimately sets surfaceLight to a DARK card colour
+       (e.g. #0A0A0A); without anchoring, `text-ivory` becomes dark → invisible
+       on the dark page (the systemic "text-on-dark" bug). themeCss computes
+       these so ink-light is always readable-light and ink-dark always
+       readable-dark, no matter how the surfaces are skinned. */
+    --brand-ink-light:     #F5F1EA;
+    --brand-ink-dark:      #050505;
 
-    /* Global --color-* aliases for var(--color-*) inline styles. */
-    --color-obsidian:     var(--brand-surface-dark);
-    --color-ivory:        var(--brand-surface-light);
+    /* Global --color-* aliases for var(--color-*) inline styles. ivory/obsidian
+       route through the ANCHORED ink poles (not the raw surfaces) so light text
+       stays light + dark text stays dark on any palette. */
+    --color-obsidian:     var(--brand-ink-dark);
+    --color-ivory:        var(--brand-ink-light);
     --color-champagne:    var(--brand-accent);
     --color-warm-stone:   var(--brand-secondary);
     --color-antique-gold: var(--brand-antique-gold);
@@ -415,8 +427,14 @@
      utilities (Tailwind would DROP a var() value in a plain @theme),
      so bg-champagne → var(--brand-accent) etc. and Settings → Theme
      re-skins the whole site at runtime. ──────────────────────────── */
-  --color-obsidian:     var(--brand-surface-dark);
-  --color-ivory:        var(--brand-surface-light);
+  /* ivory/obsidian route through the CONTRAST-ANCHORED ink poles (see the
+     @layer base note) so light text stays light + dark surfaces stay dark on
+     ANY palette — a dark-site operator can re-skin surfaceLight to a dark card
+     colour without turning `text-ivory` invisible. ink-light == surfaceLight
+     on a light palette (identical re-skin), and a guaranteed light when the
+     light surface is itself dark. */
+  --color-obsidian:     var(--brand-ink-dark);
+  --color-ivory:        var(--brand-ink-light);
   --color-champagne:    var(--brand-accent);
   --color-warm-stone:   var(--brand-secondary);
   --color-antique-gold: var(--brand-antique-gold);
@@ -1051,3 +1069,69 @@
     --tw-prose-td-borders: color-mix(in srgb, currentColor 12%, transparent);
   }
 }
+
+/* ─── Operator hover-state overrides (E12) ──────────────────────────────
+   Applied to lx_action buttons (and cards) that carry hover settings. The
+   CSS custom properties are set INLINE from block data; this rule is
+   UNLAYERED so it wins over Tailwind's layered hover:* utilities. Empty
+   var() fallbacks mean an unset property is simply ignored (no-op), so an
+   operator can set only scale, only colour, etc. */
+.cms-hover {
+  transition-property: background-color, color, transform, box-shadow, border-color;
+  transition-duration: var(--cms-hover-dur, 200ms);
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.cms-hover:hover {
+  background-color: var(--cms-hover-bg, );
+  color: var(--cms-hover-fg, );
+  transform: translateY(var(--cms-hover-lift, 0px)) scale(var(--cms-hover-scale, 1));
+  box-shadow: var(--cms-hover-shadow, );
+  border-color: var(--cms-hover-border, );
+}
+
+/* ─── Ken Burns ambient motion + slide drift (Feature A) ─────────────────
+   Slow continuous camera move on a section's background photo / each slide.
+   Applied to the inner <img> of SectionBackdrop via an inline `animation`
+   shorthand referencing these keyframes (the keyframe NAME is chosen from a
+   fixed allow-list in the renderer, never operator free-text). The outer
+   layer owns the cross-fade + counter-zoom; this inner drift COMPOSES on top
+   (parent transform × child transform). Disabled wholesale under
+   prefers-reduced-motion. */
+@keyframes cms-kb-zoom-in {
+  from { transform: scale(1); }
+  to { transform: scale(1.12); }
+}
+@keyframes cms-kb-zoom-out {
+  from { transform: scale(1.12); }
+  to { transform: scale(1); }
+}
+@keyframes cms-kb-pan-left {
+  from { transform: scale(1.12) translate3d(2%, 0, 0); }
+  to { transform: scale(1.12) translate3d(-2%, 0, 0); }
+}
+@keyframes cms-kb-pan-right {
+  from { transform: scale(1.12) translate3d(-2%, 0, 0); }
+  to { transform: scale(1.12) translate3d(2%, 0, 0); }
+}
+@keyframes cms-kb-zoom-pan {
+  from { transform: scale(1.04) translate3d(1.5%, 1%, 0); }
+  to { transform: scale(1.16) translate3d(-1.5%, -1%, 0); }
+}
+.cms-kb-img {
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cms-kb-img { animation: none !important; transform: none !important; }
+  /* SectionBackdrop layers also disable their JS advance under reduced-motion;
+     this is the CSS belt for the inner drift. */
+}
+
+/* Fixed-duration Ken Burns utilities for widget images (lx_figure). The
+   SectionBackdrop sets its own inline animation timed to the slide interval;
+   widgets use these ready-made 16s drifts. All gated by .cms-kb-img under
+   prefers-reduced-motion above. */
+.cms-kb-anim-zoom-in { animation: cms-kb-zoom-in 16s ease-in-out infinite alternate; }
+.cms-kb-anim-zoom-out { animation: cms-kb-zoom-out 16s ease-in-out infinite alternate; }
+.cms-kb-anim-pan-left { animation: cms-kb-pan-left 18s ease-in-out infinite alternate; }
+.cms-kb-anim-pan-right { animation: cms-kb-pan-right 18s ease-in-out infinite alternate; }
+.cms-kb-anim-zoom-pan { animation: cms-kb-zoom-pan 20s ease-in-out infinite alternate; }

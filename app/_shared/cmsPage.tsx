@@ -20,6 +20,9 @@ import { resolveSegments } from '@/lib/blog/resolveSegments'
 // one line — not a tree-scanning expression in three places.
 const FORM_BLOCK_TYPES = new Set<string>([
   'contact_form',
+  // Composable form (lx_form / E21) — submits to /api/leads/form and needs
+  // the public preCsrf nonce minted page-level, same as contact_form.
+  'lx_form',
   // Project lead forms — both submit to /api/leads/* and need the
   // public preCsrf nonce minted page-level. Present on migrated
   // project pages (app/projects/[slug]); harmless on any other page.
@@ -174,7 +177,12 @@ export async function renderCmsPage(
   // Thread the loop cursor so a loop-mode lx_posts block on this page (the
   // /blog index) gets the slice for the visitor's ?page=. Cheap for every
   // other page — hydrate only runs the loop query when a loop block exists.
-  const hydrated = await hydratePage(pageId, { loopPage: parseLoopPage(opts?.search) })
+  // Editor renders the DRAFT view (operator previews pending edits); public
+  // renders the PUBLISHED view. Behaviour-neutral in Phase 0 (draft==published).
+  const hydrated = await hydratePage(pageId, {
+    loopPage: parseLoopPage(opts?.search),
+    draft: editable,
+  })
   if (!hydrated) return null
 
   // Organization JSON-LD is emitted by app/layout.tsx for every
