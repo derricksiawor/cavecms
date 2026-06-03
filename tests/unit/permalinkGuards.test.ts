@@ -224,6 +224,67 @@ describe('guardPermalink (cross-collision + login-path)', () => {
     // Only the sibling SELECT ran.
     expect(tx.execute).toHaveBeenCalledTimes(1)
   })
+
+  // ─── BUG-2: reverting to the segment's OWN canonical default is ALLOWED ──────
+  // The blog/projects SYSTEM PAGE legitimately has slug='blog'/'projects' and
+  // coexists with the default segment by design (the segment rewrite is a no-op
+  // on the default word, so that page is never shadowed). Reverting a custom
+  // segment back to its canonical default must therefore SKIP the page/post
+  // shadow probes — even though those system pages exist — or the operator is
+  // permanently locked out of the default.
+  it('ALLOWS reverting permalink_blog to the canonical "blog" even though the blog system page exists', async () => {
+    // Sibling (projects) differs. The page/post shadow rows are queued as HITS
+    // to prove the guard NEVER reaches them (the canonical exemption returns
+    // before those SELECTs).
+    const tx = makeTx([
+      [[{ value: JSON.stringify({ segment: 'work' }) }]], // sibling differs
+      [[{ '1': 1 }]], // page-shadow WOULD hit (blog system page) — must not be read
+      [[{ '1': 1 }]], // post-shadow WOULD hit — must not be read
+    ])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'blog', 'kqt9ji3jrhz7', 'news'),
+    ).resolves.toBeUndefined()
+    // Only the sibling SELECT ran — the canonical exemption returned before the
+    // page/post shadow probes.
+    expect(tx.execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('ALLOWS reverting permalink_projects to the canonical "projects" even though the projects system page exists', async () => {
+    const tx = makeTx([
+      [[{ value: JSON.stringify({ segment: 'blog' }) }]], // sibling (blog) differs
+      [[{ '1': 1 }]], // page-shadow WOULD hit — must not be read
+      [[{ '1': 1 }]], // post-shadow WOULD hit — must not be read
+    ])
+    await expect(
+      guardPermalink(tx as never, 'permalink_projects', 'projects', 'kqt9ji3jrhz7', 'work'),
+    ).resolves.toBeUndefined()
+    expect(tx.execute).toHaveBeenCalledTimes(1)
+  })
+
+  // The exemption is SCOPED to the canonical word — a NON-canonical custom
+  // segment that shadows a real page/post is STILL rejected.
+  it('STILL rejects a non-canonical segment that shadows a real page (exemption does not over-apply)', async () => {
+    const tx = makeTx([
+      [[{ value: JSON.stringify({ segment: 'work' }) }]], // sibling differs
+      [[{ '1': 1 }]], // page-shadow hit on the custom 'news' page
+      [[]], // post-shadow miss
+    ])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'news', 'kqt9ji3jrhz7', 'blog'),
+    ).rejects.toBeInstanceOf(SecurityGuardFailure)
+  })
+
+  // The canonical exemption must NOT bypass the SIBLING-collision check: if the
+  // projects segment were (somehow) 'blog', reverting blog→'blog' still collides
+  // at the sibling check, which runs BEFORE the exemption.
+  it('STILL rejects reverting to "blog" when the sibling projects segment is also "blog" (sibling check precedes exemption)', async () => {
+    const tx = makeTx([[[{ value: JSON.stringify({ segment: 'blog' }) }]]])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'blog', 'kqt9ji3jrhz7', 'news'),
+    ).rejects.toBeInstanceOf(SecurityGuardFailure)
+    // Sibling SELECT ran and threw; exemption never reached.
+    expect(tx.execute).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('registerSegmentChangeRedirects', () => {

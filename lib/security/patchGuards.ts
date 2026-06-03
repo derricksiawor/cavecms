@@ -396,6 +396,19 @@ export async function guardPermalink(
   // Reject so the operator picks a non-shadowing base. Same parameterized,
   // same-TX consistent-read pattern as the sibling-segment SELECT above — `seg`
   // is bound, never interpolated. Both probes are LIMIT 1 existence checks.
+  //
+  // EXEMPTION — the segment's OWN canonical default word ('blog' for
+  // permalink_blog, 'projects' for permalink_projects). The blog/projects SYSTEM
+  // PAGE legitimately has slug='blog'/'projects' and COEXISTS with the default
+  // segment by design — the segment rewrite is a NO-OP on the default word (the
+  // file route serves /blog directly), so that system page is NEVER shadowed.
+  // Without this exemption, reverting a custom segment ('news') back to the
+  // default ('blog') would be wrongly rejected as shadowing its own system page,
+  // permanently locking the operator out of the default. The shadow check stays
+  // active for every OTHER value (a custom 'news' that collides with a real
+  // 'news' page is still correctly rejected).
+  const ownDefault = key === 'permalink_blog' ? 'blog' : 'projects'
+  if (seg === ownDefault) return
   const [pageHit] = (await tx.execute(sql`
     SELECT 1 FROM pages
     WHERE slug = ${seg} AND deleted_at IS NULL AND kind = 'page'

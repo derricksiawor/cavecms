@@ -301,11 +301,15 @@ export default async function BlogPost({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(breadcrumb) }}
       />
+      {/* h1 inherits the body foreground (--brand-base-fg) so the title stays
+          readable on BOTH a light and a dark theme — no fixed dark token. */}
       <h1 className="text-3xl font-semibold tracking-tight">{post.title}</h1>
       {/* Byline meta row: published date · author · reading time. Reading time
           gated on blog_settings.showReadingTime (consistent with the index card)
-          and rendered with a middot separator only when shown. */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs uppercase tracking-wide text-copper-600">
+          and rendered with a middot separator only when shown. FIX 3: the byline
+          uses the THEME accent (champagne → --brand-accent) instead of fixed
+          copper so it flips with the operator's theme and reads on dark. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs uppercase tracking-wide text-champagne">
         <time dateTime={publishedAt.toISOString()}>
           {publishedAt.toISOString().slice(0, 10)}
         </time>
@@ -455,7 +459,7 @@ export default async function BlogPost({
       const html = await renderMarkdown(post.body_md)
       bodyNode = (
         <article
-          className="prose mt-8"
+          className="prose prose-theme mt-8"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       )
@@ -464,7 +468,7 @@ export default async function BlogPost({
     const html = await renderMarkdown(post.body_md)
     bodyNode = (
       <article
-        className="prose mt-8"
+        className="prose prose-theme mt-8"
         // body_md is server-rendered via the rehype-sanitize pipeline in
         // lib/cms/markdown.ts. The sanitizer is the only trust boundary;
         // the editor surface posts plain markdown.

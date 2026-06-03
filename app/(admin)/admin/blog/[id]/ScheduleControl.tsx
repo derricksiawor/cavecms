@@ -165,14 +165,14 @@ export function ScheduleControl({
               disabled={disabled}
               onClick={() => pickMode(s.value)}
               className={[
-                'inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-semibold tracking-wide transition-all duration-quick disabled:opacity-50',
+                'inline-flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-1.5 py-2 text-[11px] font-semibold tracking-wide transition-all duration-quick disabled:opacity-50',
                 active
                   ? 'bg-copper-500 text-cream-50 shadow-[0_6px_16px_-8px_rgba(184,115,51,0.7)]'
                   : 'text-near-black/70 hover:bg-cream-50 hover:text-copper-700',
               ].join(' ')}
             >
-              <Icon size={14} strokeWidth={2.2} aria-hidden />
-              <span className="hidden sm:inline">{s.label}</span>
+              <Icon size={14} strokeWidth={2.2} className="shrink-0" aria-hidden />
+              <span className="hidden whitespace-nowrap sm:inline">{s.label}</span>
             </button>
           )
         })}

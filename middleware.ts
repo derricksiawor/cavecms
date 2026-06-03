@@ -498,6 +498,21 @@ const CMS_RENDER_PREFIX = '/cms-render'
 // note on refuseInternalPageRoute for why this exists.
 const CMS_RENDER_MARKER = 'x-cavecms-render'
 
+// ── blog-system worktree: permalink-segment rewrite re-entry marker ──
+// Set on the internal request when the permalink-segment rewrite maps an
+// EXTERNAL path under a configured segment (e.g. /news) to its CANONICAL
+// internal blog/projects route (e.g. /blog). Next 15.5 standalone re-runs
+// middleware on the rewrite TARGET (the matcher matches /blog too), so without
+// a re-entry signal the redirect-matcher block (5b) would catch the now-live
+// `/blog → /news` auto-registered rule and 301 the internal target back to
+// /news → infinite loop. Mirrors CMS_RENDER_MARKER exactly: stripped from every
+// incoming request below so an external client can't spoof it, set ONLY by our
+// own rewrite, and read on re-entry to SKIP the redirect-matcher + segment-
+// rewrite + reserved-slug logic so the internal target is served directly. The
+// EXTERNAL old `/blog` URL (no marker) STILL hits block 5b and 301s to /news for
+// SEO — only our own internal re-entry is exempted.
+const SEGMENT_REWRITE_MARKER = 'x-cavecms-segment'
+
 // Refuse DIRECT external hits to `/cms-render/*` so the internal
 // render route can't be probed at a non-canonical URL. CRITICAL
 // subtlety (cost us a multi-release chase): in Next.js 15.5 standalone,
@@ -557,6 +572,17 @@ export async function middleware(
   event: NextFetchEvent,
 ): Promise<NextResponse> {
   const pathname = req.nextUrl.pathname
+
+  // ── blog-system worktree: permalink-segment rewrite re-entry detection ──
+  // True when THIS invocation is the middleware re-running on our own internal
+  // segment-rewrite target (e.g. /blog after /news was rewritten). The marker
+  // is set ONLY by the rewrite below and stripped from every other incoming
+  // request, so its presence on `req.headers` is a trustworthy "this is the
+  // internal target, do not redirect/re-rewrite it" signal. When true we skip
+  // the redirect-matcher (5b) — which would otherwise catch the auto-registered
+  // `/blog → /news` rule and loop — and the segment-rewrite + reserved-slug
+  // logic, letting app/blog|projects/* serve the internal target directly.
+  const segmentReentry = req.headers.get(SEGMENT_REWRITE_MARKER) === '1'
 
   // Loopback security-config endpoint: bypass everything else so
   // the middleware doesn't fetch itself in a recursive loop. Auth on
@@ -710,7 +736,12 @@ export async function middleware(
   //     so a 503 still wins, before the CMS rewrite so /old.html etc.
   //     redirect even when they'd otherwise 404. Skips admin/api/internal/
   //     render/static + non-GET. Cached ruleset, fail-open on feed error.
-  if (redirectMatchEligible(pathname, req.method)) {
+  //     SKIPPED on a segment-rewrite re-entry: the internal /blog|/projects
+  //     target carries SEGMENT_REWRITE_MARKER and must NOT be redirect-matched
+  //     — the auto-registered `/blog → /news` rule would otherwise 301 it back
+  //     to /news (infinite loop). The EXTERNAL old /blog URL (no marker) still
+  //     reaches this block and 301s to /news for SEO.
+  if (!segmentReentry && redirectMatchEligible(pathname, req.method)) {
     const matcher = await getRedirectMatcher()
     if (matcher) {
       const hit = matchRedirect(matcher, pathname, req.nextUrl.search)
@@ -769,9 +800,15 @@ export async function middleware(
   const reqHeaders = new Headers(req.headers)
   reqHeaders.set('x-csp-nonce', nonce)
   reqHeaders.set('x-pathname', pathname)
-  // Strip any client-supplied marker so an external request can't
-  // pre-set it; only the rewrite below is allowed to add it.
+  // Strip any client-supplied markers so an external request can't pre-set
+  // them; only the rewrite below is allowed to add them. (The segmentReentry
+  // flag above was already read from the ORIGINAL req.headers, before this
+  // copy is mutated, so stripping here doesn't affect re-entry detection — it
+  // only ensures the re-written request we forward carries a marker iff WE set
+  // it, and a spoofed external request never reaches the served target as if
+  // it were an internal re-entry.)
   reqHeaders.delete(CMS_RENDER_MARKER)
+  reqHeaders.delete(SEGMENT_REWRITE_MARKER)
 
   // ── blog-system worktree (Phase 5): permalink segment rewrite ──────────────
   // Resolve the configured blog/projects segments (cfg-backed via the cached
@@ -804,8 +841,14 @@ export async function middleware(
   // canonical /blog/<slug> (which resolves by slug). For the pure default case
   // (default segments + postname structure) BOTH conditions are false, so the
   // rewrite is never invoked and behaviour stays byte-identical to today.
-  const segmentRewriteTarget =
-    extraReservedLower.size > 0 || blogStructure === 'year-month-postname'
+  // On a segment-rewrite re-entry (the internal /blog|/projects target carrying
+  // SEGMENT_REWRITE_MARKER) NEVER re-run the rewrite — the pure function already
+  // returns null for its own canonical target, but short-circuiting here makes
+  // the loop-safety explicit and skips the reserved-slug pass below too, so the
+  // internal target is served untouched.
+  const segmentRewriteTarget: string | null =
+    !segmentReentry &&
+    (extraReservedLower.size > 0 || blogStructure === 'year-month-postname')
       ? rewriteConfiguredSegment({
           pathname: decodedForSegment,
           blogSegment: blogSeg,
@@ -821,9 +864,10 @@ export async function middleware(
   // A permalink segment rewrite (when present) wins over the generic CMS
   // rewrite — it targets a canonical internal route, NOT /cms-render, so it
   // does NOT set the CMS_RENDER_MARKER.
-  const cmsRenderTarget = segmentRewriteTarget
-    ? null
-    : maybeRewriteToPageRoute(pathname, loginPathLower, extraReservedLower)
+  const cmsRenderTarget =
+    segmentRewriteTarget || segmentReentry
+      ? null
+      : maybeRewriteToPageRoute(pathname, loginPathLower, extraReservedLower)
   const rewriteTarget = segmentRewriteTarget ?? cmsRenderTarget
   let res: NextResponse
   if (rewriteTarget) {
@@ -872,12 +916,18 @@ export async function middleware(
     // marker the guard would 404 our own rewrite — the empty-body 404
     // that broke every CMS page.
     //
-    // blog-system worktree (Phase 5): the marker is ONLY for /cms-render/*
-    // targets. A permalink segment rewrite (cmsRenderTarget === null) targets a
-    // canonical internal blog/projects route that the matcher re-runs harmlessly
-    // (those file routes aren't gated by refuseInternalPageRoute), so it must NOT
-    // carry the marker.
+    // blog-system worktree: the CMS_RENDER_MARKER is ONLY for /cms-render/*
+    // targets (refuseInternalPageRoute re-entry guard). A permalink segment
+    // rewrite targets a canonical internal blog/projects route that the matcher
+    // RE-RUNS — and that re-run would hit the redirect-matcher (5b), catch the
+    // auto-registered `/<old> → /<new>` rule and 301 the internal target back to
+    // the external segment (infinite loop). So the segment rewrite carries its
+    // OWN marker (SEGMENT_REWRITE_MARKER); on re-entry `segmentReentry` is true
+    // and blocks 5b + the segment/CMS rewrites are skipped, serving the internal
+    // target directly. The two markers are mutually exclusive (a rewrite is
+    // EITHER a /cms-render target OR a segment target, never both).
     if (cmsRenderTarget) reqHeaders.set(CMS_RENDER_MARKER, '1')
+    else if (segmentRewriteTarget) reqHeaders.set(SEGMENT_REWRITE_MARKER, '1')
     res = NextResponse.rewrite(url, { request: { headers: reqHeaders } })
   } else {
     res = NextResponse.next({ request: { headers: reqHeaders } })

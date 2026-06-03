@@ -29,11 +29,16 @@ export function TaxonomyPills({
   if (categories.length === 0 && tags.length === 0) return null
   return (
     <div className={['flex flex-wrap items-center gap-2', className ?? ''].join(' ')}>
+      {/* FIX 3 — theme-aware pills (these sit on the page background, which
+          flips with the operator's theme). Categories tint from the THEME accent
+          (champagne → --brand-accent) with deeper-gold text (antique-gold) for
+          contrast on a light surface; both flip on dark. Tags stay warm-stone
+          (already theme-aware → --brand-secondary). No fixed copper. */}
       {categories.map((c) => (
         <a
           key={`c-${c.slug}`}
           href={categoryUrl(c.slug, 1, segments)}
-          className="inline-flex w-fit items-center rounded-full bg-copper-500/12 px-3.5 py-1.5 text-xs font-semibold text-copper-700 ring-1 ring-copper-400/30 transition-colors hover:bg-copper-500/20"
+          className="inline-flex w-fit items-center rounded-full bg-champagne/15 px-3.5 py-1.5 text-xs font-semibold text-antique-gold ring-1 ring-champagne/40 transition-colors hover:bg-champagne/25"
         >
           {c.name}
         </a>
@@ -42,7 +47,7 @@ export function TaxonomyPills({
         <a
           key={`t-${t.slug}`}
           href={tagUrl(t.slug, 1, segments)}
-          className="inline-flex w-fit items-center rounded-full border border-warm-stone/30 px-3.5 py-1.5 text-xs font-medium text-warm-stone transition-colors hover:border-copper-400 hover:text-copper-700"
+          className="inline-flex w-fit items-center rounded-full border border-warm-stone/30 px-3.5 py-1.5 text-xs font-medium text-warm-stone transition-colors hover:border-champagne/50 hover:text-antique-gold"
         >
           #{t.name}
         </a>

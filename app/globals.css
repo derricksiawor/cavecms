@@ -1022,4 +1022,32 @@
     font-size: 1.2em;
     letter-spacing: 0.6em;
   }
+
+  /* Theme-aware prose (FIX 3) — applied to the markdown-FALLBACK post body
+     (app/blog/[slug] renders un-migrated posts via the @tailwindcss/typography
+     `prose` plugin). The plugin hard-codes its colours to fixed gray-* values
+     (--tw-prose-body: gray-700, etc.), which are INVISIBLE on a dark theme.
+     This override re-points the visible-text prose vars at the inherited body
+     foreground (--brand-base-fg via currentColor) + the theme accent, so the
+     fallback body flips with the operator's theme exactly like the primary
+     .cms-richtext block-tree body does. Quotes/bullets/hr derive from
+     currentColor at reduced alpha; links + inline code use the theme accent. */
+  .prose-theme {
+    --tw-prose-body: currentColor;
+    --tw-prose-headings: currentColor;
+    --tw-prose-lead: currentColor;
+    --tw-prose-bold: currentColor;
+    --tw-prose-counters: color-mix(in srgb, currentColor 70%, transparent);
+    --tw-prose-bullets: color-mix(in srgb, currentColor 45%, transparent);
+    --tw-prose-hr: color-mix(in srgb, currentColor 18%, transparent);
+    --tw-prose-quotes: currentColor;
+    --tw-prose-quote-borders: color-mix(in srgb, currentColor 18%, transparent);
+    --tw-prose-captions: var(--color-warm-stone);
+    --tw-prose-links: var(--color-champagne);
+    --tw-prose-code: currentColor;
+    --tw-prose-pre-code: #dbd7ca;
+    --tw-prose-pre-bg: #121212;
+    --tw-prose-th-borders: color-mix(in srgb, currentColor 22%, transparent);
+    --tw-prose-td-borders: color-mix(in srgb, currentColor 12%, transparent);
+  }
 }

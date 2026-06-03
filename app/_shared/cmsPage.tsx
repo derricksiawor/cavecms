@@ -303,11 +303,17 @@ export async function renderCmsBlogArchive(
       {/* Archive header — breadcrumb + term name + optional description. The
           <h1> is the archive's semantic top-level heading (the /blog shell's
           own heading, if any, renders below as an h2-level section). */}
+      {/* Theme-aware chrome (FIX 3): this archive header sits on the PAGE
+          background, which flips light↔dark with the operator's theme
+          (--brand-base-bg/fg). So primary text INHERITS the body foreground
+          (no fixed text-near-black, which would be invisible on a dark theme);
+          the eyebrow uses the theme accent (champagne → --brand-accent); muted
+          text stays warm-stone (already theme-aware → --brand-secondary). */}
       <header className="mb-10">
         <nav aria-label="Breadcrumb" className="mb-4">
           <ol className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-eyebrow text-warm-stone">
             <li>
-              <Link href="/" className="transition-colors hover:text-near-black">
+              <Link href="/" className="transition-colors hover:text-champagne">
                 Home
               </Link>
             </li>
@@ -317,7 +323,7 @@ export async function renderCmsBlogArchive(
             <li>
               <Link
                 href={blogIndexUrl(1, segments)}
-                className="transition-colors hover:text-near-black"
+                className="transition-colors hover:text-champagne"
               >
                 Blog
               </Link>
@@ -325,13 +331,14 @@ export async function renderCmsBlogArchive(
             <li aria-hidden className="text-warm-stone/50">
               /
             </li>
-            <li className="text-near-black">{term.name}</li>
+            {/* Inherits body foreground (theme-flips) — no fixed dark token. */}
+            <li>{term.name}</li>
           </ol>
         </nav>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-champagne">
           {kindLabel}
         </p>
-        <h1 className="mt-3 font-serif text-4xl font-bold tracking-tight text-near-black sm:text-5xl">
+        <h1 className="mt-3 font-serif text-4xl font-bold tracking-tight sm:text-5xl">
           {term.name}
         </h1>
         {term.description && term.description.trim() !== '' && (

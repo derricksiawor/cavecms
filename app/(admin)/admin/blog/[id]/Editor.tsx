@@ -263,11 +263,23 @@ export function Editor({
     setBusy(true)
     const patch = buildPatch()
     try {
-      const res = await csrfFetch(`/api/cms/posts/${post.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      })
+      let res: Response
+      try {
+        res = await csrfFetch(`/api/cms/posts/${post.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(patch),
+        })
+      } catch {
+        // Network-level failure (offline, DNS, aborted, CSRF-token fetch
+        // failed) — csrfFetch threw before any HTTP status came back. Without
+        // this branch the editor silently kept "Unsaved changes" with no signal
+        // the work didn't save. Surface it like every other save error.
+        toast.error(
+          "We couldn't reach the server — check your connection and try saving again. Your changes are still here.",
+        )
+        return { ok: false }
+      }
       if (res.status === 409) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
         const msg =

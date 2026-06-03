@@ -209,10 +209,15 @@ export function LxPosts({
                       key={c.slug}
                       href={c.url}
                       className={clsx(
+                        // FIX 3: theme-aware category pills. On a dark section
+                        // surface, tint from ivory (theme light surface); on a
+                        // light surface, tint from the THEME accent (champagne →
+                        // --brand-accent) instead of fixed copper — so the pill
+                        // flips with the operator's theme on both surfaces.
                         'inline-flex w-fit items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-eyebrow ring-1 transition-colors',
                         onDark
                           ? 'bg-ivory/10 text-ivory ring-ivory/20 hover:bg-ivory/15'
-                          : 'bg-copper-500/12 text-copper-700 ring-copper-400/30 hover:bg-copper-500/20',
+                          : 'bg-champagne/15 text-antique-gold ring-champagne/40 hover:bg-champagne/25',
                       )}
                     >
                       {c.name}

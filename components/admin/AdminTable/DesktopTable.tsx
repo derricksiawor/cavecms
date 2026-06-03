@@ -54,8 +54,13 @@ export function DesktopTable<Row>(props: DesktopTableProps<Row>) {
   }, [someSelected])
 
   return (
-    <div className="hidden md:block overflow-hidden rounded-2xl border border-warm-stone/15 bg-cream-50/50">
-      <table className="w-full text-sm">
+    // overflow-x-auto (not overflow-hidden) so a table wider than its
+    // container at the md..lg range scrolls horizontally instead of CLIPPING
+    // the right-edge actions column (Trash). rounded-2xl + the ring keep the
+    // premium framed look; the inner table carries a min-width so columns stay
+    // legible rather than crushing, and the scrollbar only appears when needed.
+    <div className="hidden md:block overflow-x-auto rounded-2xl border border-warm-stone/15 bg-cream-50/50">
+      <table className="w-full min-w-[40rem] text-sm">
         <thead className="border-b border-warm-stone/15 bg-cream-50/80 text-[10px] uppercase tracking-[0.2em] text-warm-stone">
           <tr>
             {showCheckboxColumn && (

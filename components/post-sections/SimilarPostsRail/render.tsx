@@ -138,21 +138,28 @@ export async function SimilarPostsRailSection({
     <RevealOnView
       as="section"
       animation="slide-up"
-      className="bg-cream py-20 sm:py-28"
+      // FIX 3 — theme-aware "Keep reading" rail. The fixed bg-cream band +
+      // cream cards + near-black text + copper accents were INVISIBLE on a dark
+      // theme (cream-on-dark island, black text on dark). The band now sits on a
+      // faint accent wash (champagne → --brand-accent) that reads as a subtle
+      // differentiated surface on BOTH a light and a dark page background; all
+      // text below inherits the body foreground or uses theme-aware tokens.
+      className="bg-champagne/[0.06] py-20 sm:py-28"
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-antique-gold">
               Keep reading
             </p>
-            <h2 className="mt-3 font-serif text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-near-black">
+            {/* h2 inherits body foreground (--brand-base-fg) — theme-flips. */}
+            <h2 className="mt-3 font-serif text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight">
               Related posts
             </h2>
           </div>
           <Link
             href={blogIndexUrl(1, segments)}
-            className="inline-flex items-center gap-2 text-sm font-semibold tracking-wide text-near-black underline-offset-4 hover:text-copper-700 hover:underline min-h-[44px]"
+            className="inline-flex items-center gap-2 text-sm font-semibold tracking-wide underline-offset-4 hover:text-champagne hover:underline min-h-[44px]"
           >
             See every post
             <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
@@ -168,9 +175,13 @@ export async function SimilarPostsRailSection({
             >
               <Link
                 href={p.href}
-                className="group block overflow-hidden rounded-2xl border border-near-black/8 bg-cream-50 shadow-sm shadow-near-black/5 transition-all duration-standard ease-standard hover:-translate-y-1 hover:shadow-xl hover:shadow-near-black/10 hover:border-copper-300"
+                // Card surface + hairline + shadow all derive from theme-aware
+                // tokens (champagne accent ring, warm-stone shadow) so the card
+                // reads as "raised" on a light AND a dark page — no fixed cream
+                // island / near-black shadow that vanishes on a dark theme.
+                className="group block overflow-hidden rounded-2xl ring-1 ring-champagne/15 bg-champagne/[0.04] shadow-sm shadow-warm-stone/10 transition-all duration-standard ease-standard hover:-translate-y-1 hover:shadow-xl hover:shadow-warm-stone/20 hover:ring-champagne/40"
               >
-                <div className="relative aspect-[4/3] overflow-hidden bg-cream-200">
+                <div className="relative aspect-[4/3] overflow-hidden bg-champagne/[0.08]">
                   {p.thumb ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -188,7 +199,9 @@ export async function SimilarPostsRailSection({
                   )}
                 </div>
                 <div className="p-6">
-                  <h3 className="font-serif text-xl font-semibold tracking-tight text-near-black">
+                  {/* Title inherits body foreground (theme-flips); excerpt +
+                      date use theme-aware tokens (warm-stone, antique-gold). */}
+                  <h3 className="font-serif text-xl font-semibold tracking-tight">
                     {p.title}
                   </h3>
                   {p.excerpt && (
@@ -197,7 +210,7 @@ export async function SimilarPostsRailSection({
                     </p>
                   )}
                   {p.dateLabel && (
-                    <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-700">
+                    <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.28em] text-antique-gold">
                       {p.dateLabel}
                     </p>
                   )}
