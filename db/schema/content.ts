@@ -43,6 +43,11 @@ export const pages = mysqlTable(
     // row succeeds but creates an audit row with action='delete' +
     // diff.system=true and the row is soft-deleted like any other.
     system: boolean('system').notNull().default(false),
+    // Discriminator: 'page' (normal — routable, listed, sitemapped) vs
+    // 'post_body' (hidden block tree owned by a post via posts.body_page_id).
+    // Every page-surfacing query filters kind='page' (spec §4.4). Defaults to
+    // 'page' so all existing rows + behavior are unchanged.
+    kind: varchar('kind', { length: 20 }).notNull().default('page'),
     published: boolean('published').notNull().default(false),
     publishedAt: timestamp('published_at', { fsp: 3 }),
     deletedAt: timestamp('deleted_at', { fsp: 3 }),
@@ -84,6 +89,8 @@ export const pages = mysqlTable(
     publishedIdx: index('idx_pages_published').on(t.published, t.publishedAt),
     // Admin trash: WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC.
     deletedUpdatedIdx: index('idx_pages_deleted_updated').on(t.deletedAt, t.updatedAt),
+    // Lets the "list normal pages" hot path skip hidden post-body pages.
+    kindIdx: index('idx_pages_kind').on(t.kind),
   }),
 )
 

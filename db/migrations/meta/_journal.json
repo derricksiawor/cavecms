@@ -211,6 +211,20 @@
 			"when": 1780360400000,
 			"tag": "0031_media_content_hash",
 			"breakpoints": true
+		},
+		{
+			"idx": 32,
+			"version": "5",
+			"when": 1780360500000,
+			"tag": "0032_blog_taxonomy",
+			"breakpoints": true
+		},
+		{
+			"idx": 33,
+			"version": "5",
+			"when": 1780360600000,
+			"tag": "0033_blog_block_ownership",
+			"breakpoints": true
 		}
 	]
 }

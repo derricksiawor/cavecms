@@ -1028,6 +1028,46 @@ const aiConfig = z
     }
   })
 
+// ── blog-system worktree keys (do not interleave) ───────────────────────────
+// Reuse the canonical reserved-slug set (RESERVED, imported above) so a
+// permalink segment can never collide with /admin, /api, an existing system
+// path, etc. Defaults preserve today's URLs exactly.
+// Validates a permalink base segment. A segment MAY be the key's own canonical
+// word ('blog' for the blog permalink, 'projects' for projects) — those live in
+// RESERVED precisely because they ARE these surfaces — but may never be any
+// OTHER reserved word (admin, api, …) or a malformed string. Cross-collision
+// (blog === projects) is enforced at the settings-write layer, where both
+// current values are visible.
+const permalinkSegment = (canonical: string) =>
+  z
+    .string()
+    .regex(/^[a-z0-9-]{2,40}$/, 'segment_invalid_format')
+    .refine(
+      (v) => v.toLowerCase() === canonical || !RESERVED.has(v.toLowerCase()),
+      { message: 'segment_reserved' },
+    )
+
+const blogSettings = z.object({
+  postsPerPage: z.number().int().min(1).max(50).default(9),
+  layout: z.enum(['grid', 'list']).default('grid'),
+  columns: z.union([z.literal(2), z.literal(3)]).default(3),
+  showExcerpt: z.boolean().default(true),
+  showDate: z.boolean().default(true),
+  showReadingTime: z.boolean().default(true),
+  feedItemCount: z.number().int().min(1).max(50).default(20),
+  relatedPostsCount: z.number().int().min(0).max(6).default(3),
+})
+
+const permalinkBlog = z.object({
+  segment: permalinkSegment('blog').default('blog'),
+  structure: z.enum(['postname', 'year-month-postname', 'flat']).default('postname'),
+})
+
+const permalinkProjects = z.object({
+  segment: permalinkSegment('projects').default('projects'),
+})
+// ── end blog-system worktree keys ───────────────────────────────────────────
+
 export const registry = {
   contact_info: {
     schema: contactInfo,
@@ -1280,6 +1320,32 @@ export const registry = {
       voicePreset: 'default',
     } satisfies z.infer<typeof aiConfig>,
   },
+
+  // ── blog-system worktree keys (do not interleave) ──
+  blog_settings: {
+    schema: blogSettings,
+    default: {
+      postsPerPage: 9,
+      layout: 'grid',
+      columns: 3,
+      showExcerpt: true,
+      showDate: true,
+      showReadingTime: true,
+      feedItemCount: 20,
+      relatedPostsCount: 3,
+    } satisfies z.infer<typeof blogSettings>,
+  },
+  permalink_blog: {
+    schema: permalinkBlog,
+    default: { segment: 'blog', structure: 'postname' } satisfies z.infer<
+      typeof permalinkBlog
+    >,
+  },
+  permalink_projects: {
+    schema: permalinkProjects,
+    default: { segment: 'projects' } satisfies z.infer<typeof permalinkProjects>,
+  },
+  // ── end blog-system worktree keys ──
 } as const
 
 // MOBILE_CTA_ICONS is canonically exported from @/lib/cms/mobileCtaIcons

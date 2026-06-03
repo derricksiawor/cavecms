@@ -31,6 +31,12 @@ export const posts = mysqlTable(
     title: varchar('title', { length: 220 }).notNull(),
     excerpt: varchar('excerpt', { length: 320 }),
     bodyMd: mediumtext('body_md').notNull(),
+    // Hidden body page (kind='post_body') whose content_blocks tree is the
+    // post body. SET NULL at the DB level (migration 0033) so dropping a body
+    // page never hard-deletes the post; the post-purge cron removes the body
+    // page explicitly. No .references() here to avoid a circular import with
+    // content.ts — the FK is enforced by the migration.
+    bodyPageId: int('body_page_id'),
     heroImageId: int('hero_image_id'),
     published: boolean('published').notNull().default(false),
     publishedAt: timestamp('published_at', { fsp: 3 }),
@@ -69,5 +75,7 @@ export const posts = mysqlTable(
       t.deletedAt,
       t.updatedAt,
     ),
+    // Join + orphan-sweep support for the hidden body page.
+    bodyPageIdx: index('idx_posts_body_page').on(t.bodyPageId),
   }),
 )
