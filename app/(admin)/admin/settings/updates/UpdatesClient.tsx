@@ -485,10 +485,12 @@ export function UpdatesClient({
 
   return (
     <section className="mt-10 space-y-6">
-      {/* Available update — promoted ABOVE the running-version + what's-new
-          cards so the actionable card is the first thing the operator sees.
-          Null when no update is available. */}
+      {/* Status card — ALWAYS first, above the running-version block. When an
+          update is waiting this is the actionable "Update available" card;
+          otherwise it's the "You're up to date" / recovery card. Exactly one
+          renders (mutually exclusive on `release`); the other is null. */}
       {availableUpdateCard}
+      {upToDateCard}
 
       {/* Current version card */}
       <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
@@ -538,11 +540,6 @@ export function UpdatesClient({
           body={currentVersionNotes.body}
         />
       )}
-
-      {/* Up to date / recovery — only renders when a check found no newer
-          release. The actionable update card (when present) lives at the
-          TOP of the section instead. */}
-      {upToDateCard}
 
       {/* Preferences */}
       <article className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-6 backdrop-blur-sm">
