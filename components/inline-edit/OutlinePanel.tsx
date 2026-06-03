@@ -666,15 +666,15 @@ export function OutlinePanel({
         },
         captures: { parentId, blockCount: priorSiblingsInOrder.length },
       })
-      // A concurrent `initial` may have arrived mid-flight. Drop that stale
-      // snapshot — re-applying it in `finally` would clobber our just-merged
-      // versions / snap the order back. If one DID arrive, re-fetch so the
-      // concurrent change becomes visible alongside our committed move (a raw
-      // re-apply can't show both — the snapshot predates our reorder).
-      if (pendingInitialRef.current) {
-        pendingInitialRef.current = null
-        router.refresh()
-      }
+      // EXACT MIRROR: re-fetch so the canvas, the inline-edit context, AND this
+      // outline all re-render from the committed server state. The optimistic
+      // setItems above is just instant feedback; without this refresh the move
+      // never propagates to the page, and the `initial` sync effect can revert
+      // the outline from stale data — desyncing the outline from the page (the
+      // "element goes missing / outline isn't a mirror" bug). Also clears any
+      // mid-flight snapshot so `finally` can't re-apply a stale one.
+      pendingInitialRef.current = null
+      router.refresh()
     } catch (e) {
       setItems(prev)
       setErr(
@@ -824,12 +824,11 @@ export function OutlinePanel({
           },
           captures: { parentId: sourceParentId, blockCount: payloadBlocks.length },
         })
-        // See postReorder: drop the mid-flight `initial` snapshot, and if one
-        // arrived, re-fetch so the concurrent change shows alongside this move.
-        if (pendingInitialRef.current) {
-          pendingInitialRef.current = null
-          router.refresh()
-        }
+        // EXACT MIRROR (see postReorder): re-fetch so the canvas + context +
+        // outline all re-render from the committed server state. A reparent is
+        // the most visible move — without this the page wouldn't reflect it.
+        pendingInitialRef.current = null
+        router.refresh()
       } catch (e) {
         setItems(prev)
         setErr(
@@ -1253,6 +1252,16 @@ const TreeRow = memo(function TreeRow({
     // gets visual feedback "not draggable" instead of a snap-back.
     disabled: !!item.blockKey || busy || !!orphan,
   })
+  // Combine dnd-kit's node ref with our own so the page→outline sync can scroll
+  // this row into view when the block is selected on the canvas.
+  const liRef = useRef<HTMLLIElement | null>(null)
+  const setRefs = useCallback(
+    (el: HTMLLIElement | null) => {
+      setNodeRef(el)
+      liRef.current = el
+    },
+    [setNodeRef],
+  )
   // Expand/collapse is lifted to the panel (so flattenTree can hide a
   // collapsed subtree from the single flat list). `expanded` derives from it.
   const expanded = !isCollapsed
@@ -1324,6 +1333,17 @@ const TreeRow = memo(function TreeRow({
   // — replaces the prior 1.6s ping-and-die.
   const selection = useSelection()
   const isRowSelected = selection.isSelected(item.id)
+  // Page→outline sync: when this block becomes selected (operator clicked it /
+  // its drag handle on the canvas), scroll this outline row into view. Only on
+  // the false→true transition so it doesn't fight the operator's own scrolling.
+  // The row already highlights via isRowSelected.
+  const wasSelectedRef = useRef(false)
+  useEffect(() => {
+    if (isRowSelected && !wasSelectedRef.current) {
+      liRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+    wasSelectedRef.current = isRowSelected
+  }, [isRowSelected])
   const selectAndScroll = useCallback(() => {
     selection.select(item.id)
     onScrollToBlock()
@@ -1708,7 +1728,7 @@ const TreeRow = memo(function TreeRow({
 
   return (
     <li
-      ref={setNodeRef}
+      ref={setRefs}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
