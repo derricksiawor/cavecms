@@ -155,6 +155,14 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
         if (cleaned.inline || cleaned.chat) payload.models = cleaned
         else delete payload.models
       }
+      // Belt-and-suspenders: a disabled master switch means every surface
+      // is off. Even if some path left a surface flag set, never submit
+      // enabled:false with a surface on — the schema rejects it and the
+      // save would fail with "some fields look off".
+      if (payload.enabled === false) {
+        payload.inlineEnabled = false
+        payload.chatEnabled = false
+      }
       const r = await csrfFetch('/api/admin/settings', {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -344,7 +352,23 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
                 <input
                   type="checkbox"
                   checked={form.enabled}
-                  onChange={(e) => setField('enabled', e.target.checked)}
+                  // Turning the master switch OFF disables — and clears —
+                  // every surface. Leaving inlineEnabled/chatEnabled true
+                  // while enabled is false is an invalid state the schema
+                  // rejects (enable_master_switch_first), so the operator
+                  // could never save after simply unticking "Enable AI".
+                  onChange={(e) =>
+                    setForm((f) =>
+                      e.target.checked
+                        ? { ...f, enabled: true }
+                        : {
+                            ...f,
+                            enabled: false,
+                            inlineEnabled: false,
+                            chatEnabled: false,
+                          },
+                    )
+                  }
                   className="mt-1 h-4 w-4 rounded border-warm-stone/40 text-copper-600 focus:ring-copper-300"
                 />
                 <span>
