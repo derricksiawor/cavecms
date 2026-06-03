@@ -30,7 +30,7 @@ export const POST = withError(async (req) => {
   checkMutationRate(ctx.userId)
 
   const body = Body.parse(await readJsonBody(req))
-  const out = await runCutover({ stageId: body.stageId, force: body.force }, { userId: ctx.userId })
+  const out = await runCutover({ stageId: body.stageId, force: body.force }, { userId: ctx.userId, tokenId: ctx.tokenId })
 
   // A cutover wholesale-REPLACES every page + post + the 8 push settings and
   // upserts projects — so the public site's caches are now stale across the

@@ -52,7 +52,7 @@ export const POST = withError(async (req) => {
     throw e
   }
 
-  const result = await pullFrom({ source, userId: ctx.userId })
+  const result = await pullFrom({ source, userId: ctx.userId, tokenId: ctx.tokenId })
 
   // A drift refusal (this install changed mid-pull) is a 409; everything else
   // ok:false maps to 422. The token is not present in `result`.

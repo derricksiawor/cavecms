@@ -4,12 +4,23 @@ import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkReadRate, checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { readJsonBody } from '@/lib/api/jsonBody'
+import { safeRevalidate } from '@/lib/cache/revalidate'
+import { tag } from '@/lib/cache/tags'
 import {
   listTargets,
   upsertTarget,
   removeTarget,
   setDefaultTarget,
 } from '@/lib/sync/syncTargets'
+
+// Bust the settings cache after a targets mutation so a read-after-write in the
+// SAME session (e.g. an MCP agent calling sync_remove_target then
+// sync_list_targets) sees the new state — getSetting('sync_targets') is wrapped
+// in unstable_cache(tags:['settings']) and would otherwise serve a stale list
+// for up to 60s. Must run inside the request context (Next 15), so awaited.
+async function bustSettings(): Promise<void> {
+  await safeRevalidate([tag.settings]).catch(() => undefined)
+}
 
 export const runtime = 'nodejs'
 
@@ -67,6 +78,7 @@ export const PUT = withError(async (req) => {
   if (asDefault.success) {
     const { ok } = await setDefaultTarget(asDefault.data.name, ctx.userId)
     if (!ok) throw new HttpError(400, 'target_not_found')
+    await bustSettings()
     const data = await listTargets()
     return json(200, data)
   }
@@ -84,6 +96,7 @@ export const PUT = withError(async (req) => {
     throw new HttpError(400, 'target_url_invalid')
   }
   const saved = await upsertTarget(parsed.data, ctx.userId)
+  await bustSettings()
   return json(200, { target: saved })
 })
 
@@ -99,5 +112,6 @@ export const DELETE = withError(async (req) => {
   if (!parsed.success) throw new HttpError(400, 'invalid_request')
   const { removed } = await removeTarget(parsed.data.name, ctx.userId)
   if (!removed) throw new HttpError(400, 'target_not_found')
+  await bustSettings()
   return json(200, { ok: true, removed: parsed.data.name })
 })

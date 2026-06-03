@@ -41,7 +41,16 @@ import {
 // the live login path unreachable.
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|uploads/|favicon\\.ico).*)'],
+  // `api/cms/sync/stage` is excluded for the SAME reason as `uploads/`: it
+  // receives a large raw gzip bundle body (up to 200 MB), and the Edge
+  // middleware buffers/caps a matched request body at ~10 MB — which silently
+  // TRUNCATED any sync_push from a real install with >10 MB of media (the stage
+  // route streams the body to disk under its own 200 MB cap, but never saw the
+  // full body once middleware buffered it first → bundle_unreadable). The stage
+  // route self-gates (requireRole admin + requireScope sync:write + requireCsrf),
+  // so bypassing the middleware here loses no auth — and `/api/*` is already
+  // exempt from redirect-matching, so nothing else regresses.
+  matcher: ['/((?!_next/static|_next/image|uploads/|api/cms/sync/stage|favicon\\.ico).*)'],
 }
 
 // Bootstrap fallback only — used when the security-config fetch fails

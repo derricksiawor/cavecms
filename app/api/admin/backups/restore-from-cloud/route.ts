@@ -100,6 +100,7 @@ export const POST = withError(async (req: Request) => {
   try {
     await db.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'restore',
       resourceType: 'backups',
       resourceId: `cloud:${body.provider}`,

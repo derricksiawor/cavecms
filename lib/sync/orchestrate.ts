@@ -392,9 +392,11 @@ async function downloadInto(
 export async function pullFrom({
   source,
   userId,
+  tokenId,
 }: {
   source: ResolvedTarget
   userId: number
+  tokenId?: number | null
 }): Promise<PullResult> {
   const work = mkdtempSync(path.join(tmpdir(), 'cavecms-pull-'))
   try {
@@ -494,7 +496,7 @@ export async function pullFrom({
         message: `the content from ${source.name} failed validation (${staged.errors.length} error(s))`,
       }
     }
-    const out = await runCutover({ stageId: staged.stageId }, { userId })
+    const out = await runCutover({ stageId: staged.stageId }, { userId, tokenId })
     if (!out.ok) {
       if (out.reason === 'drift_detected') {
         return { ok: false, drift: true, message: `this install changed during the pull — re-run the pull from ${source.name}` }
