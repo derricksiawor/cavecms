@@ -16,6 +16,7 @@ import { structuralEqual } from '@/lib/structuralEqual'
 import { SETTINGS_SHAPES, SETTINGS_HELP } from '@/lib/cms/settings-shapes'
 import { UpdatesProgressModal } from '@/components/admin/UpdatesProgressModal'
 import { UpdateHistoryTable } from '@/components/admin/UpdateHistoryTable'
+import { ReleaseNotesMarkdown } from '@/components/admin/ReleaseNotesMarkdown'
 import {
   humaniseRelease,
   formatRelativeDays,
@@ -461,9 +462,9 @@ export function UpdatesClient({
               <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
                 What&rsquo;s new
               </p>
-              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-near-black">
-                {release.body}
-              </p>
+              <div className="mt-2">
+                <ReleaseNotesMarkdown>{release.body}</ReleaseNotesMarkdown>
+              </div>
             </div>
           )}
         </article>
