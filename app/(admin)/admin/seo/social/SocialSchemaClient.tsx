@@ -16,6 +16,12 @@ import { Switch } from '@/components/inline-edit/Switch'
 import { useToast } from '@/components/inline-edit/Toast'
 import { structuralEqual } from '@/lib/structuralEqual'
 import { SeoCard } from '@/components/seo/SeoCard'
+import {
+  OgSharePreview,
+  XSharePreview,
+  PlatformRow,
+  type SharePreviewData,
+} from '@/components/seo/SharePreview'
 
 // ── Shapes mirroring seo_social + seo_schema ──
 interface SocialValue {
@@ -69,12 +75,18 @@ export function SocialSchemaClient({
   social,
   schema,
   defaults,
+  preview,
+  hasDefaultImage,
 }: {
   social: { value: unknown; version: number }
   schema: { value: unknown; version: number }
   /** Registry defaults for the two keys, passed from the server page so
    *  this client never imports the server-only settings registry. */
   defaults: { seo_social: SocialValue; seo_schema: SchemaValue }
+  /** Live share-card preview context from the site's real default SEO. */
+  preview: SharePreviewData
+  /** Whether a default share image is configured (drives the empty hint). */
+  hasDefaultImage: boolean
 }) {
   // Merge each stored value over its registry default so every optional
   // key is present + controlled regardless of the stored row shape (a
@@ -91,7 +103,12 @@ export function SocialSchemaClient({
 
   return (
     <section className="mt-10 space-y-6">
-      <SocialCard initial={socialValue} version={social.version} />
+      <SocialCard
+        initial={socialValue}
+        version={social.version}
+        preview={preview}
+        hasDefaultImage={hasDefaultImage}
+      />
       <SchemaCard initial={schemaValue} version={schema.version} />
     </section>
   )
@@ -102,9 +119,13 @@ export function SocialSchemaClient({
 function SocialCard({
   initial,
   version: initialVersion,
+  preview,
+  hasDefaultImage,
 }: {
   initial: SocialValue
   version: number
+  preview: SharePreviewData
+  hasDefaultImage: boolean
 }) {
   const toast = useToast()
   const [form, setForm] = useState<SocialValue>(initial)
@@ -163,114 +184,154 @@ function SocialCard({
   return (
     <SeoCard
       title="Social sharing"
-      eyebrow="Open Graph & X (Twitter)"
-      help="How a link to your site looks when someone shares it on X, Facebook, LinkedIn, or in a chat — the card style, your account handles, and the language."
+      eyebrow="Open Graph & X cards"
+      help="How a link to your site looks when it's shared — on Facebook, LinkedIn, WhatsApp, Slack, iMessage, X, and anywhere else. Almost every app reads the same Open Graph tags; X layers its own card on top."
       dirty={dirty}
       busy={busy}
       onSave={() => void save()}
       onUndo={() => setForm(pristine)}
     >
-      <div className="space-y-7">
-        {/* Twitter card — two visual preview tiles, not a dropdown. */}
+      <div className="space-y-8">
+        {/* ── Universal: the Open Graph share card ── */}
         <div>
-          <p className="text-sm font-medium text-near-black">Card style on X</p>
-          <p className="mt-0.5 text-[13px] leading-relaxed text-warm-stone">
-            How your shared link previews on X. A large image draws more
-            attention; a small card is more compact.
+          <p className="text-sm font-medium text-near-black">
+            When your link is shared
           </p>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <CardChoiceTile
-              selected={form.twitterCard === 'summary_large_image'}
-              onSelect={() =>
-                setForm((f) => ({ ...f, twitterCard: 'summary_large_image' }))
-              }
-              title="Large image"
-              caption="Big, edge-to-edge preview image"
-              variant="large"
+          <p className="mt-0.5 text-[13px] leading-relaxed text-warm-stone">
+            This is the card people see on almost every platform — built from
+            each page&rsquo;s title, description, and share image.
+          </p>
+          <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start">
+            <OgSharePreview data={preview} />
+            <div className="flex-1 space-y-4 lg:pt-1">
+              <PlatformRow />
+              <div className="flex items-start gap-3 rounded-xl bg-cream-100/40 p-3.5">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-copper-500/12 text-copper-700">
+                  <ImageIcon size={15} strokeWidth={1.9} aria-hidden />
+                </span>
+                <p className="text-[12.5px] leading-relaxed text-warm-stone">
+                  {hasDefaultImage
+                    ? 'The image above is your site-wide default. '
+                    : 'No default share image yet — shared links will show no picture. '}
+                  <Link
+                    href="/admin/settings"
+                    className="font-medium text-copper-700 underline-offset-2 hover:underline"
+                  >
+                    {hasDefaultImage
+                      ? 'Change it under Settings → SEO'
+                      : 'Add one under Settings → SEO'}
+                  </Link>
+                  . Any page can also set its own.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Content language (og:locale) — universal across platforms. */}
+        <label className="block max-w-sm">
+          <span className="block text-sm font-medium text-near-black">
+            Content language
+          </span>
+          <div className="mt-2">
+            <Select
+              value={form.ogLocale}
+              options={OG_LOCALES}
+              onChange={(v) => setForm((f) => ({ ...f, ogLocale: v }))}
+              aria-label="Content language"
             />
-            <CardChoiceTile
-              selected={form.twitterCard === 'summary'}
-              onSelect={() => setForm((f) => ({ ...f, twitterCard: 'summary' }))}
-              title="Small card"
-              caption="Compact thumbnail beside the text"
-              variant="small"
+          </div>
+          <span className="mt-1 block text-[11px] text-warm-stone">
+            Tells every platform what language your pages are written in.
+          </span>
+        </label>
+
+        {/* ── X (Twitter)-specific card + handles ── */}
+        <div className="border-t border-warm-stone/15 pt-7">
+          <div className="flex items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/icons/x.svg"
+              alt="X"
+              width={15}
+              height={15}
+              className="h-[15px] w-[15px] opacity-75"
+            />
+            <p className="text-sm font-medium text-near-black">On X</p>
+            <span className="rounded-full bg-warm-stone/12 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warm-stone">
+              formerly Twitter
+            </span>
+          </div>
+          <p className="mt-0.5 text-[13px] leading-relaxed text-warm-stone">
+            X renders its own card. Choose the style and credit your accounts.
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <CardChoiceTile
+                selected={form.twitterCard === 'summary_large_image'}
+                onSelect={() =>
+                  setForm((f) => ({ ...f, twitterCard: 'summary_large_image' }))
+                }
+                title="Large image"
+                caption="Big, edge-to-edge preview"
+                variant="large"
+              />
+              <CardChoiceTile
+                selected={form.twitterCard === 'summary'}
+                onSelect={() =>
+                  setForm((f) => ({ ...f, twitterCard: 'summary' }))
+                }
+                title="Small card"
+                caption="Compact thumbnail"
+                variant="small"
+              />
+            </div>
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-warm-stone">
+                Preview on X
+              </p>
+              <XSharePreview variant={form.twitterCard} data={preview} />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <HandleField
+              label="Your site’s X account"
+              help="The account that owns the site."
+              value={form.twitterSite ?? ''}
+              onChange={(v) => setForm((f) => ({ ...f, twitterSite: v }))}
+              placeholder="yoursite"
+            />
+            <HandleField
+              label="Default author account"
+              help="Credited on shared posts when no author is set."
+              value={form.twitterCreator ?? ''}
+              onChange={(v) => setForm((f) => ({ ...f, twitterCreator: v }))}
+              placeholder="yourname"
             />
           </div>
         </div>
 
-        {/* Handles. */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <HandleField
-            label="Your site’s X account"
-            help="The account that owns the site."
-            value={form.twitterSite ?? ''}
-            onChange={(v) => setForm((f) => ({ ...f, twitterSite: v }))}
-            placeholder="yoursite"
-          />
-          <HandleField
-            label="Default author account"
-            help="Credited on shared posts when no author is set."
-            value={form.twitterCreator ?? ''}
-            onChange={(v) => setForm((f) => ({ ...f, twitterCreator: v }))}
-            placeholder="yourname"
-          />
-        </div>
-
-        {/* Locale + Facebook app id. */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label className="block">
-            <span className="block text-sm font-medium text-near-black">
-              Content language
-            </span>
-            <div className="mt-2">
-              <Select
-                value={form.ogLocale}
-                options={OG_LOCALES}
-                onChange={(v) => setForm((f) => ({ ...f, ogLocale: v }))}
-                aria-label="Content language"
-              />
-            </div>
-            <span className="mt-1 block text-[11px] text-warm-stone">
-              Tells social platforms what language your pages are written in.
-            </span>
-          </label>
-
-          <label className="block">
-            <span className="block text-sm font-medium text-near-black">
-              Facebook App ID
-            </span>
-            <Input
-              className="mt-2"
-              inputMode="numeric"
-              value={form.facebookAppId ?? ''}
-              maxLength={40}
-              placeholder="Optional — numbers only"
-              onChange={(e) =>
-                setForm((f) => ({ ...f, facebookAppId: e.target.value }))
-              }
-            />
-            <span className="mt-1 block text-[11px] text-warm-stone">
-              Only needed if you use Facebook’s insights for shared links.
-            </span>
-          </label>
-        </div>
-
-        {/* Pointer to the default OG image (lives elsewhere — don't duplicate). */}
-        <div className="flex items-start gap-3 rounded-xl bg-cream-100/40 p-4">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-copper-500/12 text-copper-700">
-            <ImageIcon size={16} strokeWidth={1.9} aria-hidden />
+        {/* Facebook App ID — advanced, rarely needed. */}
+        <label className="block max-w-sm">
+          <span className="block text-sm font-medium text-near-black">
+            Facebook App ID
           </span>
-          <p className="text-[13px] leading-relaxed text-warm-stone">
-            The default image shown on shared links is set under{' '}
-            <Link
-              href="/admin/settings"
-              className="font-medium text-copper-700 underline-offset-2 hover:underline"
-            >
-              Settings → SEO
-            </Link>
-            . It’s used whenever a page doesn’t have its own share image.
-          </p>
-        </div>
+          <Input
+            className="mt-2"
+            inputMode="numeric"
+            value={form.facebookAppId ?? ''}
+            maxLength={40}
+            placeholder="Optional — numbers only"
+            onChange={(e) =>
+              setForm((f) => ({ ...f, facebookAppId: e.target.value }))
+            }
+          />
+          <span className="mt-1 block text-[11px] text-warm-stone">
+            Only needed if you use Facebook’s sharing insights.
+          </span>
+        </label>
       </div>
     </SeoCard>
   )

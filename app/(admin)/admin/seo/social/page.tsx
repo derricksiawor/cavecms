@@ -3,6 +3,9 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { registry } from '@/lib/cms/settings-registry'
+import { getSetting } from '@/lib/cms/getSettings'
+import { resolveMedia } from '@/lib/cms/resolveMedia'
+import type { SharePreviewData } from '@/components/seo/SharePreview'
 import { SocialSchemaClient } from './SocialSchemaClient'
 
 // Social & Schema — how links to the site preview when shared (seo_social:
@@ -58,6 +61,41 @@ export default async function SocialSchemaPage() {
   const social = rowFor('seo_social')
   const schema = rowFor('seo_schema')
 
+  // Build the live share-card preview context from the site's real default
+  // SEO settings, so the previews show what an actual shared link looks
+  // like (not a placeholder). Falls back gracefully when nothing is set.
+  const [defaultSeo, general] = await Promise.all([
+    getSetting('default_seo'),
+    getSetting('site_general'),
+  ])
+  let ogImageUrl: string | null = null
+  if (defaultSeo.ogImage?.media_id) {
+    const m = await resolveMedia(defaultSeo.ogImage.media_id)
+    ogImageUrl = m?.og ?? m?.lg ?? m?.md ?? null
+  }
+  if (!ogImageUrl) ogImageUrl = defaultSeo.ogImagePath ?? null
+  const base = general?.siteUrl?.replace(/\/+$/, '') ?? ''
+  if (ogImageUrl && !/^https?:\/\//i.test(ogImageUrl) && base) {
+    ogImageUrl = `${base}${ogImageUrl.startsWith('/') ? '' : '/'}${ogImageUrl}`
+  }
+  let domain = 'yoursite.com'
+  if (general?.siteUrl) {
+    try {
+      domain = new URL(general.siteUrl).host
+    } catch {
+      /* keep fallback */
+    }
+  }
+  const siteName = general?.siteName || defaultSeo.title || 'Your site'
+  const preview: SharePreviewData = {
+    ogImageUrl,
+    domain,
+    title: defaultSeo.title || siteName,
+    description:
+      defaultSeo.description ||
+      'A short description of your page appears here when your link is shared.',
+  }
+
   return (
     <div className="max-w-4xl">
       <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
@@ -84,6 +122,8 @@ export default async function SocialSchemaPage() {
           seo_social: registry.seo_social.default,
           seo_schema: registry.seo_schema.default,
         }}
+        preview={preview}
+        hasDefaultImage={!!ogImageUrl}
       />
     </div>
   )

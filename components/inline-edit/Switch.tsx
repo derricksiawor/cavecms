@@ -35,7 +35,7 @@ export function Switch({
   return (
     <span
       className={clsx(
-        'inline-flex items-start gap-3 select-none',
+        'flex items-start gap-3 select-none',
         disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
       )}
       onClick={(e) => {
