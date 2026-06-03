@@ -13,7 +13,7 @@ export async function generateMetadata() {
 // dropped at the boundary, not echoed into the table's <select> nor
 // the subsequent network call.
 const FilterParams = z.object({
-  source: z.enum(['contact', 'brochure', 'inquiry']).optional(),
+  source: z.enum(['contact', 'brochure', 'inquiry', 'form']).optional(),
   status: z.enum(['new', 'contacted', 'won', 'lost']).optional(),
   trashed: z.enum(['0', '1']).optional(),
 })

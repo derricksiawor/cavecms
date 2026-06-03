@@ -172,6 +172,9 @@ next-env.d.ts
 # Local operator notes — never tracked.
 /instructions.md
 
+# Session status / feature-notes doc — local reference, never shipped (#0.55).
+/features.md
+
 # Per-install runtime state — the update + backup engines write the live
 # status files, locks, snapshots, logs, and the background-prestaged release
 # cache here (lib/backups/statusPath.ts getInstallStateDir falls back to

@@ -118,6 +118,8 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
   'site_header',
   'organization_json_ld',
   'theme_palette',
+  'typography',
+  'cookie_consent',
   // NOTE: site_general is deliberately NOT here — its `siteUrl` sets the
   // origin of outbound tokenized email links (newsletter confirm/unsubscribe,
   // brochure) and the canonical host, so a token writing it could harvest

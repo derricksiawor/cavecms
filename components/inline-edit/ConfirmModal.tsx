@@ -69,7 +69,7 @@ export function ConfirmModal({
       // z-[60] keeps the modal above the Drawer (z-50) for the
       // EditDrawer's discard-changes prompt; harmless above bare
       // page chrome for the section/column delete prompts.
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-near-black/40 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-near-black/60 sm:items-center"
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onCancel()
       }}

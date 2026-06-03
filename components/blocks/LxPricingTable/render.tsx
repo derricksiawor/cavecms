@@ -3,6 +3,7 @@ import { Check } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury pricing table (Elementor: Price Table). A single plan card —
 // compose three in a section's columns for a 3-up. `featured` adds a
@@ -18,15 +19,18 @@ const TONE_BORDER: Record<string, string> = {
 export function LxPricingTable({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_pricing_table'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const isToken = isColorToken(data.tone)
-  const headClass = isToken ? TONE_HEAD[data.tone] : undefined
-  const bodyClass = isToken ? TONE_BODY[data.tone] : undefined
-  const borderClass = isToken ? TONE_BORDER[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const headClass = isToken ? TONE_HEAD[tone] : undefined
+  const bodyClass = isToken ? TONE_BODY[tone] : undefined
+  const borderClass = isToken ? TONE_BORDER[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
 
   const showCta = !!(data.ctaLabel && data.ctaHref)
 

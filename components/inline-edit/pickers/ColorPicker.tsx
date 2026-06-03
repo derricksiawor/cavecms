@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pipette, Plus, X } from 'lucide-react'
+import { useColorSwatches } from '@/components/inline-edit/ColorSwatchesContext'
 import { HexColorPicker, HexAlphaColorPicker } from 'react-colorful'
 import {
   COLOR_TOKENS,
@@ -79,6 +80,7 @@ export function ColorPickerField({
   // If the on-disk shape was corrupted, we self-heal by re-writing
   // the cleaned subset on next persist.
   const [saved, setSaved] = useState<string[]>([])
+  const brandSwatches = useColorSwatches()
   useEffect(() => {
     try {
       const raw = safeStorage.get(SAVED_COLORS_KEY)
@@ -411,6 +413,31 @@ export function ColorPickerField({
                 </button>
               )}
             </div>
+
+            {/* Brand swatches (E18) — operator-defined global colours. */}
+            {brandSwatches.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-cream-50/65">
+                  Brand
+                </div>
+                <div className="grid grid-cols-8 gap-1.5">
+                  {brandSwatches.map((s) => (
+                    <button
+                      key={s.label + s.color}
+                      type="button"
+                      onClick={() => {
+                        setDraftHex(s.color)
+                        onChange(s.color)
+                      }}
+                      title={`${s.label} — ${s.color}`}
+                      aria-label={`Apply brand colour ${s.label}`}
+                      className="h-7 w-7 rounded-md border border-cream-50/15 transition-all hover:scale-[1.08] hover:border-copper-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/70"
+                      style={{ background: s.color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Saved colours row. */}
             <div className="mt-3 space-y-1.5">

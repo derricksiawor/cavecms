@@ -9,6 +9,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Animated headline (Elementor: Animated Headline). A static prefix +
 // rotating/typed words + optional suffix. Hydration-safe: the server
@@ -49,9 +50,11 @@ function usePrefersReducedMotion(): boolean {
 export function LxAnimatedHeadline({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_animated_headline'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const reduced = usePrefersReducedMotion()
   const [index, setIndex] = useState(0)
@@ -113,8 +116,9 @@ export function LxAnimatedHeadline({
   const family = data.family
   const familyClass = family ? FAMILY_TAILWIND[family] : 'font-serif'
   const weightClass = data.weight ? fontWeightClass(data.weight) : 'font-bold'
-  const toneClass = isColorToken(data.tone) ? TOKEN_TEXT_CLASS[data.tone] : undefined
-  const toneStyle = !isColorToken(data.tone) ? { color: resolveColorValue(data.tone) } : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const toneClass = isColorToken(tone) ? TOKEN_TEXT_CLASS[tone] : undefined
+  const toneStyle = !isColorToken(tone) ? { color: resolveColorValue(tone) } : undefined
 
   const current = words[index] ?? ''
   const animClass =

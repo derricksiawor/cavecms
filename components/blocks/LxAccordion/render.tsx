@@ -7,6 +7,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury accordion — FAQ with smooth open/close motion. Uses native
 // <details>/<summary> so it works without JS (SSR-friendly, screen
@@ -41,12 +42,14 @@ export function LxAccordion({
   // only the renderer change.
   inlineEdit: _inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_accordion'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const titleClass = isToken ? TONE_TITLE[tone] : undefined
   const bodyClass = isToken ? TONE_BODY[tone] : undefined

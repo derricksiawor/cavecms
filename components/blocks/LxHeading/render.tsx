@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import clsx from 'clsx'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import { MotionTarget } from '@/components/motion/MotionTarget'
@@ -9,6 +10,9 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
+import { gradientTextStyle } from '@/lib/cms/gradient'
+import { ResponsiveStyle, hasResponsive } from '@/components/blocks/_shared/ResponsiveStyle'
 
 // Luxury heading — Playfair Display serif for titles, bold weight,
 // tracking-tight. Body text (lx_text) stays Montserrat so the
@@ -21,11 +25,16 @@ const SIZE_CLASS: Record<BlockData<'lx_heading'>['size'], string> = {
   // hero-tier sizes. Bold Montserrat takes more vertical space than
   // the previous serif draft; sizes calibrated so a Display-2XL h1
   // still fits comfortably on a 375px viewport.
-  'display-2xl': 'text-5xl sm:text-6xl md:text-7xl',
-  'display-xl':  'text-4xl sm:text-5xl md:text-6xl',
-  'display-lg':  'text-3xl sm:text-4xl md:text-5xl',
-  'display-md':  'text-2xl sm:text-3xl md:text-4xl',
-  'display-sm':  'text-xl sm:text-2xl md:text-3xl',
+  // Size-aware leading: display type wants TIGHT leading (premium sites —
+  // Apple / Stripe / Linear — set display headlines ~1.05–1.1; the old
+  // blanket `leading-tight` = 1.25 read loose + tall on big headings).
+  // Larger sizes get tighter leading; smaller ones loosen slightly for
+  // readability. A per-block `lineHeight` override still wins over these.
+  'display-2xl': 'text-5xl sm:text-6xl md:text-7xl leading-[1.05]',
+  'display-xl':  'text-4xl sm:text-5xl md:text-6xl leading-[1.07]',
+  'display-lg':  'text-3xl sm:text-4xl md:text-5xl leading-[1.1]',
+  'display-md':  'text-2xl sm:text-3xl md:text-4xl leading-[1.14]',
+  'display-sm':  'text-xl sm:text-2xl md:text-3xl leading-[1.2]',
 }
 
 const ALIGN_CLASS: Record<BlockData<'lx_heading'>['alignment'], string> = {
@@ -55,21 +64,44 @@ export function LxHeading({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
+  blockId,
 }: {
   data: BlockData<'lx_heading'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
+  blockId?: number
 }) {
   const Tag = data.level
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  // Responsive per-breakpoint typography (E17) — a scoped <style> overrides
+  // the base size at tablet/mobile via a unique class.
+  const rTablet = { fontSize: data.fontSizeTablet, lineHeight: data.lineHeightTablet }
+  const rMobile = { fontSize: data.fontSizeMobile, lineHeight: data.lineHeightMobile }
+  const responsive = blockId != null && hasResponsive(rTablet, rMobile)
+  const rClass = responsive ? `cms-r-${blockId}` : undefined
 
   // Resolve tone. If it's a brand token, emit the Tailwind utility
   // (cacheable, themable). If it's a custom hex, fall back to an
   // inline style — no Tailwind utility can express arbitrary hex.
   const toneClass = isColorToken(tone) ? TOKEN_TEXT_CLASS[tone] : undefined
-  const toneStyle = !isColorToken(tone)
-    ? { color: resolveColorValue(tone) }
-    : undefined
+  // Merge tone color + exact typographic overrides into one inline style.
+  // Inline style beats the size / leading-tight / tracking-tight utility
+  // classes, so any set override wins to the pixel; unset = class baseline.
+  const styleObj: CSSProperties = {}
+  if (!isColorToken(tone)) styleObj.color = resolveColorValue(tone)
+  if (data.fontSize) styleObj.fontSize = data.fontSize
+  if (data.lineHeight) styleObj.lineHeight = data.lineHeight
+  if (data.letterSpacing) styleObj.letterSpacing = data.letterSpacing
+  // Gradient text wins over the solid tone colour when set (it sets
+  // background-clip:text + transparent fill).
+  Object.assign(styleObj, gradientTextStyle(data.textGradient))
+  const toneStyle = Object.keys(styleObj).length > 0 ? styleObj : undefined
+  // When gradient text is active, drop the tone utility class so its
+  // `color` can't fight the transparent fill (utility color + inline
+  // transparent: inline wins, but the class is dead weight + confusing).
+  const toneClassEffective = data.textGradient ? undefined : toneClass
 
   // Family override is opt-in — when undefined the renderer defaults
   // to font-serif (Playfair Display) per the client brand pairing.
@@ -86,16 +118,22 @@ export function LxHeading({
   const className = clsx(
     familyClass,
     weightClass,
-    'leading-tight tracking-tight',
+    // Leading now lives per-size in SIZE_CLASS (display type → tight).
+    'tracking-tight',
     italic,
     SIZE_CLASS[data.size],
     ALIGN_CLASS[data.alignment],
-    toneClass,
+    toneClassEffective,
+    rClass,
   )
+  const responsiveStyle = responsive ? (
+    <ResponsiveStyle id={blockId!} tablet={rTablet} mobile={rMobile} />
+  ) : null
 
   if (inlineEdit) {
     return (
       <div className={outerClass}>
+        {responsiveStyle}
         <InlineEditable
           blockId={inlineEdit.blockId}
           blockVersion={inlineEdit.blockVersion}
@@ -121,10 +159,16 @@ export function LxHeading({
   )
 
   if (data.animation === 'none') {
-    return <div className={outerClass}>{heading}</div>
+    return (
+      <div className={outerClass}>
+        {responsiveStyle}
+        {heading}
+      </div>
+    )
   }
   return (
     <div className={outerClass}>
+      {responsiveStyle}
       <MotionTarget preset={data.animation}>{heading}</MotionTarget>
     </div>
   )

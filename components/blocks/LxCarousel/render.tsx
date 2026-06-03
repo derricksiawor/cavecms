@@ -11,6 +11,7 @@ import {
 } from '../_shared/embla'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury image/media carousel — the lx_ successor to Elementor's Image
 // Carousel + Slides. Embla owns the swipe/drag/keyboard mechanics; we
@@ -22,11 +23,14 @@ export function LxCarousel({
   data,
   media,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_carousel'>
   media: RenderContext['media']
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const { emblaRef, selectedIndex, scrollSnaps, scrollTo, scrollPrev, scrollNext } =
     useEmblaLuxury({
       loop: data.loop,
@@ -88,7 +92,7 @@ export function LxCarousel({
           </div>
         </div>
         {data.showArrows && data.slides.length > 1 && (
-          <CarouselArrows onPrev={scrollPrev} onNext={scrollNext} tone={data.tone} />
+          <CarouselArrows onPrev={scrollPrev} onNext={scrollNext} tone={tone} />
         )}
       </div>
       {data.showDots && (

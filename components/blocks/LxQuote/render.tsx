@@ -10,6 +10,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury closing quote — bold Montserrat, large display size, no
 // italics (per ~/.claude/CLAUDE.md the body of the aesthetic is bold
@@ -37,12 +38,14 @@ export function LxQuote({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_quote'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const quoteToneClass = isToken ? TONE_QUOTE_CLASS[tone] : undefined
   const attribToneClass = isToken ? TONE_ATTRIBUTION_CLASS[tone] : undefined

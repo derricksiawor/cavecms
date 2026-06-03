@@ -1,9 +1,12 @@
+import type { CSSProperties, ReactNode } from 'react'
 import clsx from 'clsx'
 import { ArrowUpRight } from 'lucide-react'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
+import { compileGradient, gradientTextStyle } from '@/lib/cms/gradient'
+import { resolveColorValue } from '@/lib/cms/designTokens'
 
 // Luxury CTA — per ~/.claude/CLAUDE.md: "Buttons: Always w-fit with
 // padding (px-6/px-8), never flex-1 or full width." Bold Montserrat,
@@ -84,8 +87,29 @@ export function LxAction({
   // Button-style variants — rounded-full pill, w-fit per CLAUDE.md
   // ("Always w-fit with padding"), bold typography, smooth color
   // transition. Magnetic + pulse animations layer on top.
+  // Per-corner radius overrides the single `radius`; any corner set drops
+  // the full pill and emits a 4-value border-radius.
+  const perCorner = [data.radiusTopLeft, data.radiusTopRight, data.radiusBottomRight, data.radiusBottomLeft]
+  const hasPerCorner = perCorner.some((v) => typeof v === 'number')
+  const baseR = typeof data.radius === 'number' ? data.radius : 0
+  const radiusInline = hasPerCorner
+    ? `${data.radiusTopLeft ?? baseR}px ${data.radiusTopRight ?? baseR}px ${data.radiusBottomRight ?? baseR}px ${data.radiusBottomLeft ?? baseR}px`
+    : typeof data.radius === 'number'
+      ? `${data.radius}px`
+      : undefined
+  const customRadius = !!radiusInline
+
+  // Hover-state overrides via CSS custom properties + the `cms-hover` class.
+  const hoverBg = data.hoverFillColor ? resolveColorValue(data.hoverFillColor) : undefined
+  const hoverFg = data.hoverTextColor ? resolveColorValue(data.hoverTextColor) : undefined
+  const hoverScale = typeof data.hoverScale === 'number' ? data.hoverScale / 100 : undefined
+  const hasHover = !!(hoverBg || hoverFg || hoverScale || data.transitionMs)
+
   const buttonClass = clsx(
-    'inline-flex items-center justify-center gap-2 w-fit rounded-full font-sans font-semibold uppercase tracking-[0.22em] min-h-[44px] transition-all duration-base ease-luxury',
+    'inline-flex items-center justify-center gap-2 w-fit font-sans font-semibold uppercase tracking-[0.22em] min-h-[44px] transition-all duration-base ease-luxury',
+    // Default full pill; a custom px radius overrides via inline style.
+    !customRadius && 'rounded-full',
+    hasHover && 'cms-hover',
     SIZE_CLASS[data.size],
     VARIANT_CLASS[data.variant],
   )
@@ -96,6 +120,32 @@ export function LxAction({
     'group inline-flex items-center gap-2 w-fit font-sans font-semibold text-ivory text-base min-h-[44px] hover:text-champagne transition-colors duration-base ease-luxury'
 
   const containerClass = clsx(ALIGN_CONTAINER[data.alignment], outerClass)
+
+  // Gradient FILL on the pill (background-image layers over the variant's
+  // solid bg). Not applicable to link-arrow (it's text, no pill).
+  const fillCss = !isLinkArrow ? compileGradient(data.backgroundGradient) : undefined
+  // Solid fill colour (e.g. a white button) — overrides the variant fill; a
+  // gradient wins over it. Plus an exact corner radius (px).
+  const solidFill =
+    !isLinkArrow && !fillCss && data.fillColor ? resolveColorValue(data.fillColor) : undefined
+  const pillStyle: CSSProperties | undefined =
+    fillCss || solidFill || customRadius || hasHover
+      ? ({
+          ...(fillCss ? { backgroundImage: fillCss } : {}),
+          ...(solidFill ? { backgroundColor: solidFill } : {}),
+          ...(radiusInline ? { borderRadius: radiusInline } : {}),
+          ...(hoverBg ? { '--cms-hover-bg': hoverBg } : {}),
+          ...(hoverFg ? { '--cms-hover-fg': hoverFg } : {}),
+          ...(hoverScale ? { '--cms-hover-scale': String(hoverScale) } : {}),
+          ...(data.transitionMs ? { '--cms-hover-dur': `${data.transitionMs}ms` } : {}),
+        } as CSSProperties)
+      : undefined
+  // Gradient LABEL — only when there's no fill gradient (a single element
+  // can't background-clip:text AND show a fill gradient at once). Wraps the
+  // label text in a span so the surrounding pill chrome is untouched.
+  const labelGradStyle = !fillCss ? gradientTextStyle(data.textGradient) : {}
+  const renderLabel = (text: string): ReactNode =>
+    Object.keys(labelGradStyle).length > 0 ? <span style={labelGradStyle}>{text}</span> : text
 
   if (inlineEdit) {
     // Paired href editor for both variants — sits below the button /
@@ -151,6 +201,7 @@ export function LxAction({
           initialValue={data.label}
           as="span"
           className={buttonClass}
+          style={pillStyle}
           placeholder="Action label…"
         />
         {hrefEditor}
@@ -165,7 +216,7 @@ export function LxAction({
       rel={linkRel(data.href, data.openInNew)}
       className={linkClass}
     >
-      <span>{data.label}</span>
+      <span>{renderLabel(data.label)}</span>
       <ArrowUpRight
         size={20}
         strokeWidth={2.5}
@@ -179,8 +230,9 @@ export function LxAction({
       target={data.openInNew ? '_blank' : undefined}
       rel={linkRel(data.href, data.openInNew)}
       className={buttonClass}
+      style={pillStyle}
     >
-      {data.label}
+      {renderLabel(data.label)}
     </a>
   )
 

@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import clsx from 'clsx'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import { MotionTarget } from '@/components/motion/MotionTarget'
@@ -9,6 +10,9 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
+import { gradientTextStyle } from '@/lib/cms/gradient'
+import { ResponsiveStyle, hasResponsive } from '@/components/blocks/_shared/ResponsiveStyle'
 
 // Luxury body text — Montserrat at semibold for lead body, regular
 // for standard body. Per ~/.claude/CLAUDE.md: "NO light font weights"
@@ -64,16 +68,36 @@ export function LxText({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
+  blockId,
 }: {
   data: BlockData<'lx_text'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
+  blockId?: number
 }) {
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const rTablet = { fontSize: data.fontSizeTablet, lineHeight: data.lineHeightTablet }
+  const rMobile = { fontSize: data.fontSizeMobile, lineHeight: data.lineHeightMobile }
+  const responsive = blockId != null && hasResponsive(rTablet, rMobile)
+  const rClass = responsive ? `cms-r-${blockId}` : undefined
+  const responsiveStyle = responsive ? (
+    <ResponsiveStyle id={blockId!} tablet={rTablet} mobile={rMobile} />
+  ) : null
   const toneClass = isColorToken(tone) ? TONE_TOKEN_CLASS[tone] : undefined
-  const toneStyle = !isColorToken(tone)
-    ? { color: resolveColorValue(tone) }
-    : undefined
+  // Merge tone color + exact typographic overrides into one inline style.
+  // Inline style beats the size / leading utility classes, so any set
+  // override wins to the pixel; unset = the class baseline.
+  const styleObj: CSSProperties = {}
+  if (!isColorToken(tone)) styleObj.color = resolveColorValue(tone)
+  if (data.fontSize) styleObj.fontSize = data.fontSize
+  if (data.lineHeight) styleObj.lineHeight = data.lineHeight
+  if (data.letterSpacing) styleObj.letterSpacing = data.letterSpacing
+  // Gradient text wins over the solid tone colour when set.
+  Object.assign(styleObj, gradientTextStyle(data.textGradient))
+  const toneStyle = Object.keys(styleObj).length > 0 ? styleObj : undefined
+  const toneClassEffective = data.textGradient ? undefined : toneClass
 
   const family = data.family
   const familyClass = family ? FAMILY_TAILWIND[family] : 'font-sans'
@@ -91,13 +115,15 @@ export function LxText({
     SIZE_CLASS[data.size],
     weightClass,
     ALIGN_CLASS[data.alignment],
-    toneClass,
+    toneClassEffective,
     MAX_WIDTH_CLASS[data.maxWidth],
+    rClass,
   )
 
   if (inlineEdit) {
     return (
       <div className={outerClass}>
+        {responsiveStyle}
         <InlineEditable
           blockId={inlineEdit.blockId}
           blockVersion={inlineEdit.blockVersion}
@@ -129,10 +155,16 @@ export function LxText({
   )
 
   if (data.animation === 'none') {
-    return <div className={outerClass}>{content}</div>
+    return (
+      <div className={outerClass}>
+        {responsiveStyle}
+        {content}
+      </div>
+    )
   }
   return (
     <div className={outerClass}>
+      {responsiveStyle}
       <MotionTarget preset={data.animation}>{content}</MotionTarget>
     </div>
   )

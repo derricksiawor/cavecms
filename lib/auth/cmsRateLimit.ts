@@ -142,6 +142,37 @@ export function checkReadRate(userId: number): void {
   }
 }
 
+// Per-TOKEN read budget — keyed by token id so an automated agent (MCP /
+// script) walking pages/themes cannot starve the human operator's per-user
+// read bucket (which the dashboard's lazy-loaded grids draw on). Higher
+// ceiling than the human bucket because agents legitimately batch reads;
+// still a hard cap so a runaway client trips at a bounded rate.
+const limitTokenReads = rateLimit('cms:read:token', {
+  limit: 240,
+  windowSec: 60,
+})
+
+export function checkReadRateForToken(tokenId: number): void {
+  if (!limitTokenReads(`t${tokenId}`)) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+// Dispatcher every CMS read site calls: token requests draw on the per-token
+// read bucket; cookie sessions on the per-user read bucket. Drop-in for
+// `checkReadRate(ctx.userId)` at read sites.
+export function checkCmsReadRate(ctx: {
+  userId: number
+  viaApiToken: boolean
+  tokenId: number | null
+}): void {
+  if (ctx.viaApiToken && ctx.tokenId !== null) {
+    checkReadRateForToken(ctx.tokenId)
+  } else {
+    checkReadRate(ctx.userId)
+  }
+}
+
 export function checkExportRate(userId: number): void {
   if (!limitExports(String(userId))) {
     throw new HttpError(429, 'rate_limited')

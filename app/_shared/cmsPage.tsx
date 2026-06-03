@@ -15,6 +15,9 @@ import { EditableMain } from '@/components/inline-edit/EditableMain'
 // one line — not a tree-scanning expression in three places.
 const FORM_BLOCK_TYPES = new Set<string>([
   'contact_form',
+  // Composable form (lx_form / E21) — submits to /api/leads/form and needs
+  // the public preCsrf nonce minted page-level, same as contact_form.
+  'lx_form',
   // Project lead forms — both submit to /api/leads/* and need the
   // public preCsrf nonce minted page-level. Present on migrated
   // project pages (app/projects/[slug]); harmless on any other page.

@@ -152,8 +152,11 @@ export function buildCsp(
     "default-src 'self'",
     `img-src ${dedupe(imgSrc).join(' ')}`,
     `script-src ${scriptSrc.join(' ')}`,
-    "style-src 'self' 'unsafe-inline'",
-    "font-src 'self' data:",
+    // Google Fonts (style + font CDN) allowed so the site-wide typography
+    // setting can load any catalog font. Trusted CDN; the two hosts are the
+    // canonical Google Fonts endpoints. next/font remains self-hosted ('self').
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
     `connect-src ${dedupe(connectSrc).join(' ')}`,
     `frame-src ${dedupe(frameSrc).join(' ')}`,
     "object-src 'none'",

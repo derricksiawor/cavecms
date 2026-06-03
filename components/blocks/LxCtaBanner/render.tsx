@@ -7,6 +7,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury CTA banner — eyebrow + title + body + primary CTA + optional
 // secondary CTA. Sits as a full-width band; operator picks the
@@ -38,12 +39,14 @@ export function LxCtaBanner({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_cta_banner'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const titleClass = isToken ? TONE_TITLE[tone] : undefined
   const bodyClass = isToken ? TONE_BODY[tone] : undefined
@@ -111,7 +114,7 @@ export function LxCtaBanner({
           initialValue={data.title}
           as="h2"
           className={clsx(
-            'font-serif font-semibold tracking-tight leading-tight',
+            'font-serif font-semibold tracking-tight leading-[1.08]',
             'text-4xl sm:text-5xl md:text-6xl',
             titleClass,
           )}
@@ -121,7 +124,7 @@ export function LxCtaBanner({
       ) : (
         <h2
           className={clsx(
-            'font-serif font-semibold tracking-tight leading-tight',
+            'font-serif font-semibold tracking-tight leading-[1.08]',
             'text-4xl sm:text-5xl md:text-6xl',
             titleClass,
           )}

@@ -304,13 +304,20 @@ export async function hydratePage(
     // both SectionMeta and ColumnMeta carry the field at the same key.
     if (parsedMeta && typeof parsedMeta === 'object') {
       const mm = parsedMeta as Record<string, unknown>
-      const bgImg = mm['backgroundImage']
-      if (bgImg && typeof bgImg === 'object') {
-        const id = (bgImg as Record<string, unknown>)['media_id']
-        if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
-          mediaIds.add(id)
+      const addMediaRef = (v: unknown) => {
+        if (v && typeof v === 'object') {
+          const id = (v as Record<string, unknown>)['media_id']
+          if (typeof id === 'number' && Number.isInteger(id) && id > 0) mediaIds.add(id)
         }
       }
+      addMediaRef(mm['backgroundImage'])
+      // Animated background slideshow (Feature A) — collect every slide's
+      // media_id so the renderer can resolve each frame's variant URL.
+      // Without this the slideshow resolves to empty and never shows.
+      const slides = mm['backgroundSlides']
+      if (Array.isArray(slides)) slides.forEach(addMediaRef)
+      // Background-video poster shares the same media-ref shape.
+      addMediaRef(mm['backgroundVideoPoster'])
     }
     blocks.push({
       id: b.id,

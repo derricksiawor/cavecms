@@ -7,6 +7,7 @@ import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
 import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
 import { encryptedSecretSchema } from '@/lib/security/secretCipher'
 import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
+import { FONT_KEYS, type FontKey } from '@/lib/cms/fontCatalog'
 
 // One Zod schema per `settings.key`. getSetting() parses every value
 // through this registry on read — so a tampered DB cell or a
@@ -235,6 +236,16 @@ const themePalette = z.object({
   accent: z.string().regex(HEX_COLOR_RE).default('#C9A961'),
   surfaceDark: z.string().regex(HEX_COLOR_RE).default('#050505'),
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
+})
+
+// Site-wide typography. heading/body each pick a font from the curated Google-
+// font catalog (bounded so nothing user-supplied is ever interpolated into a
+// stylesheet URL). null = keep the compiled default pairing. The layout loads
+// the chosen families + overrides the two leaf font vars everything chains
+// through (--font-playfair = headings, --font-montserrat = body).
+const typography = z.object({
+  heading: z.enum(FONT_KEYS as [FontKey, ...FontKey[]]).nullable().default(null),
+  body: z.enum(FONT_KEYS as [FontKey, ...FontKey[]]).nullable().default(null),
 })
 
 // Prune abandoned rows before item validation. Runs on every parse — INCLUDING
@@ -972,6 +983,73 @@ const aiConfig = z
     }
   })
 
+// ─── GDPR / cookie-consent banner ───
+// Operator-configurable consent banner. When enabled, the public banner
+// shows on first visit with granular per-category toggles + Reject all /
+// Customise / Allow selected / Accept all. Consent is stored in a first-
+// party cookie and gates Google tags via Consent Mode v2 (+ a JS consent
+// API for any other tag). `consentVersion` is bumped to re-ask everyone
+// after a material policy change.
+const cookieConsentCategory = z.object({
+  key: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]{0,23}$/, 'lowercase letters/digits/underscore, start with a letter'),
+  label: z.string().min(1).max(48),
+  description: z.string().max(300),
+  required: z.boolean().default(false),
+})
+const cookieConsent = z
+  .object({
+    enabled: z.boolean().default(false),
+    title: z.string().min(1).max(120).default('We value your privacy'),
+    message: z
+      .string()
+      .min(1)
+      .max(600)
+      .default(
+        'We use cookies to enhance your browsing experience, serve personalised content, and analyse our traffic. Choose which categories you allow — you can change your mind anytime.',
+      ),
+    policyUrl: siteLink.default('/privacy'),
+    position: z.enum(['bottom', 'bottom-left', 'bottom-right', 'center']).default('bottom-left'),
+    theme: z.enum(['auto', 'dark', 'light']).default('auto'),
+    categories: z
+      .array(cookieConsentCategory)
+      .min(1)
+      .max(8)
+      .default([
+        { key: 'necessary', label: 'Strictly necessary', description: 'Essential for the site to work — security, network management, and remembering your cookie choices. Always on.', required: true },
+        { key: 'analytics', label: 'Analytics', description: 'Help us understand how visitors use the site so we can improve it. Aggregated and anonymous.', required: false },
+        { key: 'marketing', label: 'Marketing', description: 'Used to deliver relevant advertising and measure campaign performance across sites.', required: false },
+        { key: 'preferences', label: 'Preferences', description: 'Remember choices you make (such as language or region) for a more personal experience.', required: false },
+      ])
+      // The first category MUST be a required (necessary) one and at least one
+      // category must be required, so consent can never disable the essentials.
+      .superRefine((cats, ctx) => {
+        if (!cats.some((c) => c.required)) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'at_least_one_required_category', path: [0, 'required'] })
+        }
+        const seen = new Set<string>()
+        cats.forEach((c, i) => {
+          if (seen.has(c.key)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate category key "${c.key}"`, path: [i, 'key'] })
+          seen.add(c.key)
+        })
+      }),
+    googleConsentMode: z.boolean().default(true),
+    buttons: z
+      .object({
+        allowAll: z.string().min(1).max(40).default('Accept all'),
+        rejectAll: z.string().min(1).max(40).default('Reject all'),
+        customize: z.string().min(1).max(40).default('Customise'),
+        save: z.string().min(1).max(40).default('Allow selected'),
+      })
+      .default({ allowAll: 'Accept all', rejectAll: 'Reject all', customize: 'Customise', save: 'Allow selected' }),
+    reopenLabel: z.string().min(1).max(40).default('Cookie preferences'),
+    showReopenLink: z.boolean().default(true),
+    consentVersion: z.number().int().min(1).max(99999).default(1),
+  })
+  .strict()
+export type CookieConsentConfig = z.infer<typeof cookieConsent>
+
 export const registry = {
   contact_info: {
     schema: contactInfo,
@@ -1161,6 +1239,28 @@ export const registry = {
       surfaceDark: '#050505',
       surfaceLight: '#F5F1EA',
     } satisfies z.infer<typeof themePalette>,
+  },
+  // ─── Operator-defined global colour swatches (E18) ───
+  // Named brand colours the editor's colour pickers surface as quick picks
+  // ("define once, reuse everywhere"). MCP / API / dashboard settable.
+  theme_swatches: {
+    schema: z.object({
+      swatches: z
+        .array(z.object({ label: z.string().min(1).max(40), color: z.string().regex(HEX_COLOR_RE) }))
+        .max(24)
+        .default([]),
+    }),
+    default: { swatches: [] },
+  },
+  // ─── Site-wide typography (font pairing) ───
+  typography: {
+    schema: typography,
+    default: { heading: null, body: null } satisfies z.infer<typeof typography>,
+  },
+  // ─── GDPR cookie-consent banner ───
+  cookie_consent: {
+    schema: cookieConsent,
+    default: cookieConsent.parse({}),
   },
   // ─── Self-update preferences ───
   updates: {

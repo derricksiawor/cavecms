@@ -9,9 +9,11 @@ import { safeCtaHref, safeCtaHrefOptional } from './safeHref'
 // parseVideoEmbedUrl is unused after the legacy purge — the lx_video
 // schema uses its own isValidVideoUrl gate. Kept removed (no import).
 import { parseStrictHttpsUrl } from './url-guard'
-import { HEX_COLOR_RE } from './designTokens'
+import { HEX_COLOR_RE, CSS_TYPO_VALUE_RE } from './designTokens'
+import { GradientSchema } from './gradient'
 import { BLOCK_TONE_ENUMS } from './blockTones'
 import { isAllowedEmbedUrl } from './embedHosts'
+import { HONEYPOT_FIELD } from '@/lib/leads/honeypot'
 
 // ─── Picker-aware colour schema helper ──────────────────────────────
 // Block tone/color fields used to accept a strict enum of design-system
@@ -38,8 +40,25 @@ const colorTokenOrHex = <T extends readonly [string, ...string[]]>(
 // hard-coded baseline (e.g. lx_heading defaults to display + bold).
 const fontFamilyToken = z.enum(['display', 'body']).optional()
 const fontWeightToken = z
-  .enum(['regular', 'medium', 'semibold', 'bold', 'black'])
+  // thin/light accepted at the write boundary for brand-exact type ramps via
+  // MCP/API; the builder weight picker omits them (operator-UI preference).
+  .enum(['thin', 'light', 'regular', 'medium', 'semibold', 'bold', 'black'])
   .optional()
+
+// Optional EXACT typographic overrides for prose blocks (heading / text).
+// The size enum + family/weight tokens cover the common cases; these let
+// an agent/operator match a brand's type ramp to the pixel (e.g. a 56px /
+// 1.1 line-height / -0.025em hero) the same way `backgroundColor` lets a
+// section match an exact hex. Accepts a SAFE subset only:
+//   - a unitless number for line-height ("1.1", "1.625")
+//   - a single length ("56px", "3.5rem", "-0.025em", "1.5vw")
+//   - a 3-arg clamp of lengths/viewport units for responsive type
+//     ("clamp(2.25rem, 5vw, 3.5rem)")
+// The strict regex rejects semicolons, url(), expression(), braces, calc —
+// so the value can never break out of the inline style it renders into.
+// Inline style beats the size/leading/tracking utility classes, so a set
+// override wins; unset = the renderer's class-derived baseline.
+const cssTypoValue = z.string().trim().min(1).max(48).regex(CSS_TYPO_VALUE_RE)
 
 // Cross-field refine for typography blocks: when both `family` and
 // `weight` are set, the chosen weight must be in the family's
@@ -57,7 +76,7 @@ import { FONT_FAMILY_TOKENS } from './designTokens'
 function refineFamilyWeight<S extends z.ZodObject<z.ZodRawShape>>(schema: S): S {
   return schema.refine(
     (d) => {
-      const o = d as { family?: 'display' | 'body'; weight?: 'regular' | 'medium' | 'semibold' | 'bold' | 'black' }
+      const o = d as { family?: 'display' | 'body'; weight?: 'thin' | 'light' | 'regular' | 'medium' | 'semibold' | 'bold' | 'black' }
       if (!o.family || !o.weight) return true
       const shipped = FONT_FAMILY_TOKENS[o.family].shippedWeights
       return (shipped as ReadonlyArray<string>).includes(o.weight)
@@ -316,6 +335,24 @@ export const blockSchemas = {
       // refine on the wrapper enforces weight ∈ family.shippedWeights.
       family: fontFamilyToken,
       weight: fontWeightToken,
+      // Exact typographic overrides (optional) — pixel-match a brand's
+      // type ramp. Override the size-enum / leading-tight / tracking-tight
+      // baseline when set. fontSize accepts a length or a responsive
+      // clamp(); lineHeight a unitless number or length; letterSpacing a
+      // length (e.g. "-0.025em").
+      fontSize: cssTypoValue.optional(),
+      lineHeight: cssTypoValue.optional(),
+      letterSpacing: cssTypoValue.optional(),
+      // Responsive per-breakpoint overrides (E17) — tablet (≤1024px) and
+      // mobile (≤640px) sizes, emitted as a scoped <style>. Override the
+      // base size at that breakpoint only.
+      fontSizeTablet: cssTypoValue.optional(),
+      fontSizeMobile: cssTypoValue.optional(),
+      lineHeightTablet: cssTypoValue.optional(),
+      lineHeightMobile: cssTypoValue.optional(),
+      // Gradient TEXT (optional) — paints the heading with a gradient via
+      // background-clip:text. Overrides the tone colour when set.
+      textGradient: GradientSchema.optional(),
       animation: z
         .enum(['none', 'fade-in', 'slide-up', 'line-reveal'])
         .default('none'),
@@ -338,6 +375,18 @@ export const blockSchemas = {
       family: fontFamilyToken,
       weight: fontWeightToken,
       maxWidth: z.enum(['narrow', 'medium', 'wide', 'full']).default('medium'),
+      // Exact typographic overrides (optional) — match a brand's body ramp
+      // precisely. Override the size-enum baseline when set.
+      fontSize: cssTypoValue.optional(),
+      lineHeight: cssTypoValue.optional(),
+      letterSpacing: cssTypoValue.optional(),
+      // Responsive per-breakpoint overrides (E17).
+      fontSizeTablet: cssTypoValue.optional(),
+      fontSizeMobile: cssTypoValue.optional(),
+      lineHeightTablet: cssTypoValue.optional(),
+      lineHeightMobile: cssTypoValue.optional(),
+      // Gradient TEXT (optional) — overrides the tone colour when set.
+      textGradient: GradientSchema.optional(),
       animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
     }),
   ),
@@ -350,9 +399,16 @@ export const blockSchemas = {
   lx_eyebrow: z.object({
     text: safeRequiredText(1, TEXT_MAX.caption),
     prefix: z.enum(['rule', 'none']).default('none'),
+    // 'badge' = the pill treatment (tinted rounded chip, uppercase).
+    // 'plain' = a quiet inline label — NO pill, text in the tone colour,
+    // rendered as typed (no forced uppercase). For editorial section
+    // kickers (e.g. a muted "The problem" above a left-aligned headline).
+    variant: z.enum(['badge', 'plain']).default('badge'),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_eyebrow).default('champagne'),
     alignment: z.enum(['left', 'center', 'right']).default('left'),
     weight: fontWeightToken,
+    // Gradient TEXT (optional) — overrides the tone colour when set.
+    textGradient: GradientSchema.optional(),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
   }),
 
@@ -362,6 +418,79 @@ export const blockSchemas = {
   // The animation: 'magnetic' opt-in attaches the cursor-follow
   // pointer behaviour for buttons that warrant it (the canonical
   // single hero CTA, not 12 magnetic CTAs on a page).
+  // Composable form (Elementor Form parity) — operator-defined fields that
+  // POST to the lead pipeline. Each field has a slug name, label, type,
+  // required flag, placeholder, and (for select) options. One field can be
+  // flagged the email/name/phone for the lead row; everything is packed
+  // into the lead message + emailed to the notification recipient.
+  lx_form: z.object({
+    heading: safeText(TEXT_MAX.title).optional(),
+    intro: safeText(TEXT_MAX.body).optional(),
+    fields: z
+      .array(
+        z.object({
+          name: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+          label: safeRequiredText(1, TEXT_MAX.caption),
+          type: z.enum(['text', 'email', 'tel', 'textarea', 'select', 'checkbox']).default('text'),
+          required: z.boolean().default(false),
+          placeholder: safeText(120).optional(),
+          options: z.array(safeText(80)).max(20).optional(),
+          // Map this field to the lead's name / email / phone column.
+          role: z.enum(['none', 'name', 'email', 'phone']).default('none'),
+        }),
+      )
+      .min(1)
+      .max(20)
+      // A visible field named exactly like the honeypot (`company_url`) would
+      // overwrite the hidden anti-bot input in the submitted FormData, so a
+      // real visitor's value trips honeypotTripped() and the lead is silently
+      // dropped behind a fake success screen. Reserve the name at the write
+      // boundary. Also enforce name-uniqueness so two fields can't clobber
+      // each other in FormData.
+      .superRefine((fields, ctx) => {
+        const seen = new Set<string>()
+        fields.forEach((f, i) => {
+          if (f.name === HONEYPOT_FIELD) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `"${HONEYPOT_FIELD}" is a reserved field name`,
+              path: [i, 'name'],
+            })
+          }
+          if (seen.has(f.name)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Duplicate field name "${f.name}"`,
+              path: [i, 'name'],
+            })
+          }
+          seen.add(f.name)
+        })
+      }),
+    submitLabel: safeRequiredText(1, TEXT_MAX.ctaText).default('Submit'),
+    successHeadline: safeText(TEXT_MAX.title).optional(),
+    successBody: safeText(TEXT_MAX.body).optional(),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_text).default('obsidian'),
+  }),
+
+  // Standalone icon (Elementor Icon widget parity) — a single lucide glyph
+  // at any size/colour, optionally in a circle/square chip, rotatable,
+  // linkable. The composable primitive for icon-led cards (vs lx_icon_box
+  // which bundles icon+heading+body).
+  lx_icon: z.object({
+    icon: iconName,
+    size: z.number().int().min(8).max(240).default(48),
+    color: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon).default('champagne'),
+    alignment: z.enum(['left', 'center', 'right']).default('left'),
+    rotate: z.number().int().min(0).max(360).default(0),
+    shape: z.enum(['none', 'circle', 'square']).default('none'),
+    shapeColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon).optional(),
+    link: z
+      .object({ href: safeCtaHref(TEXT_MAX.url), openInNew: z.boolean().default(false) })
+      .optional(),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
   lx_action: z.object({
     label: safeRequiredText(1, TEXT_MAX.ctaText),
     href: safeCtaHref(TEXT_MAX.url),
@@ -371,6 +500,34 @@ export const blockSchemas = {
       .default('primary-gold'),
     size: z.enum(['sm', 'md', 'lg']).default('md'),
     alignment: z.enum(['left', 'center', 'right']).default('left'),
+    // Gradient FILL (optional) — paints the button with a gradient
+    // background. Overrides the variant's solid fill when set; the label
+    // colour still comes from the variant (set a contrasting variant).
+    // Ignored for the 'link-arrow' variant (it's text, not a pill).
+    backgroundGradient: GradientSchema.optional(),
+    // Optional gradient on the button LABEL text (background-clip:text).
+    textGradient: GradientSchema.optional(),
+    // Exact corner radius in px (0 = square, larger = softer). UNSET = the
+    // default full pill (rounded-full). Set e.g. 14 for a rounded-rectangle
+    // button. Ignored for 'link-arrow' (text, no pill).
+    radius: z.number().int().min(0).max(64).optional(),
+    // Solid fill colour (token or #hex) for the button — overrides the
+    // variant's fill (e.g. a white button: fillColor '#ffffff' on the
+    // primary variant, which already has dark label text). A gradient fill
+    // wins over this when both are set.
+    fillColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
+    // Hover-state overrides (Elementor parity) — bg, label colour, scale,
+    // and transition duration on hover. Rendered via CSS custom properties
+    // + the `cms-hover` utility so :hover styling works from inline data.
+    hoverFillColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
+    hoverTextColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
+    hoverScale: z.number().int().min(80).max(140).optional(),
+    transitionMs: z.number().int().min(50).max(1200).optional(),
+    // Per-corner radius (px) — overrides the single `radius` for that corner.
+    radiusTopLeft: z.number().int().min(0).max(64).optional(),
+    radiusTopRight: z.number().int().min(0).max(64).optional(),
+    radiusBottomRight: z.number().int().min(0).max(64).optional(),
+    radiusBottomLeft: z.number().int().min(0).max(64).optional(),
     animation: z.enum(['none', 'fade-in', 'slide-up', 'magnetic']).default('none'),
   }),
 
@@ -389,6 +546,22 @@ export const blockSchemas = {
     caption: safeText(TEXT_MAX.short).optional(),
     goldOverlay: z.boolean().default(false),
     corners: z.enum(['sharp', 'soft']).default('sharp'),
+    // E13 — Elementor Image parity:
+    // optional link (whole figure clickable); lightbox (click → full-image
+    // overlay; ignored when a link is set); hover-zoom; crop focus.
+    link: z
+      .object({ href: safeCtaHref(TEXT_MAX.url), openInNew: z.boolean().default(false) })
+      .optional(),
+    lightbox: z.boolean().default(false),
+    hoverZoom: z.boolean().default(false),
+    // Ambient Ken Burns drift — a slow continuous camera move on the image
+    // (independent of hoverZoom). Respects prefers-reduced-motion.
+    kenBurns: z
+      .enum(['none', 'zoom-in', 'zoom-out', 'pan-left', 'pan-right', 'zoom-pan'])
+      .default('none'),
+    objectPosition: z
+      .enum(['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'])
+      .optional(),
     animation: z.enum(['none', 'fade-in', 'slide-up', 'parallax']).default('none'),
   }),
 
@@ -723,16 +896,30 @@ export const blockSchemas = {
           icon: iconName,
           headline: safeRequiredText(1, TEXT_MAX.title),
           body: safeText(TEXT_MAX.body).optional(),
+          // Optional command/code shown as a mini terminal strip inside the
+          // card (with a copy button) — for "install command" feature cards.
+          // Escaped at render; no rich markup.
+          code: z.string().max(400).optional(),
         }),
       )
       .min(1)
       .max(12),
-    variant: z.enum(['vertical', 'grid', 'row']).default('vertical'),
+    // Render each item on a filled, rounded CARD surface (for a 2-col
+    // feature-card grid). Pairs with variant:'grid'.
+    card: z.boolean().default(false),
+    // 'checklist' = a compact stack of small-icon-beside-text rows (the
+    // ceymail "✓ feature" list register): no glow, tight rows, the icon
+    // tinted by `iconColor`. 'row' is the larger icon-beside-text card.
+    variant: z.enum(['vertical', 'grid', 'row', 'checklist']).default('vertical'),
     // 1 is meaningful for the 'row' variant — a single stacked column of
     // icon-beside-text rows (e.g. a POI rail in a narrow layout column).
     columns: z.union([z.literal(1), z.literal(2), z.literal(3)]).default(3),
     alignment: z.enum(['left', 'center']).default('left'),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon_list).default('obsidian'),
+    // Optional icon colour (token or #hex). When set, the icon uses this
+    // colour and the champagne glow is dropped — e.g. green checks for a
+    // feature checklist. Unset = the signature champagne glow treatment.
+    iconColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_icon_list).optional(),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
   }),
 
@@ -776,6 +963,14 @@ export const blockSchemas = {
     thickness: z.enum(['hairline', '1px', '2px']).default('hairline'),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_divider).default('champagne'),
     alignment: z.enum(['left', 'center', 'right']).default('center'),
+    // Optional text OR icon centred on the rule (Elementor divider parity)
+    // — e.g. an "OR" separator or a small glyph between two rules.
+    label: safeText(TEXT_MAX.caption).optional(),
+    labelIcon: iconName.optional(),
+    // Exact overrides (max flexibility): thickness in px (overrides the
+    // enum) and width as a % (overrides the width preset).
+    thicknessPx: z.number().int().min(1).max(16).optional(),
+    widthPercent: z.number().int().min(5).max(100).optional(),
     animation: z.enum(['none', 'fade-in']).default('none'),
   }),
 
@@ -1224,6 +1419,9 @@ export const blockSchemas = {
       .default('text'),
     showLineNumbers: z.boolean().default(false),
     filename: safeText(TEXT_MAX.caption).optional(),
+    // One-click "Copy" affordance in the code-block header (default on).
+    // Set false for display-only snippets.
+    copyable: z.boolean().default(true),
   }),
 
   // ── Stretch wave ("even better than Elementor") ─────────────────
@@ -1268,6 +1466,10 @@ export const blockSchemas = {
       .max(40),
     highlightColumn: z.number().int().min(0).max(3).optional(),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_comparison_table).default('obsidian'),
+    // Accent (token or #hex) for the ✓ checks, the highlighted column's
+    // header text, and its tint band. Default champagne; set to the brand
+    // accent (e.g. a green #00e68a) to match a brand's compare table.
+    accent: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_comparison_table).default('champagne'),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
   }),
 
