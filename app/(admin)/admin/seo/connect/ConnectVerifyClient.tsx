@@ -63,7 +63,7 @@ const WEBMASTER_FIELDS: {
   { key: 'bing', name: 'Bing', logo: '/icons/bing.svg', placeholder: 'e.g. A1B2C3D4…' },
   { key: 'yandex', name: 'Yandex', logo: '/icons/yandex.svg', placeholder: 'e.g. a1b2c3d4e5…' },
   { key: 'pinterest', name: 'Pinterest', logo: '/icons/pinterest.svg', placeholder: 'e.g. a1b2c3…' },
-  { key: 'baidu', name: 'Baidu', logo: null, placeholder: 'e.g. code from Baidu Ziyuan' },
+  { key: 'baidu', name: 'Baidu', logo: '/icons/baidu.svg', placeholder: 'e.g. code from Baidu Ziyuan' },
   { key: 'naver', name: 'Naver', logo: '/icons/naver.svg', placeholder: 'e.g. code from Naver Search Advisor' },
 ]
 
