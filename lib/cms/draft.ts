@@ -482,6 +482,10 @@ export async function getPageDraftStatus(pageId: number): Promise<DraftStatus> {
 export async function publishPageDraft(args: {
   pageId: number
   userId: number
+  // Acting API token id (null for a cookie-session publish) — attributes the
+  // publish audit row to the specific token, matching the sync/backup audit
+  // rows so a forensic trail can tell an agent's publish from a UI publish.
+  tokenId?: number | null
   ip: string | null
   userAgent: string | null
   requestId: string | null
@@ -578,6 +582,7 @@ export async function publishPageDraft(args: {
     // 5. Audit the publish (one summary row, not per-block).
     await tx.insert(auditLog).values({
       userId: args.userId,
+      tokenId: args.tokenId ?? null,
       action: 'update',
       resourceType: 'page',
       resourceId: String(args.pageId),

@@ -47,6 +47,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
     const { pageVersion, published } = await publishPageDraft({
       pageId: id,
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       ip,
       userAgent,
       requestId,
