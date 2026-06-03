@@ -83,6 +83,10 @@ interface Props {
   project?: RenderContext['project']
   /** Preview-mode marker — see RenderContext.preview. */
   preview?: boolean
+  /** Active theme palette mode — see RenderContext.themeMode (FIX 3). Threaded
+   *  down so the editor-canvas lx_posts renderer matches the public dark-theme
+   *  no-bg-section text flip. Undefined → light default. */
+  themeMode?: RenderContext['themeMode']
 }
 
 export function EditableBlockTreeRenderer({
@@ -95,7 +99,8 @@ export function EditableBlockTreeRenderer({
   csrf,
   project,
   preview,
-}: Props) {
+  themeMode,
+}:Props) {
   const state = useInlineEditState()
   // Memoise tree + topIds against state.blocks identity. The reducer
   // preserves state.blocks reference when only previews/versionOverrides/
@@ -151,6 +156,7 @@ export function EditableBlockTreeRenderer({
                   csrf={csrf}
                   project={project}
                   preview={preview}
+                  themeMode={themeMode}
                 />
               ) : (
                 <EditableWidgetSlot
@@ -166,6 +172,7 @@ export function EditableBlockTreeRenderer({
                   csrf={csrf}
                   project={project}
                   preview={preview}
+                  themeMode={themeMode}
                 />
               )}
               <InsertSectionHere pageId={pageId} afterBlockId={entryId} />
@@ -191,6 +198,10 @@ interface SectionSlotProps {
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
+  /** Active theme palette mode — see RenderContext.themeMode (FIX 3). Threaded
+   *  down so the editor-canvas lx_posts renderer matches the public dark-theme
+   *  no-bg-section text flip. Undefined → light default. */
+  themeMode?: RenderContext['themeMode']
 }
 
 function EditableSectionSlot({
@@ -206,7 +217,8 @@ function EditableSectionSlot({
   csrf,
   project,
   preview,
-}: SectionSlotProps) {
+  themeMode,
+}:SectionSlotProps) {
   // Live-preview overlay for the section's meta. The drawer pushes
   // background / padding tweaks here so the operator sees the CSS
   // flip the instant they pick a swatch. Chunk E: the SpacingToolbar
@@ -255,6 +267,7 @@ function EditableSectionSlot({
             csrf={csrf}
             project={project}
             preview={preview}
+            themeMode={themeMode}
           />
         ))}
       </SectionFrame>
@@ -283,6 +296,10 @@ interface ColumnSlotProps {
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
+  /** Active theme palette mode — see RenderContext.themeMode (FIX 3). Threaded
+   *  down so the editor-canvas lx_posts renderer matches the public dark-theme
+   *  no-bg-section text flip. Undefined → light default. */
+  themeMode?: RenderContext['themeMode']
 }
 
 function EditableColumnSlot({
@@ -301,7 +318,8 @@ function EditableColumnSlot({
   csrf,
   project,
   preview,
-}: ColumnSlotProps) {
+  themeMode,
+}:ColumnSlotProps) {
   // Memoise widgetIds against the widgets array identity. EditableColumn
   // passes this into the per-column SortableContext as the `items` prop —
   // dnd-kit identity-diffs `items` and on a churning array (fresh per
@@ -356,6 +374,7 @@ function EditableColumnSlot({
               csrf={csrf}
               project={project}
               preview={preview}
+              themeMode={themeMode}
             />
             <InsertBlockHere
               pageId={pageId}
@@ -383,6 +402,10 @@ interface WidgetSlotProps {
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
+  /** Active theme palette mode — see RenderContext.themeMode (FIX 3). Threaded
+   *  down so the editor-canvas lx_posts renderer matches the public dark-theme
+   *  no-bg-section text flip. Undefined → light default. */
+  themeMode?: RenderContext['themeMode']
 }
 
 function EditableWidgetSlot({
@@ -399,7 +422,8 @@ function EditableWidgetSlot({
   csrf,
   project,
   preview,
-}: WidgetSlotProps) {
+  themeMode,
+}:WidgetSlotProps) {
   // Effective data: shallow-merge any pending drawer preview overlay
   // on top of the persisted block.data. When no preview is pending
   // this returns the persisted shape verbatim (no churn).
@@ -476,7 +500,7 @@ function EditableWidgetSlot({
   const node = renderBlock(
     block.blockType,
     effectiveData,
-    { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview },
+    { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview, themeMode },
     inlineEdit,
     widgetSpacingClass,
     block.id,

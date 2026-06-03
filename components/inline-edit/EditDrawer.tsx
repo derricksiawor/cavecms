@@ -1128,6 +1128,7 @@ export function EditDrawer({
               shapes={activeShapes}
               value={data}
               onChange={handleSetData}
+              blockType={blockType}
             />
           )}
         </div>

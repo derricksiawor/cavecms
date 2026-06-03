@@ -260,23 +260,43 @@ interface SurfaceProbeMeta {
 
 /** Probe whether the visible surface of a section reads as dark — used
  *  by the insert pipeline to pick a contrasting tone for new tone-aware
- *  widgets. Returns false when meta is null/undefined (no section
- *  ancestor → page body is cream/light) OR when neither the bg color
- *  nor the cover-photo overlay is dark. */
+ *  widgets, and by renderers (e.g. lx_posts) to flip text tones light↔dark.
+ *
+ *  Resolution order:
+ *    1. Cover photo + darkening overlay → dark (the operator picked a dark
+ *       hero treatment, regardless of the underlying bg token).
+ *    2. An explicit dark bg token → dark.
+ *    3. An explicit light/neutral bg token → light.
+ *    4. NO explicit bg → the section sits on the PAGE BODY. The body bg flips
+ *       with the active theme (--brand-base-bg). FIX 3: when `themeMode` is
+ *       'dark', a no-bg section's surface is therefore dark, so we return true
+ *       → text resolves to the LIGHT token (legible). When `themeMode` is
+ *       'light' (or omitted, preserving the legacy default), a no-bg section is
+ *       light → false → dark text, exactly as before.
+ *
+ *  `themeMode` is optional so every existing call site (insert pipeline,
+ *  editor canvas) keeps its prior light-default behaviour; only callers that
+ *  resolve the live `theme_palette.mode` and pass it (today: the lx_posts
+ *  renderer via RenderContext.themeMode) get the theme-aware no-bg result. */
 export function isSectionSurfaceDark(
   meta: SurfaceProbeMeta | null | undefined,
+  themeMode?: 'light' | 'dark',
 ): boolean {
-  if (!meta) return false
   // Cover photo with dark overlay wins regardless of underlying bg
-  // color — the operator picked a dark hero treatment.
+  // color — the operator picked a dark hero treatment. (Checked before the
+  // null-meta guard's no-bg fallback so it always takes precedence.)
   if (
+    meta &&
     meta.backgroundImage &&
     meta.backgroundOverlay &&
     DARKENING_OVERLAYS.has(meta.backgroundOverlay)
   ) {
     return true
   }
-  if (!meta.background) return false
+  // No explicit bg token (no section ancestor, or a section that didn't set a
+  // background) → the surface is the page body, which follows the theme. On a
+  // dark theme the body is dark; otherwise light (legacy default).
+  if (!meta || !meta.background) return themeMode === 'dark'
   return COLOR_TOKEN_BRIGHTNESS[meta.background] === 'dark'
 }
 

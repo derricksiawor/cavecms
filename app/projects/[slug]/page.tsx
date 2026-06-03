@@ -188,7 +188,7 @@ export default async function ProjectPage({
     // arbitrary project slugs.
     const hydratedPage = await hydratePage(pageRow.id)
     if (!hydratedPage) notFound()
-    const { blocks, media, projects, posts, postsLoop, postCardsByBlock } = hydratedPage
+    const { blocks, media, projects, posts, postsLoop, postCardsByBlock, themeMode } = hydratedPage
     const csrf = await mintPublicPreCsrfForBlocks(blocks, slug)
 
     // JSON-LD still uses the project's structured-data shape — the
@@ -237,6 +237,7 @@ export default async function ProjectPage({
           posts={posts}
           postsLoop={postsLoop}
           postCardsByBlock={postCardsByBlock}
+          themeMode={themeMode}
           session={session}
           editable={editable}
           preview={previewMode}

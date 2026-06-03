@@ -99,6 +99,7 @@ export function LxPosts({
   media,
   outerClass,
   sectionMeta,
+  themeMode,
 }: {
   data: BlockData<'lx_posts'>
   postsLoop?: RenderContext['postsLoop']
@@ -106,8 +107,14 @@ export function LxPosts({
   media: RenderContext['media']
   outerClass?: string
   sectionMeta?: SectionMeta
+  /** Active theme palette mode (FIX 3). When the widget sits in a section with
+   *  NO explicit background and the theme is dark, the surface is the dark page
+   *  body — so we resolve onDark=true and the non-card text (heading / empty
+   *  state) + card text read light-on-dark instead of dark-on-dark. Absent →
+   *  light default (every prior caller). */
+  themeMode?: 'light' | 'dark'
 }) {
-  const onDark = isSectionSurfaceDark(sectionMeta)
+  const onDark = isSectionSurfaceDark(sectionMeta, themeMode)
   const isCurrent = data.source === 'current'
 
   // Resolve the card list from the active source.
@@ -115,19 +122,50 @@ export function LxPosts({
     ? (postsLoop?.items ?? []).map(loopItemToCard)
     : postCards ?? []
 
-  // ── Card content toggles (the block's values; defaults from schema, which
-  //    for the current source were overwritten with blog_settings at hydrate) ─
+  // ── Effective DISPLAY (FIX 2) ────────────────────────────────────────────
+  // For the `current` source the canonical blog index/archive display is
+  // AUTHORITATIVELY controlled by Settings → Blog. hydrate.ts no longer bakes
+  // those values into `block.data` (so the editor reads/saves raw block
+  // values); it carries them on `postsLoop.display` instead. We read the
+  // settings-authoritative fields from there for `current`, and fall back to
+  // the block's own `data` (e.g. an editor-canvas preview where display may be
+  // absent, or the load-more route's slice). Every OTHER source uses its own
+  // block data verbatim — those widgets are operator-authored per placement.
+  const display = isCurrent ? postsLoop?.display : undefined
+  const eff = {
+    template: display?.template ?? data.template,
+    columns: display?.columns ?? data.columns,
+    showImage: display?.showImage ?? data.showImage,
+    showExcerpt: display?.showExcerpt ?? data.showExcerpt,
+    showDate: display?.showDate ?? data.showDate,
+    showAuthor: display?.showAuthor ?? data.showAuthor,
+    showCategory: display?.showCategory ?? data.showCategory,
+    showReadingTime: display?.showReadingTime ?? data.showReadingTime,
+    showReadMore: display?.showReadMore ?? data.showReadMore,
+    // readMoreLabel is optional on both sides; a settings display may carry it
+    // or not — fall back to the block value, then undefined (renderer default).
+    readMoreLabel: display ? display.readMoreLabel : data.readMoreLabel,
+    excerptClamp: display?.excerptClamp ?? data.excerptClamp,
+    cardStyle: display?.cardStyle ?? data.cardStyle,
+    spacing: display?.spacing ?? data.spacing,
+    imageAspect: display?.imageAspect ?? data.imageAspect,
+    pagination: display?.pagination ?? data.pagination,
+  }
+
+  // ── Card content toggles (effective display: settings for `current`,
+  //    block data for every other source). titleClamp is NOT settings-backed
+  //    (not in the blog_settings reading model) → always the block value. ─────
   const toggles: PostCardToggles = {
-    showImage: data.showImage,
-    showDate: data.showDate,
-    showAuthor: data.showAuthor,
-    showCategory: data.showCategory,
-    showExcerpt: data.showExcerpt,
-    showReadingTime: data.showReadingTime,
-    showReadMore: data.showReadMore,
-    readMoreLabel: data.readMoreLabel,
+    showImage: eff.showImage,
+    showDate: eff.showDate,
+    showAuthor: eff.showAuthor,
+    showCategory: eff.showCategory,
+    showExcerpt: eff.showExcerpt,
+    showReadingTime: eff.showReadingTime,
+    showReadMore: eff.showReadMore,
+    readMoreLabel: eff.readMoreLabel,
     titleClamp: data.titleClamp,
-    excerptClamp: data.excerptClamp,
+    excerptClamp: eff.excerptClamp,
   }
 
   // ── Empty state ──────────────────────────────────────────────────────────
@@ -141,14 +179,14 @@ export function LxPosts({
     if (isBareTeaser) return null
     const empty = (
       <section className={clsx('mx-auto w-full max-w-6xl', outerClass)}>
-        <PostsEmptyState heading={data.heading} onDark={onDark} template={data.template} />
+        <PostsEmptyState heading={data.heading} onDark={onDark} template={eff.template} />
       </section>
     )
     return data.animation === 'none' ? empty : <MotionTarget preset={data.animation}>{empty}</MotionTarget>
   }
 
-  const columns = data.columns as Columns
-  const template: PostsTemplate = data.template
+  const columns = eff.columns as Columns
+  const template: PostsTemplate = eff.template
 
   // ── Body — the chosen template ───────────────────────────────────────────
   let body: React.ReactNode
@@ -158,7 +196,7 @@ export function LxPosts({
         cards={cards}
         media={media}
         toggles={toggles}
-        aspect={data.imageAspect}
+        aspect={eff.imageAspect}
         onDark={onDark}
         autoplay={data.autoplay}
         intervalMs={data.intervalMs}
@@ -173,9 +211,9 @@ export function LxPosts({
         cards={cards}
         media={media}
         toggles={toggles}
-        cardStyle={data.cardStyle}
-        spacing={data.spacing}
-        aspect={data.imageAspect}
+        cardStyle={eff.cardStyle}
+        spacing={eff.spacing}
+        aspect={eff.imageAspect}
         columns={columns}
         onDark={onDark}
       />
@@ -186,9 +224,9 @@ export function LxPosts({
         cards={cards}
         media={media}
         toggles={toggles}
-        cardStyle={data.cardStyle}
-        spacing={data.spacing}
-        aspect={data.imageAspect}
+        cardStyle={eff.cardStyle}
+        spacing={eff.spacing}
+        aspect={eff.imageAspect}
         columns={1}
         onDark={onDark}
         imageSide="left"
@@ -203,9 +241,9 @@ export function LxPosts({
         cards={cards}
         media={media}
         toggles={toggles}
-        cardStyle={data.cardStyle}
-        spacing={data.spacing}
-        aspect={data.imageAspect}
+        cardStyle={eff.cardStyle}
+        spacing={eff.spacing}
+        aspect={eff.imageAspect}
         columns={effCols}
         onDark={onDark}
       />
@@ -213,11 +251,14 @@ export function LxPosts({
 
     // ── Pagination (current source + grid/cards/list only) ──────────────────
     // Resolve the effective mode: 'auto' → numbered for the current source
-    // (SEO-crawlable default), none for everything else.
+    // (SEO-crawlable default), none for everything else. `eff.pagination` is
+    // the settings-authoritative value for the current source (FIX 2), so an
+    // explicit settings/block 'numbered'/'load-more'/'none' is honoured and the
+    // 'auto' sentinel maps to numbered.
     const effectivePagination = isCurrent
-      ? data.pagination === 'auto'
+      ? eff.pagination === 'auto'
         ? 'numbered'
-        : data.pagination
+        : eff.pagination
       : 'none'
 
     if (isCurrent && effectivePagination === 'load-more' && postsLoop) {
@@ -225,9 +266,9 @@ export function LxPosts({
         <PostsLoadMore
           media={media}
           toggles={toggles}
-          aspect={data.imageAspect}
+          aspect={eff.imageAspect}
           columns={effCols}
-          spacing={data.spacing}
+          spacing={eff.spacing}
           onDark={onDark}
           initialPage={postsLoop.page}
           initialHasNext={postsLoop.hasNext}

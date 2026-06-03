@@ -101,6 +101,27 @@ export interface RenderContext {
      *  renderer builds prev/next hrefs from this so an archive's pager stays on
      *  the archive. Defaults to /blog when absent. */
     basePath?: string
+    /** Settings-authoritative DISPLAY config for the `current` source (FIX 2).
+     *  Mirrors hydrate.ts PostsLoopDisplay. The LxPosts loop renderer reads its
+     *  template/columns/card-toggles/pagination from here so `block.data` stays
+     *  raw (the editor sees + saves the stored values, not baked settings). */
+    display?: {
+      template: 'grid' | 'cards' | 'list' | 'magazine' | 'carousel'
+      columns: 1 | 2 | 3 | 4
+      showImage: boolean
+      showExcerpt: boolean
+      showDate: boolean
+      showAuthor: boolean
+      showCategory: boolean
+      showReadingTime: boolean
+      showReadMore: boolean
+      readMoreLabel?: string
+      excerptClamp: number
+      cardStyle: 'flat' | 'soft' | 'elevated'
+      spacing: 'tight' | 'comfortable' | 'airy'
+      imageAspect: '16:9' | '4:3' | '3:2' | '1:1' | '4:5'
+      pagination: 'auto' | 'none' | 'numbered' | 'load-more'
+    }
   }
   /** Posts-widget card lists keyed by the lx_posts BLOCK id — set when the
    *  page tree has a SELF-CONTAINED posts widget (source latest/category/tag/
@@ -128,6 +149,12 @@ export interface RenderContext {
    *  blocks suppress live submission in preview so QA never produces a
    *  false-success state. Undefined / false everywhere else. */
   preview?: boolean
+  /** Active theme palette mode (FIX 3). Set only when the page tree has an
+   *  lx_posts block (resolved in hydrate.ts). The lx_posts renderer threads it
+   *  into isSectionSurfaceDark so a posts widget in a no-bg section on a dark
+   *  theme reads light-on-dark instead of dark-on-dark. Absent → light default.
+   */
+  themeMode?: 'light' | 'dark'
 }
 
 /** Project-row fields threaded to the project block renderers via
@@ -202,6 +229,11 @@ type BlockRendererArgs<D> = {
    *  to resolve. `undefined` means the block is rendering at the page
    *  root (no ancestor section) — treat as light surface. */
   sectionMeta?: SectionMeta
+  /** Active theme palette mode — see RenderContext.themeMode (FIX 3). Only the
+   *  lx_posts renderer consumes it (passes it to isSectionSurfaceDark so a no-bg
+   *  section on a dark theme flips its text to light). Every other renderer
+   *  ignores it. */
+  themeMode?: RenderContext['themeMode']
 }
 
 type BlockRenderer<D> = (args: BlockRendererArgs<D>) => ReactNode
@@ -361,8 +393,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_share: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_share'>>) => (
     <LxShare data={data} outerClass={outerClass} />
   ),
-  lx_posts: ({ data, postsLoop, postCards, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
-    <LxPosts data={data} postsLoop={postsLoop} postCards={postCards} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
+  lx_posts: ({ data, postsLoop, postCards, media, outerClass, sectionMeta, themeMode }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
+    <LxPosts data={data} postsLoop={postsLoop} postCards={postCards} media={media} outerClass={outerClass} sectionMeta={sectionMeta} themeMode={themeMode} />
   ),
   lx_embed: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_embed'>>) => (
     <LxEmbed data={data} outerClass={outerClass} />
@@ -513,5 +545,6 @@ export function renderBlock(
     outerClass,
     blockId,
     sectionMeta,
+    themeMode: ctx.themeMode,
   })
 }

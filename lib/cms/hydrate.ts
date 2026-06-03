@@ -147,6 +147,39 @@ export interface HydratedPostLoopItem {
   url: string
 }
 
+/** The settings-authoritative DISPLAY config for the canonical blog index /
+ *  archive (the `current` source). Resolved from `blog_settings` at hydrate and
+ *  carried on `postsLoop` so the SYNCHRONOUS LxPosts loop renderer reads its
+ *  display from HERE — never from `block.data`. This is the FIX-2 decoupling:
+ *  hydrate no longer mutates `firstLoopBlock.data` in place, so the inline-edit
+ *  drawer reads + saves the RAW stored block values (e.g. pagination:'auto'),
+ *  and a later Settings → Blog change still flows through to the index because
+ *  the effective display lives on the request-scoped loop context, not baked
+ *  into the persisted block.
+ *
+ *  Field set MIRRORS the WordPress "reading settings" model: Settings → Blog is
+ *  the one authoritative place that controls the index/archive layout +
+ *  card toggles + pagination. Fields NOT in this set (heading, titleClamp,
+ *  animation, carousel knobs, postsPerPage) stay block-controlled — see
+ *  resolveLoopDisplay below + the FIX-1 controlled-field set in ZodForm. */
+export interface PostsLoopDisplay {
+  template: 'grid' | 'cards' | 'list' | 'magazine' | 'carousel'
+  columns: 1 | 2 | 3 | 4
+  showImage: boolean
+  showExcerpt: boolean
+  showDate: boolean
+  showAuthor: boolean
+  showCategory: boolean
+  showReadingTime: boolean
+  showReadMore: boolean
+  readMoreLabel?: string
+  excerptClamp: number
+  cardStyle: 'flat' | 'soft' | 'elevated'
+  spacing: 'tight' | 'comfortable' | 'airy'
+  imageAspect: '16:9' | '4:3' | '3:2' | '1:1' | '4:5'
+  pagination: 'auto' | 'none' | 'numbered' | 'load-more'
+}
+
 // The paginated, filtered slice a loop-mode lx_posts block renders.
 // Populated only when the page tree contains a loop-mode lx_posts block;
 // the slice is index-ordered (published_at DESC, id DESC), bounded via SQL
@@ -167,6 +200,13 @@ export interface HydratedPostsLoop {
    *  archive instead of bouncing to the plain /blog index. Always a
    *  route-safe path (composed by lib/blog/urls), never user input. */
   basePath?: string
+  /** Settings-authoritative display config for the index/archive (FIX 2). The
+   *  LxPosts loop renderer reads its template/columns/card-toggles/pagination
+   *  from here for the `current` source, leaving `block.data` raw. Always set
+   *  when this loop was produced for a `current`-source block; the
+   *  load-more route's standalone slices (loadBlogLoopPage) omit it — that path
+   *  re-renders only the grid body with toggles the AJAX caller already holds. */
+  display?: PostsLoopDisplay
 }
 
 export interface HydratedPage {
@@ -190,6 +230,14 @@ export interface HydratedPage {
   // a related rail) gets three independent bounded slices here. Undefined
   // when the page has no self-contained posts widget.
   postCardsByBlock?: Map<number, HydratedPostCard[]>
+  // Active theme palette mode (FIX 3) — resolved ONLY when the page has an
+  // lx_posts block (so non-blog pages pay no extra setting read). The lx_posts
+  // renderer threads it into isSectionSurfaceDark so a posts widget in a no-bg
+  // section on a DARK-theme install resolves its text to the light token
+  // instead of dark-on-dark. Undefined on pages without a posts widget (and
+  // the renderer then treats absent as the light-default, preserving prior
+  // behaviour).
+  themeMode?: 'light' | 'dark'
 }
 
 /** Defensively parse a media row's `variants` JSON cell.
@@ -466,8 +514,15 @@ export async function hydratePage(
   // then bake segment-aware URLs onto every card so the SYNCHRONOUS LxPosts
   // renderer reads them directly. Cost-free on pages with no posts widget.
   let segments: PermalinkSegments | null = null
+  // FIX 3: resolve the active theme mode ONCE, only when the page has a posts
+  // widget, so the synchronous lx_posts renderer can pick light-on-dark text
+  // in a no-bg section on a dark-theme install. Missing-context-safe (getSetting
+  // returns the registry default, mode:'light', when absent/corrupt). Stays
+  // undefined on pages with no posts widget — no extra setting read there.
+  let themeMode: 'light' | 'dark' | undefined
   if (postsBlocks.length > 0) {
     segments = await resolveSegments()
+    themeMode = (await getSetting('theme_palette')).mode
   }
 
   // ── Self-contained sources: one bounded slice PER block ──────────────────
@@ -540,15 +595,24 @@ export async function hydratePage(
     // settings-backed fields on the CURRENT source: the lx_posts schema gives
     // them Zod `.default()`s that materialize into EVERY stored block, so there
     // is no reliable "operator left this unset" signal — and a single canonical
-    // blog surface doesn't need per-instance display variance. We mutate the
-    // parsed `data` so the synchronous LxPosts renderer reads the effective
-    // values with zero renderer changes. `postsPerPage` STAYS block-overridable
-    // (it's `.optional()` with no default → a per-block value is a genuine,
-    // detectable override; block wins, else the setting). getSetting is
-    // missing-context safe (returns the registry default if absent/corrupt).
+    // blog surface doesn't need per-instance display variance.
+    //
+    // FIX 2: we MUST NOT mutate `firstLoopBlock.data` in place. The inline-edit
+    // drawer reads `block.data` as the editor's stored value, so baking the
+    // settings-derived effective values there would (a) decouple the block from
+    // future Settings → Blog changes the moment the operator saves the drawer
+    // (the now-materialized block value would override the setting), and (b)
+    // surface the materialized values (e.g. pagination:'numbered') as if the
+    // operator had picked them. Instead we resolve the effective DISPLAY config
+    // onto the request-scoped `postsLoop.display`; the LxPosts loop renderer
+    // reads its display FROM there for the `current` source, leaving
+    // `block.data` exactly as stored (raw sentinels like pagination:'auto').
+    // `postsPerPage` STAYS block-overridable (it's `.optional()` with no
+    // default → a per-block value is a genuine, detectable override; block
+    // wins, else the setting). getSetting is missing-context safe (returns the
+    // registry default if absent/corrupt).
     const blogSettings = await getSetting('blog_settings')
-    firstLoopBlock.data = {
-      ...loopData,
+    const display: PostsLoopDisplay = {
       // `template` is the authoritative index layout (grid/cards/list/magazine);
       // carousel is excluded at the settings schema, so a settings-driven index
       // never becomes a carousel. `layout` (legacy grid|list) is honoured as a
@@ -569,9 +633,9 @@ export async function hydratePage(
       spacing: blogSettings.spacing,
       imageAspect: blogSettings.imageAspect,
       // Pagination: the settings choice drives the canonical index. A per-block
-      // 'auto' resolves to this; an explicit per-block override (numbered/load-
-      // more/none) still wins in the renderer because we only set it here when
-      // the block left it at the default 'auto'.
+      // explicit override (numbered/load-more/none) still wins; the block's
+      // default sentinel 'auto' resolves to the setting. Same precedence as the
+      // pre-FIX-2 behaviour — only the storage site moved (display, not data).
       pagination:
         loopData.pagination && loopData.pagination !== 'auto'
           ? loopData.pagination
@@ -611,6 +675,9 @@ export async function hydratePage(
       tag: filterTag,
       basePath,
     })
+    // FIX 2: carry the settings-authoritative DISPLAY on the loop context so
+    // the renderer reads it from here (NOT from the now-unmutated block.data).
+    postsLoop.display = display
     for (const p of postsLoop.items) {
       if (p.hero_image_id) mediaIds.add(p.hero_image_id)
     }
@@ -671,6 +738,7 @@ export async function hydratePage(
     posts: new Map(posts.map((p) => [p.id, p])),
     postsLoop,
     postCardsByBlock,
+    themeMode,
   }
 }
 

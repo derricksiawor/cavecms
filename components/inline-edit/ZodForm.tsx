@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import { assertNever } from '@/lib/typeUtils'
-import { Share2, Layers, ListChecks } from 'lucide-react'
+import { Share2, Layers, ListChecks, Settings2 } from 'lucide-react'
 import { EmptyState } from './EmptyState'
 import { MediaPicker } from './MediaPicker'
 import { useMediaPicker } from './MediaPickerProvider'
@@ -178,26 +178,99 @@ export type FieldShape =
       childNoun: string
     }
 
+// ── FIX 1: lx_posts fields that Settings → Blog authoritatively controls for
+//    the BLOG INDEX (source:'current'). MUST match the settings-authoritative
+//    set resolved in lib/cms/hydrate.ts (PostsLoopDisplay / resolveLoopDisplay)
+//    so the drawer's "controlled by Settings → Blog" hint is truthful: exactly
+//    the fields that get overridden are the fields that show the hint.
+//
+//    NOT in this set (still fully editable for the current source): heading,
+//    titleClamp, animation, the carousel-only knobs, postsPerPage (block still
+//    overrides the per-page size), and every source-operand field. For ALL
+//    OTHER sources (latest/category/tag/author/manual/related) the block owns
+//    every field — the hint never shows.
+const LX_POSTS_CURRENT_SETTINGS_FIELDS: ReadonlySet<string> = new Set([
+  'template',
+  'columns',
+  'showImage',
+  'showExcerpt',
+  'showDate',
+  'showAuthor',
+  'showCategory',
+  'showReadingTime',
+  'showReadMore',
+  'readMoreLabel',
+  'excerptClamp',
+  'cardStyle',
+  'spacing',
+  'imageAspect',
+  'pagination',
+])
+
+/** A controlled-by-settings overlay for an lx_posts field on the blog index.
+ *  Dims + makes the field non-interactive (so the operator can't change a value
+ *  the blog index will silently override) and prepends a one-line note pointing
+ *  them to Settings → Blog. Non-invasive: it wraps the existing field renderer
+ *  rather than threading a `disabled` prop through every input kind. */
+function SettingsControlledField({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-copper-300">
+        <Settings2 className="mt-px h-3 w-3 shrink-0" strokeWidth={2} aria-hidden />
+        <span>Controlled by Settings &rarr; Blog for the blog index.</span>
+      </p>
+      {/* aria-disabled + pointer-events-none + dim = clearly "not editable here"
+          without rewiring each input's own disabled state. The note above tells
+          the operator WHERE to change it. */}
+      <div
+        aria-disabled
+        className="pointer-events-none select-none opacity-50"
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
 export function ZodForm({
   shapes,
   value,
   onChange,
+  blockType,
 }: {
   shapes: FieldShape[]
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
+  /** Block type the form is editing. Used to scope block-specific drawer
+   *  affordances — today: the lx_posts "controlled by Settings → Blog" hint on
+   *  the blog-index (source:'current') display fields (FIX 1). Optional; absent
+   *  for container (section/column) style forms. */
+  blockType?: string
 }) {
+  // FIX 1: when an lx_posts block is set to the `current` source (the blog
+  // index/archive), the layout/columns/card-toggle/pagination fields are
+  // overridden by Settings → Blog at render — editing them here is a UX trap.
+  // Mark exactly those fields as settings-controlled so the renderer dims them
+  // + shows the hint. Every other source (and every other block) is unaffected.
+  const lxPostsCurrent =
+    blockType === 'lx_posts' && value['source'] === 'current'
   return (
     <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
-      {shapes.map((s) => (
-        <FieldRenderer
-          key={s.key}
-          shape={s}
-          value={value[s.key]}
-          parent={value}
-          onChange={(v) => onChange({ ...value, [s.key]: v })}
-        />
-      ))}
+      {shapes.map((s) => {
+        const field = (
+          <FieldRenderer
+            key={s.key}
+            shape={s}
+            value={value[s.key]}
+            parent={value}
+            onChange={(v) => onChange({ ...value, [s.key]: v })}
+          />
+        )
+        if (lxPostsCurrent && LX_POSTS_CURRENT_SETTINGS_FIELDS.has(s.key)) {
+          return <SettingsControlledField key={s.key}>{field}</SettingsControlledField>
+        }
+        return field
+      })}
     </form>
   )
 }

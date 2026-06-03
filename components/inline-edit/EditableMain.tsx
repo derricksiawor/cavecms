@@ -156,6 +156,11 @@ interface Props {
    *  to /api/leads/contact without a separate client-side mint round
    *  trip. Undefined for pages with no public form. */
   csrf?: string
+  /** Active theme palette mode (FIX 3) — see RenderContext.themeMode. Resolved
+   *  in hydrate.ts only when the page tree has an lx_posts block. Threaded into
+   *  both renderer branches so a posts widget in a no-bg section on a dark theme
+   *  reads light-on-dark. Undefined on pages with no posts widget. */
+  themeMode?: RenderContext['themeMode']
 }
 
 export async function EditableMain(p: Props) {
@@ -182,6 +187,7 @@ export async function EditableMain(p: Props) {
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}
+      themeMode={p.themeMode}
     />
   ) : (
     <BlockTreeRenderer
@@ -194,6 +200,7 @@ export async function EditableMain(p: Props) {
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}
+      themeMode={p.themeMode}
     />
   )
 

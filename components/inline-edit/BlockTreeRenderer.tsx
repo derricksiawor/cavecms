@@ -64,6 +64,11 @@ interface Props {
   project?: RenderContext['project']
   /** Preview-mode marker — see RenderContext.preview. */
   preview?: boolean
+  /** Active theme palette mode — see RenderContext.themeMode (FIX 3). Threaded
+   *  into every renderBlock dispatch so the lx_posts renderer can flip a no-bg
+   *  section's text light-on-dark on a dark theme. Undefined on pages without a
+   *  posts widget. */
+  themeMode?: RenderContext['themeMode']
 }
 
 /** One-shot meta-derivation. Returns the three computed values
@@ -120,6 +125,7 @@ export function BlockTreeRenderer({
   csrf,
   project,
   preview,
+  themeMode,
 }: Props) {
   const tree = buildBlockTree(blocks)
   if (tree.length === 0) return null
@@ -156,7 +162,7 @@ export function BlockTreeRenderer({
                             {renderBlock(
                               w.blockType,
                               w.data,
-                              { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview },
+                              { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview, themeMode },
                               undefined,
                               m.outerClass,
                               w.id,
@@ -183,7 +189,7 @@ export function BlockTreeRenderer({
                 {renderBlock(
                   entry.node.blockType,
                   entry.node.data,
-                  { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview },
+                  { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview, themeMode },
                   undefined,
                   m.outerClass,
                   entry.node.id,
