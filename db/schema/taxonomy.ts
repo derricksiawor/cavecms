@@ -6,6 +6,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  type AnyMySqlColumn,
 } from 'drizzle-orm/mysql-core'
 import { users } from './users'
 import { posts } from './posts'
@@ -21,7 +22,14 @@ export const categories = mysqlTable(
     slug: varchar('slug', { length: 120 }).notNull(),
     name: varchar('name', { length: 120 }).notNull(),
     description: varchar('description', { length: 320 }),
-    parentId: int('parent_id'),
+    // Self-FK for one-level hierarchy. Thunk defers the self-reference (the
+    // table isn't bound yet at column-definition time) — mirrors the
+    // contentBlocks.parentId pattern in content.ts. Matches the DB-level
+    // fk_categories_parent (ON DELETE SET NULL) in migration 0032.
+    parentId: int('parent_id').references(
+      (): AnyMySqlColumn => categories.id,
+      { onDelete: 'set null' },
+    ),
     position: int('position').notNull().default(0),
     version: int('version').notNull().default(0),
     updatedBy: int('updated_by').references(() => users.id, { onDelete: 'set null' }),

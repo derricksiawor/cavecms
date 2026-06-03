@@ -2,6 +2,7 @@ import 'server-only'
 import { z } from 'zod'
 import { env } from '@/lib/env'
 import { RESERVED } from '@/lib/cms/page-slug'
+import { SLUG_RE } from '@/lib/cms/slug'
 import { parseCidr } from '@/lib/security/ipMatch'
 import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
 import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
@@ -1038,14 +1039,20 @@ const aiConfig = z
 // OTHER reserved word (admin, api, …) or a malformed string. Cross-collision
 // (blog === projects) is enforced at the settings-write layer, where both
 // current values are visible.
+// Reuse the project's CANONICAL slug regex (lib/cms/slug — lowercase only, no
+// leading/trailing/consecutive hyphens) so a permalink segment is a strict
+// subset of the page-slug contract Phase 5 routing relies on. A bespoke
+// `[a-z0-9-]{2,40}` would let `--`, `-blog`, `blog-`, `b--c` through, which
+// become malformed route prefixes downstream.
 const permalinkSegment = (canonical: string) =>
   z
     .string()
-    .regex(/^[a-z0-9-]{2,40}$/, 'segment_invalid_format')
-    .refine(
-      (v) => v.toLowerCase() === canonical || !RESERVED.has(v.toLowerCase()),
-      { message: 'segment_reserved' },
-    )
+    .min(2)
+    .max(40)
+    .regex(SLUG_RE, 'segment_invalid_format')
+    .refine((v) => v === canonical || !RESERVED.has(v), {
+      message: 'segment_reserved',
+    })
 
 const blogSettings = z.object({
   postsPerPage: z.number().int().min(1).max(50).default(9),

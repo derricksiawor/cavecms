@@ -44,12 +44,27 @@ describe('settings-registry: blog-system keys', () => {
     expect(e.schema.safeParse({ segment: 'blog' }).success).toBe(false)
   })
 
-  it('permalink_blog rejects a malformed segment', () => {
+  it('permalink_blog rejects a malformed segment (canonical slug rules)', () => {
     const e = registry['permalink_blog']
-    // spaces / uppercase
-    expect(e.schema.safeParse({ segment: 'Bad Seg', structure: 'postname' }).success).toBe(false)
-    // too short (min 2)
-    expect(e.schema.safeParse({ segment: 'a', structure: 'postname' }).success).toBe(false)
+    const bad = [
+      'Bad Seg', // spaces / uppercase
+      'a', // too short (min 2)
+      '--', // all dashes
+      '------',
+      '-news', // leading dash
+      'news-', // trailing dash
+      'a--b', // consecutive dashes
+      'news_letter', // underscore not allowed
+      'a'.repeat(41), // too long
+    ]
+    for (const segment of bad) {
+      expect(
+        e.schema.safeParse({ segment, structure: 'postname' }).success,
+        `expected "${segment}" to be rejected`,
+      ).toBe(false)
+    }
+    // sanity: a clean hyphenated word is allowed
+    expect(e.schema.safeParse({ segment: 'press-room', structure: 'postname' }).success).toBe(true)
   })
 
   it('permalink_blog rejects an unknown structure', () => {
