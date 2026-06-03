@@ -325,7 +325,9 @@ export async function guardLoginPath(
 //
 // `key` is the permalink key being saved ('permalink_blog' | 'permalink_projects');
 // `newSegment` is the candidate. The guard reads the OTHER permalink row's stored
-// segment + the live login path and rejects an equal value.
+// segment + the live login path and rejects an equal value, AND (spec §7.1)
+// rejects a segment that shadows an existing live page slug or a published-post
+// slug (the segment rewrite would otherwise make that page/post unreachable).
 //
 // `prevSegment` is the segment as currently stored. When it equals `newSegment`
 // (a structure-only save on the blog card, where only `structure` moved) the
@@ -382,6 +384,31 @@ export async function guardPermalink(
     const otherLabel = key === 'permalink_blog' ? 'Projects' : 'Blog'
     guardFail('PERMALINK_SEGMENT_IN_USE', {
       message: `That base is already used by ${otherLabel}. Blog and Projects need different bases.`,
+    })
+  }
+
+  // ─── Collision with an existing page / published post slug (spec §7.1) ───
+  // The segment becomes the URL base for the whole surface — `/<seg>` is the
+  // index and `/<seg>/<post-or-term>` the children. If a LIVE page already owns
+  // `/<seg>` (e.g. an operator made an `about` page, then sets the blog base to
+  // `about`), the segment rewrite would shadow that page and make it
+  // unreachable; likewise a published post whose own detail URL is `/<seg>`.
+  // Reject so the operator picks a non-shadowing base. Same parameterized,
+  // same-TX consistent-read pattern as the sibling-segment SELECT above — `seg`
+  // is bound, never interpolated. Both probes are LIMIT 1 existence checks.
+  const [pageHit] = (await tx.execute(sql`
+    SELECT 1 FROM pages
+    WHERE slug = ${seg} AND deleted_at IS NULL AND kind = 'page'
+    LIMIT 1
+  `)) as unknown as [Array<Record<string, unknown>>]
+  const [postHit] = (await tx.execute(sql`
+    SELECT 1 FROM posts
+    WHERE slug = ${seg} AND published = 1 AND deleted_at IS NULL
+    LIMIT 1
+  `)) as unknown as [Array<Record<string, unknown>>]
+  if (pageHit.length > 0 || postHit.length > 0) {
+    guardFail('PERMALINK_SHADOWS_PAGE', {
+      message: `That base matches an existing page/post ("${seg}") and would make it unreachable. Pick a different word.`,
     })
   }
 }

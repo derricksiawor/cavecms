@@ -22,6 +22,7 @@ import {
   syncPostTaxonomy,
   MAX_TERMS_PER_POST,
 } from '@/lib/cms/syncPostTaxonomy'
+import { trashPostInTx } from '@/lib/cms/trashPost'
 
 import { SLUG_RE, SLUG_MAX } from '@/lib/cms/slug'
 import { TAXONOMY_RESERVED } from '@/lib/cms/taxonomy-slug'
@@ -718,44 +719,16 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     const row = rows[0]
     if (!row) throw new HttpError(404, 'not_found')
 
-    await tx.execute(sql`
-      UPDATE posts
-      SET deleted_at = NOW(3),
-          updated_by = ${ctx.userId}
-      WHERE id = ${id}
-    `)
-
-    // Couple the hidden body page's lifecycle to the post (spec §4.5):
-    // soft-delete it too so its block tree can't be edited while the post
-    // sits in trash (the block-CRUD routes filter pages.deleted_at IS
-    // NULL). The body page is already unreachable everywhere, but
-    // coupling keeps the lifecycle consistent + safe. Scoped to
-    // kind='post_body' as defence in depth so this can only ever touch a
-    // body page, never a normal page. preview_epoch bump invalidates any
-    // (theoretical) leaked preview token, mirroring the page DELETE path.
-    if (row.body_page_id !== null) {
-      await tx.execute(sql`
-        UPDATE pages
-        SET deleted_at = NOW(3),
-            preview_epoch = preview_epoch + 1,
-            updated_by = ${ctx.userId}
-        WHERE id = ${row.body_page_id}
-          AND kind = 'post_body'
-          AND deleted_at IS NULL
-      `)
-    }
-
-    // Clean any slug_redirects pointing AT this post so a renamed-
-    // then-deleted post doesn't leave dangling 308→404 cascades for
-    // crawlers hitting the old URL. We drop both directions of the
-    // map: rows that USED to redirect to this slug, and any row
-    // that lists this slug as new (which shouldn't exist if the
-    // chain-collapse step worked, but is safe to clean either way).
-    await tx.execute(sql`
-      DELETE FROM slug_redirects
-      WHERE resource_type = 'post'
-        AND (new_slug = ${row.slug} OR old_slug = ${row.slug})
-    `)
+    // Shared trash core (F6): soft-delete the post, couple the hidden body
+    // page, clean both directions of slug_redirects — identical to the bulk
+    // trash path (lib/cms/trashPost). The audit row + cache-tag bust below are
+    // caller-specific and stay here.
+    await trashPostInTx(tx, {
+      id,
+      userId: ctx.userId,
+      slug: row.slug,
+      bodyPageId: row.body_page_id,
+    })
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,

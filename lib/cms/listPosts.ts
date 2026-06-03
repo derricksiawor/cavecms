@@ -4,6 +4,9 @@ import { db } from '@/db/client'
 import {
   type PostStatusFilter,
   isPostStatusFilter,
+  statusFilterSql,
+  statusBucketCaseSql,
+  statusCountSumsSql,
 } from '@/lib/cms/postStatus'
 
 // Phase 8 (blog-system worktree): the SERVER-SIDE admin posts list query —
@@ -109,24 +112,12 @@ function buildLikeNeedle(search: string): string {
 }
 
 // ── WHERE-fragment builders (status + search + taxonomy) ─────────────────────
-
-// The status filter as a SQL condition fragment. NOW(3) matches the column fsp.
-function statusCondition(status: PostStatusFilter) {
-  switch (status) {
-    case 'trash':
-      return sql`p.deleted_at IS NOT NULL`
-    case 'draft':
-      return sql`p.deleted_at IS NULL AND p.published = 0`
-    case 'scheduled':
-      return sql`p.deleted_at IS NULL AND p.published = 1 AND p.published_at IS NOT NULL AND p.published_at > NOW(3)`
-    case 'published':
-      return sql`p.deleted_at IS NULL AND p.published = 1 AND (p.published_at IS NULL OR p.published_at <= NOW(3))`
-    case 'all':
-    default:
-      // "All" = the active set (everything not in Trash). Trash is its own tab.
-      return sql`p.deleted_at IS NULL`
-  }
-}
+//
+// The status taxonomy (tab filter + ordering CASE + grouped-count SUMs) is NOT
+// re-implemented here — it lives in lib/cms/postStatus (statusFilterSql /
+// statusBucketCaseSql / statusCountSumsSql) so the admin axis is the SAME single
+// source of truth as the public gate + derivePostStatus (F5/F7). Search +
+// taxonomy + sort wiring stay local because they're admin-list-specific.
 
 function searchCondition(needle: string | null) {
   if (needle === null) return sql``
@@ -160,12 +151,8 @@ function orderByClause(sort: PostSortColumn, dir: SortDir) {
     case 'title':
       return sql`ORDER BY p.title ${d}, p.id DESC`
     case 'status':
-      return sql`ORDER BY CASE
-          WHEN p.deleted_at IS NOT NULL THEN 3
-          WHEN p.published = 0 THEN 0
-          WHEN p.published_at IS NOT NULL AND p.published_at > NOW(3) THEN 1
-          ELSE 2
-        END ${d}, p.published_at DESC, p.id DESC`
+      // Status-ordering bucket CASE — single source of truth in postStatus.
+      return sql`ORDER BY ${statusBucketCaseSql('p')} ${d}, p.published_at DESC, p.id DESC`
     case 'published':
       // Nulls (drafts) sort last on DESC, first on ASC — MySQL's default null
       // ordering. Acceptable for an admin column header.
@@ -192,7 +179,7 @@ export async function listPosts(
       ? buildLikeNeedle(args.search)
       : null
 
-  const whereSql = sql`${statusCondition(args.status)}${searchCondition(
+  const whereSql = sql`${statusFilterSql(args.status, 'p')}${searchCondition(
     needle,
   )}${taxonomyCondition(args.categorySlug, args.tagSlug)}`
 
@@ -205,12 +192,7 @@ export async function listPosts(
     args.tagSlug,
   )}`
   const [countRows] = (await db.execute(sql`
-    SELECT
-      SUM(p.deleted_at IS NULL) AS all_active,
-      SUM(p.deleted_at IS NULL AND p.published = 0) AS draft,
-      SUM(p.deleted_at IS NULL AND p.published = 1 AND p.published_at IS NOT NULL AND p.published_at > NOW(3)) AS scheduled,
-      SUM(p.deleted_at IS NULL AND p.published = 1 AND (p.published_at IS NULL OR p.published_at <= NOW(3))) AS published_,
-      SUM(p.deleted_at IS NOT NULL) AS trash
+    SELECT ${statusCountSumsSql('p')}
     FROM posts p
     WHERE ${countWhere}
   `)) as unknown as [

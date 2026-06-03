@@ -6,6 +6,9 @@ import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { MediaPickerProvider } from '@/components/inline-edit/MediaPickerProvider'
 import { Editor, type EditorPost } from './Editor'
 import type { TermOption } from './TaxonomyChips'
+// F15: resolve the operator's configured permalink segments server-side so the
+// editor's "Edit content" button opens the correctly-segmented public URL.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,6 +68,7 @@ export default async function PostEditor({ params }: { params: Params }) {
     [allTags],
     [assignedCats],
     [assignedTags],
+    segments,
   ] = await Promise.all([
     db.execute(sql`
       SELECT id, slug, name, parent_id
@@ -83,6 +87,8 @@ export default async function PostEditor({ params }: { params: Params }) {
     db.execute(sql`
       SELECT tag_id AS id FROM post_tags WHERE post_id = ${id}
     `) as unknown as Promise<[Array<{ id: number }>]>,
+    // F15: configured permalink segments for the "Edit content" public URL.
+    resolveSegments(),
   ])
 
   const categoryOptions: TermOption[] = allCats.map((c) => ({
@@ -133,6 +139,7 @@ export default async function PostEditor({ params }: { params: Params }) {
         tagOptions={tagOptions}
         assignedCategoryIds={assignedCategoryIds}
         assignedTagIds={assignedTagIds}
+        segments={segments}
       />
     </MediaPickerProvider>
   )

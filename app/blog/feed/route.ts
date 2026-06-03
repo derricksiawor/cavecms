@@ -7,6 +7,7 @@ import { blogIndexUrl, feedUrl, postUrl } from '@/lib/blog/urls'
 // blog-system worktree (Phase 8): public post-visibility gate (adds the
 // scheduling clause so a future-dated post is never emitted into the feed).
 import { publicPostGateSql } from '@/lib/cms/postStatus'
+import { isMissingTable } from '@/lib/db/errors'
 
 // /blog/feed — RSS 2.0 for the blog. Served at the configured segment via the
 // existing middleware rewrite (/<blogSeg>/feed | feed.xml -> /blog/feed; see
@@ -89,14 +90,27 @@ export async function GET(): Promise<Response> {
   // unbounded scan.
   const limit = Math.min(50, Math.max(1, Math.floor(blog.feedItemCount)))
 
-  const [rows] = (await db.execute(sql`
-    SELECT p.slug, p.title, p.excerpt, p.published_at
-    FROM posts p
-    WHERE 1 = 1
-      ${publicPostGateSql('p')}
-    ORDER BY p.published_at DESC, p.id DESC
-    LIMIT ${limit}
-  `)) as unknown as [FeedRow[]]
+  // Missing-table-safe (F9): mirror fetchRecentPostsSafely — on a fresh/partial
+  // install where the `posts` table isn't migrated yet, degrade to an empty BUT
+  // valid <channel> (rows=[] already produces one below) instead of a 500. Any
+  // other DB error propagates so a real outage isn't masked.
+  let rows: FeedRow[]
+  try {
+    ;[rows] = (await db.execute(sql`
+      SELECT p.slug, p.title, p.excerpt, p.published_at
+      FROM posts p
+      WHERE 1 = 1
+        ${publicPostGateSql('p')}
+      ORDER BY p.published_at DESC, p.id DESC
+      LIMIT ${limit}
+    `)) as unknown as [FeedRow[]]
+  } catch (err) {
+    if (isMissingTable(err)) {
+      rows = []
+    } else {
+      throw err
+    }
+  }
 
   // Absolute when the origin is configured; relative path otherwise (a wrong
   // absolute URL is worse than a relative one for a feed reader).

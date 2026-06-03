@@ -13,6 +13,12 @@
 import { sql } from 'drizzle-orm'
 import { db } from '../client-node'
 import { contentBlocks } from '../schema'
+
+// The transaction handle drizzle hands the `db.transaction` callback — derived
+// from the local client-node `db` so this module never imports the server-only
+// `db/client` wrapper. insertSections runs every write through this handle so
+// the whole seed (page existence check → block COUNT → inserts) is one TX.
+type SeedTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 import { parseAndSanitize } from '@/lib/cms/parse'
 import type {
   SectionSpec,
@@ -29,17 +35,24 @@ export type { SectionSpec, ColumnSpec, WidgetSpec }
 
 const POS_STEP = 1000
 
-async function insertSections(pageId: number, sections: SectionSpec[]): Promise<number> {
+async function insertSections(
+  tx: SeedTx,
+  pageId: number,
+  sections: SectionSpec[],
+): Promise<number> {
   // IMPORTANT: this function MUST NOT mutate `sections`, `sec`, `col`,
   // or `w` — the SECTION arrays are exported and re-imported by
   // lib/cms/siteTemplates/default-welcome.ts. Mutating `w.data` on the
   // shared module-scope reference would corrupt the install-template
   // re-seed path (which reads the same arrays). Always produce a local
   // sanitized copy and pass that to the DB write.
+  //
+  // Every write runs through the caller's transaction handle `tx` so the seed
+  // is atomic with the check-then-act guard in seedSystemPageIfEmpty (F10).
   let inserted = 0
   let secPos = POS_STEP
   for (const sec of sections) {
-    const [secRes] = (await db.execute(sql`
+    const [secRes] = (await tx.execute(sql`
       INSERT INTO content_blocks
         (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
       VALUES
@@ -51,7 +64,7 @@ async function insertSections(pageId: number, sections: SectionSpec[]): Promise<
     let colPos = POS_STEP
     for (const col of sec.columns) {
       const colMeta = col.meta ?? {}
-      const [colRes] = (await db.execute(sql`
+      const [colRes] = (await tx.execute(sql`
         INSERT INTO content_blocks
           (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
         VALUES
@@ -64,7 +77,7 @@ async function insertSections(pageId: number, sections: SectionSpec[]): Promise<
       for (const w of col.widgets) {
         const cleaned = parseAndSanitize(w.blockType, w.data) as Record<string, unknown>
         const widgetMetaJson = w.meta ? JSON.stringify(w.meta) : null
-        await db.execute(sql`
+        await tx.execute(sql`
           INSERT INTO content_blocks
             (page_id, parent_id, kind, block_key, block_type, position, data, meta, version)
           VALUES
@@ -358,20 +371,39 @@ export async function seedPrivacyPageBlocksIfEmpty(): Promise<number | false> { 
 export async function seedTermsPageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('terms', TERMS_SECTIONS) }
 
 // ── Shared helper ───────────────────────────────────────────────────
+// Atomic check-then-act (F10): the whole sequence — resolve the system page row
+// (locked FOR UPDATE), COUNT its live blocks, and (only if empty) insert the
+// sections — runs inside ONE transaction. The FOR UPDATE row lock on the page
+// row serializes concurrent seeders (two cluster workers booting at once, or
+// `db:seed` racing the boot backfill), so exactly one wins the empty check and
+// the other sees liveBlocks > 0 and no-ops. Without the lock, both could read
+// liveBlocks=0 and double-seed the same page.
+//
+// Shared by every system-page seed (home/about/services/projects/contact/
+// privacy/terms/blog) — the tx wrapping is invisible to those callers (they
+// still just `await seed<Page>BlocksIfEmpty()`); only the internal write path
+// changed from `db.execute` to `tx.execute`.
 async function seedSystemPageIfEmpty(slug: string, sections: SectionSpec[]): Promise<number | false> {
-  const [pageRows] = (await db.execute(sql`
-    SELECT id FROM pages WHERE system = 1 AND slug = ${slug} AND deleted_at IS NULL LIMIT 1
-  `)) as unknown as [Array<{ id: number }>]
-  const pageId = pageRows[0]?.id
-  if (!pageId) {
-    console.warn(`[seed:${slug}-blocks] no ${slug} system page row — run migrations first.`)
-    return false
-  }
-  const [countRows] = (await db.execute(sql`
-    SELECT COUNT(*) AS n FROM ${contentBlocks}
-    WHERE page_id = ${pageId} AND deleted_at IS NULL
-  `)) as unknown as [Array<{ n: number | bigint }>]
-  const liveBlocks = Number(countRows[0]?.n ?? 0)
-  if (liveBlocks > 0) return false
-  return insertSections(pageId, sections)
+  return db.transaction(async (tx) => {
+    // Lock the system page row up-front so the COUNT below is a consistent read
+    // no concurrent seeder can race past. LIMIT 1 + the FOR UPDATE pin the row.
+    const [pageRows] = (await tx.execute(sql`
+      SELECT id FROM pages
+      WHERE system = 1 AND slug = ${slug} AND deleted_at IS NULL
+      LIMIT 1
+      FOR UPDATE
+    `)) as unknown as [Array<{ id: number }>]
+    const pageId = pageRows[0]?.id
+    if (!pageId) {
+      console.warn(`[seed:${slug}-blocks] no ${slug} system page row — run migrations first.`)
+      return false
+    }
+    const [countRows] = (await tx.execute(sql`
+      SELECT COUNT(*) AS n FROM ${contentBlocks}
+      WHERE page_id = ${pageId} AND deleted_at IS NULL
+    `)) as unknown as [Array<{ n: number | bigint }>]
+    const liveBlocks = Number(countRows[0]?.n ?? 0)
+    if (liveBlocks > 0) return false
+    return insertSections(tx, pageId, sections)
+  })
 }

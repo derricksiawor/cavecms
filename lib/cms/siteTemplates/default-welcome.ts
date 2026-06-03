@@ -4,7 +4,6 @@ import {
   SERVICES_SECTIONS,
   CONTACT_SECTIONS,
   PROJECTS_SECTIONS,
-  BLOG_SECTIONS,
 } from '@/db/seeds/systemPageBlocks'
 import type { SiteTemplate } from './types'
 
@@ -22,6 +21,14 @@ import type { SiteTemplate } from './types'
 // migration 0015 and live as legal pages every template inherits),
 // and the thank-you-{enquiry,tour,brochure} utility pages also
 // survive — see app/api/install/template/route.ts wipe logic.
+//
+// The Blog index (slug='blog') is ALSO preserved by the wipe (seeded by
+// migration 0034) and is therefore template-agnostic (F2): NO template —
+// not even this default — declares a 'blog' page. The preserved row's
+// block tree is filled by the boot backfill (runBlogPageBackfillOnce →
+// seedBlogPageBlocksIfEmpty, BLOG_SECTIONS) when empty. Declaring a 'blog'
+// page here would now be REJECTED by validateTemplateShape as a
+// preserved-slug collision.
 //
 // Single source of truth: when systemPageBlocks.ts changes, this
 // template tracks automatically because the SECTIONS arrays are
@@ -75,11 +82,6 @@ export const defaultWelcomeTemplate: SiteTemplate = {
       slug: 'projects',
       title: 'Projects',
       sections: PROJECTS_SECTIONS,
-    },
-    {
-      slug: 'blog',
-      title: 'Blog',
-      sections: BLOG_SECTIONS,
     },
   ],
 }

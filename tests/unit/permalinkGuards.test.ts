@@ -173,6 +173,57 @@ describe('guardPermalink (cross-collision + login-path)', () => {
       guardPermalink(tx as never, 'permalink_blog', 'kqt9ji3jrhz7', 'kqt9ji3jrhz7', 'blog'),
     ).rejects.toBeInstanceOf(SecurityGuardFailure)
   })
+
+  // ─── F3: shadowing an existing live page / published post ────────────────
+  // After the login-path + sibling-segment checks pass, the guard issues two
+  // existence probes in order: (1) live page with this slug, (2) published,
+  // non-deleted post with this slug. makeTx queues results by call order:
+  //   [0] sibling-segment SELECT, [1] page-shadow SELECT, [2] post-shadow SELECT.
+  it('rejects a segment that shadows an existing live page slug', async () => {
+    const tx = makeTx([
+      [[{ value: JSON.stringify({ segment: 'work' }) }]], // sibling differs
+      [[{ '1': 1 }]], // page-shadow hit (one row)
+      [[]], // post-shadow miss
+    ])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'about', 'kqt9ji3jrhz7', 'blog'),
+    ).rejects.toBeInstanceOf(SecurityGuardFailure)
+  })
+
+  it('rejects a segment that shadows a published post slug (no page hit)', async () => {
+    const tx = makeTx([
+      [[{ value: JSON.stringify({ segment: 'work' }) }]], // sibling differs
+      [[]], // page-shadow miss
+      [[{ '1': 1 }]], // post-shadow hit
+    ])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'hello-world', 'kqt9ji3jrhz7', 'blog'),
+    ).rejects.toBeInstanceOf(SecurityGuardFailure)
+  })
+
+  it('accepts a segment that shadows nothing (sibling/page/post all clear)', async () => {
+    const tx = makeTx([
+      [[{ value: JSON.stringify({ segment: 'work' }) }]], // sibling differs
+      [[]], // page-shadow miss
+      [[]], // post-shadow miss
+    ])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'news', 'kqt9ji3jrhz7', 'blog'),
+    ).resolves.toBeUndefined()
+    // Three SELECTs issued: sibling, page-shadow, post-shadow.
+    expect(tx.execute).toHaveBeenCalledTimes(3)
+  })
+
+  it('does NOT reach the shadow probes when the sibling collision already fails', async () => {
+    // Sibling (projects) is 'about'; candidate 'about' collides at the sibling
+    // check → guard throws BEFORE the page/post shadow SELECTs.
+    const tx = makeTx([[[{ value: JSON.stringify({ segment: 'about' }) }]]])
+    await expect(
+      guardPermalink(tx as never, 'permalink_blog', 'about', 'kqt9ji3jrhz7', 'blog'),
+    ).rejects.toBeInstanceOf(SecurityGuardFailure)
+    // Only the sibling SELECT ran.
+    expect(tx.execute).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('registerSegmentChangeRedirects', () => {

@@ -153,18 +153,24 @@ for (const t of SITE_TEMPLATES) {
     }
   }
 
-  // 2c. Page slugs do NOT collide with preserved system pages.
+  // 2c. Page slugs do NOT collide with preserved system pages. These rows
+  // survive the template wipe (route preservedPageIds), so a template that
+  // also declared one would lose its content to the preserved row or hit a
+  // slug-unique collision. 'blog' is preserved (F2) — its index is
+  // template-agnostic (0034 row + boot backfill own it), so no template
+  // ships a blog page.
   const PRESERVED = new Set([
     'privacy',
     'terms',
     'thank-you-enquiry',
     'thank-you-tour',
     'thank-you-brochure',
+    'blog',
   ])
   for (const p of t.pages) {
     if (PRESERVED.has(p.slug)) {
       fail(
-        `${t.slug}: page slug "${p.slug}" collides with a preserved system page — would be wiped before template insert.`,
+        `${t.slug}: page slug "${p.slug}" collides with a preserved system page — it is preserved across the template wipe, so a template must not ship it.`,
       )
     }
   }

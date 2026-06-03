@@ -67,6 +67,15 @@ import { PATHS } from '@/lib/media/storage'
 //   - privacy + terms (legal pages, seeded by 0015 migration)
 //   - thank-you-{enquiry,tour,brochure} (utility pages used by
 //     several lead-form flows; never wiped)
+//   - blog (the system Blog-index page, seeded by 0034 migration). It
+//     is preserved — NOT re-seeded by any template — so that EVERY
+//     install (default-welcome AND the 8 industry templates) ends with
+//     exactly one slug='blog' kind='page' row regardless of whether the
+//     template declares a blog page. The migration guarantees the ROW;
+//     the boot backfill (seedBlogPageBlocksIfEmpty / runBlogPageBackfillOnce)
+//     fills its block tree when empty. Templates therefore MUST NOT ship a
+//     'blog' page (validateTemplateShape rejects one as a preserved-slug
+//     collision) — the blog index is template-agnostic by construction.
 //
 // Everything else (the install-migrate seed of home / about /
 // services / contact / projects, and whatever a previous template
@@ -85,6 +94,9 @@ export const dynamic = 'force-dynamic'
 //   privacy / terms        legal pages, seeded by migration 0015
 //   thank-you-{enquiry,
 //     tour, brochure}      utility lead-form landing pages from 0019
+//   blog                   system Blog-index page, seeded by migration 0034
+//                          (preserved so /blog never 404s after an industry-
+//                          template install — F2)
 
 const Body = z
   .object({
@@ -123,18 +135,18 @@ class AlreadyInstalledError extends Error {
 }
 
 /**
- * Returns the IDs of pages we MUST preserve across a template wipe.
- * Filtered on `deleted_at IS NULL` so a soft-deleted legal page
- * (operator deleted /privacy via /admin/pages) doesn't survive as a
- * tombstone — it gets hard-wiped and re-created by the next migration
- * pass. Throws if the expected legal-page set is missing entirely
- * (i.e. migrations didn't run): we refuse to proceed rather than
- * blanket-wipe.
+ * Returns the IDs of pages we MUST preserve across a template wipe
+ * (the legal pages + the system Blog index — F2). Filtered on
+ * `deleted_at IS NULL` so a soft-deleted preserved page (operator
+ * deleted /privacy via /admin/pages) doesn't survive as a tombstone —
+ * it gets hard-wiped and re-created by the next migration pass. Throws
+ * if the expected preserved-page set is missing entirely (i.e.
+ * migrations didn't run): we refuse to proceed rather than blanket-wipe.
  */
 async function preservedPageIds(tx: Tx): Promise<number[]> {
   const [rows] = (await tx.execute(sql`
     SELECT id FROM pages
-    WHERE slug IN ('privacy','terms','thank-you-enquiry','thank-you-tour','thank-you-brochure')
+    WHERE slug IN ('privacy','terms','thank-you-enquiry','thank-you-tour','thank-you-brochure','blog')
       AND deleted_at IS NULL
   `)) as unknown as [Array<{ id: number }>]
   return rows.map((r) => Number(r.id))
@@ -143,7 +155,7 @@ async function preservedPageIds(tx: Tx): Promise<number[]> {
 async function wipeNonLegalPagesAndBlocks(tx: Tx): Promise<void> {
   const keepIds = await preservedPageIds(tx)
   if (keepIds.length === 0) {
-    // No legal pages survived → migrations didn't run, or someone
+    // No preserved pages survived → migrations didn't run, or someone
     // soft-deleted them all. Either way, we will not silently
     // truncate the entire pages table. Bail loudly.
     throw new Error('preserved_legal_pages_missing')
@@ -156,7 +168,7 @@ async function wipeNonLegalPagesAndBlocks(tx: Tx): Promise<void> {
   await tx.execute(sql`
     UPDATE pages
     SET is_home = 0
-    WHERE slug IN ('privacy','terms','thank-you-enquiry','thank-you-tour','thank-you-brochure')
+    WHERE slug IN ('privacy','terms','thank-you-enquiry','thank-you-tour','thank-you-brochure','blog')
       AND is_home = 1
   `)
 
@@ -895,15 +907,20 @@ function validateTemplateShape(template: SiteTemplate): Response | null {
       return errJson(422, 'template_page_slug_duplicate')
     }
     slugSeen.add(p.slug)
-    // Slugs cannot collide with the preserved system pages — the
-    // wipe would delete them just before reinsert and we'd lose
-    // the legal-page content.
+    // Slugs cannot collide with the preserved system pages. The wipe
+    // PRESERVES these rows (it no longer deletes-then-reinserts them),
+    // so a template that also declared one of these slugs would either
+    // lose its content to the preserved row or hit a slug-unique
+    // collision on insert. 'blog' is preserved (F2) so the Blog index is
+    // template-agnostic: templates never ship their own blog page; the
+    // 0034 row + boot backfill own it.
     if (
       p.slug === 'privacy' ||
       p.slug === 'terms' ||
       p.slug === 'thank-you-enquiry' ||
       p.slug === 'thank-you-tour' ||
-      p.slug === 'thank-you-brochure'
+      p.slug === 'thank-you-brochure' ||
+      p.slug === 'blog'
     ) {
       return errJson(422, 'template_page_slug_collides_with_preserved')
     }

@@ -98,10 +98,14 @@ export function ScheduleControl({
 
   // The status pill mirrors what the PUBLIC sees, computed from the same derive
   // helper the admin list + public gate use. For the "schedule" mode preview we
-  // feed the chosen instant as published_at so a future pick reads "Scheduled".
+  // feed the chosen instant as published_at so a future pick reads "Scheduled";
+  // for "publish now" (published, no future date) we feed the EFFECTIVE
+  // published_at the server stamps (NOW) instead of null — after F7 a null
+  // published_at on a published row derives to 'draft', so passing now keeps the
+  // "Published" preview accurate.
   const previewStatus: PostStatus = derivePostStatus({
     published,
-    published_at: published ? scheduledAtIso : null,
+    published_at: published ? (scheduledAtIso ?? new Date()) : null,
     deleted_at: null,
   })
   const pill = statusPill(previewStatus)

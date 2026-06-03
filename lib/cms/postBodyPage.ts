@@ -55,10 +55,23 @@ function bodyPageSlug(postId: number): string {
  * The body page is published=0 / system=0 / is_home=0; its published
  * state is irrelevant because it is never routed by slug — hydratePage
  * reads its blocks regardless of the page's published flag.
+ *
+ * `deletedAt` (F8): when migrating a post that is ALREADY trashed
+ * (posts.deleted_at set), the body page must be born trashed too so the §4.5
+ * lockstep holds — otherwise the backfill would create a LIVE body page for a
+ * dead post, leaving an editable orphan tree. Defaults to null (live) for the
+ * create-draft path + every live post in the backfill. The value is the post's
+ * deleted_at as returned by mysql2 (Date or ISO string); a falsy value keeps the
+ * body page live.
  */
 export async function insertPostBodyPage(
   tx: Tx,
-  args: { postId: number; title: string; markdown: string },
+  args: {
+    postId: number
+    title: string
+    markdown: string
+    deletedAt?: Date | string | null
+  },
 ): Promise<number> {
   // Validate + normalise the seed block through the standard write
   // boundary BEFORE any INSERT (validate-before-write — a bad payload
@@ -72,11 +85,25 @@ export async function insertPostBodyPage(
   // every page-surfacing query filters out (spec §4.4). The slug is the
   // non-routable sentinel; it satisfies the UNIQUE constraint and is
   // never used to resolve the page.
+  //
+  // deleted_at (F8): born trashed IFF the post being migrated is already
+  // trashed, so the §4.5 lockstep holds. Normalised to a Date the driver binds
+  // as DATETIME(3); a falsy value → NULL (live), the default for create-draft +
+  // every live post. We stamp the post's OWN deleted_at (not NOW(3)) so the two
+  // timestamps match exactly, mirroring the trash path's coupled write.
+  let deletedAt: Date | null = null
+  if (args.deletedAt) {
+    const d =
+      args.deletedAt instanceof Date ? args.deletedAt : new Date(args.deletedAt)
+    // A NaN date (corrupt cell) would make mysql2 bind garbage — fall back to
+    // null (a live body page) rather than crash the backfill batch.
+    if (!Number.isNaN(d.getTime())) deletedAt = d
+  }
   const [pageRes] = (await tx.execute(sql`
     INSERT INTO pages
-      (slug, title, is_home, system, kind, published, published_at, version)
+      (slug, title, is_home, system, kind, published, published_at, deleted_at, version)
     VALUES (
-      ${bodyPageSlug(args.postId)}, ${args.title}, 0, 0, 'post_body', 0, NULL, 0
+      ${bodyPageSlug(args.postId)}, ${args.title}, 0, 0, 'post_body', 0, NULL, ${deletedAt}, 0
     )
   `)) as unknown as [{ insertId: number }]
   const pageId = Number(pageRes.insertId)

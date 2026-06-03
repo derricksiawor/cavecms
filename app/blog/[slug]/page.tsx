@@ -28,6 +28,9 @@ import { postUrl } from '@/lib/blog/urls'
 // time); the EDITOR PREVIEW branch (admin/editor in edit mode) is deliberately
 // LEFT UNGATED so a draft / scheduled post stays previewable in place.
 import { publicPostGateSql } from '@/lib/cms/postStatus'
+// F14: single source of truth for the reading-time SQL (shared with the Blog
+// Loop slice in lib/cms/hydrate) so the formula + magic constant can't drift.
+import { readingTimeSql } from '@/lib/cms/readingTime'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,10 +95,11 @@ interface PostDetailRow {
   author_name: string | null
   hero_variants: string | { lg?: string } | null
   // Phase 7: ≈200-wpm reading-time estimate computed in SQL from body_md char
-  // length — IDENTICAL formula to the Blog Loop hydrate (lib/cms/hydrate.ts):
-  // ceil(CHAR_LENGTH(body_md) / 1000), min 1 (≈5 chars/word, ≈200 wpm). Keeping
-  // the body text out of app memory and the estimate consistent with the index
-  // card. body_md is retained as the body source of truth even after the
+  // length via the SHARED readingTimeSql fragment (lib/cms/readingTime, F14) —
+  // so the formula + magic constant are IDENTICAL to the Blog Loop hydrate
+  // (lib/cms/hydrate.ts) and can't drift. Keeps the body text out of app memory
+  // and the estimate consistent with the index card. body_md is retained as the
+  // body source of truth even after the
   // block-tree migration, so it stays the word-count source for both surfaces.
   reading_minutes: number | string | bigint
 }
@@ -157,7 +161,7 @@ export default async function BlogPost({
            p.published, p.published_at, p.updated_at, p.hero_image_id,
            u.name AS author_name,
            m.variants AS hero_variants,
-           GREATEST(1, CEIL(CHAR_LENGTH(COALESCE(p.body_md, '')) / 1000)) AS reading_minutes
+           ${readingTimeSql('p')} AS reading_minutes
     FROM posts p
     LEFT JOIN users u ON u.id = p.author_id
     LEFT JOIN media m ON m.id = p.hero_image_id AND m.deleted_at IS NULL

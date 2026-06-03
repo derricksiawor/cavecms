@@ -19,6 +19,10 @@ import { previewMarkdown } from './preview/action'
 import { TaxonomyChips, type TermOption } from './TaxonomyChips'
 import { ScheduleControl } from './ScheduleControl'
 import { derivePostStatus } from '@/lib/cms/postStatus'
+// F15: build the "Edit content" public-page URL from the operator's configured
+// permalink segments (resolved server-side, passed in) instead of hardcoding
+// /blog/<slug> — so a custom blog base / post structure opens the right URL.
+import { postUrl as buildPostUrl, type PermalinkSegments } from '@/lib/blog/urls'
 
 export interface EditorPost {
   id: number
@@ -59,6 +63,7 @@ export function Editor({
   tagOptions: initialTagOptions,
   assignedCategoryIds,
   assignedTagIds,
+  segments,
 }: {
   post: EditorPost
   canPublish: boolean
@@ -67,6 +72,10 @@ export function Editor({
   tagOptions: TermOption[]
   assignedCategoryIds: number[]
   assignedTagIds: number[]
+  /** Resolved permalink segments (blog base + post structure), threaded from the
+   *  server editor page so the "Edit content" button opens the correctly-
+   *  segmented public URL (F15). */
+  segments: PermalinkSegments
 }) {
   const toast = useToast()
   const router = useRouter()
@@ -369,10 +378,14 @@ export function Editor({
           {(() => {
             // Header status pill — derived from the SAME helper the public gate
             // + admin list use, so the editor never claims a status the public
-            // wouldn't see. A future schedule reads "Scheduled".
+            // wouldn't see. A future schedule reads "Scheduled". For the
+            // publish-now case (published, no future date) we feed the EFFECTIVE
+            // published_at the server will stamp (NOW) instead of null — after
+            // F7 a null published_at on a published row derives to 'draft', so
+            // passing now keeps the live "Published" preview accurate.
             const status = derivePostStatus({
               published,
-              published_at: published ? scheduledAtIso : null,
+              published_at: published ? (scheduledAtIso ?? new Date()) : null,
               deleted_at: null,
             })
             const cls =
@@ -471,7 +484,11 @@ export function Editor({
                   className="w-fit gap-2"
                   onClick={() =>
                     window.open(
-                      `/blog/${pristine.slug}?edit=1`,
+                      // F15: segment-aware public URL (honors a custom blog base
+                      // + post structure). Uses the PERSISTED slug + the post's
+                      // published_at (year-month structures need it) so the link
+                      // matches the real route. ?edit=1 enters inline-edit mode.
+                      `${buildPostUrl(pristine.slug, segments, post.published_at)}?edit=1`,
                       '_blank',
                       'noopener',
                     )

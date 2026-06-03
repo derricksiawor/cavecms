@@ -17,6 +17,7 @@ import {
   tagsForPostTaxonomySync,
 } from '@/lib/cache/tags'
 import { syncPostTaxonomy, MAX_TERMS_PER_POST } from '@/lib/cms/syncPostTaxonomy'
+import { trashPostInTx } from '@/lib/cms/trashPost'
 import {
   BULK_POST_ACTIONS,
   type BulkPostAction,
@@ -151,8 +152,9 @@ async function doTrashOne(
   meta: { ip: string | null; userAgent: string | null; requestId: string | null },
   tags: TagAccumulator,
 ): Promise<void> {
-  // Mirror the single-post DELETE exactly: soft-delete the post, couple the
-  // hidden body page, clean both directions of slug_redirects.
+  // Mirror the single-post DELETE exactly via the shared trashPostInTx helper
+  // (F6): lock + read the post here, then delegate the soft-delete + body-page
+  // coupling + slug_redirects cleanup to the shared core.
   const [rows] = (await tx.execute(sql`
     SELECT id, slug, body_page_id FROM posts
     WHERE id = ${id} AND deleted_at IS NULL
@@ -163,27 +165,13 @@ async function doTrashOne(
   const row = rows[0]
   if (!row) throw new HttpError(404, 'not_found')
 
-  await tx.execute(sql`
-    UPDATE posts
-    SET deleted_at = NOW(3), updated_by = ${userId}
-    WHERE id = ${id}
-  `)
-  if (row.body_page_id !== null) {
-    await tx.execute(sql`
-      UPDATE pages
-      SET deleted_at = NOW(3),
-          preview_epoch = preview_epoch + 1,
-          updated_by = ${userId}
-      WHERE id = ${row.body_page_id}
-        AND kind = 'post_body'
-        AND deleted_at IS NULL
-    `)
-  }
-  await tx.execute(sql`
-    DELETE FROM slug_redirects
-    WHERE resource_type = 'post'
-      AND (new_slug = ${row.slug} OR old_slug = ${row.slug})
-  `)
+  // Shared trash core (F6) — byte-equivalent to the single-post DELETE.
+  await trashPostInTx(tx, {
+    id,
+    userId,
+    slug: row.slug,
+    bodyPageId: row.body_page_id,
+  })
   await writeBulkAudit(tx, id, 'trash', row.slug, userId, meta)
   for (const t of tagsForPostDelete(row.slug).tags) tags.add(t)
 }

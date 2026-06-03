@@ -20,6 +20,7 @@ import { isMissingTable } from '@/lib/db/errors'
 // lib/cms/postStatus so the loop, recent teaser, feed, related rail, sitemap and
 // detail page can never drift apart.
 import { publicPostGateSql } from './postStatus'
+import { readingTimeSql } from './readingTime'
 import type { BlockData } from './block-registry'
 import type { BlockKind } from './blockMeta'
 
@@ -142,16 +143,18 @@ export interface HydratedPostLoopItem {
 
 // The paginated, filtered slice a loop-mode lx_posts block renders.
 // Populated only when the page tree contains a loop-mode lx_posts block;
-// the keyset window is index-ordered (published_at DESC, id DESC), bounded,
-// and parameterised. `hasPrev`/`hasNext` drive the accessible pager + the
-// rel=prev/next links — there is NO unbounded COUNT(*), so deep archives
-// stay cheap.
+// the slice is index-ordered (published_at DESC, id DESC), bounded via SQL
+// LIMIT/OFFSET, and parameterised. `hasPrev`/`hasNext` drive the accessible
+// pager + the rel=prev/next links — a `+1` probe row decides hasNext, so
+// there is NO unbounded COUNT(*) and deep archives stay cheap.
 export interface HydratedPostsLoop {
   items: HydratedPostLoopItem[]
   page: number
   perPage: number
   hasPrev: boolean
   hasNext: boolean
+  // (Slice is fetched via bounded LIMIT/OFFSET with a +1 hasNext probe; see
+  // fetchPostsLoopSlice. No COUNT(*), so deep archives stay cheap.)
   /** Base path the pager builds prev/next hrefs from. Defaults to the blog
    *  index (`/blog`); the archive routes set it to the term archive
    *  (`/blog/category/<slug>` etc.) so paging within an archive stays on the
@@ -591,24 +594,25 @@ export async function hydratePage(
   }
 }
 
-// Max page a loop archive will serve. Bounds the windowed keyset fetch so a
-// crafted `?page=99999999` can never ask the DB for an unbounded scan — the
-// renderer clamps to this and the pager stops here. 1000 pages × 50/page =
-// 50k posts deep, far past any real blog; raise if a customer needs more.
-export const MAX_LOOP_PAGE = 1000
+// Max page a loop archive will serve. Bounds the OFFSET so a crafted
+// `?page=99999999` can never ask the DB to skip an unbounded number of rows —
+// the renderer clamps to this and the pager stops here. 200 pages × 50/page =
+// 10k posts deep, far past any real blog archive, and keeps the worst-case
+// OFFSET (MAX_LOOP_PAGE × perPage) bounded so a deep `?page=` stays cheap.
+export const MAX_LOOP_PAGE = 200
 
-/** Fetches ONE keyset-paginated, optionally taxonomy-filtered page of
- *  published posts for a loop-mode lx_posts block.
+/** Fetches ONE page of published posts (optionally taxonomy-filtered) for a
+ *  loop-mode lx_posts block, via bounded OFFSET pagination with a +1 probe.
  *
  *  Ordering is `(published_at DESC, id DESC)` — served by idx_posts_published
  *  (published equality → published_at ordered; id is the InnoDB PK carried in
  *  the secondary-index leaf, so the DESC tiebreak is a backward index scan,
- *  no filesort). We fetch a BOUNDED window of `page*perPage + 1` rows in that
- *  order (NO SQL `OFFSET` — MySQL's OFFSET still materialises+discards the
- *  skipped rows; the index-ordered LIMIT window is the keyset-equivalent that
- *  the project's scalability rule wants) and slice the requested page in app.
- *  The trailing `+1` row tells us whether a NEXT page exists without a
- *  separate COUNT(*). `page` is clamped to [1, MAX_LOOP_PAGE].
+ *  no filesort). We use SQL `LIMIT (perPage + 1) OFFSET (page-1)*perPage`: the
+ *  DB discards the skipped rows server-side (only ≤ perPage+1 rows ever cross
+ *  into app memory, regardless of how deep `page` is), and the trailing `+1`
+ *  probe row tells us whether a NEXT page exists without a separate COUNT(*).
+ *  `page` is clamped to [1, MAX_LOOP_PAGE], so the worst-case OFFSET is bounded
+ *  (MAX_LOOP_PAGE × perPage); render shows `rows.slice(0, perPage)`.
  *
  *  Public gate: publicPostGateSql('p') — `published = TRUE AND deleted_at IS
  *  NULL AND published_at IS NOT NULL AND published_at <= NOW(3)` (Phase 8 added
@@ -629,16 +633,16 @@ async function fetchPostsLoopSlice(args: {
 }): Promise<HydratedPostsLoop> {
   const perPage = Math.min(50, Math.max(1, Math.floor(args.perPage)))
   const page = Math.min(MAX_LOOP_PAGE, Math.max(1, Math.floor(args.page)))
-  // Bounded window: enough rows to cover the requested page + one probe row
-  // for hasNext. Capped structurally by MAX_LOOP_PAGE * perPage.
-  const window = page * perPage + 1
+  // Bounded OFFSET pagination: skip the (page-1) full pages server-side, fetch
+  // this page's rows + one probe row for hasNext. Only ≤ perPage+1 rows ever
+  // cross into app memory; the OFFSET is bounded by MAX_LOOP_PAGE × perPage.
+  const limit = perPage + 1
+  const offset = (page - 1) * perPage
 
   // reading_minutes is computed in SQL from the body character length so the
-  // full body text never crosses into app memory: ≈5 chars/word, ≈200 wpm →
-  // ceil(chars / (5*200)) = ceil(chars / 1000), min 1. body_md is the body
-  // source (Phase 2's lx_richtext mirrors it); for an empty body the estimate
-  // floors to 1 minute.
-  const readingExpr = sql`GREATEST(1, CEIL(CHAR_LENGTH(COALESCE(p.body_md, '')) / 1000))`
+  // full body text never crosses into app memory. Single source of truth for
+  // the formula + the magic constant: lib/cms/readingTime (F14).
+  const readingExpr = readingTimeSql('p')
 
   // Taxonomy filter — at most one term (a category OR a tag). The junction
   // EXISTS keeps the gate sargable and avoids row duplication a JOIN+DISTINCT
@@ -670,7 +674,7 @@ async function fetchPostsLoopSlice(args: {
         ${publicPostGateSql('p')}
         ${termFilter}
       ORDER BY p.published_at DESC, p.id DESC
-      LIMIT ${window}
+      LIMIT ${limit} OFFSET ${offset}
     `)) as unknown as [
       Array<{
         id: number
@@ -683,8 +687,10 @@ async function fetchPostsLoopSlice(args: {
       }>,
     ]
 
-    const start = (page - 1) * perPage
-    const pageRows = rows.slice(start, start + perPage)
+    // The OFFSET already skipped prior pages server-side, so `rows` holds only
+    // THIS page (≤ perPage) plus the optional +1 probe row. Take the first
+    // perPage for render; the probe (if present) only signals hasNext.
+    const pageRows = rows.slice(0, perPage)
 
     // Batch-fetch the categories for ALL posts on this page in ONE query
     // (no N+1), ordered by (post, category position) so each card's pills are
@@ -729,9 +735,9 @@ async function fetchPostsLoopSlice(args: {
       page,
       perPage,
       hasPrev: page > 1,
-      // A NEXT page exists when the window over-fetched past this page —
-      // i.e. we saw more rows than `page*perPage`.
-      hasNext: rows.length > page * perPage,
+      // A NEXT page exists when the +1 probe row came back — i.e. the DB had
+      // more than `perPage` rows past this page's OFFSET.
+      hasNext: rows.length > perPage,
       basePath: args.basePath,
     }
   } catch (err) {
