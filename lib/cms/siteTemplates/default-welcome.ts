@@ -4,6 +4,7 @@ import {
   SERVICES_SECTIONS,
   CONTACT_SECTIONS,
   PROJECTS_SECTIONS,
+  BLOG_SECTIONS,
 } from '@/db/seeds/systemPageBlocks'
 import type { SiteTemplate } from './types'
 
@@ -74,6 +75,11 @@ export const defaultWelcomeTemplate: SiteTemplate = {
       slug: 'projects',
       title: 'Projects',
       sections: PROJECTS_SECTIONS,
+    },
+    {
+      slug: 'blog',
+      title: 'Blog',
+      sections: BLOG_SECTIONS,
     },
   ],
 }

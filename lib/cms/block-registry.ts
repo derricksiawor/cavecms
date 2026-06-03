@@ -12,6 +12,7 @@ import { parseStrictHttpsUrl } from './url-guard'
 import { HEX_COLOR_RE } from './designTokens'
 import { BLOCK_TONE_ENUMS } from './blockTones'
 import { isAllowedEmbedUrl } from './embedHosts'
+import { SLUG_RE } from './slug'
 
 // ─── Picker-aware colour schema helper ──────────────────────────────
 // Block tone/color fields used to accept a strict enum of design-system
@@ -1203,19 +1204,55 @@ export const blockSchemas = {
 
   // ── Dynamic wave ────────────────────────────────────────────────
 
-  // Posts loop (Elementor: Posts / Loop Grid). Auto-renders the latest
-  // published posts — no per-block selection, the same model as
-  // lx_featured_projects. hydrate.ts bulk-fetches them; the renderer
-  // never queries the DB. No tone (auto-contrasts the ancestor surface).
-  // 'by tag/category' is a documented future add (needs a posts-tags
-  // migration the schema doesn't have yet).
+  // Posts loop (Elementor: Posts / Loop Grid). Two modes:
+  //
+  //   • 'recent' (DEFAULT — back-compat): the original teaser behaviour.
+  //     Auto-renders the latest published posts, capped by `limit` (1..12),
+  //     no pagination. hydrate.ts bulk-fetches them into RenderContext.posts;
+  //     the renderer slices + never queries the DB. This is what every
+  //     existing instance (e.g. the home-page teaser) keeps doing — `mode`
+  //     defaults to 'recent', so deserialising an old payload is a no-op.
+  //
+  //   • 'loop': the paginated blog archive used on the `/blog` system page.
+  //     Reads the current page from the URL `?page=` (threaded via
+  //     renderCmsPage → RenderContext.postsLoop) and renders a KEYSET-
+  //     paginated slice (published_at DESC, id DESC) with accessible
+  //     prev/next. Filterable by a single `category`/`tag` slug (injected
+  //     on archive pages; unset on a plain /blog). `postsPerPage` overrides
+  //     the page size; when unset the renderer falls back to
+  //     blog_settings.postsPerPage. hydrate.ts fetches the correct
+  //     filtered+paginated bounded slice into RenderContext.postsLoop, so
+  //     the renderer STAYS a pure synchronous view (required: lx_posts also
+  //     renders inside the client editor canvas, where an async server
+  //     component would throw — same constraint as lx_code).
+  //
+  // No tone (auto-contrasts the ancestor surface). `category`/`tag` are
+  // slug strings validated against the canonical SLUG_RE so a malformed
+  // value can never reach the parameterised taxonomy join.
   lx_posts: z.object({
+    mode: z.enum(['recent', 'loop']).default('recent'),
     heading: safeText(TEXT_MAX.title).optional(),
+    // 'recent' mode cap. Loop mode ignores this in favour of postsPerPage
+    // / blog_settings; kept for back-compat + the recent-mode teaser.
     limit: z.number().int().min(1).max(12).default(3),
+    // Loop-mode taxonomy filter — a single category OR tag slug. Optional;
+    // on a plain /blog both are unset. Validated to the canonical slug
+    // shape (lowercase, no leading/trailing/double hyphen) so the value is
+    // a safe parameter for the post_categories / post_tags join.
+    category: z.string().min(1).max(120).regex(SLUG_RE, 'invalid_category_slug').optional(),
+    tag: z.string().min(1).max(120).regex(SLUG_RE, 'invalid_tag_slug').optional(),
+    // Loop-mode page size override. When omitted the renderer uses
+    // blog_settings.postsPerPage (1..50). Bounded here to the same ceiling
+    // so a hand-edited payload can't request an unbounded page.
+    postsPerPage: z.number().int().min(1).max(50).optional(),
     layout: z.enum(['grid', 'list']).default('grid'),
     columns: z.union([z.literal(2), z.literal(3)]).default(3),
     showExcerpt: z.boolean().default(true),
     showDate: z.boolean().default(true),
+    // Loop-mode reading-time pill. Computed at hydrate (≈200 wpm over the
+    // post body text, bounded). Off by default so 'recent' teasers stay
+    // visually identical to today.
+    showReadingTime: z.boolean().default(false),
     animation: z.enum(['none', 'fade-in', 'slide-up']).default('fade-in'),
   }),
 

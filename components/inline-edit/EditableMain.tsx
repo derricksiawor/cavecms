@@ -118,6 +118,11 @@ interface Props {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
+  // Blog Loop slice — see RenderContext.postsLoop. Threaded into both
+  // renderer branches so a loop-mode lx_posts block renders its paginated
+  // page on the public surface and a page-1 preview in the editor canvas.
+  // Undefined on pages without a loop block.
+  postsLoop?: RenderContext['postsLoop']
   session: AdminSession | null
   editable: boolean
   // Optional preview-mode marker — emits `data-preview="1"` on `<main>`
@@ -167,6 +172,7 @@ export async function EditableMain(p: Props) {
       media={p.media}
       projects={p.projects}
       posts={p.posts}
+      postsLoop={p.postsLoop}
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}
@@ -177,6 +183,7 @@ export async function EditableMain(p: Props) {
       media={p.media}
       projects={p.projects}
       posts={p.posts}
+      postsLoop={p.postsLoop}
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}

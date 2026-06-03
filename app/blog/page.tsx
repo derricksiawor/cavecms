@@ -1,98 +1,67 @@
+import { notFound } from 'next/navigation'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
+import { renderCmsPage, parseLoopPage } from '../_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
 
-// /blog stays force-dynamic to mirror /projects: the underlying data
-// is small and rarely changes, but the CMS save path fires
+// /blog stays force-dynamic to mirror /projects: the underlying data is
+// small and rarely changes, but the CMS save path fires
 // revalidateTag('posts-index') without a downstream cache layer to
-// invalidate. If a CDN/edge cache is added later the tag wiring is
-// already correct.
+// invalidate, and the Blog Loop reads `?page=` at request time. If a
+// CDN/edge cache is added later the tag wiring is already correct.
 export const dynamic = 'force-dynamic'
 
-export async function generateMetadata() {
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const search = await searchParams
+  const page = parseLoopPage(search)
+
+  // Pull SEO fields from the CMS page row (mirrors app/projects/page.tsx).
+  // Filter `published = 1 AND deleted_at IS NULL AND kind = 'page'` so a
+  // soft-deleted / unpublished row — or a hidden post_body page that somehow
+  // shared the slug — never leaks draft SEO fields into the <head>.
+  const [rows] = (await db.execute(sql`
+    SELECT seo_title, seo_description
+    FROM pages
+    WHERE slug = 'blog'
+      AND deleted_at IS NULL
+      AND published = 1
+      AND kind = 'page'
+    LIMIT 1
+  `)) as unknown as [
+    Array<{ seo_title: string | null; seo_description: string | null }>,
+  ]
+  const r = rows[0]
+
+  // Page 2+ canonicalises to its own paginated URL so duplicate-content
+  // signals stay clean across the archive. No rel=prev/next <head> hints:
+  // Next.js renders Metadata.other as `<meta name>`, NOT the `<link rel>`
+  // those hints require, and Google deprecated rel=prev/next anyway. The
+  // in-content Blog Loop pager already carries the rel=prev/next links.
   return resolveMetadata({
-    canonicalPath: '/blog',
-    fallbackTitle: 'News — CaveCMS',
-    fallbackDescription:
-      'Updates, milestones and stories from CaveCMS.',
+    title: r?.seo_title ?? null,
+    description: r?.seo_description ?? null,
+    fallbackTitle: 'Blog — CaveCMS',
+    fallbackDescription: 'Updates, milestones and stories from CaveCMS.',
+    canonicalPath: page > 1 ? `/blog?page=${page}` : '/blog',
   })
 }
 
-interface PostListRow {
-  slug: string
-  title: string
-  excerpt: string | null
-  // mysql2 may return TIMESTAMP as Date OR ISO string — normalize
-  // at render time. Same pattern as /blog/[slug]/page.tsx.
-  published_at: Date | string | null
-  hero_image_id: number | null
-  variants: { md?: string } | null
-}
-
-// Public blog index. Lists every published, not-soft-deleted post in
-// reverse-chronological order. Hero variant comes from the joined
-// media row; when the media has no `md` variant the card renders a
-// neutral placeholder.
-export default async function BlogIndex() {
-  const [rows] = (await db.execute(sql`
-    SELECT p.slug, p.title, p.excerpt, p.published_at, p.hero_image_id, m.variants
-    FROM posts p
-    LEFT JOIN media m ON m.id = p.hero_image_id AND m.deleted_at IS NULL
-    WHERE p.published = TRUE AND p.deleted_at IS NULL
-    ORDER BY p.published_at DESC, p.id DESC
-    LIMIT 50
-  `)) as unknown as [
-    Array<PostListRow & { variants: string | { md?: string } | null }>,
-  ]
-  const posts: PostListRow[] = rows.map((r) => ({
-    ...r,
-    variants:
-      typeof r.variants === 'string'
-        ? (JSON.parse(r.variants) as { md?: string })
-        : (r.variants as { md?: string } | null),
-  }))
-
-  return (
-    <main className="py-12 px-4 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-semibold tracking-tight mb-8">News</h1>
-      {posts.length === 0 ? (
-        <p className="text-warm-stone">More coming soon.</p>
-      ) : (
-        <ul className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {posts.map((p) => (
-            <li key={p.slug}>
-              <a href={`/blog/${p.slug}`} className="block group">
-                {p.variants?.md ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={p.variants.md}
-                    alt={p.title}
-                    className="w-full h-56 object-cover rounded transition-transform group-hover:scale-[1.02]"
-                  />
-                ) : (
-                  <div className="w-full h-56 bg-cream-200 rounded-xl" />
-                )}
-                <h2 className="mt-3 font-medium">{p.title}</h2>
-                {p.excerpt && (
-                  <p className="text-sm text-warm-stone mt-1">{p.excerpt}</p>
-                )}
-                {p.published_at &&
-                  (() => {
-                    const d = new Date(p.published_at)
-                    return (
-                      <time
-                        className="text-[11px] uppercase tracking-wide text-copper-600 mt-2 inline-block"
-                        dateTime={d.toISOString()}
-                      >
-                        {d.toISOString().slice(0, 10)}
-                      </time>
-                    )
-                  })()}
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </main>
-  )
+// CMS-driven /blog index. The hero, intro, and CTA live as content_blocks;
+// the post listing inside the page (via the loop-mode `lx_posts` block) reads
+// the `posts` table at hydrate time, so the cards stay data-driven while the
+// surrounding page is editable from /admin/pages. See project CLAUDE.md
+// "#1 RULE — CMS-FIRST".
+export default async function BlogIndex({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const search = await searchParams
+  const tree = await renderCmsPage('blog', { search })
+  if (!tree) notFound()
+  return tree
 }

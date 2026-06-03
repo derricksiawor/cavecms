@@ -1,14 +1,24 @@
 import clsx from 'clsx'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import { MediaImg } from '../MediaImg'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
 import { isSectionSurfaceDark, type SectionMeta } from '@/lib/cms/blockMeta'
 
-// Dynamic posts loop (Elementor: Posts / Loop Grid). Renders the latest
-// published posts, resolved by hydrate.ts (never queried here — same
-// contract as lx_featured_projects). Text auto-contrasts the ancestor
-// section surface. Server component.
+// Dynamic posts loop (Elementor: Posts / Loop Grid). Two modes — both
+// resolved by hydrate.ts (never queried here — same contract as
+// lx_featured_projects), so this component stays a PURE SYNCHRONOUS view
+// (required: it also renders inside the client editor canvas, where an
+// async server component would throw — same constraint as lx_code):
+//
+//   • recent — the original teaser. Reads RenderContext.posts (the latest
+//     published posts, capped 12) and slices to data.limit. Unchanged.
+//   • loop   — the paginated blog archive. Reads RenderContext.postsLoop
+//     (the keyset-paginated, filtered, bounded page hydrate fetched for the
+//     URL ?page=) and renders an accessible prev/next pager.
+//
+// Text auto-contrasts the ancestor section surface.
 
 const COLS: Record<BlockData<'lx_posts'>['columns'], string> = {
   2: 'grid-cols-1 sm:grid-cols-2 gap-8 sm:gap-10',
@@ -22,15 +32,38 @@ function formatDate(value: Date | string | null): string | null {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
+// Shared card shape for both modes. `readingMinutes` is set only in loop
+// mode (hydrate computes it); recent mode passes undefined and the pill is
+// omitted regardless of showReadingTime.
+interface PostCard {
+  id: number
+  slug: string
+  title: string
+  excerpt: string | null
+  published_at: Date | string | null
+  hero_image_id: number | null
+  readingMinutes?: number
+}
+
+// Build the loop pager href. Loop pages live under /blog?page=N today; the
+// configurable permalink segment is a Phase 5 concern (a single
+// lib/blog/urls helper) — this renderer uses the literal default to match
+// the recent-mode card links (`/blog/<slug>`) already shipping.
+function pageHref(page: number): string {
+  return page <= 1 ? '/blog' : `/blog?page=${page}`
+}
+
 export function LxPosts({
   data,
   posts,
+  postsLoop,
   media,
   outerClass,
   sectionMeta,
 }: {
   data: BlockData<'lx_posts'>
   posts?: RenderContext['posts']
+  postsLoop?: RenderContext['postsLoop']
   media: RenderContext['media']
   outerClass?: string
   sectionMeta?: SectionMeta
@@ -39,16 +72,47 @@ export function LxPosts({
   const headingClass = onDark ? 'text-ivory' : 'text-obsidian'
   const titleClass = onDark ? 'text-ivory' : 'text-obsidian'
   const excerptClass = onDark ? 'text-ivory/70' : 'text-warm-stone'
+  const metaClass = onDark ? 'text-ivory/60' : 'text-warm-stone'
 
-  const list = [...(posts?.values() ?? [])].slice(0, data.limit)
+  const isLoop = data.mode === 'loop'
 
-  if (list.length === 0) {
-    // No published posts. Public render: nothing. (The editor preview
-    // path doesn't thread posts, so this also covers "in editor".)
-    return null
-  }
+  // Resolve the card list + pager from the active mode's data source.
+  const list: PostCard[] = isLoop
+    ? (postsLoop?.items ?? []).map((p) => ({
+        id: p.id,
+        slug: p.slug,
+        title: p.title,
+        excerpt: p.excerpt,
+        published_at: p.published_at,
+        hero_image_id: p.hero_image_id,
+        readingMinutes: p.reading_minutes,
+      }))
+    : [...(posts?.values() ?? [])].slice(0, data.limit)
 
   const isList = data.layout === 'list'
+
+  if (list.length === 0) {
+    // Loop mode: a real, on-brand empty state — the operator styled this
+    // page and a visitor landing on an empty archive (or a category with no
+    // posts) should see something intentional, not a blank gap. Recent mode
+    // keeps its legacy behaviour of rendering nothing (the home teaser must
+    // disappear cleanly when there are no posts yet).
+    if (!isLoop) return null
+    const empty = (
+      <section className={clsx('mx-auto w-full max-w-6xl', outerClass)}>
+        {data.heading && (
+          <h2 className={clsx('mb-6 font-serif text-3xl font-bold tracking-tight sm:text-4xl', headingClass)}>
+            {data.heading}
+          </h2>
+        )}
+        <p className={clsx('font-sans text-base leading-relaxed', excerptClass)}>
+          No posts here yet — check back soon.
+        </p>
+      </section>
+    )
+    if (data.animation === 'none') return empty
+    return <MotionTarget preset={data.animation}>{empty}</MotionTarget>
+  }
 
   const section = (
     <section className={clsx('mx-auto w-full max-w-6xl', outerClass)}>
@@ -65,6 +129,8 @@ export function LxPosts({
       >
         {list.map((p) => {
           const date = data.showDate ? formatDate(p.published_at) : null
+          const showReading =
+            isLoop && data.showReadingTime && typeof p.readingMinutes === 'number'
           return (
             <li key={p.id}>
               <a
@@ -83,13 +149,27 @@ export function LxPosts({
                   />
                 </div>
                 <div className={clsx(isList && 'sm:flex-1')}>
-                  {date && (
-                    <time
-                      className="mt-4 block font-sans text-xs font-semibold uppercase tracking-eyebrow text-champagne sm:mt-0"
-                      dateTime={new Date(p.published_at as string | Date).toISOString()}
-                    >
-                      {date}
-                    </time>
+                  {(date || showReading) && (
+                    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 sm:mt-0">
+                      {date && (
+                        <time
+                          className="block font-sans text-xs font-semibold uppercase tracking-eyebrow text-champagne"
+                          dateTime={new Date(p.published_at as string | Date).toISOString()}
+                        >
+                          {date}
+                        </time>
+                      )}
+                      {date && showReading && (
+                        <span aria-hidden className={clsx('text-xs', metaClass)}>
+                          ·
+                        </span>
+                      )}
+                      {showReading && (
+                        <span className={clsx('font-sans text-xs font-medium uppercase tracking-eyebrow', metaClass)}>
+                          {p.readingMinutes} min read
+                        </span>
+                      )}
+                    </div>
                   )}
                   <h3 className={clsx('mt-2 font-serif text-xl font-bold tracking-tight sm:text-2xl', titleClass)}>
                     {p.title}
@@ -105,6 +185,53 @@ export function LxPosts({
           )
         })}
       </ul>
+
+      {isLoop && postsLoop && (postsLoop.hasPrev || postsLoop.hasNext) && (
+        <nav
+          aria-label="Blog pagination"
+          className="mt-14 flex items-center justify-between gap-4"
+        >
+          {postsLoop.hasPrev ? (
+            <a
+              href={pageHref(postsLoop.page - 1)}
+              rel="prev"
+              className={clsx(
+                'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
+                onDark
+                  ? 'bg-ivory/10 text-ivory hover:bg-ivory/15'
+                  : 'bg-obsidian/[0.06] text-obsidian hover:bg-obsidian/[0.1]',
+              )}
+            >
+              <ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden />
+              Newer posts
+            </a>
+          ) : (
+            <span />
+          )}
+
+          <span className={clsx('font-sans text-xs font-semibold uppercase tracking-eyebrow', metaClass)}>
+            Page {postsLoop.page}
+          </span>
+
+          {postsLoop.hasNext ? (
+            <a
+              href={pageHref(postsLoop.page + 1)}
+              rel="next"
+              className={clsx(
+                'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
+                onDark
+                  ? 'bg-champagne text-obsidian hover:bg-champagne/90'
+                  : 'bg-obsidian text-ivory hover:bg-obsidian/90',
+              )}
+            >
+              Older posts
+              <ArrowRight className="h-4 w-4" strokeWidth={2} aria-hidden />
+            </a>
+          ) : (
+            <span />
+          )}
+        </nav>
+      )}
     </section>
   )
 

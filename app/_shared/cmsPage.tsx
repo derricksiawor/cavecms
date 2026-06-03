@@ -2,7 +2,7 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { hydratePage } from '@/lib/cms/hydrate'
+import { hydratePage, MAX_LOOP_PAGE } from '@/lib/cms/hydrate'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { ensurePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
@@ -89,8 +89,26 @@ export type CmsPageSlug =
   | 'services'
   | 'contact'
   | 'projects'
+  | 'blog'
   | 'privacy'
   | 'terms'
+
+/** Parse the 1-based `?page=` loop cursor from a route's searchParams.
+ *  Tolerant: a missing / non-numeric / <1 value resolves to page 1.
+ *  Clamped to [1, MAX_LOOP_PAGE] — the SAME upper bound the loop renderer
+ *  applies inside the keyset fetch — so generateMetadata's canonical/pager
+ *  never points past the rendered clamp. Arrays (?page=1&page=2) take the
+ *  first entry. */
+export function parseLoopPage(
+  search: Record<string, string | string[] | undefined> | undefined,
+): number {
+  const raw = search?.['page']
+  const v = Array.isArray(raw) ? raw[0] : raw
+  if (typeof v !== 'string') return 1
+  const n = Number.parseInt(v, 10)
+  const page = Number.isFinite(n) ? n : 1
+  return Math.min(MAX_LOOP_PAGE, Math.max(1, page))
+}
 
 // Shared server-component renderer for the six CMS-edited public
 // pages. Adds the global Organization JSON-LD, wires up edit-mode
@@ -148,14 +166,17 @@ export async function renderCmsPage(
   const pageVersion = row.version
   const pageTitle = row.title
 
-  const hydrated = await hydratePage(pageId)
+  // Thread the loop cursor so a loop-mode lx_posts block on this page (the
+  // /blog index) gets the slice for the visitor's ?page=. Cheap for every
+  // other page — hydrate only runs the loop query when a loop block exists.
+  const hydrated = await hydratePage(pageId, { loopPage: parseLoopPage(opts?.search) })
   if (!hydrated) return null
 
   // Organization JSON-LD is emitted by app/layout.tsx for every
   // public route, so we don't duplicate it here. Per-entity LD
   // (Residence, BlogPosting) lives on the route that knows about
   // the entity.
-  const { blocks, media, projects, posts } = hydrated
+  const { blocks, media, projects, posts, postsLoop } = hydrated
 
   const csrf = await mintPublicPreCsrfForBlocks(blocks, slug)
 
@@ -184,6 +205,7 @@ export async function renderCmsPage(
       media={media}
       projects={projects}
       posts={posts}
+      postsLoop={postsLoop}
       session={session}
       editable={editable}
       showEmptyState={false}

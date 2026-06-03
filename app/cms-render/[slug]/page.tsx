@@ -24,7 +24,11 @@ import { db } from '@/db/client'
 import { hydratePage } from '@/lib/cms/hydrate'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
-import { mintPublicPreCsrfForBlocks, pageHasVisibleH1 } from '@/app/_shared/cmsPage'
+import {
+  mintPublicPreCsrfForBlocks,
+  pageHasVisibleH1,
+  parseLoopPage,
+} from '@/app/_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { jsonLdForPage } from '@/lib/seo/page-jsonld'
@@ -280,7 +284,11 @@ async function renderResolvedPage(
   // whole route. Mirrors the home page's pattern at app/page.tsx.
   let hydrated: Awaited<ReturnType<typeof hydratePage>> | null = null
   try {
-    hydrated = await hydratePage(page.id)
+    // Thread the loop cursor so a loop-mode lx_posts block on this page (an
+    // editor-preview/preview-token render of the /blog page) gets the slice
+    // for the visitor's ?page=. Cheap elsewhere — hydrate only runs the loop
+    // query when a loop block exists.
+    hydrated = await hydratePage(page.id, { loopPage: parseLoopPage(opts.search) })
   } catch (e) {
     console.error(
       JSON.stringify({
@@ -293,7 +301,7 @@ async function renderResolvedPage(
     )
   }
   if (!hydrated) notFound()
-  const { blocks, media, projects, posts } = hydrated
+  const { blocks, media, projects, posts, postsLoop } = hydrated
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
 
   const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
@@ -307,6 +315,7 @@ async function renderResolvedPage(
       media={media}
       projects={projects}
       posts={posts}
+      postsLoop={postsLoop}
       session={session}
       editable={editable}
       preview={opts.preview}

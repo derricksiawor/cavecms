@@ -81,9 +81,9 @@ async function main(): Promise<void> {
       SELECT COUNT(*) AS n FROM pages WHERE system = 1 AND deleted_at IS NULL
     `)
     const sysN = Number(sysCount[0]?.['n'] ?? 0)
-    if (sysN !== 7) {
+    if (sysN !== 8) {
       throw new Error(
-        `[post-migrate-asserts] #3 expected 7 live system rows (system=1 AND deleted_at IS NULL), found ${sysN}; recovery: inspect pages with SELECT id,slug,system,deleted_at FROM pages WHERE system=1 OR slug IN ('home','about','services','contact','projects','privacy','terms');`,
+        `[post-migrate-asserts] #3 expected 8 live system rows (system=1 AND deleted_at IS NULL), found ${sysN}; recovery: inspect pages with SELECT id,slug,system,deleted_at FROM pages WHERE system=1 OR slug IN ('home','about','services','contact','projects','blog','privacy','terms');`,
       )
     }
 
@@ -221,25 +221,26 @@ async function main(): Promise<void> {
     }
 
     // -------------------------------------------------------------------
-    // 9. All 7 system slugs survived seed AND have system=1.
+    // 9. All 8 system slugs survived seed AND have system=1.
     //    home/about/services/contact seeded by 0010_pages_cms.sql;
     //    privacy/terms seeded by 0015_legal_pages.sql;
-    //    projects seeded by 0016_projects_page.sql.
+    //    projects seeded by 0016_projects_page.sql;
+    //    blog seeded by 0034_blog_system_page.sql.
     // -------------------------------------------------------------------
     const [sysSlugs] = await conn.execute<mysql.RowDataPacket[]>(`
       SELECT slug, system FROM pages
-      WHERE slug IN ('home','about','services','contact','projects','privacy','terms')
+      WHERE slug IN ('home','about','services','contact','projects','blog','privacy','terms')
         AND deleted_at IS NULL
       ORDER BY slug
     `)
-    const expectedSlugs = ['about', 'contact', 'home', 'privacy', 'projects', 'services', 'terms']
+    const expectedSlugs = ['about', 'blog', 'contact', 'home', 'privacy', 'projects', 'services', 'terms']
     const gotSlugs = sysSlugs.map((r) => String(r['slug']))
     if (
-      gotSlugs.length !== 7 ||
+      gotSlugs.length !== 8 ||
       gotSlugs.join(',') !== expectedSlugs.join(',')
     ) {
       throw new Error(
-        `[post-migrate-asserts] #9 expected 7 system slugs [${expectedSlugs.join(',')}], got [${gotSlugs.map(sanitiseForLog).join(',')}]; recovery: re-INSERT the missing seed rows with system=1`,
+        `[post-migrate-asserts] #9 expected 8 system slugs [${expectedSlugs.join(',')}], got [${gotSlugs.map(sanitiseForLog).join(',')}]; recovery: re-INSERT the missing seed rows with system=1`,
       )
     }
     const nonSystemSeed = sysSlugs.filter((r) => Number(r['system']) !== 1)
@@ -247,7 +248,7 @@ async function main(): Promise<void> {
       throw new Error(
         `[post-migrate-asserts] #9 seed slugs found but not system=1: ${nonSystemSeed
           .map((r) => sanitiseForLog(String(r['slug'])))
-          .join(',')}; recovery: UPDATE pages SET system=1 WHERE slug IN ('home','about','services','contact','projects','privacy','terms');`,
+          .join(',')}; recovery: UPDATE pages SET system=1 WHERE slug IN ('home','about','services','contact','projects','blog','privacy','terms');`,
       )
     }
 

@@ -280,6 +280,44 @@ export const PROJECTS_SECTIONS: SectionSpec[] = [
 ]
 export async function seedProjectsPageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('projects', PROJECTS_SECTIONS) }
 
+// ── BLOG ────────────────────────────────────────────────────────────
+// The /blog index as an operator-styleable CMS system page (spec §5).
+// A premium hero (eyebrow + h1 + intro) over an obsidian surface, then a
+// loop-mode lx_posts "Blog Loop" on an ivory surface that auto-renders the
+// paginated archive (hydrate.ts fetches the keyset slice for ?page=). The
+// post LISTING data lives in the `posts` table — the loop block reads it at
+// hydrate, so the list stays data-driven while the surrounding page is
+// CMS-driven. Mirrors PROJECTS_SECTIONS: a thin renderCmsPage('blog') shim
+// at app/blog/page.tsx resolves this tree.
+export const BLOG_SECTIONS: SectionSpec[] = [
+  {
+    kind: 'section',
+    meta: { columns: 1, background: 'obsidian', padding: 'lg' },
+    columns: [{ kind: 'column', widgets: [
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Journal', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Stories, updates, and ideas', level: 'h1', size: 'display-2xl', alignment: 'left', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>A short framing of what readers will find here — the kind of writing you publish and why it is worth their time.</p>', size: 'body-lg', alignment: 'left', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+    ] }],
+  },
+  {
+    kind: 'section',
+    meta: { columns: 1, background: 'ivory', padding: 'md' },
+    columns: [{ kind: 'column', widgets: [
+      { kind: 'widget', blockType: 'lx_posts', data: { mode: 'loop', layout: 'grid', columns: 3, showExcerpt: true, showDate: true, showReadingTime: true, animation: 'fade-in' } },
+    ] }],
+  },
+  {
+    kind: 'section',
+    meta: { columns: 1, background: 'obsidian', padding: 'md' },
+    columns: [{ kind: 'column', widgets: [
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Want these in your inbox?', level: 'h2', size: 'display-md', alignment: 'center', tone: 'ivory', italic: false, animation: 'slide-up' } },
+      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>Replace this with a one-line invitation, and link it to your newsletter, contact page, or social profiles.</p>', size: 'body-md', alignment: 'center', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_action', data: { label: 'Get in touch', href: '/contact', variant: 'primary-gold', size: 'md', alignment: 'center', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+    ] }],
+  },
+]
+export async function seedBlogPageBlocksIfEmpty(): Promise<number | false> { return seedSystemPageIfEmpty('blog', BLOG_SECTIONS) }
+
 // ── CONTACT ─────────────────────────────────────────────────────────
 export const CONTACT_SECTIONS: SectionSpec[] = [
   {

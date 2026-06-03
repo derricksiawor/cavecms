@@ -229,7 +229,7 @@ export default async function BlogPost({
     if (bodyPage) {
       const hydrated = await hydratePage(bodyPage.id)
       if (hydrated) {
-        const { blocks, media, projects, posts } = hydrated
+        const { blocks, media, projects, posts, postsLoop } = hydrated
         // Mint the public pre-CSRF for the body blocks EXACTLY as
         // cms-render does — covers a form-bearing block dropped into the
         // body. Identical helper, identical contract.
@@ -244,6 +244,7 @@ export default async function BlogPost({
               media={media}
               projects={projects}
               posts={posts}
+              postsLoop={postsLoop}
               session={session}
               editable={editable}
               // A form block in the body suppresses live submission while

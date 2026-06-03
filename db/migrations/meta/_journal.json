@@ -225,6 +225,13 @@
 			"when": 1780360600000,
 			"tag": "0033_blog_block_ownership",
 			"breakpoints": true
+		},
+		{
+			"idx": 34,
+			"version": "5",
+			"when": 1780360700000,
+			"tag": "0034_blog_system_page",
+			"breakpoints": true
 		}
 	]
 }

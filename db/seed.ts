@@ -3,6 +3,7 @@ import { users, settings } from './schema'
 import { hashPassword } from '../lib/auth/scrypt'
 import {
   seedAboutPageBlocksIfEmpty,
+  seedBlogPageBlocksIfEmpty,
   seedContactPageBlocksIfEmpty,
   seedHomePageBlocksIfEmpty,
   seedPrivacyPageBlocksIfEmpty,
@@ -196,6 +197,12 @@ async function runCli(): Promise<void> {
       projectsInserted === false
         ? 'Projects page already has live blocks — skipped block seed.'
         : `Seeded Projects page block tree (${projectsInserted} rows).`,
+    )
+    const blogInserted = await seedBlogPageBlocksIfEmpty()
+    console.log(
+      blogInserted === false
+        ? 'Blog page already has live blocks — skipped block seed.'
+        : `Seeded Blog page block tree (${blogInserted} rows).`,
     )
     const contactInserted = await seedContactPageBlocksIfEmpty()
     console.log(

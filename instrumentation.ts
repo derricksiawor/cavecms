@@ -347,6 +347,34 @@ export async function register(): Promise<void> {
     })()
   }
 
+  // ─── One-time Blog-index block-tree backfill (customer auto-migration) ──
+  // Migration 0034 creates the `pages.slug='blog'` system ROW, but pure SQL
+  // can't author a block tree. On a fresh install the blocks come from the
+  // install template; on an EXISTING install that updates, this seeds the
+  // canonical BLOG_SECTIONS tree into the empty row so /blog renders instead
+  // of resolving to an empty page (spec §5). Idempotent + cheap (a single
+  // COUNT inside seedBlogPageBlocksIfEmpty short-circuits when the row already
+  // has live blocks). FIRE-AND-FORGET so it never blocks boot. Production-only
+  // — contributors seed via pnpm db:seed.
+  if (env.NODE_ENV === 'production') {
+    void (async () => {
+      try {
+        const { runBlogPageBackfillOnce } = await import(
+          '@/lib/cms/runBlogPageBackfillOnce'
+        )
+        await runBlogPageBackfillOnce()
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'blog_page_backfill_failed',
+            err: e instanceof Error ? e.message : String(e),
+          }),
+        )
+      }
+    })()
+  }
+
   // Crash handlers were installed at the top of register() — see the
   // module-scope definitions of isInboundHttpAbort + crash above.
   // Documenting the inbound-HTTP-abort filter here so the rationale

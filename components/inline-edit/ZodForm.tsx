@@ -2028,8 +2028,19 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
   ],
 
   lx_posts: [
+    {
+      kind: 'select', key: 'mode', label: 'Mode',
+      help: 'Recent shows your latest posts as a teaser. Loop is the full, paginated blog archive (used on the Blog page).',
+      options: [
+        { value: 'recent', label: 'Recent posts (teaser)' },
+        { value: 'loop', label: 'Blog loop (paginated archive)' },
+      ],
+    },
     { kind: 'string', key: 'heading', label: 'Heading (optional)', maxLength: TEXT_MAX.title, placeholder: 'From the journal' },
-    { kind: 'number', key: 'limit', label: 'Number of posts', min: 1, max: 12, step: 1 },
+    { kind: 'number', key: 'limit', label: 'Number of posts (Recent mode)', min: 1, max: 12, step: 1, help: 'How many posts the Recent teaser shows. Ignored in Loop mode.' },
+    { kind: 'number', key: 'postsPerPage', label: 'Posts per page (Loop mode)', min: 1, max: 50, step: 1, help: 'Loop mode page size. Leave blank to use the site-wide default from Settings → Blog.' },
+    { kind: 'string', key: 'category', label: 'Filter by category slug (Loop mode, optional)', maxLength: 120, placeholder: 'e.g. announcements' },
+    { kind: 'string', key: 'tag', label: 'Filter by tag slug (Loop mode, optional)', maxLength: 120, placeholder: 'e.g. release-notes' },
     {
       kind: 'select', key: 'layout', label: 'Layout',
       options: [
@@ -2046,6 +2057,7 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     },
     { kind: 'boolean', key: 'showExcerpt', label: 'Show excerpt' },
     { kind: 'boolean', key: 'showDate', label: 'Show date' },
+    { kind: 'boolean', key: 'showReadingTime', label: 'Show reading time (Loop mode)' },
     {
       kind: 'select', key: 'animation', label: 'Animation',
       options: [

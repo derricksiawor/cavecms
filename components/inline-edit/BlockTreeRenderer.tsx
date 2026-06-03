@@ -7,6 +7,7 @@ import type {
   HydratedMedia,
   HydratedProject,
   HydratedPost,
+  HydratedPostsLoop,
 } from '@/lib/cms/hydrate'
 import { buildBlockTree } from '@/lib/cms/blockTree'
 import {
@@ -43,6 +44,10 @@ interface Props {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
+  /** Blog Loop slice — see RenderContext.postsLoop. Threaded into every
+   *  renderBlock dispatch so a loop-mode lx_posts block renders its
+   *  paginated page. Undefined on pages without a loop block. */
+  postsLoop?: HydratedPostsLoop
   /** Public preCsrf nonce minted in `renderCmsPage()`. Threaded through
    *  every renderBlock dispatch via RenderContext so blocks that need
    *  it (today: `contact_form`) can submit without an extra round trip.
@@ -106,6 +111,7 @@ export function BlockTreeRenderer({
   media,
   projects,
   posts,
+  postsLoop,
   csrf,
   project,
   preview,
@@ -145,7 +151,7 @@ export function BlockTreeRenderer({
                             {renderBlock(
                               w.blockType,
                               w.data,
-                              { media, projects, posts, csrf, project, preview },
+                              { media, projects, posts, postsLoop, csrf, project, preview },
                               undefined,
                               m.outerClass,
                               w.id,
@@ -172,7 +178,7 @@ export function BlockTreeRenderer({
                 {renderBlock(
                   entry.node.blockType,
                   entry.node.data,
-                  { media, projects, posts, csrf, project, preview },
+                  { media, projects, posts, postsLoop, csrf, project, preview },
                   undefined,
                   m.outerClass,
                   entry.node.id,

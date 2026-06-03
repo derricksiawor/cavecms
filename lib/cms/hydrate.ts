@@ -5,6 +5,7 @@ import { notificationFailures } from '@/db/schema'
 import { parseForRead, parseProjectSectionForRead } from './parse'
 import { collectMediaPaths } from './mediaRefs'
 import { getProjectRow } from './getProjectRow'
+import { getSetting } from './getSettings'
 import { isMissingTable } from '@/lib/db/errors'
 import type { BlockData } from './block-registry'
 import type { BlockKind } from './blockMeta'
@@ -97,6 +98,36 @@ export interface HydratedPost {
   hero_image_id: number | null
 }
 
+// One card in a Blog Loop slice. Extends the recent-post shape with the
+// hydrate-computed reading time (cheap word-count estimate over the body
+// text) so the loop renderer stays a pure synchronous view.
+export interface HydratedPostLoopItem {
+  id: number
+  slug: string
+  title: string
+  excerpt: string | null
+  published_at: Date | string | null
+  hero_image_id: number | null
+  /** ≈200-wpm reading-time estimate in whole minutes (min 1). Computed at
+   *  fetch from the body character length — bounded + cheap, never the full
+   *  body text into app memory. */
+  reading_minutes: number
+}
+
+// The paginated, filtered slice a loop-mode lx_posts block renders.
+// Populated only when the page tree contains a loop-mode lx_posts block;
+// the keyset window is index-ordered (published_at DESC, id DESC), bounded,
+// and parameterised. `hasPrev`/`hasNext` drive the accessible pager + the
+// rel=prev/next links — there is NO unbounded COUNT(*), so deep archives
+// stay cheap.
+export interface HydratedPostsLoop {
+  items: HydratedPostLoopItem[]
+  page: number
+  perPage: number
+  hasPrev: boolean
+  hasNext: boolean
+}
+
 export interface HydratedPage {
   blocks: HydratedBlock[]
   media: Map<number, HydratedMedia>
@@ -107,6 +138,10 @@ export interface HydratedPage {
   // Recent posts — populated only when the page has an lx_posts block.
   // Iteration order is published_at DESC (newest first).
   posts: Map<number, HydratedPost>
+  // Blog Loop slice — populated only when the page tree has a loop-mode
+  // lx_posts block. Undefined on every other page (and for recent-mode-only
+  // pages), so existing renders pay nothing.
+  postsLoop?: HydratedPostsLoop
 }
 
 /** Defensively parse a media row's `variants` JSON cell.
@@ -174,6 +209,14 @@ function parseMediaVariants(
  */
 export async function hydratePage(
   pageId: number,
+  opts?: {
+    /** 1-based current page for any loop-mode lx_posts block on this page,
+     *  parsed from the URL `?page=` by renderCmsPage. Defaults to 1 (the
+     *  editor preview + every non-loop caller). A loop block's slice is
+     *  fetched for THIS page number; the recent-mode posts Map is
+     *  unaffected. */
+    loopPage?: number
+  },
 ): Promise<HydratedPage | null> {
   // Verify the page exists before fetching blocks — distinguishes
   // "real page with zero blocks" (returns an empty-shaped HydratedPage)
@@ -339,14 +382,24 @@ export async function hydratePage(
     if (p.og_image_id) mediaIds.add(p.og_image_id)
   }
 
-  // lx_posts auto-renders the latest published posts (no per-block
-  // selection). Fetch ONLY when such a block is on the page. A page can
-  // hold several lx_posts blocks with different `limit`s — fetch MAX
-  // once (capped at 12), each renderer slices to its own data.limit.
+  // lx_posts has two modes (see block-registry):
+  //   • recent — auto-renders the latest published posts (capped 12). A
+  //     page can hold several recent blocks with different `limit`s; we
+  //     fetch the MAX once and each renderer slices to its own data.limit.
+  //   • loop   — the paginated blog archive. Each loop block gets its own
+  //     keyset-paginated, filtered, bounded slice fetched into postsLoop.
+  // Blocks are filtered by mode so a recent-only page never pays for the
+  // loop query and vice-versa.
   const postsBlocks = blocks.filter((b) => b.blockType === 'lx_posts')
+  const recentBlocks = postsBlocks.filter(
+    (b) => ((b.data as BlockData<'lx_posts'>).mode ?? 'recent') === 'recent',
+  )
+  const loopBlocks = postsBlocks.filter(
+    (b) => (b.data as BlockData<'lx_posts'>).mode === 'loop',
+  )
   let posts: HydratedPost[] = []
-  if (postsBlocks.length > 0) {
-    const maxLimit = postsBlocks.reduce((m, b) => {
+  if (recentBlocks.length > 0) {
+    const maxLimit = recentBlocks.reduce((m, b) => {
       // b.blockType === 'lx_posts' here (filtered above), so b.data is
       // the lx_posts shape; `limit` is a Zod-validated 1..12 int.
       const lim = (b.data as BlockData<'lx_posts'>).limit
@@ -354,6 +407,35 @@ export async function hydratePage(
     }, 1)
     posts = await fetchRecentPostsSafely(Math.min(12, Math.max(1, maxLimit)))
     for (const p of posts) {
+      if (p.hero_image_id) mediaIds.add(p.hero_image_id)
+    }
+  }
+
+  // Loop slice. We support ONE loop block per page (the blog-index pattern);
+  // if an operator drops several, the FIRST loop block owns the ?page= slice
+  // and the rest share it — a deliberate simplification (multiple
+  // independently-paginated archives on one URL would need per-block page
+  // params, a non-goal). The slice reads blog_settings.postsPerPage when the
+  // block leaves postsPerPage unset.
+  let postsLoop: HydratedPostsLoop | undefined
+  const firstLoopBlock = loopBlocks[0]
+  if (firstLoopBlock) {
+    const loopData = firstLoopBlock.data as BlockData<'lx_posts'>
+    let perPage = loopData.postsPerPage
+    if (typeof perPage !== 'number') {
+      // Fall back to the site-wide default. getSetting is missing-context
+      // safe (uncached direct read outside a request) and returns the Zod
+      // default if the row is absent/corrupt.
+      const blogSettings = await getSetting('blog_settings')
+      perPage = blogSettings.postsPerPage
+    }
+    postsLoop = await fetchPostsLoopSlice({
+      page: opts?.loopPage ?? 1,
+      perPage: Math.min(50, Math.max(1, Math.floor(perPage))),
+      category: loopData.category,
+      tag: loopData.tag,
+    })
+    for (const p of postsLoop.items) {
       if (p.hero_image_id) mediaIds.add(p.hero_image_id)
     }
   }
@@ -411,6 +493,122 @@ export async function hydratePage(
     media: new Map(mediaRows.map((r) => [r.id, r])),
     projects: new Map(projects.map((p) => [p.id, p])),
     posts: new Map(posts.map((p) => [p.id, p])),
+    postsLoop,
+  }
+}
+
+// Max page a loop archive will serve. Bounds the windowed keyset fetch so a
+// crafted `?page=99999999` can never ask the DB for an unbounded scan — the
+// renderer clamps to this and the pager stops here. 1000 pages × 50/page =
+// 50k posts deep, far past any real blog; raise if a customer needs more.
+export const MAX_LOOP_PAGE = 1000
+
+/** Fetches ONE keyset-paginated, optionally taxonomy-filtered page of
+ *  published posts for a loop-mode lx_posts block.
+ *
+ *  Ordering is `(published_at DESC, id DESC)` — served by idx_posts_published
+ *  (published equality → published_at ordered; id is the InnoDB PK carried in
+ *  the secondary-index leaf, so the DESC tiebreak is a backward index scan,
+ *  no filesort). We fetch a BOUNDED window of `page*perPage + 1` rows in that
+ *  order (NO SQL `OFFSET` — MySQL's OFFSET still materialises+discards the
+ *  skipped rows; the index-ordered LIMIT window is the keyset-equivalent that
+ *  the project's scalability rule wants) and slice the requested page in app.
+ *  The trailing `+1` row tells us whether a NEXT page exists without a
+ *  separate COUNT(*). `page` is clamped to [1, MAX_LOOP_PAGE].
+ *
+ *  Public gate: `published = TRUE AND deleted_at IS NULL` (NO
+ *  `published_at <= NOW()` — scheduled-post gating is Phase 8). The taxonomy
+ *  filter joins post_categories / post_tags by the term's slug; both `category`
+ *  and `tag` are SLUG_RE-validated at the block boundary and bound as
+ *  parameters here, so the join is injection-safe. Missing-table-safe (returns
+ *  an empty page) like the other post/project fetches. */
+async function fetchPostsLoopSlice(args: {
+  page: number
+  perPage: number
+  category?: string
+  tag?: string
+}): Promise<HydratedPostsLoop> {
+  const perPage = Math.min(50, Math.max(1, Math.floor(args.perPage)))
+  const page = Math.min(MAX_LOOP_PAGE, Math.max(1, Math.floor(args.page)))
+  // Bounded window: enough rows to cover the requested page + one probe row
+  // for hasNext. Capped structurally by MAX_LOOP_PAGE * perPage.
+  const window = page * perPage + 1
+
+  // reading_minutes is computed in SQL from the body character length so the
+  // full body text never crosses into app memory: ≈5 chars/word, ≈200 wpm →
+  // ceil(chars / (5*200)) = ceil(chars / 1000), min 1. body_md is the body
+  // source (Phase 2's lx_richtext mirrors it); for an empty body the estimate
+  // floors to 1 minute.
+  const readingExpr = sql`GREATEST(1, CEIL(CHAR_LENGTH(COALESCE(p.body_md, '')) / 1000))`
+
+  // Taxonomy filter — at most one term (a category OR a tag). The junction
+  // EXISTS keeps the gate sargable and avoids row duplication a JOIN+DISTINCT
+  // would cost.
+  let termFilter = sql``
+  if (args.category) {
+    termFilter = sql`
+      AND EXISTS (
+        SELECT 1 FROM post_categories pc
+        JOIN categories c ON c.id = pc.category_id
+        WHERE pc.post_id = p.id AND c.slug = ${args.category}
+      )`
+  } else if (args.tag) {
+    termFilter = sql`
+      AND EXISTS (
+        SELECT 1 FROM post_tags pt
+        JOIN tags t ON t.id = pt.tag_id
+        WHERE pt.post_id = p.id AND t.slug = ${args.tag}
+      )`
+  }
+
+  try {
+    const [rows] = (await db.execute(sql`
+      SELECT
+        p.id, p.slug, p.title, p.excerpt, p.published_at, p.hero_image_id,
+        ${readingExpr} AS reading_minutes
+      FROM posts p
+      WHERE p.published = TRUE
+        AND p.deleted_at IS NULL
+        ${termFilter}
+      ORDER BY p.published_at DESC, p.id DESC
+      LIMIT ${window}
+    `)) as unknown as [
+      Array<{
+        id: number
+        slug: string
+        title: string
+        excerpt: string | null
+        published_at: Date | string | null
+        hero_image_id: number | null
+        reading_minutes: number | string | bigint
+      }>,
+    ]
+
+    const start = (page - 1) * perPage
+    const pageRows = rows.slice(start, start + perPage)
+    const items: HydratedPostLoopItem[] = pageRows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      title: r.title,
+      excerpt: r.excerpt,
+      published_at: r.published_at,
+      hero_image_id: r.hero_image_id,
+      reading_minutes: Math.max(1, Number(r.reading_minutes) || 1),
+    }))
+    return {
+      items,
+      page,
+      perPage,
+      hasPrev: page > 1,
+      // A NEXT page exists when the window over-fetched past this page —
+      // i.e. we saw more rows than `page*perPage`.
+      hasNext: rows.length > page * perPage,
+    }
+  } catch (err) {
+    if (isMissingTable(err)) {
+      return { items: [], page, perPage, hasPrev: page > 1, hasNext: false }
+    }
+    throw err
   }
 }
 

@@ -68,6 +68,18 @@ export interface RenderContext {
    *  path) leave it undefined and the posts block renders its empty
    *  state rather than crashing. */
   posts?: Map<number, { id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null }>
+  /** Blog Loop slice — set ONLY when the page tree contains a loop-mode
+   *  `lx_posts` block (see hydrate.ts `postsLoop`). Carries the keyset-
+   *  paginated, filtered, bounded page of posts plus the pager flags the
+   *  loop renderer needs. Undefined on every other page (and for recent-
+   *  mode-only pages): the loop renderer then renders its empty state. */
+  postsLoop?: {
+    items: Array<{ id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null; reading_minutes: number }>
+    page: number
+    perPage: number
+    hasPrev: boolean
+    hasNext: boolean
+  }
   /** Public preCsrf nonce minted once per page render. Only set when
    *  the page tree contains a block that submits a public form (today:
    *  `contact_form`). Blocks that don't need it ignore the field; an
@@ -138,6 +150,9 @@ type BlockRendererArgs<D> = {
   projects: RenderContext['projects']
   /** Recent posts — see RenderContext.posts. Only lx_posts consumes it. */
   posts?: RenderContext['posts']
+  /** Blog Loop slice — see RenderContext.postsLoop. Only the loop-mode
+   *  lx_posts renderer consumes it. */
+  postsLoop?: RenderContext['postsLoop']
   csrf?: RenderContext['csrf']
   /** Singular project context — see RenderContext.project. Only the
    *  project block renderers (lx_project_hero, lx_inquiry_form,
@@ -315,8 +330,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_share: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_share'>>) => (
     <LxShare data={data} outerClass={outerClass} />
   ),
-  lx_posts: ({ data, posts, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
-    <LxPosts data={data} posts={posts} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
+  lx_posts: ({ data, posts, postsLoop, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
+    <LxPosts data={data} posts={posts} postsLoop={postsLoop} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_embed: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_embed'>>) => (
     <LxEmbed data={data} outerClass={outerClass} />
@@ -456,6 +471,7 @@ export function renderBlock(
     media: ctx.media,
     projects: ctx.projects,
     posts: ctx.posts,
+    postsLoop: ctx.postsLoop,
     csrf: ctx.csrf,
     project: ctx.project,
     preview: ctx.preview,

@@ -68,6 +68,10 @@ interface Props {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
+  /** Blog Loop slice — see RenderContext.postsLoop. Threaded down to the
+   *  loop-mode lx_posts renderer; in the editor this is the page-1 preview
+   *  fetched at the initial server render. */
+  postsLoop?: RenderContext['postsLoop']
   /** Public preCsrf nonce minted in `renderCmsPage()`. Threaded through
    *  RenderContext to blocks that need it (today: `contact_form`).
    *  Undefined when no such block is on the page. */
@@ -85,6 +89,7 @@ export function EditableBlockTreeRenderer({
   media,
   projects,
   posts,
+  postsLoop,
   csrf,
   project,
   preview,
@@ -139,6 +144,7 @@ export function EditableBlockTreeRenderer({
                   media={media}
                   projects={projects}
                   posts={posts}
+                  postsLoop={postsLoop}
                   csrf={csrf}
                   project={project}
                   preview={preview}
@@ -152,6 +158,7 @@ export function EditableBlockTreeRenderer({
                   media={media}
                   projects={projects}
                   posts={posts}
+                  postsLoop={postsLoop}
                   csrf={csrf}
                   project={project}
                   preview={preview}
@@ -175,6 +182,7 @@ interface SectionSlotProps {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
+  postsLoop?: RenderContext['postsLoop']
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -188,6 +196,7 @@ function EditableSectionSlot({
   media,
   projects,
   posts,
+  postsLoop,
   csrf,
   project,
   preview,
@@ -235,6 +244,7 @@ function EditableSectionSlot({
             media={media}
             projects={projects}
             posts={posts}
+            postsLoop={postsLoop}
             csrf={csrf}
             project={project}
             preview={preview}
@@ -261,6 +271,7 @@ interface ColumnSlotProps {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
+  postsLoop?: RenderContext['postsLoop']
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -277,6 +288,7 @@ function EditableColumnSlot({
   media,
   projects,
   posts,
+  postsLoop,
   csrf,
   project,
   preview,
@@ -330,6 +342,7 @@ function EditableColumnSlot({
               media={media}
               projects={projects}
               posts={posts}
+              postsLoop={postsLoop}
               csrf={csrf}
               project={project}
               preview={preview}
@@ -355,6 +368,7 @@ interface WidgetSlotProps {
   media: Map<number, HydratedMedia>
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
+  postsLoop?: RenderContext['postsLoop']
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -369,6 +383,7 @@ function EditableWidgetSlot({
   media,
   projects,
   posts,
+  postsLoop,
   csrf,
   project,
   preview,
@@ -449,7 +464,7 @@ function EditableWidgetSlot({
   const node = renderBlock(
     block.blockType,
     effectiveData,
-    { media, projects, posts, csrf, project, preview },
+    { media, projects, posts, postsLoop, csrf, project, preview },
     inlineEdit,
     widgetSpacingClass,
     block.id,
