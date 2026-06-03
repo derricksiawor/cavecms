@@ -384,7 +384,7 @@ export function UndoStackProvider({ children }: ProviderProps) {
           dispatch({ type: 'undo' })
           router.refresh()
         } else {
-          toast.error(`Couldn’t undo (${out.error ?? 'unknown'}).`)
+          toast.error("We couldn’t undo that just now. Try again in a moment.")
         }
         return
       }
@@ -426,7 +426,7 @@ export function UndoStackProvider({ children }: ProviderProps) {
           dispatch({ type: 'redo' })
           router.refresh()
         } else {
-          toast.error(`Couldn’t redo (${out.error ?? 'unknown'}).`)
+          toast.error("We couldn’t redo that just now. Try again in a moment.")
         }
         return
       }

@@ -71,6 +71,7 @@ import clsx from 'clsx'
 import { AlertCircle, Type } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { setFieldValue } from '@/lib/cms/inlineEditableFields'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import {
   useEffectiveVersions,
   useInlineEditDispatch,
@@ -243,12 +244,20 @@ export function AltTextOverlay(props: AltTextOverlayProps) {
           }
           if (res.status === 422) {
             toast.error(
-              j.error ?? 'That alt text is invalid. Reverting.',
+              mapServerError(
+                j.error,
+                "That description couldn't be saved — we put the previous one back.",
+              ),
             )
             setDraft(savedValueRef.current)
             return
           }
-          toast.error(j.error ?? "We couldn't save alt text. Try again.")
+          toast.error(
+            mapServerError(
+              j.error,
+              "We couldn't save that description. Try again in a moment.",
+            ),
+          )
           return
         }
         let parsed: { blockVersion: number; pageVersion: number }

@@ -24,6 +24,7 @@ import clsx from 'clsx'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { csrfFetch } from '@/lib/client/csrf'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { MAX_SECTION_COLUMNS } from '@/lib/cms/blockMeta'
 import { EditDrawer, type TabKey } from './EditDrawer'
 import { SectionColumnsSortable } from './SortableContainers'
@@ -330,7 +331,7 @@ export function EditableSection(p: Props) {
             `This section is at the ${MAX_SECTION_COLUMNS}-column maximum.`,
           )
         } else {
-          toast.error(j.error ?? "We couldn't add the column.")
+          toast.error(mapServerError(j.error, "We couldn't add the column. Try again in a moment."))
         }
         return
       }
@@ -381,7 +382,7 @@ export function EditableSection(p: Props) {
           )
           return
         }
-        toast.error(j.error ?? 'Reorder failed.')
+        toast.error(mapServerError(j.error, "We couldn't save the new order. Refresh and try again."))
         return
       }
       // F11 — reorder bumps pages.version too; thread it through so a
@@ -433,7 +434,7 @@ export function EditableSection(p: Props) {
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? "We couldn't remove the section.")
+        toast.error(mapServerError(j.error, "We couldn't remove the section. Try again in a moment."))
         setOptimisticallyDeleted(false)
         return
       }

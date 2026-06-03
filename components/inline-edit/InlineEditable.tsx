@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation'
 import clsx from 'clsx'
 import { csrfFetch } from '@/lib/client/csrf'
 import { sanitizeRichText } from '@/lib/cms/sanitize-shared'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { useToast } from './Toast'
 import {
   setFieldValue,
@@ -464,7 +465,9 @@ export function InlineEditable(props: InlineEditableProps) {
             startTransition(() => router.refresh())
             return
           }
-          toast.error(j.error ?? "We couldn't save. Try again in a moment.")
+          toast.error(
+            mapServerError(j.error, "We couldn't save that text. Try again in a moment."),
+          )
           return
         }
         let parsed: { blockVersion: number; pageVersion: number }

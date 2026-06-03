@@ -144,7 +144,7 @@ export function UsersTable({
       }
       throw new Error('Conflict — refresh and try again.')
     }
-    if (!r.ok) throw new Error(`Save failed (${r.status})`)
+    if (!r.ok) throw new Error("We couldn't save that change. Try again.")
   }
 
   async function deleteOne(u: UserRow): Promise<void> {
@@ -161,7 +161,8 @@ export function UsersTable({
       }
       throw new Error('Conflict — refresh and try again.')
     }
-    if (!r.ok && r.status !== 204) throw new Error(`Failed (${r.status})`)
+    if (!r.ok && r.status !== 204)
+      throw new Error("We couldn't remove that person. Try again.")
   }
 
   async function patchUser(
@@ -181,7 +182,7 @@ export function UsersTable({
         name: body.name ?? row.name,
       }))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.")
     } finally {
       setBusy(false)
     }
@@ -196,7 +197,7 @@ export function UsersTable({
       removeRow(pendingRemove.id)
       toast.success(`${pendingRemove.email} removed.`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Remove failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.")
     } finally {
       setBusy(false)
       setPendingRemove(null)

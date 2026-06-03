@@ -31,6 +31,7 @@ import { csrfFetch } from '@/lib/client/csrf'
 import { groupByParent } from '@/lib/cms/blockTree'
 import { MAX_SECTION_COLUMNS, type BlockKind } from '@/lib/cms/blockMeta'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { useToast } from './Toast'
 import { useRecordCommand } from './UndoStackProvider'
 import {
@@ -652,9 +653,7 @@ export function EditModeDndShell({ pageId, children }: Props) {
             startTransition(() => router.refresh())
           } else if (res.status === 400) {
             toast.error(
-              j.error
-                ? `Move rejected: ${j.error.replace(/_/g, ' ')}.`
-                : "That move isn't allowed.",
+              mapServerError(j.error, "You can only move items within the same area. Drag it back to its group and try again."),
             )
           } else if (res.status === 404) {
             toast.error(
@@ -662,7 +661,7 @@ export function EditModeDndShell({ pageId, children }: Props) {
             )
             startTransition(() => router.refresh())
           } else {
-            toast.error(j.error ?? "We couldn't move that block.")
+            toast.error(mapServerError(j.error, "We couldn't move that block. Refresh and try again."))
           }
           return
         }

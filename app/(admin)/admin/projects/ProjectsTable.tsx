@@ -42,6 +42,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { mapServerError } from '@/lib/cms/errorCopy'
 
 interface Row {
   id: number
@@ -186,7 +187,9 @@ export function ProjectsTable({
     })
     if (!res.ok && res.status !== 204) {
       const j = (await res.json().catch(() => ({}))) as { error?: string }
-      throw new Error(j.error ?? `Failed (${res.status})`)
+      throw new Error(
+        mapServerError(j.error, "We couldn't save that change. Try again."),
+      )
     }
   }
 
@@ -200,7 +203,7 @@ export function ProjectsTable({
       toast.success(`${row.name} moved to Trash.`)
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "We couldn't move that to Trash.",
+        e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.",
       )
     } finally {
       setBusy(false)
@@ -217,7 +220,12 @@ export function ProjectsTable({
         `Web address is now used by another live project. Rename one of them and try again.`,
       )
     }
-    if (!res.ok) throw new Error(`Restore failed (${res.status})`)
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(
+        mapServerError(j.error, "We couldn't restore that project. Try again."),
+      )
+    }
   }
 
   async function restoreFromRow(row: Row) {
@@ -229,7 +237,7 @@ export function ProjectsTable({
       toast.success(`${row.name} restored.`)
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "We couldn't restore that.",
+        e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.",
       )
     } finally {
       setBusy(false)
@@ -324,7 +332,9 @@ export function ProjectsTable({
           })
           if (!r.ok) {
             const j = (await r.json().catch(() => ({}))) as { error?: string }
-            throw new Error(j.error ?? `Failed (${r.status})`)
+            throw new Error(
+              mapServerError(j.error, "We couldn't save that change. Try again."),
+            )
           }
         })
         return result
@@ -344,7 +354,9 @@ export function ProjectsTable({
           })
           if (!r.ok) {
             const j = (await r.json().catch(() => ({}))) as { error?: string }
-            throw new Error(j.error ?? `Restore failed (${r.status})`)
+            throw new Error(
+              mapServerError(j.error, "We couldn't restore that project. Try again."),
+            )
           }
         })
         return result

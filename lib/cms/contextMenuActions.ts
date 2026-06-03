@@ -95,6 +95,7 @@ import {
 } from 'lucide-react'
 
 import { csrfFetch } from '@/lib/client/csrf'
+import { mapServerError } from './errorCopy'
 import { sanitizeSavedBlockName } from './savedBlocks'
 import { emitSavedBlocksChanged } from './savedBlocksBus'
 import {
@@ -250,46 +251,13 @@ interface JsonError {
   error?: string
 }
 
-// Server error code → operator-friendly toast string. Anything not in
-// this map falls through to the generic "we couldn't complete" message
-// — keeps raw codes (`stale_version`, `position_gap_exhausted`, etc.)
-// from surfacing in user-facing toasts. New 4xx/5xx codes added to
-// server routes should land here too.
-const SERVER_ERROR_COPY: Record<string, string> = {
-  not_found:
-    "We can't find that anymore — it may have been removed. Refreshing to sync.",
-  page_not_found: 'This page no longer exists. Refreshing to sync.',
-  stale_block_version:
-    'Someone else changed this. Refresh to see the latest version.',
-  stale_page_version:
-    'Someone else changed this page. Refresh to see the latest version.',
-  stale_version:
-    'Someone else changed this. Refresh to see the latest version.',
-  column_count_exceeded: `This section is at the ${MAX_SECTION_COLUMNS}-column maximum.`,
-  position_gap_exhausted:
-    "We couldn't slot this in here — refresh and try again to re-space the row.",
-  subtree_too_large:
-    "That structure is too large to duplicate in one go — try duplicating its parts.",
-  block_type_reserved_for_fixed_slot:
-    "This block is part of the page template and can't be duplicated.",
-  source_invalid:
-    "This block's settings need updating before it can be duplicated.",
-  cycle_detected:
-    "We hit a data-integrity issue. The team has been notified.",
-  cannot_delete_fixed_block:
-    "This block is part of the page template and can't be removed.",
-  drift:
-    'Someone else changed this page. Refresh to see the latest order.',
-  invalid_meta_json: 'That section/column has malformed settings.',
-}
-
+// Server error code → operator-friendly toast string. Single source of truth
+// lives in lib/cms/errorCopy (`mapServerError`), which NEVER echoes a raw code:
+// known codes get specific copy, anything else degrades to the caller's gentle
+// fallback. New server error codes get an entry there.
 async function readJsonErr(res: Response): Promise<string> {
   const j = (await res.json().catch(() => ({}))) as JsonError
-  const code = j.error
-  if (code && code in SERVER_ERROR_COPY) {
-    return SERVER_ERROR_COPY[code]!
-  }
-  return code ?? "We couldn't complete that action. Try again."
+  return mapServerError(j.error, "We couldn't complete that action. Try again.")
 }
 
 function toastNetworkError(toast: MenuToastApi, e: unknown): void {

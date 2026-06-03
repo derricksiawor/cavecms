@@ -15,6 +15,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { mapServerError } from '@/lib/cms/errorCopy'
 
 // Active-posts client. Wraps AdminTable so /admin/blog gets the full
 // sort + paginate + select + bulk treatment alongside per-row
@@ -69,7 +70,9 @@ export function PostsClient({
     if (!r.ok) {
       const j = (await r.json().catch(() => ({}))) as { error?: string }
       throw new Error(
-        j.error === 'not_found' ? ALREADY_REMOVED : `Failed (${r.status})`,
+        j.error === 'not_found'
+          ? ALREADY_REMOVED
+          : mapServerError(j.error, "We couldn't do that just now. Try again."),
       )
     }
   }
@@ -166,7 +169,9 @@ export function PostsClient({
           })
           if (!r.ok) {
             const j = (await r.json().catch(() => ({}))) as { error?: string }
-            throw new Error(j.error ?? `Failed (${r.status})`)
+            throw new Error(
+              mapServerError(j.error, "We couldn't do that just now. Try again."),
+            )
           }
         })
         router.refresh()

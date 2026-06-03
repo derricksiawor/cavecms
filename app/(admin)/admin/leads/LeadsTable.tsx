@@ -16,6 +16,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { StatusBadge, type StatusTone } from '@/components/admin/StatusBadge'
 import type { Role } from '@/lib/auth/requireRole'
 
@@ -185,19 +186,34 @@ export function LeadsTable({
     if (r.status === 409) {
       throw new Error("You can't move this lead to that status.")
     }
-    if (!r.ok) throw new Error(`Save failed (${r.status})`)
+    if (!r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      throw new Error(
+        mapServerError(j.error, "We couldn't save that change. Try again in a moment."),
+      )
+    }
   }
 
   async function deleteOne(id: number): Promise<void> {
     const r = await csrfFetch(`/api/admin/leads/${id}`, { method: 'DELETE' })
-    if (!r.ok && r.status !== 204) throw new Error(`Failed (${r.status})`)
+    if (!r.ok && r.status !== 204) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      throw new Error(
+        mapServerError(j.error, "We couldn't move that lead to Trash. Try again."),
+      )
+    }
   }
 
   async function restoreOne(id: number): Promise<void> {
     const r = await csrfFetch(`/api/admin/leads/${id}/restore`, {
       method: 'POST',
     })
-    if (!r.ok) throw new Error(`Restore failed (${r.status})`)
+    if (!r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      throw new Error(
+        mapServerError(j.error, "We couldn't restore that lead. Try again."),
+      )
+    }
   }
 
   async function restoreFromRow(id: number) {
@@ -208,7 +224,7 @@ export function LeadsTable({
       removeRow(id)
       toast.success('Lead restored.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Restore failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.")
     } finally {
       setBusy(false)
     }
@@ -223,7 +239,7 @@ export function LeadsTable({
       setActive((cur) => (cur && cur.id === id ? { ...cur, status } : cur))
       toast.success(`Lead moved to ${humanStatus(status)}.`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.")
     } finally {
       setBusy(false)
     }
@@ -238,7 +254,7 @@ export function LeadsTable({
       toast.success('Lead moved to Trash.')
       setActive(null)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Delete failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.")
     } finally {
       setBusy(false)
       setPendingDelete(null)

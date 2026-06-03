@@ -26,6 +26,7 @@ import {
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { csrfFetch } from '@/lib/client/csrf'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { ConfirmModal } from './ConfirmModal'
 import { EditDrawer, type TabKey } from './EditDrawer'
 import { SpacingToolbar } from './SpacingToolbar'
@@ -386,7 +387,7 @@ export function EditableBlock(p: EditableBlockProps) {
           )
           return
         }
-        toast.error(j.error ?? 'Reorder failed.')
+        toast.error(mapServerError(j.error, "We couldn't save the new order. Refresh and try again."))
         return
       }
       // F3 / F11 — apply per-row versions + the bumped pageVersion
@@ -452,7 +453,7 @@ export function EditableBlock(p: EditableBlockProps) {
       )
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? 'Duplicate failed.')
+        toast.error(mapServerError(j.error, "We couldn't duplicate that. Try again in a moment."))
         // Source vanished mid-flight (peer delete race) — sync the
         // canvas so the operator doesn't see a ghost block.
         if (res.status === 404) refresh()
@@ -581,7 +582,7 @@ export function EditableBlock(p: EditableBlockProps) {
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? 'Delete failed.')
+        toast.error(mapServerError(j.error, "We couldn't remove that block. Try again in a moment."))
         // Reveal the block again — the server still owns it.
         setOptimisticallyDeleted(false)
         return
@@ -907,7 +908,7 @@ export function EditableBlock(p: EditableBlockProps) {
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? 'Paste failed.')
+        toast.error(mapServerError(j.error, "We couldn't paste that here. Try again in a moment."))
         return
       }
       // Record an undo command so ⌘Z on a keyboard-pasted block targets

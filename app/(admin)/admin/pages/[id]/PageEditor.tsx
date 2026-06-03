@@ -69,6 +69,7 @@ import { formatRelativeSince } from '@/hooks/useAutoSave'
 import { SLUG_RE, SLUG_MIN, SLUG_MAX } from '@/lib/cms/slug'
 import { summariseBlockText } from '@/lib/ai/chatEligibility'
 import { SEED_DATA } from '@/lib/cms/blockSeeds'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import {
   readDraftBuffer,
   writeDraftBuffer,
@@ -638,7 +639,9 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? `Delete failed (${r.status})`)
+        toast.error(
+          mapServerError(j.error, "We couldn't move that page to Trash. Try again in a moment."),
+        )
         return
       }
       toast.success('Moved to Trash.')
@@ -670,7 +673,9 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error ?? `Reorder failed (${r.status})`)
+        throw new Error(
+          mapServerError(j.error, "We couldn't save the new order. Refresh and try again."),
+        )
       }
       // The reorder endpoint bumps every row's version by 1 and reassigns
       // positions at 1000, 2000, …. Mirror that locally so the next
@@ -757,7 +762,9 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error ?? `Duplicate failed (${r.status})`)
+        throw new Error(
+          mapServerError(j.error, "We couldn't duplicate that block. Try again in a moment."),
+        )
       }
       toast.success('Block duplicated.')
       router.refresh()
@@ -780,7 +787,9 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? `Couldn’t delete that block (${r.status})`)
+        toast.error(
+          mapServerError(j.error, "We couldn't remove that block. Try again in a moment."),
+        )
         return
       }
       toast.success('Block moved to Trash.')
@@ -907,7 +916,9 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       })
       if (!wrap.ok) {
         const j = (await wrap.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error ?? `Couldn’t set up a section (${wrap.status})`)
+        throw new Error(
+          mapServerError(j.error, "We couldn't set up a section for that block. Try again in a moment."),
+        )
       }
       const wj = (await wrap.json().catch(() => ({}))) as {
         id?: number
@@ -936,11 +947,13 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
         await rollbackAutoSection(autoSectionId)
         if (j.error === 'block_type_reserved_for_fixed_slot') {
           toast.error(
-            'That block type is reserved for a fixed slot on this page.',
+            "This block is part of the page template, so you can't add another one here.",
           )
           return
         }
-        throw new Error(j.error ?? `Couldn’t add that block (${r.status})`)
+        throw new Error(
+          mapServerError(j.error, "We couldn't add that block. Try again in a moment."),
+        )
       }
       toast.success(`${stub.label} block added — click it on the public page to edit.`)
       router.refresh()
