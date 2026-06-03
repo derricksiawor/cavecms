@@ -247,5 +247,9 @@ trust, closed enough to sustain a single maintainer.
 - **Code contributions**: pull requests are not accepted at this time. CaveCMS is
   sole-maintained by Derrick S. K. Siawor; the canonical branch is closed to
   outside commits. The source is open so you can audit and fork for personal use.
+- **Support the project**: CaveCMS is free for personal, hobby, and non-profit use,
+  and built and maintained by one person. If it is useful to you, a
+  [donation](https://donate.stripe.com/9B6cN41Lr78i4Wg9e74ZG0e) is appreciated and
+  entirely optional. Commercial use is covered by the license above.
 
 Roadmap: [GitHub Projects](https://github.com/derricksiawor/cavecms/projects).
