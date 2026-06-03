@@ -167,6 +167,10 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
   // branding, same trust level as theme_palette. An AI agent can restyle the
   // site's typefaces via the API.
   'typography_roles',
+  // Site-wide font pairing + GDPR cookie-consent banner — presentational /
+  // operator-config, token-writable like the other branding keys.
+  'typography',
+  'cookie_consent',
   // NOTE: site_general is deliberately NOT here — its `siteUrl` sets the
   // origin of outbound tokenized email links (newsletter confirm/unsubscribe,
   // brochure) and the canonical host, so a token writing it could harvest

@@ -1,38 +1,49 @@
 import clsx from 'clsx'
-import { Check, Minus } from 'lucide-react'
+import { Check, X } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
-// Comparison / feature matrix ("even better than Elementor"). Up to 4
-// plan columns. Each row cell (c1..c4) is a plain string: "yes"/"true"/
-// "✓" renders a champagne check, "no"/"false"/"-"/"" renders a dash,
-// anything else renders as text. Horizontal-scrolls on mobile. Server
-// component.
+// Comparison / feature matrix. Up to 4 plan columns. Each row cell
+// (c1..c4) is a plain string: "yes"/"true"/"✓" renders an accent-coloured
+// CHECK, "no"/"false"/"x"/"" renders a muted CROSS (×), anything else
+// renders as text. One column can be highlighted (accent header + tint
+// band). Horizontal-scrolls on mobile. Server component.
 
 const TONE_TEXT: Record<string, string> = { obsidian: 'text-obsidian', ivory: 'text-ivory' }
 const TRUE_SET = new Set(['yes', 'true', '✓', 'y', '✔', 'check'])
 const FALSE_SET = new Set(['no', 'false', '-', '—', 'x', '✗', 'n', ''])
 
-function Cell({ value }: { value: string | undefined }) {
+function Cell({ value, accent }: { value: string | undefined; accent: string }) {
   const v = (value ?? '').trim().toLowerCase()
-  if (TRUE_SET.has(v)) return <Check className="mx-auto h-5 w-5 text-champagne" strokeWidth={2.5} aria-label="Yes" />
-  if (FALSE_SET.has(v)) return <Minus className="mx-auto h-5 w-5 text-warm-stone/40" strokeWidth={2} aria-label="No" />
+  if (TRUE_SET.has(v))
+    return <Check className="mx-auto h-5 w-5" style={{ color: accent }} strokeWidth={2.5} aria-label="Yes" />
+  if (FALSE_SET.has(v))
+    return <X className="mx-auto h-5 w-5 text-warm-stone/40" strokeWidth={2} aria-label="No" />
   return <span className="font-sans text-sm">{value}</span>
 }
 
 export function LxComparisonTable({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_comparison_table'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const isToken = isColorToken(data.tone)
-  const textClass = isToken ? TONE_TEXT[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const textClass = isToken ? TONE_TEXT[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
   const cols = data.columns
   const cellKeys = ['c1', 'c2', 'c3', 'c4'] as const
+  // Accent drives the checks, the highlighted header text, and the tint
+  // band. resolveColorValue handles both a token (→ var(--color-*)) and a
+  // raw #hex, so color-mix works for the translucent band either way.
+  const accent = resolveColorValue(data.accent) ?? 'var(--color-champagne)'
+  const tintBand = `color-mix(in srgb, ${accent} 9%, transparent)`
 
   const composed = (
     <div className={clsx('mx-auto w-full max-w-4xl overflow-x-auto', outerClass)}>
@@ -42,17 +53,18 @@ export function LxComparisonTable({
             <th className="px-4 py-4 text-left font-sans text-xs font-semibold uppercase tracking-eyebrow text-warm-stone">
               <span className="sr-only">Feature</span>
             </th>
-            {cols.map((c, i) => (
-              <th
-                key={i}
-                className={clsx(
-                  'px-4 py-4 font-serif text-base font-bold tracking-tight',
-                  data.highlightColumn === i && 'bg-champagne/10',
-                )}
-              >
-                {c}
-              </th>
-            ))}
+            {cols.map((c, i) => {
+              const hl = data.highlightColumn === i
+              return (
+                <th
+                  key={i}
+                  className="px-4 py-4 font-serif text-base font-bold tracking-tight"
+                  style={hl ? { color: accent, backgroundColor: tintBand } : undefined}
+                >
+                  {c}
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
@@ -62,9 +74,10 @@ export function LxComparisonTable({
               {cols.map((_, ci) => (
                 <td
                   key={ci}
-                  className={clsx('px-4 py-3.5', data.highlightColumn === ci && 'bg-champagne/[0.06]')}
+                  className="px-4 py-3.5"
+                  style={data.highlightColumn === ci ? { backgroundColor: tintBand } : undefined}
                 >
-                  <Cell value={row[cellKeys[ci]!]} />
+                  <Cell value={row[cellKeys[ci]!]} accent={accent} />
                 </td>
               ))}
             </tr>

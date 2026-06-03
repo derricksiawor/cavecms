@@ -22,7 +22,9 @@ import {
   FontWeightPickerField,
   IconPickerField,
 } from './pickers'
+import { GradientPickerField } from './GradientPickerField'
 import type { ColorToken, FontWeightToken } from '@/lib/cms/designTokens'
+import type { Gradient } from '@/lib/cms/gradient'
 
 // Visual-form renderer. The `kind` discriminator drives which premium
 // widget the field uses. Server-side Zod schemas validate the final
@@ -101,6 +103,10 @@ export type FieldShape =
     }
   // Display vs Body brand-family override. Picker shows every option
   // styled in its own face. Cleared value = renderer default.
+  // Structured gradient (kind + angle + 2–6 hex stops). Visual picker
+  // with a live preview. Cleared value = undefined (no gradient). Used for
+  // text gradients, section/column backgrounds, and button fills.
+  | { kind: 'gradient'; key: string; label: string; help?: string }
   | { kind: 'font_family'; key: string; label: string; help?: string }
   // Numeric font-weight token. The picker greys out weights the
   // associated family doesn't ship — pass `familyKey` to read the
@@ -470,6 +476,16 @@ function FieldRenderer({
         />
       )
 
+    case 'gradient':
+      return (
+        <GradientPickerField
+          label={shape.label}
+          help={shape.help}
+          value={(value as Gradient | undefined) ?? undefined}
+          onChange={onChange}
+        />
+      )
+
     case 'font_family':
       return (
         <FontFamilyPickerField
@@ -824,8 +840,41 @@ function ObjectArrayField({
 }) {
   const arr = useMemo(() => (Array.isArray(value) ? value : []), [value])
   const blank = useMemo(() => {
+    // Seed a new item with KIND-APPROPRIATE defaults. A blanket '' breaks any
+    // non-string itemField: a present '' is validated as-is by the server Zod
+    // schema (enum/boolean/number/array) and rejected, since `.default()` only
+    // fills ABSENT keys. So text-like kinds get '', selects get their first
+    // valid option, booleans false, arrays [], and every other kind is OMITTED
+    // entirely — letting the schema's `.default()`/`.optional()` apply on save.
     const b: Record<string, unknown> = { __id: cryptoId() }
-    for (const f of shape.itemFields) b[f.key] = ''
+    for (const f of shape.itemFields) {
+      switch (f.kind) {
+        case 'string':
+        case 'richtext':
+          b[f.key] = ''
+          break
+        case 'string_array':
+          b[f.key] = []
+          break
+        case 'boolean':
+          b[f.key] = false
+          break
+        case 'select':
+          if (f.options.length) b[f.key] = f.options[0]!.value
+          break
+        case 'number':
+          // Seed a valid starting number (min, else 0) so a REQUIRED number
+          // itemField with no schema default doesn't make the new item fail
+          // validation on save (e.g. hotspot x/y, stat value, rating).
+          b[f.key] = f.min ?? 0
+          break
+        default:
+          // color, gradient, icon, media, link, object_array, font_family,
+          // font_weight, menu_builder, visibility → omit (schema .default()/
+          // .optional() applies on save).
+          break
+      }
+    }
     return b
   }, [shape.itemFields])
   const canAdd = shape.maxItems === undefined || arr.length < shape.maxItems
@@ -1241,6 +1290,105 @@ const COLUMN_IDENTITY_SHAPES: FieldShape[] = CONTAINER_IDENTITY_SHAPES.map((s) =
     : s,
 )
 
+// Shared decoration controls (Elementor parity) appended to every section
+// + column: border, box-shadow, sticky. Route to the Style tab (STYLE_KEYS).
+const CONTAINER_DECORATION_SHAPES: FieldShape[] = [
+  { kind: 'number', key: 'borderWidth', label: 'Border width (px)', min: 0, max: 40, step: 1, help: '0 = no border. Pairs with the style + colour below.' },
+  {
+    kind: 'select', key: 'borderStyle', label: 'Border style',
+    options: [
+      { value: 'solid', label: 'Solid' }, { value: 'dashed', label: 'Dashed' },
+      { value: 'dotted', label: 'Dotted' }, { value: 'double', label: 'Double' },
+    ],
+  },
+  { kind: 'color', key: 'borderColor', label: 'Border colour', tokens: [], allowCustom: true, allowAlpha: false },
+  { kind: 'number', key: 'borderRadius', label: 'Corner radius (px)', min: 0, max: 200, step: 1, help: 'Rounds the corners (and clips children).' },
+  {
+    kind: 'select', key: 'boxShadow', label: 'Shadow',
+    options: [
+      { value: 'none', label: 'None' }, { value: 'sm', label: 'Small' }, { value: 'md', label: 'Medium' },
+      { value: 'lg', label: 'Large' }, { value: 'xl', label: 'Extra large' }, { value: '2xl', label: 'Cinematic' },
+    ],
+  },
+  { kind: 'color', key: 'boxShadowColor', label: 'Shadow colour (optional)', tokens: [], allowCustom: true, allowAlpha: false, help: 'Tints the shadow; default is a neutral black.' },
+  {
+    kind: 'select', key: 'sticky', label: 'Sticky on scroll',
+    options: [
+      { value: 'none', label: 'No' }, { value: 'top', label: 'Stick to top' }, { value: 'bottom', label: 'Stick to bottom' },
+    ],
+    help: 'Pins this block in view while the page scrolls past it.',
+  },
+  { kind: 'number', key: 'stickyOffset', label: 'Sticky offset (px)', min: 0, max: 400, step: 1, help: 'Gap from the viewport edge when sticky.' },
+  {
+    kind: 'select', key: 'motionEffect', label: 'Scroll motion effect',
+    options: [
+      { value: 'none', label: 'None' },
+      { value: 'parallax', label: 'Parallax (drifts on scroll)' },
+      { value: 'fade-scroll', label: 'Fade on scroll' },
+      { value: 'zoom-scroll', label: 'Zoom on scroll' },
+      { value: 'tilt', label: '3D tilt on mouse' },
+    ],
+    help: 'Motion as the visitor scrolls / moves the mouse. Respects reduced-motion.',
+  },
+  { kind: 'number', key: 'motionIntensity', label: 'Motion intensity', min: 1, max: 100, step: 1, help: '1–100. Default 30.' },
+  { kind: 'number', key: 'hoverLift', label: 'Hover lift (px)', min: 0, max: 40, step: 1, help: 'Raises the card on hover (translate up). Great for feature cards.' },
+  {
+    kind: 'select', key: 'hoverShadow', label: 'Hover shadow',
+    options: [
+      { value: 'none', label: 'None' }, { value: 'sm', label: 'Small' }, { value: 'md', label: 'Medium' },
+      { value: 'lg', label: 'Large' }, { value: 'xl', label: 'Extra large' }, { value: '2xl', label: 'Cinematic' },
+    ],
+    help: 'Grows the elevation on hover.',
+  },
+  { kind: 'color', key: 'hoverBorderColor', label: 'Hover border colour', tokens: [], allowCustom: true, allowAlpha: false, help: 'Border colour on hover (pairs with a border above).' },
+  { kind: 'string', key: 'customCss', label: 'Custom CSS', multiline: true, maxLength: 1200, placeholder: 'e.g. backdrop-filter: blur(8px); letter-spacing: 1px;', help: 'CSS declarations applied to this block (no selectors/braces). Scoped + sanitised.' },
+  { kind: 'string', key: 'customCssHover', label: 'Custom CSS · hover', multiline: true, maxLength: 1200, placeholder: 'e.g. transform: translateY(-4px);', help: 'Declarations applied on hover.' },
+]
+
+// Exact spacing with UNITS (E15) — per-side padding + margin accepting any
+// CSS length (px/rem/em/%/vw/vh). Complements the quick px toolbar; these
+// give full unit control. Appended to section + column.
+const SPACING_LEN_PATTERN = /^-?\d*\.?\d+(?:px|rem|em|%|vw|vh)$/
+const CONTAINER_SPACING_SHAPES: FieldShape[] = [
+  { kind: 'string', key: 'paddingTop', label: 'Padding top', placeholder: 'e.g. 24px, 2rem, 5%', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit (px/rem/em/%/vw/vh).' },
+  { kind: 'string', key: 'paddingRight', label: 'Padding right', placeholder: 'e.g. 24px, 2rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+  { kind: 'string', key: 'paddingBottom', label: 'Padding bottom', placeholder: 'e.g. 24px, 2rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+  { kind: 'string', key: 'paddingLeft', label: 'Padding left', placeholder: 'e.g. 24px, 2rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+  { kind: 'string', key: 'marginTop', label: 'Margin top', placeholder: 'e.g. 16px, 1rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+  { kind: 'string', key: 'marginRight', label: 'Margin right', placeholder: 'e.g. 16px, 1rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+  { kind: 'string', key: 'marginBottom', label: 'Margin bottom', placeholder: 'e.g. 16px, 1rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+  { kind: 'string', key: 'marginLeft', label: 'Margin left', placeholder: 'e.g. 16px, 1rem', pattern: SPACING_LEN_PATTERN, patternError: 'Use a number + unit.' },
+]
+
+// Section shape dividers (Elementor parity) — SVG separators on the top /
+// bottom edges. Section-only.
+const SHAPE_OPTIONS = [
+  { value: 'none', label: 'None' }, { value: 'wave', label: 'Wave' },
+  { value: 'tilt', label: 'Tilt' }, { value: 'curve', label: 'Curve' },
+  { value: 'triangle', label: 'Triangle' }, { value: 'mountains', label: 'Mountains' },
+  { value: 'split', label: 'Split' },
+]
+const SECTION_SHAPE_DIVIDER_SHAPES: FieldShape[] = [
+  { kind: 'select', key: 'shapeTop', label: 'Top shape divider', options: SHAPE_OPTIONS, help: 'An SVG separator on the section’s top edge. Set its colour to the section above for a clean transition.' },
+  { kind: 'color', key: 'shapeTopColor', label: 'Top divider colour', tokens: [], allowCustom: true, allowAlpha: false },
+  { kind: 'number', key: 'shapeTopHeight', label: 'Top divider height (px)', min: 8, max: 400, step: 1 },
+  { kind: 'boolean', key: 'shapeTopFlip', label: 'Flip top divider horizontally' },
+  { kind: 'select', key: 'shapeBottom', label: 'Bottom shape divider', options: SHAPE_OPTIONS, help: 'An SVG separator on the section’s bottom edge.' },
+  { kind: 'color', key: 'shapeBottomColor', label: 'Bottom divider colour', tokens: [], allowCustom: true, allowAlpha: false },
+  { kind: 'number', key: 'shapeBottomHeight', label: 'Bottom divider height (px)', min: 8, max: 400, step: 1 },
+  { kind: 'boolean', key: 'shapeBottomFlip', label: 'Flip bottom divider horizontally' },
+]
+
+// Widget entrance-animation timing (E16) — duration + delay (ms), applied to
+// the block's reveal animation via the MotionTiming context. Appended to
+// every widget (not sections/columns, which carry their own animation knobs).
+const WIDGET_MOTION_SHAPES: FieldShape[] = [
+  { kind: 'number', key: 'animationDuration', label: 'Animation duration (ms)', min: 0, max: 5000, step: 50, help: 'Entrance speed for this block’s on-scroll animation.' },
+  { kind: 'number', key: 'animationDelay', label: 'Animation delay (ms)', min: 0, max: 5000, step: 50, help: 'Stagger the entrance — e.g. 100ms on each card in a row.' },
+  { kind: 'string', key: 'customCss', label: 'Custom CSS', multiline: true, maxLength: 1200, placeholder: 'e.g. backdrop-filter: blur(8px);', help: 'CSS declarations for this block (no selectors/braces). Scoped + sanitised.' },
+  { kind: 'string', key: 'customCssHover', label: 'Custom CSS · hover', multiline: true, maxLength: 1200, placeholder: 'e.g. transform: scale(1.03);', help: 'Declarations applied on hover.' },
+]
+
 // Widget identity — htmlId + visibility, no label. Widgets are
 // identified by their inline content (see IDENTITY_TEXT_KEYS in
 // EditDrawer.tsx); adding a label here would create two competing
@@ -1292,6 +1440,16 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       help: 'Sets the section background and adjusts text color for contrast.',
     },
     {
+      kind: 'color',
+      key: 'backgroundColor',
+      label: 'Exact background color (optional)',
+      tokens: [],
+      allowCustom: true,
+      allowAlpha: false,
+      help: 'Match a brand exactly with any hex color — overrides the tone above. Text contrast auto-adapts to its lightness. Leave empty to use the Background tone.',
+    },
+    { kind: 'gradient', key: 'backgroundGradient', label: 'Gradient background', help: 'A multi-stop gradient behind the whole section — overrides the tone + exact colour above. Toggle off to use a solid background.' },
+    {
       kind: 'select',
       key: 'padding',
       label: 'Vertical padding',
@@ -1309,6 +1467,32 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     // with an optional overlay tint for text legibility. Three knobs:
     // image picker, overlay preset, minimum height.
     { kind: 'media', key: 'backgroundImage', label: 'Background image (optional)', help: 'Set a cover photo behind this section. Widgets in the section compose on top of the image.' },
+    {
+      kind: 'media_array', key: 'backgroundSlides', label: 'Background slideshow (optional)',
+      help: 'Add 2+ photos to cross-fade them as an animated slideshow behind the section (overrides the single background image above). Each slide fades through black with a counter-zoom. Up to 8 — only the first loads upfront, the rest stream in.',
+    },
+    {
+      kind: 'select', key: 'kenBurns', label: 'Ken Burns motion',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'zoom-in', label: 'Slow zoom in' },
+        { value: 'zoom-out', label: 'Slow zoom out' },
+        { value: 'pan-left', label: 'Pan left' },
+        { value: 'pan-right', label: 'Pan right' },
+        { value: 'zoom-pan', label: 'Zoom + pan' },
+      ],
+      help: 'A slow continuous camera move on the background photo (single image or each slide). Respects reduced-motion — it stops for visitors who ask for less animation.',
+    },
+    {
+      kind: 'select', key: 'slideTransition', label: 'Slide transition',
+      options: [
+        { value: 'through-black', label: 'Through black (cinematic)' },
+        { value: 'crossfade', label: 'Crossfade (counter-zoom)' },
+        { value: 'fade', label: 'Fade (no zoom)' },
+      ],
+      help: 'How one slide gives way to the next. Through-black: the outgoing photo fades out zooming in while the next fades in zooming out, dipping through black.',
+    },
+    { kind: 'number', key: 'slideIntervalMs', label: 'Milliseconds per slide', min: 1000, max: 30000, step: 500, help: 'How long each slide shows before advancing, in milliseconds — 4000 = 4 seconds (Elementor-style). 1000–30000. Only applies with 2+ slides.' },
     {
       kind: 'select', key: 'backgroundOverlay', label: 'Overlay tint',
       options: [
@@ -1332,6 +1516,18 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       help: 'How the photo fills the box. Cover is the hero default — Contain when the image must show in full.',
     },
     {
+      kind: 'select', key: 'backgroundPosition', label: 'Image position',
+      options: [
+        { value: 'center', label: 'Center' }, { value: 'top', label: 'Top' }, { value: 'bottom', label: 'Bottom' },
+        { value: 'left', label: 'Left' }, { value: 'right', label: 'Right' },
+        { value: 'top left', label: 'Top left' }, { value: 'top right', label: 'Top right' },
+        { value: 'bottom left', label: 'Bottom left' }, { value: 'bottom right', label: 'Bottom right' },
+      ],
+      help: 'Which part of the photo/video stays in frame when cropped (object-position).',
+    },
+    { kind: 'string', key: 'backgroundVideoUrl', label: 'Background video URL (optional)', placeholder: 'https://…/clip.mp4', help: 'A looping, muted, autoplay background video (https .mp4/.webm). Renders behind the content like a cover image.' },
+    { kind: 'media', key: 'backgroundVideoPoster', label: 'Video poster image (optional)', help: 'Shown before the video loads (and on devices that block autoplay).' },
+    {
       kind: 'select', key: 'minHeight', label: 'Minimum height',
       options: [
         { value: 'none', label: 'None (content drives height)' },
@@ -1342,6 +1538,17 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'screen', label: 'Full viewport (100vh)' },
       ],
       help: 'Keeps the section from collapsing to a thin band on landscape screens. Set Large+ for hero sections.',
+    },
+    {
+      kind: 'select', key: 'contentMaxWidth', label: 'Content width',
+      options: [
+        { value: 'sm', label: 'Narrow — 768 px' },
+        { value: 'md', label: 'Medium — 1024 px' },
+        { value: 'lg', label: 'Wide — 1152 px' },
+        { value: 'xl', label: 'Extra wide — 1280 px (default)' },
+        { value: 'full', label: 'Full (edge to edge)' },
+      ],
+      help: 'Max width of the section’s inner content. Default is 1280px.',
     },
     // Column count lives on `meta.columns` and is set at section
     // creation time via the InsertSectionHere shape picker, then
@@ -1360,6 +1567,40 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       step: 1,
       help: 'Optional override (1-12). Leave blank for an even split with sibling columns.',
     },
+    // Inline row primitive — lay this column's widgets horizontally
+    // instead of the default vertical stack. Great for a row of buttons,
+    // badges, logos or stats without splitting the section into columns.
+    {
+      kind: 'select', key: 'childLayout', label: 'Lay out items',
+      options: [
+        { value: 'stack', label: 'Stacked (vertical, default)' },
+        { value: 'row', label: 'In a row (horizontal)' },
+        { value: 'grid', label: 'In a grid (wrapping)' },
+      ],
+      help: 'Row = side by side, wraps. Grid = a wrapping card grid inside this column (a nested container).',
+    },
+    {
+      kind: 'select', key: 'childColumns', label: 'Grid columns', valueAsNumber: true,
+      options: [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '4', label: '4' }],
+      help: 'Only applies in grid mode.',
+    },
+    { kind: 'number', key: 'childGap', label: 'Gap between items (px)', min: 0, max: 96, step: 1, help: 'Spacing between items in row/grid mode.' },
+    {
+      kind: 'select', key: 'childJustify', label: 'Row alignment',
+      options: [
+        { value: 'start', label: 'Left' },
+        { value: 'center', label: 'Center' },
+        { value: 'end', label: 'Right' },
+        { value: 'between', label: 'Spaced apart' },
+      ],
+      help: 'Only applies in row mode — how the items distribute horizontally.',
+    },
+    {
+      kind: 'color', key: 'backgroundColor', label: 'Card background color (optional)',
+      tokens: [], allowCustom: true, allowAlpha: false,
+      help: 'Give the column a solid background → it renders as a rounded, padded CARD (great for icon-less feature cards). Text contrast auto-adapts.',
+    },
+    { kind: 'gradient', key: 'backgroundGradient', label: 'Gradient background', help: 'A multi-stop gradient behind this column — overrides any solid column background.' },
     // Cover-image background — same triad as the section. Lets the
     // operator build "split hero" layouts (text column next to a
     // photo column with full bleed inside that column). Columns are
@@ -1451,6 +1692,14 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       allowAlpha: false,
       help: 'Pick a brand token (globe icon turns blue when bound) — or open the picker to dial in a custom luxury hue.',
     },
+    { kind: 'gradient', key: 'textGradient', label: 'Gradient text', help: 'Fills the heading with a gradient (overrides the tone colour). Toggle off for a solid colour.' },
+    { kind: 'string', key: 'fontSize', label: 'Exact font size (optional)', placeholder: 'e.g. 56px, 3.5rem, clamp(2.25rem,5vw,3.5rem)', help: 'Pixel-match a brand. Overrides the Visual size when set. A clamp() keeps it responsive.' },
+    { kind: 'string', key: 'lineHeight', label: 'Exact line height (optional)', placeholder: 'e.g. 1.1 or 61px', help: 'A unitless number (1.1) or a length. Overrides the default tight leading.' },
+    { kind: 'string', key: 'letterSpacing', label: 'Exact letter spacing (optional)', placeholder: 'e.g. -0.025em or -1.4px', help: 'Tightens or loosens tracking. Negative values pull letters together (display type).' },
+    { kind: 'string', key: 'fontSizeTablet', label: '↳ Font size · tablet (≤1024px)', placeholder: 'e.g. 40px', help: 'Per-breakpoint override (responsive).' },
+    { kind: 'string', key: 'fontSizeMobile', label: '↳ Font size · mobile (≤640px)', placeholder: 'e.g. 30px' },
+    { kind: 'string', key: 'lineHeightTablet', label: '↳ Line height · tablet', placeholder: 'e.g. 1.15' },
+    { kind: 'string', key: 'lineHeightMobile', label: '↳ Line height · mobile', placeholder: 'e.g. 1.2' },
     {
       kind: 'font_family',
       key: 'family',
@@ -1503,6 +1752,14 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       allowCustom: true,
       allowAlpha: false,
     },
+    { kind: 'gradient', key: 'textGradient', label: 'Gradient text', help: 'Fills the text with a gradient (overrides the tone colour).' },
+    { kind: 'string', key: 'fontSize', label: 'Exact font size (optional)', placeholder: 'e.g. 18px, 1.125rem', help: 'Overrides the Size when set — match a brand body ramp precisely.' },
+    { kind: 'string', key: 'lineHeight', label: 'Exact line height (optional)', placeholder: 'e.g. 1.625 or 29px', help: 'A unitless number or a length.' },
+    { kind: 'string', key: 'letterSpacing', label: 'Exact letter spacing (optional)', placeholder: 'e.g. 0.01em' },
+    { kind: 'string', key: 'fontSizeTablet', label: '↳ Font size · tablet (≤1024px)', placeholder: 'e.g. 16px', help: 'Per-breakpoint override (responsive).' },
+    { kind: 'string', key: 'fontSizeMobile', label: '↳ Font size · mobile (≤640px)', placeholder: 'e.g. 15px' },
+    { kind: 'string', key: 'lineHeightTablet', label: '↳ Line height · tablet', placeholder: 'e.g. 1.6' },
+    { kind: 'string', key: 'lineHeightMobile', label: '↳ Line height · mobile', placeholder: 'e.g. 1.55' },
     {
       kind: 'font_family',
       key: 'family',
@@ -1538,6 +1795,14 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
   lx_eyebrow: [
     { kind: 'string', key: 'text', label: 'Kicker text', maxLength: TEXT_MAX.caption, placeholder: 'KICKER LABEL' },
     {
+      kind: 'select', key: 'variant', label: 'Style',
+      options: [
+        { value: 'badge', label: 'Badge (tinted pill)' },
+        { value: 'plain', label: 'Plain (quiet label, no pill)' },
+      ],
+      help: 'Plain is a muted inline label (as-typed, no pill) for editorial section kickers; Badge is the tinted uppercase chip.',
+    },
+    {
       kind: 'select', key: 'prefix', label: 'Prefix',
       options: [
         { value: 'none', label: 'None' },
@@ -1554,6 +1819,7 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       allowAlpha: false,
       help: 'Champagne is the signature editorial kicker tone.',
     },
+    { kind: 'gradient', key: 'textGradient', label: 'Gradient label', help: 'Paints the kicker text with a gradient (drops the pill tint for a clean gradient label).' },
     {
       kind: 'font_family',
       key: 'family',
@@ -2051,6 +2317,7 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       ],
     },
     { kind: 'boolean', key: 'showLineNumbers', label: 'Show line numbers' },
+    { kind: 'boolean', key: 'copyable', label: 'Show copy button', help: 'One-click copy of the code in the block header.' },
     { kind: 'string', key: 'filename', label: 'Filename (optional)', maxLength: TEXT_MAX.caption, placeholder: 'example.ts' },
   ],
 
@@ -2096,6 +2363,51 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: false },
   ],
 
+  lx_icon_list: [
+    {
+      kind: 'object_array', key: 'items', label: 'Items', addLabel: 'Add item', itemNoun: 'item', maxItems: 12,
+      itemFields: [
+        { kind: 'icon', key: 'icon', label: 'Icon' },
+        { kind: 'string', key: 'headline', label: 'Headline', maxLength: TEXT_MAX.title },
+        { kind: 'string', key: 'body', label: 'Body (optional)', maxLength: TEXT_MAX.body, multiline: true },
+        { kind: 'string', key: 'code', label: 'Command / code (optional)', maxLength: 400, placeholder: 'curl -fsSL https://… | sudo bash', help: 'Card mode only — shows a copyable mini terminal inside the card.' },
+      ],
+    },
+    { kind: 'boolean', key: 'card', label: 'Card surface', help: 'Render each item on a filled rounded card (use with the Grid layout for a feature-card grid).' },
+    {
+      kind: 'select', key: 'variant', label: 'Layout',
+      options: [
+        { value: 'vertical', label: 'Vertical (icon above text)' },
+        { value: 'grid', label: 'Grid (icon-top cards)' },
+        { value: 'row', label: 'Row (icon beside text)' },
+        { value: 'checklist', label: 'Checklist (small icon + line)' },
+      ],
+      help: 'Checklist = compact ✓-style feature list; pair with a green Icon colour.',
+    },
+    {
+      kind: 'select', key: 'columns', label: 'Columns', valueAsNumber: true,
+      options: [{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }],
+    },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }],
+    },
+    { kind: 'color', key: 'tone', label: 'Text tone', tokens: ['obsidian', 'ivory', 'champagne'], allowCustom: true },
+    {
+      kind: 'color', key: 'iconColor', label: 'Icon colour (optional)',
+      tokens: ['champagne', 'ivory'], allowCustom: true,
+      help: 'Tints the icons (e.g. a green check). When set, the champagne glow is dropped. Leave empty for the signature glow.',
+    },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
   lx_comparison_table: [
     { kind: 'string_array', key: 'columns', label: 'Plan columns (2–4)', placeholder: 'Add a plan, press Enter', maxItems: 4 },
     {
@@ -2110,6 +2422,11 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     },
     { kind: 'number', key: 'highlightColumn', label: 'Highlight column (0-based, optional)', min: 0, max: 3, step: 1 },
     { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'color', key: 'accent', label: 'Accent colour',
+      tokens: ['champagne', 'ivory'], allowCustom: true,
+      help: 'Colours the ✓ checks + the highlighted column (header text + tint band). Set to your brand accent (e.g. a green) to match.',
+    },
     {
       kind: 'select', key: 'animation', label: 'Animation',
       options: [
@@ -2138,6 +2455,62 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'fade-in', label: 'Fade in on scroll' },
         { value: 'slide-up', label: 'Slide up on scroll' },
       ],
+    },
+  ],
+
+  lx_form: [
+    { kind: 'string', key: 'heading', label: 'Heading', maxLength: TEXT_MAX.title, placeholder: 'Get in touch' },
+    { kind: 'string', key: 'intro', label: 'Intro', maxLength: TEXT_MAX.body, multiline: true },
+    {
+      kind: 'object_array', key: 'fields', label: 'Fields', addLabel: 'Add field', itemNoun: 'field', maxItems: 20,
+      itemFields: [
+        { kind: 'string', key: 'name', label: 'Field name (slug)', maxLength: 40, placeholder: 'email', pattern: /^[a-z][a-z0-9_]{0,39}$/, patternError: 'lowercase letters, digits, underscore — start with a letter.' },
+        { kind: 'string', key: 'label', label: 'Label', maxLength: TEXT_MAX.caption },
+        {
+          kind: 'select', key: 'type', label: 'Type',
+          options: [
+            { value: 'text', label: 'Text' }, { value: 'email', label: 'Email' }, { value: 'tel', label: 'Phone' },
+            { value: 'textarea', label: 'Long text' }, { value: 'select', label: 'Dropdown' }, { value: 'checkbox', label: 'Checkbox' },
+          ],
+        },
+        { kind: 'boolean', key: 'required', label: 'Required' },
+        { kind: 'string', key: 'placeholder', label: 'Placeholder', maxLength: 120 },
+        { kind: 'string_array', key: 'options', label: 'Dropdown options', placeholder: 'Add an option, press Enter', maxItems: 20 },
+        {
+          kind: 'select', key: 'role', label: 'Map to lead field',
+          options: [
+            { value: 'none', label: 'None' }, { value: 'name', label: 'Lead name' },
+            { value: 'email', label: 'Lead email' }, { value: 'phone', label: 'Lead phone' },
+          ],
+          help: 'Maps this field to the lead row’s name/email/phone column.',
+        },
+      ],
+    },
+    { kind: 'string', key: 'submitLabel', label: 'Submit button label', maxLength: TEXT_MAX.ctaText },
+    { kind: 'string', key: 'successHeadline', label: 'Success headline', maxLength: TEXT_MAX.title },
+    { kind: 'string', key: 'successBody', label: 'Success message', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+  ],
+
+  lx_icon: [
+    { kind: 'icon', key: 'icon', label: 'Icon' },
+    { kind: 'number', key: 'size', label: 'Size (px)', min: 8, max: 240, step: 1 },
+    { kind: 'color', key: 'color', label: 'Colour', tokens: ['champagne', 'obsidian', 'ivory', 'warm-stone'], allowCustom: true },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }],
+    },
+    { kind: 'number', key: 'rotate', label: 'Rotate (deg)', min: 0, max: 360, step: 1 },
+    {
+      kind: 'select', key: 'shape', label: 'Background shape',
+      options: [{ value: 'none', label: 'None' }, { value: 'circle', label: 'Circle' }, { value: 'square', label: 'Rounded square' }],
+      help: 'Wrap the icon in a tinted chip.',
+    },
+    { kind: 'color', key: 'shapeColor', label: 'Chip colour (optional)', tokens: ['champagne', 'obsidian', 'ivory'], allowCustom: true, help: 'Default is a soft tint of the icon colour.' },
+    { kind: 'link', key: 'link', label: 'Link (optional)', help: 'Make the icon a link. /relative, https://, mailto:, tel:.' },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [{ value: 'none', label: 'None' }, { value: 'fade-in', label: 'Fade in on scroll' }, { value: 'slide-up', label: 'Slide up on scroll' }],
     },
   ],
 
@@ -2186,6 +2559,22 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       ],
     },
     {
+      kind: 'color', key: 'fillColor', label: 'Fill colour (optional)',
+      tokens: ['champagne', 'ivory', 'obsidian'], allowCustom: true,
+      help: 'Solid button background — overrides the variant fill (e.g. #ffffff for a white button; the primary variant already has dark label text).',
+    },
+    { kind: 'number', key: 'radius', label: 'Corner radius (px)', min: 0, max: 64, step: 1, help: 'Leave blank for a full pill. 0 = square; e.g. 14 = rounded rectangle.' },
+    { kind: 'number', key: 'radiusTopLeft', label: '↳ Top-left radius (px)', min: 0, max: 64, step: 1, help: 'Per-corner override of the radius above.' },
+    { kind: 'number', key: 'radiusTopRight', label: '↳ Top-right radius (px)', min: 0, max: 64, step: 1 },
+    { kind: 'number', key: 'radiusBottomRight', label: '↳ Bottom-right radius (px)', min: 0, max: 64, step: 1 },
+    { kind: 'number', key: 'radiusBottomLeft', label: '↳ Bottom-left radius (px)', min: 0, max: 64, step: 1 },
+    { kind: 'color', key: 'hoverFillColor', label: 'Hover fill colour', tokens: ['champagne', 'obsidian', 'ivory'], allowCustom: true, help: 'Button background on hover.' },
+    { kind: 'color', key: 'hoverTextColor', label: 'Hover text colour', tokens: ['champagne', 'obsidian', 'ivory'], allowCustom: true },
+    { kind: 'number', key: 'hoverScale', label: 'Hover scale (%)', min: 80, max: 140, step: 1, help: 'e.g. 105 grows the button slightly on hover.' },
+    { kind: 'number', key: 'transitionMs', label: 'Transition (ms)', min: 50, max: 1200, step: 10, help: 'Hover transition speed.' },
+    { kind: 'gradient', key: 'backgroundGradient', label: 'Gradient fill', help: 'Paints the button with a gradient background (overrides the variant fill + fill colour). Not used for the link-arrow variant.' },
+    { kind: 'gradient', key: 'textGradient', label: 'Gradient label', help: 'Gradient on the label text — applies when no fill gradient is set.' },
+    {
       kind: 'select', key: 'animation', label: 'Animation',
       options: [
         { value: 'none', label: 'None (static)' },
@@ -2215,6 +2604,31 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'contain', label: 'Contain (fit inside)' },
       ],
     },
+    {
+      kind: 'select', key: 'objectPosition', label: 'Crop focus',
+      options: [
+        { value: 'center', label: 'Center' }, { value: 'top', label: 'Top' }, { value: 'bottom', label: 'Bottom' },
+        { value: 'left', label: 'Left' }, { value: 'right', label: 'Right' },
+        { value: 'top left', label: 'Top left' }, { value: 'top right', label: 'Top right' },
+        { value: 'bottom left', label: 'Bottom left' }, { value: 'bottom right', label: 'Bottom right' },
+      ],
+      help: 'Which part stays in frame when the image is cropped (Cover fit).',
+    },
+    { kind: 'boolean', key: 'hoverZoom', label: 'Zoom on hover', help: 'The image scales up slightly on hover (clipped to the frame).' },
+    {
+      kind: 'select', key: 'kenBurns', label: 'Ken Burns motion',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'zoom-in', label: 'Slow zoom in' },
+        { value: 'zoom-out', label: 'Slow zoom out' },
+        { value: 'pan-left', label: 'Pan left' },
+        { value: 'pan-right', label: 'Pan right' },
+        { value: 'zoom-pan', label: 'Zoom + pan' },
+      ],
+      help: 'A slow continuous camera drift on the image (independent of hover). Respects reduced-motion.',
+    },
+    { kind: 'link', key: 'link', label: 'Link the image to… (optional)', help: 'Makes the whole image a link. /relative, https://, mailto:, tel:.' },
+    { kind: 'boolean', key: 'lightbox', label: 'Open in lightbox on click', help: 'Click enlarges the image in a full-screen overlay. Ignored when a link is set.' },
     { kind: 'string', key: 'caption', label: 'Caption', maxLength: TEXT_MAX.short },
     { kind: 'boolean', key: 'goldOverlay', label: 'Champagne gradient overlay', help: 'Soft gold gradient over the bottom of the image for brand cohesion.' },
     {
@@ -2367,6 +2781,40 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
   ],
 
   // lx_rule shape removed — widget retired (no borders/lines).
+
+  lx_divider: [
+    {
+      kind: 'select', key: 'style', label: 'Style',
+      options: [
+        { value: 'solid', label: 'Solid' }, { value: 'dashed', label: 'Dashed' },
+        { value: 'dotted', label: 'Dotted' }, { value: 'fleuron', label: 'Fleuron (diamond)' },
+      ],
+    },
+    {
+      kind: 'select', key: 'width', label: 'Width',
+      options: [
+        { value: 'full', label: 'Full' }, { value: 'half', label: 'Half' },
+        { value: 'quarter', label: 'Quarter' }, { value: 'short', label: 'Short (64px)' },
+      ],
+    },
+    { kind: 'number', key: 'widthPercent', label: 'Exact width (%)', min: 5, max: 100, step: 1, help: 'Overrides the Width preset.' },
+    {
+      kind: 'select', key: 'thickness', label: 'Thickness',
+      options: [{ value: 'hairline', label: 'Hairline' }, { value: '1px', label: '1px' }, { value: '2px', label: '2px' }],
+    },
+    { kind: 'number', key: 'thicknessPx', label: 'Exact thickness (px)', min: 1, max: 16, step: 1, help: 'Overrides the Thickness preset.' },
+    { kind: 'color', key: 'tone', label: 'Colour', tokens: ['champagne', 'warm-stone', 'obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }],
+    },
+    { kind: 'string', key: 'label', label: 'Centre label (optional)', maxLength: 48, placeholder: 'e.g. OR', help: 'Text centred on the rule. Leave empty for a plain divider.' },
+    { kind: 'icon', key: 'labelIcon', label: 'Centre icon (optional)', help: 'An icon centred on the rule (takes precedence over the label).' },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [{ value: 'none', label: 'None' }, { value: 'fade-in', label: 'Fade in on scroll' }],
+    },
+  ],
 
   lx_space: [
     {
@@ -2675,7 +3123,13 @@ export const SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = (() => {
         : type === 'column'
           ? COLUMN_IDENTITY_SHAPES
           : WIDGET_IDENTITY_SHAPES
-    out[type] = [...shapes, ...identity]
+    const decoration =
+      type === 'section' || type === 'column' ? CONTAINER_DECORATION_SHAPES : []
+    const spacing =
+      type === 'section' || type === 'column' ? CONTAINER_SPACING_SHAPES : []
+    const dividers = type === 'section' ? SECTION_SHAPE_DIVIDER_SHAPES : []
+    const motion = type !== 'section' && type !== 'column' ? WIDGET_MOTION_SHAPES : []
+    out[type] = [...shapes, ...decoration, ...spacing, ...dividers, ...motion, ...identity]
   }
   return out
 })()

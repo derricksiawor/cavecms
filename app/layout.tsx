@@ -11,11 +11,13 @@ import { getSetting } from '@/lib/cms/getSettings'
 import { buildVerificationMetas } from '@/lib/seo/webmaster/verificationMeta'
 import { resolveMedia } from '@/lib/cms/resolveMedia'
 import { brandVarsCss } from '@/lib/cms/themeCss'
+import { googleFontsHref, typographyVarsCss } from '@/lib/cms/fontCatalog'
 import { SiteFooter } from '@/components/SiteFooter'
 import { SiteHeader } from '@/components/SiteHeader'
 import { AdminBar } from '@/components/admin-bar/AdminBar'
 import { MotionProvider } from '@/components/motion/MotionProvider'
 import { ThirdPartyScripts, ThirdPartyBodyScripts } from '@/components/ThirdPartyScripts'
+import { CookieConsent } from '@/components/consent/CookieConsent'
 import { MobileCtaBar } from '@/components/MobileCtaBar'
 import './globals.css'
 
@@ -137,12 +139,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // both coexist via multiple application/ld+json script tags.
   const orgLd = await organizationLd()
 
+  // GDPR cookie-consent banner — rendered only on public pages when enabled
+  // in Settings (zero bytes otherwise). Suppressed on /admin (operators don't
+  // need a consent prompt while editing) and the install wizard.
+  const isAdminPath = pathname === '/admin' || pathname.startsWith('/admin/')
+  const cookieConsentCfg = await getSetting('cookie_consent')
+  const showCookieConsent = cookieConsentCfg.enabled && !isAdminPath && !isInstallWizard
+
   // Operator brand palette → injected CSS-var overrides. getSetting
   // fails-closed to the registry default, so a missing/garbage row
   // yields the luxury defaults. brandVarsCss re-validates every hex.
   const palette = await getSetting('theme_palette')
-  const brandCss = brandVarsCss(palette)
-
   // Typography roles (Settings → Typography) → the --font-cat-* catalog
   // map + the two role leaf vars. getSetting fails-closed to the registry
   // default, so a missing/garbage row yields Marcellus + Montserrat.
@@ -155,10 +162,26 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Google (font-src 'self').
   const googleFonts = await getSetting('google_fonts')
   const fontCss = typographyCss(typographyRoles, [...customFonts, ...googleFonts])
+
+  // Operator typography font-pairing (Settings → Theme / MCP). Fails closed to
+  // the compiled default pairing (Marcellus + Montserrat). When a font is
+  // chosen, typographyVarsCss appends a :root override of the two leaf font
+  // vars to the brand <style> so it wins the cascade, and googleFontsHref loads
+  // the family. This composes on top of the role/catalog font system above.
+  const typography = await getSetting('typography')
+  const fontHref = googleFontsHref(typography)
+  const brandCss = brandVarsCss(palette) + typographyVarsCss(typography)
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="csp-nonce" content={nonce} />
+        {fontHref && (
+          <>
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+            <link rel="stylesheet" href={fontHref} />
+          </>
+        )}
         <script
           type="application/ld+json"
           // safeJsonForScript escapes </script>, --> and U+2028/U+2029
@@ -234,6 +257,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <div className="flex flex-1 flex-col">{children}</div>
               <SiteFooter />
               <MobileCtaBar />
+              {showCookieConsent && <CookieConsent config={cookieConsentCfg} />}
             </>
           )}
         </MotionProvider>

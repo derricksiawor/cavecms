@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Table of contents (Elementor: Table of Contents) — manual anchor list.
 // Each item links to a block's HTML id (set in that block's Advanced
@@ -17,14 +18,17 @@ const TONE_LINK: Record<string, string> = {
 export function LxToc({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_toc'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const isToken = isColorToken(data.tone)
-  const titleClass = isToken ? TONE_TITLE[data.tone] : undefined
-  const linkClass = isToken ? TONE_LINK[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const titleClass = isToken ? TONE_TITLE[tone] : undefined
+  const linkClass = isToken ? TONE_LINK[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
 
   const composed = (
     <nav

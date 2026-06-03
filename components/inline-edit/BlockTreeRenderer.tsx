@@ -1,6 +1,8 @@
 import 'server-only'
 import { Fragment } from 'react'
 import { renderBlock } from '@/components/blocks'
+import { MotionTimingProvider } from '@/lib/motion/MotionTiming'
+import { buildScopedCss } from '@/lib/cms/customCss'
 import type { RenderContext } from '@/components/blocks'
 import type {
   HydratedBlock,
@@ -71,31 +73,45 @@ interface Props {
  *  — this keeps the dozens of existing block renderers unchanged
  *  while still honouring per-side arbitrary px values the operator
  *  types into SpacingPopover. */
-function deriveWidgetMeta(meta: unknown): {
+function deriveWidgetMeta(
+  meta: unknown,
+  id: number,
+): {
   outerClass: string
   outerStyle: React.CSSProperties | undefined
   htmlId: string | undefined
+  animationDuration: number | undefined
+  animationDelay: number | undefined
+  customCss: string
 } {
   const parsed = parseWidgetMeta(meta)
   return {
     outerClass: clsx(spacingClass(parsed), visibilityClasses(parsed)),
     outerStyle: spacingStyle(parsed),
     htmlId: htmlIdForBlock(parsed),
+    animationDuration: parsed.animationDuration,
+    animationDelay: parsed.animationDelay,
+    customCss: buildScopedCss(id, parsed.customCss, parsed.customCssHover),
   }
 }
 
 function WidgetStyleWrap({
   style,
   htmlId,
+  customCss,
+  cssId,
   children,
 }: {
   style: React.CSSProperties | undefined
   htmlId: string | undefined
+  customCss?: string
+  cssId?: number
   children: React.ReactNode
 }) {
-  if (!style && !htmlId) return <>{children}</>
+  if (!style && !htmlId && !customCss) return <>{children}</>
   return (
-    <div style={style} id={htmlId}>
+    <div style={style} id={htmlId} className={customCss ? `cms-r-${cssId}` : undefined}>
+      {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
       {children}
     </div>
   )
@@ -135,23 +151,30 @@ export function BlockTreeRenderer({
                     media={media}
                   >
                     {col.widgets.map((w) => {
-                      const m = deriveWidgetMeta(w.meta)
+                      const m = deriveWidgetMeta(w.meta, w.id)
                       return (
                         <Fragment key={w.id}>
                           <WidgetStyleWrap
                             style={m.outerStyle}
                             htmlId={m.htmlId}
+                            customCss={m.customCss}
+                            cssId={w.id}
                           >
-                            {renderBlock(
-                              w.blockType,
-                              w.data,
-                              { media, projects, posts, csrf, project, preview },
-                              undefined,
-                              m.outerClass,
-                              w.id,
-                              'public',
-                              parseSectionMeta(sec.meta),
-                            )}
+                            <MotionTimingProvider
+                              durationMs={m.animationDuration}
+                              delayMs={m.animationDelay}
+                            >
+                              {renderBlock(
+                                w.blockType,
+                                w.data,
+                                { media, projects, posts, csrf, project, preview },
+                                undefined,
+                                m.outerClass,
+                                w.id,
+                                'public',
+                                parseSectionMeta(sec.meta),
+                              )}
+                            </MotionTimingProvider>
                           </WidgetStyleWrap>
                         </Fragment>
                       )
@@ -165,18 +188,25 @@ export function BlockTreeRenderer({
         // Loose top-level widget (legacy + back-compat). Renders
         // directly without a section wrapper.
         {
-          const m = deriveWidgetMeta(entry.node.meta)
+          const m = deriveWidgetMeta(entry.node.meta, entry.node.id)
           return (
             <Fragment key={entry.node.id}>
-              <WidgetStyleWrap style={m.outerStyle} htmlId={m.htmlId}>
-                {renderBlock(
-                  entry.node.blockType,
-                  entry.node.data,
-                  { media, projects, posts, csrf, project, preview },
-                  undefined,
-                  m.outerClass,
-                  entry.node.id,
-                )}
+              <WidgetStyleWrap
+                style={m.outerStyle}
+                htmlId={m.htmlId}
+                customCss={m.customCss}
+                cssId={entry.node.id}
+              >
+                <MotionTimingProvider durationMs={m.animationDuration} delayMs={m.animationDelay}>
+                  {renderBlock(
+                    entry.node.blockType,
+                    entry.node.data,
+                    { media, projects, posts, csrf, project, preview },
+                    undefined,
+                    m.outerClass,
+                    entry.node.id,
+                  )}
+                </MotionTimingProvider>
               </WidgetStyleWrap>
             </Fragment>
           )

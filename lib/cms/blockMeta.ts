@@ -17,7 +17,8 @@ import {
   isSpacingTier,
   type SpacingTier,
 } from './spacingTokens'
-import type { SpacingMeta } from './spacingClasses'
+import { SAFE_SPACING_LEN, type SpacingMeta } from './spacingClasses'
+import { GradientSchema, parseGradient, type Gradient } from './gradient'
 import { BLOCK_TONE_ENUMS } from './blockTones'
 import { TEXT_MAX } from './limits'
 import { CTA_HREF_RE, isSafeCtaHref, safeCtaHref } from './safeHref'
@@ -106,6 +107,193 @@ export interface IdentityMeta {
   visibility?: VisibilityMeta
 }
 
+// Decoration meta (Elementor parity) shared by sections + columns:
+// border, box-shadow, and sticky positioning. All render via inline style
+// (decorationStyle) so they layer cleanly over the token/utility classes.
+export type BorderStyle = 'solid' | 'dashed' | 'dotted' | 'double'
+export type BoxShadowPreset = 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
+export type StickyMode = 'none' | 'top' | 'bottom'
+export interface DecorationMeta {
+  /** Border width in px (0 = none). Pairs with borderStyle + borderColor. */
+  borderWidth?: number
+  borderStyle?: BorderStyle
+  /** Border colour — #hex. */
+  borderColor?: string
+  /** Corner radius in px (applies to the box + clips children). */
+  borderRadius?: number
+  /** Soft elevation preset. boxShadowColor optionally tints it. */
+  boxShadow?: BoxShadowPreset
+  boxShadowColor?: string
+  /** Sticky positioning — pins the element while scrolling. */
+  sticky?: StickyMode
+  /** Offset from the viewport edge (px) when sticky. Default 0. */
+  stickyOffset?: number
+  /** Scroll / mouse motion effect (Elementor Motion Effects parity). */
+  motionEffect?: MotionEffect
+  /** Effect intensity 1–100 (px or %, effect-dependent). Default 30. */
+  motionIntensity?: number
+  /** Hover lift — translateY up (px) on hover (card-style elevation). */
+  hoverLift?: number
+  /** Hover shadow preset (grows the elevation on hover). */
+  hoverShadow?: BoxShadowPreset
+  /** Hover border colour (#hex). */
+  hoverBorderColor?: string
+  /** Custom CSS DECLARATIONS scoped to this block (E19) — base + hover.
+   *  Sanitised at render (declarations-only, no selectors/at-rules). */
+  customCss?: string
+  customCssHover?: string
+}
+
+export type MotionEffect = 'none' | 'parallax' | 'fade-scroll' | 'zoom-scroll' | 'tilt'
+
+// Soft, premium elevation presets. y / blur / spread / alpha, recoloured
+// when boxShadowColor is set (else neutral black).
+const BOX_SHADOW_SPEC: Record<Exclude<BoxShadowPreset, 'none'>, { y: number; blur: number; spread: number; alpha: number }> = {
+  sm: { y: 1, blur: 3, spread: 0, alpha: 12 },
+  md: { y: 6, blur: 16, spread: -4, alpha: 16 },
+  lg: { y: 14, blur: 36, spread: -10, alpha: 20 },
+  xl: { y: 26, blur: 60, spread: -16, alpha: 26 },
+  '2xl': { y: 42, blur: 90, spread: -28, alpha: 34 },
+}
+
+function boxShadowCss(preset: BoxShadowPreset | undefined, color: string | undefined): string | undefined {
+  if (!preset || preset === 'none') return undefined
+  const s = BOX_SHADOW_SPEC[preset]
+  const col = color
+    ? `color-mix(in srgb, ${color} ${s.alpha}%, transparent)`
+    : `rgba(0,0,0,${s.alpha / 100})`
+  return `0 ${s.y}px ${s.blur}px ${s.spread}px ${col}`
+}
+
+const HEXCOLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+
+function readDecorationMeta(r: Record<string, unknown>): DecorationMeta {
+  const out: DecorationMeta = {}
+  const bw = r['borderWidth']
+  if (typeof bw === 'number' && bw >= 0 && bw <= 40) out.borderWidth = bw
+  const bs = r['borderStyle']
+  if (bs === 'solid' || bs === 'dashed' || bs === 'dotted' || bs === 'double') out.borderStyle = bs
+  const bc = r['borderColor']
+  if (typeof bc === 'string' && HEXCOLOR_RE.test(bc)) out.borderColor = bc
+  const br = r['borderRadius']
+  if (typeof br === 'number' && br >= 0 && br <= 200) out.borderRadius = br
+  const sh = r['boxShadow']
+  if (sh === 'none' || sh === 'sm' || sh === 'md' || sh === 'lg' || sh === 'xl' || sh === '2xl') out.boxShadow = sh
+  const shc = r['boxShadowColor']
+  if (typeof shc === 'string' && HEXCOLOR_RE.test(shc)) out.boxShadowColor = shc
+  const st = r['sticky']
+  if (st === 'top' || st === 'bottom' || st === 'none') out.sticky = st
+  const so = r['stickyOffset']
+  if (typeof so === 'number' && so >= 0 && so <= 400) out.stickyOffset = so
+  const me = r['motionEffect']
+  if (me === 'parallax' || me === 'fade-scroll' || me === 'zoom-scroll' || me === 'tilt') out.motionEffect = me
+  const mi = r['motionIntensity']
+  if (typeof mi === 'number' && mi >= 1 && mi <= 100) out.motionIntensity = mi
+  const hl = r['hoverLift']
+  if (typeof hl === 'number' && hl >= 0 && hl <= 40) out.hoverLift = hl
+  const hsh = r['hoverShadow']
+  if (hsh === 'none' || hsh === 'sm' || hsh === 'md' || hsh === 'lg' || hsh === 'xl' || hsh === '2xl') out.hoverShadow = hsh
+  const hbc = r['hoverBorderColor']
+  if (typeof hbc === 'string' && HEXCOLOR_RE.test(hbc)) out.hoverBorderColor = hbc
+  const cc = r['customCss']
+  if (typeof cc === 'string' && cc.length <= 1200) out.customCss = cc
+  const cch = r['customCssHover']
+  if (typeof cch === 'string' && cch.length <= 1200) out.customCssHover = cch
+  return out
+}
+
+/** Inline-style fragment for border + shadow + sticky. Spread into the
+ *  SectionFrame / ColumnFrame style object. */
+export function decorationStyle(meta: DecorationMeta): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (meta.borderWidth && meta.borderWidth > 0) {
+    out.borderWidth = `${meta.borderWidth}px`
+    out.borderStyle = meta.borderStyle ?? 'solid'
+    out.borderColor = meta.borderColor ?? 'currentColor'
+  }
+  if (typeof meta.borderRadius === 'number') out.borderRadius = `${meta.borderRadius}px`
+  const shadow = boxShadowCss(meta.boxShadow, meta.boxShadowColor)
+  if (shadow) out.boxShadow = shadow
+  if (meta.sticky === 'top' || meta.sticky === 'bottom') {
+    out.position = 'sticky'
+    out[meta.sticky] = `${meta.stickyOffset ?? 0}px`
+    out.zIndex = '20'
+  }
+  // Hover CSS custom properties — consumed by the `.cms-hover` rule (see
+  // globals.css). Only set vars the operator chose; unset = no-op.
+  if (typeof meta.hoverLift === 'number') out['--cms-hover-lift'] = `-${meta.hoverLift}px`
+  const hoverShadow = boxShadowCss(meta.hoverShadow, undefined)
+  if (hoverShadow) out['--cms-hover-shadow'] = hoverShadow
+  if (meta.hoverBorderColor) out['--cms-hover-border'] = meta.hoverBorderColor
+  return out
+}
+
+/** 'cms-hover' when any hover override is set (so the section/column picks
+ *  up the hover rule). Returns '' otherwise. */
+export function decorationHoverClass(meta: DecorationMeta): string {
+  return typeof meta.hoverLift === 'number' || meta.hoverShadow || meta.hoverBorderColor
+    ? 'cms-hover'
+    : ''
+}
+
+// Section shape dividers (Elementor parity) — flat keys so the builder can
+// expose each as a plain select / number / colour / boolean control.
+export type ShapeDividerType = 'none' | 'wave' | 'tilt' | 'curve' | 'triangle' | 'mountains' | 'split'
+const SHAPE_DIVIDER_TYPES = ['none', 'wave', 'tilt', 'curve', 'triangle', 'mountains', 'split'] as const
+export interface ShapeDividerMeta {
+  shapeTop?: ShapeDividerType
+  shapeTopHeight?: number
+  shapeTopColor?: string
+  shapeTopFlip?: boolean
+  shapeBottom?: ShapeDividerType
+  shapeBottomHeight?: number
+  shapeBottomColor?: string
+  shapeBottomFlip?: boolean
+}
+function readShapeDividerMeta(r: Record<string, unknown>): ShapeDividerMeta {
+  const out: ShapeDividerMeta = {}
+  const isType = (v: unknown): v is ShapeDividerType =>
+    typeof v === 'string' && (SHAPE_DIVIDER_TYPES as readonly string[]).includes(v)
+  for (const side of ['Top', 'Bottom'] as const) {
+    const t = r[`shape${side}`]
+    if (isType(t) && t !== 'none') out[`shape${side}`] = t
+    const h = r[`shape${side}Height`]
+    if (typeof h === 'number' && h >= 8 && h <= 400) out[`shape${side}Height`] = h
+    const c = r[`shape${side}Color`]
+    if (typeof c === 'string' && HEXCOLOR_RE.test(c)) out[`shape${side}Color`] = c
+    if (r[`shape${side}Flip`] === true) out[`shape${side}Flip`] = true
+  }
+  return out
+}
+const ShapeDividerFields = {
+  shapeTop: z.enum(SHAPE_DIVIDER_TYPES).optional(),
+  shapeTopHeight: z.number().int().min(8).max(400).optional(),
+  shapeTopColor: z.string().regex(HEXCOLOR_RE).optional(),
+  shapeTopFlip: z.boolean().optional(),
+  shapeBottom: z.enum(SHAPE_DIVIDER_TYPES).optional(),
+  shapeBottomHeight: z.number().int().min(8).max(400).optional(),
+  shapeBottomColor: z.string().regex(HEXCOLOR_RE).optional(),
+  shapeBottomFlip: z.boolean().optional(),
+} as const
+
+const DecorationFields = {
+  borderWidth: z.number().int().min(0).max(40).optional(),
+  borderStyle: z.enum(['solid', 'dashed', 'dotted', 'double']).optional(),
+  borderColor: z.string().regex(HEXCOLOR_RE).optional(),
+  borderRadius: z.number().int().min(0).max(200).optional(),
+  boxShadow: z.enum(['none', 'sm', 'md', 'lg', 'xl', '2xl']).optional(),
+  boxShadowColor: z.string().regex(HEXCOLOR_RE).optional(),
+  sticky: z.enum(['none', 'top', 'bottom']).optional(),
+  stickyOffset: z.number().int().min(0).max(400).optional(),
+  motionEffect: z.enum(['none', 'parallax', 'fade-scroll', 'zoom-scroll', 'tilt']).optional(),
+  motionIntensity: z.number().int().min(1).max(100).optional(),
+  hoverLift: z.number().int().min(0).max(40).optional(),
+  hoverShadow: z.enum(['none', 'sm', 'md', 'lg', 'xl', '2xl']).optional(),
+  hoverBorderColor: z.string().regex(HEXCOLOR_RE).optional(),
+  customCss: z.string().max(1200).optional(),
+  customCssHover: z.string().max(1200).optional(),
+} as const
+
 // Optional cover-image background on a section (Elementor parity).
 // When set, the renderer paints the image as an absolutely-positioned
 // <img> beneath the section's content + an optional overlay layer so
@@ -143,17 +331,79 @@ export type SectionBackgroundFit =
   | 'none'
   | 'scale-down'
 
-export interface SectionMeta extends SpacingMeta, IdentityMeta {
+// Ken Burns / ambient motion applied to a section's background photo (single
+// image or each slide). A slow continuous camera move. 'none' = static.
+export type SectionKenBurns =
+  | 'none'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'pan-left'
+  | 'pan-right'
+  | 'zoom-pan'
+// How one background slide gives way to the next in a multi-image slideshow.
+// 'through-black' is the cinematic default: the outgoing photo fades out while
+// zooming IN, the incoming photo fades in while zooming OUT, both dipping
+// through a black base. 'crossfade' is the same counter-zoom without the black
+// dip; 'fade' is a plain opacity cross-fade with no scale.
+export type SectionSlideTransition = 'through-black' | 'crossfade' | 'fade'
+
+export interface SectionMeta extends SpacingMeta, IdentityMeta, DecorationMeta, ShapeDividerMeta {
   columns: SectionColumnsCount
   background: SectionBackground
+  /** Arbitrary hex bg (#RGB/#RRGGBB) that OVERRIDES the `background`
+   *  token when set — lets any brand colour be matched exactly, not
+   *  just the named tones. */
+  backgroundColor?: string
+  /** Structured gradient background that OVERRIDES the token + hex bg
+   *  when set (rendered as background-image). Lets a section carry a
+   *  brand's exact multi-stop gradient. */
+  backgroundGradient?: Gradient
   padding: SectionPadding
   backgroundImage?: SectionBackgroundImage
+  /** Multiple background photos that auto cross-fade as an animated slideshow
+   *  behind the section. When 2+ slides are present they OVERRIDE the single
+   *  `backgroundImage`. Capped at 8 for bounded preload + DOM cost. */
+  backgroundSlides?: SectionBackgroundImage[]
+  /** Ken Burns ambient motion on the background photo / each slide. */
+  kenBurns?: SectionKenBurns
+  /** Transition between background slides (slideshow only). */
+  slideTransition?: SectionSlideTransition
+  /** Milliseconds each slide is shown before advancing (slideshow only),
+   *  Elementor-style — 4000 = 4 seconds. Clamped 1000–30000. */
+  slideIntervalMs?: number
   backgroundOverlay?: SectionBackgroundOverlay
   backgroundFit?: SectionBackgroundFit
+  /** object-position for the cover image (which part stays in frame when
+   *  cropped). E.g. 'center', 'top', 'bottom', 'left top'. */
+  backgroundPosition?: SectionBgPosition
+  /** Looping muted autoplay background VIDEO (https .mp4/.webm). Rendered
+   *  behind content like the cover image; the overlay layers on top. */
+  backgroundVideoUrl?: string
+  /** Optional poster image shown before the video loads. */
+  backgroundVideoPoster?: SectionBackgroundImage
   minHeight?: SectionMinHeight
+  /** Max width of the section's CONTENT container (the inner wrapper).
+   *  Default 'xl' (the current 1280px). 'full' removes the cap. */
+  contentMaxWidth?: SectionContentWidth
 }
 
-export interface ColumnMeta extends SpacingMeta, IdentityMeta {
+export type SectionBgPosition =
+  | 'center' | 'top' | 'bottom' | 'left' | 'right'
+  | 'top left' | 'top right' | 'bottom left' | 'bottom right'
+export const VALID_BG_POSITIONS: ReadonlySet<string> = new Set([
+  'center', 'top', 'bottom', 'left', 'right',
+  'top left', 'top right', 'bottom left', 'bottom right',
+])
+export type SectionContentWidth = 'sm' | 'md' | 'lg' | 'xl' | 'full'
+export const SECTION_CONTENT_WIDTH_CLASS: Record<SectionContentWidth, string> = {
+  sm: 'max-w-3xl',   // ~768
+  md: 'max-w-5xl',   // ~1024
+  lg: 'max-w-6xl',   // ~1152
+  xl: 'max-w-7xl',   // ~1280 (default — current behaviour)
+  full: 'max-w-none',
+}
+
+export interface ColumnMeta extends SpacingMeta, IdentityMeta, DecorationMeta {
   // Optional grid-span override (1..12). When undefined the column
   // takes its share of the section's even split.
   width?: number
@@ -168,6 +418,34 @@ export interface ColumnMeta extends SpacingMeta, IdentityMeta {
   // CSS grid self-alignment for the column within its row.
   // 'center' vertically centers a short text column next to a tall image.
   verticalAlign?: 'center' | 'start' | 'end'
+  // How this column lays out ITS OWN children. Default 'stack' = the
+  // normal vertical block flow (space-y-6). 'row' lays the widgets
+  // HORIZONTALLY (flex flex-wrap) — an inline primitive for button rows,
+  // badge strips, logo rows, stat clusters, etc. WITHOUT needing N
+  // section columns. In row mode each child sizes to its content (the
+  // widget's own mx-auto collapses to content width inside flex, which
+  // is exactly what a horizontal row wants), and `childJustify` controls
+  // the horizontal distribution. See ColumnFrame in renderShell.tsx.
+  // 'grid' lays the column's children in a WRAPPING CSS grid of
+  // `childColumns` columns — a nested container (Elementor flex/grid parity)
+  // for an arbitrary card grid inside one column without splitting the
+  // section. 'row' = horizontal flex-wrap; 'stack' = vertical (default).
+  childLayout?: 'stack' | 'row' | 'grid'
+  // Horizontal distribution of children when childLayout === 'row'.
+  // Ignored in 'stack'/'grid' mode. Default 'start'.
+  childJustify?: 'start' | 'center' | 'end' | 'between'
+  // Column count for 'grid' mode (1–4). Default 2.
+  childColumns?: number
+  // Gap between children (px) for 'row'/'grid' mode. Default 24.
+  childGap?: number
+  /** Exact hex background for this column. When set (and no cover image),
+   *  the column renders as a rounded, padded CARD — the native primitive
+   *  for icon-less feature cards. */
+  backgroundColor?: string
+  /** Structured gradient background for this column (rendered as
+   *  background-image, overrides any token/hex bg). Same shape as the
+   *  section-level gradient. */
+  backgroundGradient?: Gradient
   // Optional whole-card link. When set, the entire column becomes a
   // single clickable target via a stretched-link OVERLAY anchor — NOT
   // by wrapping the children in a parent <a>. Wrapping would nest
@@ -199,6 +477,13 @@ export interface ColumnMeta extends SpacingMeta, IdentityMeta {
 export interface WidgetMeta extends SpacingMeta {
   htmlId?: string
   visibility?: VisibilityMeta
+  /** Entrance-animation timing (E16) — applied to the block's MotionTarget
+   *  reveal via the MotionTiming context. ms. */
+  animationDuration?: number
+  animationDelay?: number
+  /** Per-widget custom CSS declarations (E19) — base + hover, scoped. */
+  customCss?: string
+  customCssHover?: string
 }
 
 export const DEFAULT_SECTION_META: SectionMeta = {
@@ -254,8 +539,23 @@ const DARKENING_OVERLAYS: ReadonlySet<SectionBackgroundOverlay> = new Set([
 
 interface SurfaceProbeMeta {
   background?: SectionBackground
+  backgroundColor?: string
   backgroundImage?: SectionBackgroundImage
   backgroundOverlay?: SectionBackgroundOverlay
+}
+
+/** Perceived-luminance test for a #RGB/#RRGGBB hex. Used so a custom
+ *  section background colour classifies as dark/light correctly for the
+ *  adaptive-tone widgets. Threshold ~140/255 on sRGB-weighted luma. */
+export function isHexColorDark(hex: string): boolean {
+  let h = hex.replace('#', '').trim()
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('')
+  if (h.length !== 6) return false
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  if ([r, g, b].some((n) => Number.isNaN(n))) return false
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 140
 }
 
 /** Probe whether the visible surface of a section reads as dark — used
@@ -276,8 +576,30 @@ export function isSectionSurfaceDark(
   ) {
     return true
   }
+  // A custom hex bg overrides the token — classify by its luminance so
+  // adaptive widgets (icon lists, forms, …) flip their text correctly.
+  if (meta.backgroundColor) return isHexColorDark(meta.backgroundColor)
   if (!meta.background) return false
   return COLOR_TOKEN_BRIGHTNESS[meta.background] === 'dark'
+}
+
+/** Auto-adapt a widget's `tone` to the section surface at RENDER time so
+ *  editorial blocks (heading/stat/quote/cta/icon-list) never paint dark ink on
+ *  a dark surface. On a dark section a DARK tone token (obsidian / charcoal /
+ *  warm-stone / …) is swapped for the canonical light tone ('ivory'); explicit
+ *  hex tones, already-light tones, and the 'neutral' accent (champagne) pass
+ *  through untouched. This makes dark sections "just work" for EVERY author —
+ *  MCP, REST, the dashboard — without anyone setting tone manually. Light
+ *  sections are unaffected (the dark default is already correct there). */
+export function adaptToneForSurface(
+  tone: string,
+  meta: SurfaceProbeMeta | null | undefined,
+): string {
+  if (!tone || tone.startsWith('#')) return tone
+  if (isSectionSurfaceDark(meta) && COLOR_TOKEN_BRIGHTNESS[tone] === 'dark') {
+    return 'ivory'
+  }
+  return tone
 }
 
 /** Resolve the first 'light' tone in a block's tone enum, or null when
@@ -342,6 +664,32 @@ const VALID_FITS: ReadonlySet<SectionBackgroundFit> = new Set([
   'none',
   'scale-down',
 ])
+const VALID_KEN_BURNS: ReadonlySet<SectionKenBurns> = new Set([
+  'none',
+  'zoom-in',
+  'zoom-out',
+  'pan-left',
+  'pan-right',
+  'zoom-pan',
+])
+const VALID_SLIDE_TRANSITIONS: ReadonlySet<SectionSlideTransition> = new Set([
+  'through-black',
+  'crossfade',
+  'fade',
+])
+// Bounded slide count keeps preload + DOM cost O(small) no matter how many
+// photos an operator pastes — the slideshow lazy-loads all but the first.
+const MAX_BG_SLIDES = 8
+function readSectionBackgroundSlides(v: unknown): SectionBackgroundImage[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out: SectionBackgroundImage[] = []
+  for (const item of v) {
+    const img = readSectionBackgroundImage(item)
+    if (img) out.push(img)
+    if (out.length >= MAX_BG_SLIDES) break
+  }
+  return out.length ? out : undefined
+}
 function readSectionBackgroundImage(v: unknown): SectionBackgroundImage | undefined {
   if (!v || typeof v !== 'object') return undefined
   const r = v as Record<string, unknown>
@@ -379,14 +727,16 @@ function isValidMarginPx(v: unknown): v is number {
     v <= MAX_SPACING_PX
   )
 }
-function readPaddingValue(v: unknown): SpacingTier | number | undefined {
+function readPaddingValue(v: unknown): SpacingTier | number | string | undefined {
   if (isSpacingTier(v)) return v
   if (isValidPaddingPx(v)) return v
+  if (typeof v === 'string' && SAFE_SPACING_LEN.test(v)) return v
   return undefined
 }
-function readMarginValue(v: unknown): SpacingTier | number | undefined {
+function readMarginValue(v: unknown): SpacingTier | number | string | undefined {
   if (isSpacingTier(v)) return v
   if (isValidMarginPx(v)) return v
+  if (typeof v === 'string' && SAFE_SPACING_LEN.test(v)) return v
   return undefined
 }
 // HTML id / anchor token. Must start with a letter (avoid the
@@ -514,6 +864,7 @@ export function parseSectionMeta(raw: unknown): SectionMeta {
   const overlay = r['backgroundOverlay']
   const fit = r['backgroundFit']
   const mh = r['minHeight']
+  const bgColor = r['backgroundColor']
   return {
     columns:
       cols === 1 || cols === 2 || cols === 3 || cols === 4
@@ -523,12 +874,29 @@ export function parseSectionMeta(raw: unknown): SectionMeta {
       typeof bg === 'string' && VALID_BACKGROUNDS.has(bg as SectionBackground)
         ? (bg as SectionBackground)
         : DEFAULT_SECTION_META.background,
+    ...(typeof bgColor === 'string' && HEXCOLOR_RE.test(bgColor)
+      ? { backgroundColor: bgColor }
+      : {}),
     padding:
       typeof pad === 'string' && VALID_PADDINGS.has(pad as SectionPadding)
         ? (pad as SectionPadding)
         : DEFAULT_SECTION_META.padding,
     ...(readSectionBackgroundImage(r['backgroundImage'])
       ? { backgroundImage: readSectionBackgroundImage(r['backgroundImage'])! }
+      : {}),
+    ...(readSectionBackgroundSlides(r['backgroundSlides'])
+      ? { backgroundSlides: readSectionBackgroundSlides(r['backgroundSlides'])! }
+      : {}),
+    ...(typeof r['kenBurns'] === 'string' && VALID_KEN_BURNS.has(r['kenBurns'] as SectionKenBurns)
+      ? { kenBurns: r['kenBurns'] as SectionKenBurns }
+      : {}),
+    ...(typeof r['slideTransition'] === 'string' &&
+    VALID_SLIDE_TRANSITIONS.has(r['slideTransition'] as SectionSlideTransition)
+      ? { slideTransition: r['slideTransition'] as SectionSlideTransition }
+      : {}),
+    ...(typeof r['slideIntervalMs'] === 'number' &&
+    Number.isFinite(r['slideIntervalMs'])
+      ? { slideIntervalMs: Math.max(1000, Math.min(30000, Math.round(r['slideIntervalMs'] as number))) }
       : {}),
     ...(typeof overlay === 'string' && VALID_OVERLAYS.has(overlay as SectionBackgroundOverlay)
       ? { backgroundOverlay: overlay as SectionBackgroundOverlay }
@@ -539,6 +907,26 @@ export function parseSectionMeta(raw: unknown): SectionMeta {
     ...(typeof mh === 'string' && VALID_MIN_HEIGHTS.has(mh as SectionMinHeight)
       ? { minHeight: mh as SectionMinHeight }
       : {}),
+    ...(parseGradient(r['backgroundGradient'])
+      ? { backgroundGradient: parseGradient(r['backgroundGradient'])! }
+      : {}),
+    ...(typeof r['backgroundPosition'] === 'string' &&
+    VALID_BG_POSITIONS.has(r['backgroundPosition'] as string)
+      ? { backgroundPosition: r['backgroundPosition'] as SectionBgPosition }
+      : {}),
+    ...(typeof r['backgroundVideoUrl'] === 'string' &&
+    /^https:\/\/[^\s"'<>]+\.(?:mp4|webm)(?:\?[^\s"'<>]*)?$/i.test(r['backgroundVideoUrl'])
+      ? { backgroundVideoUrl: r['backgroundVideoUrl'] }
+      : {}),
+    ...(readSectionBackgroundImage(r['backgroundVideoPoster'])
+      ? { backgroundVideoPoster: readSectionBackgroundImage(r['backgroundVideoPoster'])! }
+      : {}),
+    ...(typeof r['contentMaxWidth'] === 'string' &&
+    ['sm', 'md', 'lg', 'xl', 'full'].includes(r['contentMaxWidth'] as string)
+      ? { contentMaxWidth: r['contentMaxWidth'] as SectionContentWidth }
+      : {}),
+    ...readDecorationMeta(r),
+    ...readShapeDividerMeta(r),
     ...readSpacingMeta(r),
     ...readIdentityMeta(r),
   }
@@ -571,6 +959,33 @@ export function parseColumnMeta(raw: unknown): ColumnMeta {
   if (va === 'center' || va === 'start' || va === 'end') {
     out.verticalAlign = va
   }
+  const childLayout = r['childLayout']
+  if (childLayout === 'row' || childLayout === 'stack' || childLayout === 'grid') {
+    out.childLayout = childLayout
+  }
+  const childColumns = r['childColumns']
+  if (typeof childColumns === 'number' && childColumns >= 1 && childColumns <= 4) {
+    out.childColumns = childColumns
+  }
+  const childGap = r['childGap']
+  if (typeof childGap === 'number' && childGap >= 0 && childGap <= 96) {
+    out.childGap = childGap
+  }
+  const childJustify = r['childJustify']
+  if (
+    childJustify === 'start' ||
+    childJustify === 'center' ||
+    childJustify === 'end' ||
+    childJustify === 'between'
+  ) {
+    out.childJustify = childJustify
+  }
+  const colBgColor = r['backgroundColor']
+  if (typeof colBgColor === 'string' && HEXCOLOR_RE.test(colBgColor)) {
+    out.backgroundColor = colBgColor
+  }
+  const colGradient = parseGradient(r['backgroundGradient'])
+  if (colGradient) out.backgroundGradient = colGradient
   // Whole-card link — tolerant read. Re-runs the same CTA href gate the
   // write boundary uses (allow-list scheme regex + unsafe-char/userinfo
   // refine), so a hand-edited or stale blob with an unsafe href renders
@@ -596,6 +1011,7 @@ export function parseColumnMeta(raw: unknown): ColumnMeta {
   if (typeof clLabel === 'string' && clLabel.trim() !== '') {
     out.cardLinkLabel = clLabel.slice(0, 120)
   }
+  Object.assign(out, readDecorationMeta(r))
   Object.assign(out, readSpacingMeta(r))
   Object.assign(out, readIdentityMeta(r))
   return out
@@ -606,9 +1022,17 @@ export function parseColumnMeta(raw: unknown): ColumnMeta {
 export function parseWidgetMeta(raw: unknown): WidgetMeta {
   if (!raw || typeof raw !== 'object') return {}
   const r = raw as Record<string, unknown>
+  const ad = r['animationDuration']
+  const adl = r['animationDelay']
+  const cc = r['customCss']
+  const cch = r['customCssHover']
   return {
     ...readSpacingMeta(r),
     ...readWidgetIdentityMeta(r),
+    ...(typeof ad === 'number' && ad >= 0 && ad <= 5000 ? { animationDuration: ad } : {}),
+    ...(typeof adl === 'number' && adl >= 0 && adl <= 5000 ? { animationDelay: adl } : {}),
+    ...(typeof cc === 'string' && cc.length <= 1200 ? { customCss: cc } : {}),
+    ...(typeof cch === 'string' && cch.length <= 1200 ? { customCssHover: cch } : {}),
   }
 }
 
@@ -764,10 +1188,12 @@ const SpacingTierEnum = z.enum(
 const PaddingValueSchema = z.union([
   SpacingTierEnum,
   z.number().int().min(0).max(512),
+  z.string().regex(SAFE_SPACING_LEN),
 ])
 const MarginValueSchema = z.union([
   SpacingTierEnum,
   z.number().int().min(-512).max(512),
+  z.string().regex(SAFE_SPACING_LEN),
 ])
 
 // Spacing surface shared by Section, Column, and Widget meta schemas.
@@ -905,6 +1331,19 @@ export const SectionMetaSchema = z
       'bone',
       'charcoal',
     ]),
+    // Arbitrary hex background override (#RGB / #RRGGBB). When set it
+    // WINS over the `background` token (inline style beats the utility
+    // class) so any brand colour can be matched exactly — not just the
+    // 8 named tones. Strictly validated so nothing but a hex literal
+    // ever reaches the inline style.
+    backgroundColor: z
+      .string()
+      .regex(HEXCOLOR_RE)
+      .optional(),
+    // Structured gradient background — WINS over the token + hex bg when
+    // set (rendered as background-image). Same shape used for text +
+    // button gradients; safe (hex stops + bounded angle, never raw CSS).
+    backgroundGradient: GradientSchema.optional(),
     padding: z.enum(['none', 'sm', 'md', 'lg', 'xl', '2xl']),
     // Optional cover-image background. media_id is the row in `media`,
     // alt is the screen-reader description (empty string allowed for
@@ -916,15 +1355,39 @@ export const SectionMetaSchema = z
         alt: z.string().max(320),
       })
       .optional(),
+    // Multi-image background slideshow (2+ slides cross-fade). Bounded at 8.
+    // The renderer lazy-loads all but the first slide so the cost is O(small).
+    backgroundSlides: z
+      .array(z.object({ media_id: z.number().int().positive(), alt: z.string().max(320) }))
+      .max(8)
+      .optional(),
+    kenBurns: z
+      .enum(['none', 'zoom-in', 'zoom-out', 'pan-left', 'pan-right', 'zoom-pan'])
+      .optional(),
+    slideTransition: z.enum(['through-black', 'crossfade', 'fade']).optional(),
+    slideIntervalMs: z.number().int().min(1000).max(30000).optional(),
     backgroundOverlay: z
       .enum(['none', 'darken', 'darken-strong', 'gradient-bottom', 'champagne'])
       .optional(),
     backgroundFit: z
       .enum(['cover', 'contain', 'fill', 'none', 'scale-down'])
       .optional(),
+    backgroundPosition: z
+      .enum(['center', 'top', 'bottom', 'left', 'right', 'top left', 'top right', 'bottom left', 'bottom right'])
+      .optional(),
+    backgroundVideoUrl: z
+      .string()
+      .regex(/^https:\/\/[^\s"'<>]+\.(?:mp4|webm)(?:\?[^\s"'<>]*)?$/i)
+      .optional(),
+    backgroundVideoPoster: z
+      .object({ media_id: z.number().int().positive(), alt: z.string().max(320) })
+      .optional(),
+    contentMaxWidth: z.enum(['sm', 'md', 'lg', 'xl', 'full']).optional(),
     minHeight: z
       .enum(['none', 'sm', 'md', 'lg', 'xl', 'screen'])
       .optional(),
+    ...DecorationFields,
+    ...ShapeDividerFields,
     ...SpacingFields,
     ...IdentityFields,
   })
@@ -939,6 +1402,21 @@ export const ColumnMetaSchema = z
     // vertically-centred column (short text beside a tall map/image)
     // round-trips through validation.
     verticalAlign: z.enum(['center', 'start', 'end']).optional(),
+    // Inline row primitive — lay this column's children HORIZONTALLY
+    // (flex flex-wrap) instead of the default vertical stack. childJustify
+    // controls horizontal distribution in row mode (ignored when stacked).
+    // Honoured by parseColumnMeta + the ColumnFrame renderer.
+    childLayout: z.enum(['stack', 'row', 'grid']).optional(),
+    childJustify: z.enum(['start', 'center', 'end', 'between']).optional(),
+    childColumns: z.number().int().min(1).max(4).optional(),
+    childGap: z.number().int().min(0).max(96).optional(),
+    // Exact hex background → renders the column as a rounded, padded card.
+    backgroundColor: z
+      .string()
+      .regex(HEXCOLOR_RE)
+      .optional(),
+    // Per-column gradient background (same shape as the section gradient).
+    backgroundGradient: GradientSchema.optional(),
     // Mirrors the section-level cover-image fields so a column can
     // also carry its own background photo. Same write-boundary
     // guarantees: media_id positive int, alt ≤ 320 chars.
@@ -972,6 +1450,7 @@ export const ColumnMetaSchema = z
     // Accessible name for the card link (aria-label on the overlay
     // anchor). 120-char cap mirrors the brand-text / nav-label caps.
     cardLinkLabel: z.string().max(120).optional(),
+    ...DecorationFields,
     ...SpacingFields,
     ...IdentityFields,
   })
@@ -982,5 +1461,12 @@ export const ColumnMetaSchema = z
 // attempt to slip data fields through the meta path) is rejected at
 // 400 instead of silently stored.
 export const WidgetMetaSchema = z
-  .object({ ...SpacingFields, ...WidgetIdentityFields })
+  .object({
+    ...SpacingFields,
+    ...WidgetIdentityFields,
+    animationDuration: z.number().int().min(0).max(5000).optional(),
+    animationDelay: z.number().int().min(0).max(5000).optional(),
+    customCss: z.string().max(1200).optional(),
+    customCssHover: z.string().max(1200).optional(),
+  })
   .strict()

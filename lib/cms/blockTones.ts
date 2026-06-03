@@ -48,6 +48,7 @@ export const BLOCK_TONE_ENUMS = {
   lx_tabs: ['obsidian', 'ivory'],
   lx_icon_list: ['obsidian', 'ivory', 'champagne'],
   lx_icon_box: ['obsidian', 'ivory'],
+  lx_icon: ['champagne', 'obsidian', 'ivory', 'warm-stone'],
 
   // Final composites closing the legacy purge.
   lx_divider: ['champagne', 'warm-stone', 'copper', 'obsidian', 'ivory'],

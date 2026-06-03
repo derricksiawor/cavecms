@@ -27,6 +27,7 @@ import {
   Share2,
   Map as MapIcon,
   PlugZap,
+  Cookie,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -72,6 +73,7 @@ export const NAV: readonly NavItem[] = [
   { label: 'Typography', href: '/admin/settings/typography', roles: ['admin'], icon: Type, parent: '/admin/settings' },
   { label: 'Security', href: '/admin/settings/security', roles: ['admin'], icon: Lock, parent: '/admin/settings' },
   { label: 'Integrations', href: '/admin/settings/integrations', roles: ['admin'], icon: Plug, parent: '/admin/settings' },
+  { label: 'Cookies', href: '/admin/settings/cookies', roles: ['admin'], icon: Cookie, parent: '/admin/settings' },
   { label: 'API Tokens', href: '/admin/settings/api-tokens', roles: ['admin'], icon: KeyRound, parent: '/admin/settings' },
   { label: 'Redirects', href: '/admin/settings/redirects', roles: ['admin'], icon: Signpost, parent: '/admin/settings' },
   { label: 'Email', href: '/admin/settings/email', roles: ['admin'], icon: Mail, parent: '/admin/settings' },

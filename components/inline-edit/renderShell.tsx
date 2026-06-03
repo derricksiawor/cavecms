@@ -8,7 +8,10 @@ import {
   parseSectionMeta,
   SECTION_BACKGROUND_CLASS,
   SECTION_COLUMNS_CLASS,
+  SECTION_CONTENT_WIDTH_CLASS,
   SECTION_PADDING_CLASS,
+  decorationStyle,
+  decorationHoverClass,
   visibilityClasses,
   type SectionBackground,
   type SectionBackgroundFit,
@@ -16,6 +19,12 @@ import {
   type SectionMinHeight,
 } from '@/lib/cms/blockMeta'
 import { spacingClass, spacingStyle } from '@/lib/cms/spacingClasses'
+import { compileGradient } from '@/lib/cms/gradient'
+import { buildScopedCss } from '@/lib/cms/customCss'
+import { ShapeDivider } from '@/components/blocks/_shared/ShapeDivider'
+import { SectionMotion } from '@/components/blocks/_shared/SectionMotion'
+import { SectionBackdrop } from '@/components/blocks/_shared/SectionBackdrop'
+import type { SectionBackgroundImage } from '@/lib/cms/blockMeta'
 
 // Lookup tables for the new section background-image controls. JIT-
 // static strings so Tailwind's scanner emits every utility used.
@@ -122,7 +131,19 @@ export function SectionFrame({
   // beat the shorthand at every responsive breakpoint without having
   // to generate matching sm:/md: variants.
   const spacing = spacingClass(parsed)
-  const style = spacingStyle(parsed)
+  // Arbitrary hex background override: inline style beats the token bg
+  // utility class, so an operator/agent can match any brand colour exactly.
+  // A gradient background (when set) wins over the hex/token via
+  // background-image.
+  const gradientCss = compileGradient(parsed.backgroundGradient)
+  const style = {
+    ...spacingStyle(parsed),
+    ...((parsed as { backgroundColor?: string }).backgroundColor
+      ? { backgroundColor: (parsed as { backgroundColor?: string }).backgroundColor }
+      : {}),
+    ...(gradientCss ? { backgroundImage: gradientCss } : {}),
+    ...decorationStyle(parsed),
+  }
   const visibility = visibilityClasses(parsed)
   const htmlId = htmlIdForBlock(parsed)
 
@@ -133,28 +154,55 @@ export function SectionFrame({
   // in CSS that has to download + parse first). Falls back silently
   // when the media row is missing variants; the section still renders
   // with its background-token paint.
-  const bgImage = parsed.backgroundImage
-  const bgMedia = bgImage
-    ? (media?.get(bgImage.media_id) ?? getUploadedMedia(bgImage.media_id))
-    : undefined
-  const bgSrc =
-    bgMedia?.variants?.lg ??
-    bgMedia?.variants?.md ??
-    bgMedia?.variants?.og ??
-    null
+  const resolveBgSrc = (m: SectionBackgroundImage): string | null => {
+    const md = media?.get(m.media_id) ?? getUploadedMedia(m.media_id)
+    return md?.variants?.lg ?? md?.variants?.md ?? md?.variants?.og ?? null
+  }
+  // Build the slide list. A `backgroundSlides` array (2+ photos) drives the
+  // animated slideshow; otherwise fall back to the single `backgroundImage`
+  // so a lone image with Ken Burns still animates. Unresolved rows dropped.
+  const slideMetas: SectionBackgroundImage[] =
+    parsed.backgroundSlides && parsed.backgroundSlides.length
+      ? parsed.backgroundSlides
+      : parsed.backgroundImage
+        ? [parsed.backgroundImage]
+        : []
+  const slides = slideMetas
+    .map((m) => ({ src: resolveBgSrc(m), alt: m.alt }))
+    .filter((s): s is { src: string; alt: string } => s.src !== null)
+  const kenBurns = parsed.kenBurns ?? 'none'
   const overlay = parsed.backgroundOverlay ?? 'none'
   const minHeight = parsed.minHeight ?? 'none'
-  const hasCoverImage = bgImage !== undefined && bgSrc !== null
+  const hasCoverImage = slides.length >= 1
+  // Animated backdrop when there's a slideshow (2+) OR a single image with Ken
+  // Burns; a lone static image keeps the zero-JS <img> path.
+  const animatedBg = slides.length >= 2 || (slides.length === 1 && kenBurns !== 'none')
+  // Background video (Elementor parity) — looping muted autoplay behind
+  // content. Optional poster image resolved from media.
+  const hasVideo = !!parsed.backgroundVideoUrl
+  const posterMedia = parsed.backgroundVideoPoster
+    ? (media?.get(parsed.backgroundVideoPoster.media_id) ??
+       getUploadedMedia(parsed.backgroundVideoPoster.media_id))
+    : undefined
+  const posterSrc =
+    posterMedia?.variants?.lg ?? posterMedia?.variants?.md ?? posterMedia?.variants?.og ?? undefined
+  // Shape dividers (Elementor parity) — SVG separators on the top/bottom
+  // edges. They need a positioning + clipping context on the section.
+  const hasDivider = !!(parsed.shapeTop || parsed.shapeBottom)
+  // Per-block custom CSS (E19) — scoped to `.cms-r-{sectionId}`.
+  const sectionCss = buildScopedCss(sectionId, parsed.customCss, parsed.customCssHover)
 
   return (
     <section
       data-section-id={exposeId ? sectionId : undefined}
       id={htmlId}
       className={clsx(
-        // `relative` so the absolutely-positioned <img> + overlay
-        // anchor inside the section. `overflow-hidden` clips any
-        // image overflow caused by `object-cover` cropping.
-        hasCoverImage && 'relative overflow-hidden',
+        // `relative` so the absolutely-positioned <img> + overlay + shape
+        // dividers anchor inside the section. `overflow-hidden` clips any
+        // image overflow + the divider SVGs at the edges.
+        (hasCoverImage || hasDivider || hasVideo) && 'relative overflow-hidden',
+        decorationHoverClass(parsed),
+        sectionCss && `cms-r-${sectionId}`,
         SECTION_BACKGROUND_CLASS[parsed.background],
         SECTION_PADDING_CLASS[parsed.padding],
         SECTION_MIN_HEIGHT_CLASS[minHeight],
@@ -168,30 +216,61 @@ export function SectionFrame({
       )}
       style={style}
     >
+      {sectionCss && <style dangerouslySetInnerHTML={{ __html: sectionCss }} />}
+      {parsed.motionEffect && parsed.motionEffect !== 'none' && (
+        <SectionMotion effect={parsed.motionEffect} intensity={parsed.motionIntensity} />
+      )}
+      {parsed.shapeTop && (
+        <ShapeDivider
+          type={parsed.shapeTop}
+          position="top"
+          height={parsed.shapeTopHeight}
+          color={parsed.shapeTopColor}
+          flipX={parsed.shapeTopFlip}
+        />
+      )}
+      {parsed.shapeBottom && (
+        <ShapeDivider
+          type={parsed.shapeBottom}
+          position="bottom"
+          height={parsed.shapeBottomHeight}
+          color={parsed.shapeBottomColor}
+          flipX={parsed.shapeBottomFlip}
+        />
+      )}
       {hasCoverImage && (
         <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={bgSrc}
-            // Decorative by default — content on top should carry the
-            // semantic meaning. If the operator set alt text we honour
-            // it (rare; the cover-image-as-section-bg pattern usually
-            // means "decorative for content composition").
-            alt={bgImage!.alt}
-            aria-hidden={bgImage!.alt === '' ? 'true' : undefined}
-            className={clsx(
-              'absolute inset-0 h-full w-full',
-              SECTION_BG_FIT_CLASS[parsed.backgroundFit ?? 'cover'],
-            )}
-            // The hero section is virtually always above-the-fold; a
-            // priority hint flips the browser's fetch strategy so the
-            // image streams immediately. Cheap if the section isn't
-            // actually above the fold — the browser falls back to
-            // normal priority.
-            loading="eager"
-            decoding="async"
-            fetchPriority="high"
-          />
+          {animatedBg ? (
+            <SectionBackdrop
+              slides={slides}
+              fitClass={SECTION_BG_FIT_CLASS[parsed.backgroundFit ?? 'cover']}
+              position={parsed.backgroundPosition}
+              kenBurns={kenBurns}
+              transition={parsed.slideTransition ?? 'through-black'}
+              intervalMs={parsed.slideIntervalMs ?? 6000}
+            />
+          ) : (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={slides[0]!.src}
+              // Decorative by default — content on top should carry the
+              // semantic meaning. If the operator set alt text we honour it.
+              alt={slides[0]!.alt}
+              aria-hidden={slides[0]!.alt === '' ? 'true' : undefined}
+              className={clsx(
+                'absolute inset-0 h-full w-full',
+                SECTION_BG_FIT_CLASS[parsed.backgroundFit ?? 'cover'],
+              )}
+              style={parsed.backgroundPosition ? { objectPosition: parsed.backgroundPosition } : undefined}
+              // The hero section is virtually always above-the-fold; a
+              // priority hint flips the browser's fetch strategy so the
+              // image streams immediately. Cheap if not above the fold —
+              // the browser falls back to normal priority.
+              loading="eager"
+              decoding="async"
+              fetchPriority="high"
+            />
+          )}
           {overlay !== 'none' && (
             <div
               aria-hidden="true"
@@ -203,12 +282,34 @@ export function SectionFrame({
           )}
         </>
       )}
+      {hasVideo && (
+        <>
+          <video
+            className="absolute inset-0 h-full w-full object-cover"
+            src={parsed.backgroundVideoUrl}
+            poster={posterSrc}
+            autoPlay
+            muted
+            loop
+            playsInline
+            aria-hidden="true"
+            style={parsed.backgroundPosition ? { objectPosition: parsed.backgroundPosition } : undefined}
+          />
+          {overlay !== 'none' && (
+            <div
+              aria-hidden="true"
+              className={clsx('pointer-events-none absolute inset-0', SECTION_OVERLAY_CLASS[overlay])}
+            />
+          )}
+        </>
+      )}
       <div
         className={clsx(
-          'mx-auto grid w-full max-w-7xl gap-8 px-6 sm:px-10',
+          'mx-auto grid w-full gap-8 px-6 sm:px-10',
+          SECTION_CONTENT_WIDTH_CLASS[parsed.contentMaxWidth ?? 'xl'],
           // Bump content above the bg + overlay layers so click
           // affordances + heading still respond to the cursor.
-          hasCoverImage && 'relative z-10',
+          (hasCoverImage || hasVideo) && 'relative z-10',
           SECTION_COLUMNS_CLASS[gridColumns],
         )}
       >
@@ -241,9 +342,55 @@ export function ColumnFrame({
 }: ColumnFrameProps) {
   const parsed = parseColumnMeta(meta)
   const spacing = spacingClass(parsed)
-  const style = spacingStyle(parsed)
+  // Arbitrary hex background override: inline style beats the token bg
+  // utility class, so an operator/agent can match any brand colour exactly.
+  // A gradient background (when set) wins over the hex/token via
+  // background-image.
+  const gradientCss = compileGradient(parsed.backgroundGradient)
+  const style = {
+    ...spacingStyle(parsed),
+    ...((parsed as { backgroundColor?: string }).backgroundColor
+      ? { backgroundColor: (parsed as { backgroundColor?: string }).backgroundColor }
+      : {}),
+    ...(gradientCss ? { backgroundImage: gradientCss } : {}),
+    ...decorationStyle(parsed),
+  }
   const visibility = visibilityClasses(parsed)
   const htmlId = htmlIdForBlock(parsed)
+
+  // Inline row primitive — when childLayout === 'row', lay the column's
+  // widgets HORIZONTALLY (flex flex-wrap) instead of the default vertical
+  // block flow. Each child sizes to its content (the widget's own
+  // mx-auto collapses to content width inside flex — exactly what a row
+  // of buttons / badges / logos / stats wants). childJustify controls the
+  // horizontal distribution. Default stays the vertical `space-y-6` stack.
+  const isRow = parsed.childLayout === 'row'
+  const isGrid = parsed.childLayout === 'grid'
+  const rowJustify =
+    parsed.childJustify === 'center'
+      ? 'justify-center'
+      : parsed.childJustify === 'end'
+        ? 'justify-end'
+        : parsed.childJustify === 'between'
+          ? 'justify-between'
+          : 'justify-start'
+  // Grid columns map to Tailwind classes (1–4); the gap is an inline style
+  // when overridden, else the tier default.
+  const gridColsClass =
+    parsed.childColumns === 1
+      ? 'grid-cols-1'
+      : parsed.childColumns === 3
+        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+        : parsed.childColumns === 4
+          ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+          : 'grid-cols-1 sm:grid-cols-2'
+  const childGapStyle =
+    typeof parsed.childGap === 'number' ? { gap: `${parsed.childGap}px` } : undefined
+  const childFlow = isGrid
+    ? clsx('grid', gridColsClass, !childGapStyle && 'gap-6')
+    : isRow
+      ? clsx('flex flex-wrap items-center', !childGapStyle && 'gap-6', rowJustify)
+      : 'space-y-6'
 
   // Cover-image background — same pattern as SectionFrame. Renders
   // an absolutely-positioned <img object-cover> behind the column's
@@ -262,6 +409,26 @@ export function ColumnFrame({
   const overlay = parsed.backgroundOverlay ?? 'none'
   const minHeight = parsed.minHeight ?? 'none'
   const hasCoverImage = bgImage !== undefined && bgSrc !== null
+
+  // CARD TREATMENT — a column with a SOLID background (a hex colour or a
+  // gradient, but not a cover photo) reads as a card: round its corners and
+  // give it interior padding so the content doesn't touch the edges. This
+  // is the native primitive for "feature card" rows (heading + body on a
+  // subtle surface) without forcing an icon (lx_icon_box). Padding is only
+  // the default when the operator hasn't set explicit per-side padding, so
+  // it never fights an intentional value.
+  const colBgColor = (parsed as { backgroundColor?: string }).backgroundColor
+  const hasSolidBg = !hasCoverImage && (!!colBgColor || !!parsed.backgroundGradient)
+  const hasExplicitPadding =
+    parsed.paddingTop !== undefined ||
+    parsed.paddingBottom !== undefined ||
+    parsed.paddingLeft !== undefined ||
+    parsed.paddingRight !== undefined
+  const cardClasses = hasSolidBg
+    ? clsx('rounded-2xl', !hasExplicitPadding && 'p-8 sm:p-10')
+    : undefined
+  // Per-block custom CSS (E19) — scoped to `.cms-r-{columnId}`.
+  const columnCss = buildScopedCss(columnId, parsed.customCss, parsed.customCssHover)
 
   // Whole-card link. Rendered as a stretched-link OVERLAY anchor (see
   // `.cms-card-link` in globals.css + the ColumnMeta.cardLink comment),
@@ -286,7 +453,7 @@ export function ColumnFrame({
     <div
       data-column-id={exposeId ? columnId : undefined}
       id={htmlId}
-      style={style}
+      style={childGapStyle ? { ...style, ...childGapStyle } : style}
       className={clsx(
         // Block-flow stacking instead of `flex flex-col gap-6`. Widget
         // renderers wrap themselves in `<section class="max-w-4xl mx-auto">`
@@ -296,11 +463,16 @@ export function ColumnFrame({
         // widgets to ~120px. Block layout lets each widget fill the
         // column's width, with the widget's own max-w + mx-auto correctly
         // capping and centering. `space-y-6` reproduces the gap-6 visual
-        // gap via sibling margin-top.
-        'space-y-6',
+        // gap via sibling margin-top. In row mode (childLayout: 'row')
+        // this becomes a horizontal flex-wrap instead — see childFlow.
+        childFlow,
         // Cover-image columns need overflow-hidden so object-cover
         // crops cleanly + relative anchor for the absolute <img>.
         hasCoverImage && 'relative overflow-hidden rounded-2xl',
+        // Solid-bg column → card (rounded + interior padding).
+        cardClasses,
+        decorationHoverClass(parsed),
+        columnCss && `cms-r-${columnId}`,
         // Whole-card link: positions + isolates the stretched-link
         // overlay and enables the hover lift (see globals.css).
         hasCardLink && 'cms-card-link',
@@ -312,6 +484,7 @@ export function ColumnFrame({
         visibility,
       )}
     >
+      {columnCss && <style dangerouslySetInnerHTML={{ __html: columnCss }} />}
       {hasCoverImage && (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -352,6 +525,9 @@ export function ColumnFrame({
         </>
       )}
       {!hasCoverImage && children}
+      {parsed.motionEffect && parsed.motionEffect !== 'none' && (
+        <SectionMotion effect={parsed.motionEffect} intensity={parsed.motionIntensity} />
+      )}
       {cardLinkOverlay}
     </div>
   )

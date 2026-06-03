@@ -190,18 +190,24 @@ export const GET = withError(async (req) => {
   const url = new URL(req.url)
   const showArchived = url.searchParams.get('archived') === '1'
 
+  // LIMIT 1000 is a safety ceiling, not pagination: the admin grid fetches the
+  // full set to drag-reorder featured_order, so a tight cap would regress it —
+  // but an unbounded scan/payload (an MCP agent listing a pathological table)
+  // is bounded here. A portfolio never realistically reaches 1000 projects.
   const [rows] = (await db.execute(
     showArchived
       ? sql`
           SELECT id, slug, name, status, featured_order, published, deleted_at, updated_at
           FROM projects
           ORDER BY featured_order IS NULL, featured_order, name
+          LIMIT 1000
         `
       : sql`
           SELECT id, slug, name, status, featured_order, published, deleted_at, updated_at
           FROM projects
           WHERE deleted_at IS NULL
           ORDER BY featured_order IS NULL, featured_order, name
+          LIMIT 1000
         `,
   )) as unknown as [ProjectListRow[]]
 

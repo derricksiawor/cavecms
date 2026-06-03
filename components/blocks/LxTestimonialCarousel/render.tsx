@@ -7,6 +7,7 @@ import { useEmblaLuxury, CarouselArrows, CarouselDots } from '../_shared/embla'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury testimonial carousel — Elementor's Testimonial Carousel as a
 // single centered pull-quote per slide (Fraunces italic), with an
@@ -27,10 +28,12 @@ export function LxTestimonialCarousel({
   data,
   media,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_testimonial_carousel'>
   media: RenderContext['media']
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const { emblaRef, selectedIndex, scrollSnaps, scrollTo, scrollPrev, scrollNext } =
     useEmblaLuxury({
@@ -39,7 +42,7 @@ export function LxTestimonialCarousel({
       intervalMs: data.intervalMs,
     })
 
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const quoteClass = isToken ? TONE_QUOTE[tone] : undefined
   const attrClass = isToken ? TONE_ATTR[tone] : undefined
@@ -100,7 +103,7 @@ export function LxTestimonialCarousel({
         </div>
       </div>
       {data.showArrows && data.items.length > 1 && (
-        <CarouselArrows onPrev={scrollPrev} onNext={scrollNext} tone={data.tone} />
+        <CarouselArrows onPrev={scrollPrev} onNext={scrollNext} tone={tone} />
       )}
       {data.showDots && (
         <CarouselDots count={scrollSnaps.length} selected={selectedIndex} onDot={scrollTo} />

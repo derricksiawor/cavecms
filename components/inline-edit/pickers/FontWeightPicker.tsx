@@ -59,9 +59,15 @@ export function FontWeightPickerField({
     if (value && allowed && !allowed.includes(value)) onChange(undefined)
   }, [value, allowed, onChange])
 
-  const weights = Object.entries(FONT_WEIGHT_TOKENS) as Array<
-    [FontWeightToken, (typeof FONT_WEIGHT_TOKENS)[FontWeightToken]]
-  >
+  // thin/light exist at the data layer (MCP/API brand-matching) but are kept
+  // OUT of the operator weight picker per the house "no light weights in the
+  // UI" preference — an operator shouldn't be able to build a too-light body.
+  const UI_HIDDEN_WEIGHTS = new Set<FontWeightToken>(['thin', 'light'])
+  const weights = (
+    Object.entries(FONT_WEIGHT_TOKENS) as Array<
+      [FontWeightToken, (typeof FONT_WEIGHT_TOKENS)[FontWeightToken]]
+    >
+  ).filter(([token]) => !UI_HIDDEN_WEIGHTS.has(token))
 
   return (
     <div className="space-y-1.5">

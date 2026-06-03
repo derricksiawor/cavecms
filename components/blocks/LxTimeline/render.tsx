@@ -4,6 +4,7 @@ import { MediaImg } from '../MediaImg'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Timeline ("even better than Elementor") — a vertical sequence of dated
 // events on a champagne rail with nodes. Server component.
@@ -15,15 +16,18 @@ export function LxTimeline({
   data,
   media,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_timeline'>
   media: RenderContext['media']
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const isToken = isColorToken(data.tone)
-  const titleClass = isToken ? TONE_TITLE[data.tone] : undefined
-  const bodyClass = isToken ? TONE_BODY[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const titleClass = isToken ? TONE_TITLE[tone] : undefined
+  const bodyClass = isToken ? TONE_BODY[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
 
   const composed = (
     <ol className={clsx('relative mx-auto w-full max-w-2xl', outerClass)}>
