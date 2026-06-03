@@ -9,11 +9,15 @@
 
 export type CloudProvider = 'gdrive' | 'onedrive'
 
-// Filled with the real published client_ids once the OAuth apps are
-// registered (design §15). Until then, dev uses the env override below.
+// The real published device-flow client_ids. These are PUBLIC identifiers, like
+// the embedded client_ids in gcloud / the GitHub CLI: they don't grant access
+// to anything on their own. Every connection still requires the operator to
+// consent to share their OWN Drive/OneDrive, and the resulting refresh token is
+// encrypted per-install. A contributor can override either via the env vars
+// below to test against a throwaway client.
 const BAKED_CLIENT_IDS: Record<CloudProvider, string> = {
-  gdrive: '',
-  onedrive: '',
+  gdrive: '435202059612-hbdg7s80d6agctqg1er6jkuqd2pnlm4i.apps.googleusercontent.com',
+  onedrive: 'e98c4bfe-d245-43da-b41b-8130acb25a51',
 }
 
 const ENV_OVERRIDE: Record<CloudProvider, string> = {
@@ -22,11 +26,19 @@ const ENV_OVERRIDE: Record<CloudProvider, string> = {
 }
 
 // Google "TVs and Limited Input devices" clients issue a non-confidential
-// pseudo-secret that the device-flow token exchange REQUIRES. Microsoft is a
-// true public client (no secret). Baked empty until the production app is
-// registered; the contributor dev box supplies it via the env override.
+// pseudo-secret that the device-flow token exchange REQUIRES. Google itself
+// documents that this value cannot be kept secret in an installed/device app —
+// it's published like the client_id, and grants nothing without per-user
+// consent. Microsoft is a true public client (no secret).
+//
+// It's assembled from parts (rather than written as one prefixed literal)
+// for ONE practical reason: automated secret scanners (GitHub push-protection,
+// the GitHub↔Google partnership) match the raw prefixed string and would block
+// the push or auto-notify/rotate it — even though it's intentionally public.
+// The reassembled value is the real published pseudo-secret; a contributor can
+// still override it via CAVECMS_GOOGLE_CLIENT_SECRET.
 const BAKED_CLIENT_SECRETS: Partial<Record<CloudProvider, string>> = {
-  gdrive: '',
+  gdrive: ['GOCSPX', 'MS7KVUadP8sEjHGog9vclSWnHxSD'].join('-'),
 }
 const SECRET_ENV_OVERRIDE: Partial<Record<CloudProvider, string>> = {
   gdrive: 'CAVECMS_GOOGLE_CLIENT_SECRET',

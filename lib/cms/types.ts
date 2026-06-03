@@ -20,6 +20,17 @@ export interface PageRawRow {
   seo_description: string | null
   og_image_id: number | null
   hero_image_id: number | null
+  // Per-entity SEO columns (migration 0032). Booleans surface as 0|1
+  // from raw SQL; seo_meta is the raw JSON string (MariaDB JSON ≡
+  // LONGTEXT — parse with parseSeoMeta).
+  focus_keyphrase: string | null
+  robots_noindex: number
+  robots_nofollow: number
+  canonical_url: string | null
+  cornerstone: number
+  seo_score: number | null
+  readability_score: number | null
+  seo_meta: unknown
   preview_epoch: number
   version: number
   updated_by: number | null

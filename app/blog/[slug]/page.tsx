@@ -6,6 +6,9 @@ import { blogPostingLd } from '@/lib/seo/jsonLd'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
+import { extraSchemaForEntity } from '@/lib/seo/schema/forPage'
+import { getSetting } from '@/lib/cms/getSettings'
+import { parseSeoMeta, schemaDefaultsFromSetting } from '@/lib/seo/seoMeta'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +17,8 @@ type Params = Promise<{ slug: string }>
 export async function generateMetadata({ params }: { params: Params }) {
   const { slug } = await params
   const [rows] = (await db.execute(sql`
-    SELECT title, excerpt, seo_title, seo_description
+    SELECT title, excerpt, seo_title, seo_description,
+           robots_noindex, robots_nofollow, canonical_url, seo_meta
     FROM posts
     WHERE slug = ${slug} AND published = TRUE AND deleted_at IS NULL
   `)) as unknown as [
@@ -23,14 +27,28 @@ export async function generateMetadata({ params }: { params: Params }) {
       excerpt: string | null
       seo_title: string | null
       seo_description: string | null
+      robots_noindex: number | null
+      robots_nofollow: number | null
+      canonical_url: string | null
+      seo_meta: unknown
     }>,
   ]
   const r = rows[0]
+  const meta = parseSeoMeta(r?.seo_meta)
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? r?.excerpt ?? null,
     fallbackTitle: r?.title ?? 'Post',
     canonicalPath: `/blog/${slug}`,
+    contentType: 'post',
+    templateVars: { title: r?.title ?? undefined, excerpt: r?.excerpt ?? undefined },
+    noindex: !!r?.robots_noindex,
+    nofollow: !!r?.robots_nofollow,
+    canonicalOverride: r?.canonical_url,
+    ogTitle: meta.ogTitle,
+    ogDescription: meta.ogDescription,
+    twitterTitle: meta.twitterTitle,
+    twitterDescription: meta.twitterDescription,
   })
 }
 
@@ -43,9 +61,12 @@ interface PostDetailRow {
   // mysql2 may return TIMESTAMP as Date OR ISO string depending on
   // driver config (`dateStrings`). Accept both and convert at use.
   published_at: Date | string | null
+  updated_at: Date | string | null
   hero_image_id: number | null
   author_name: string | null
   hero_variants: string | { lg?: string } | null
+  seo_description: string | null
+  seo_meta: unknown
 }
 
 // NOTE: do NOT wrap the body of this function in try/catch. Next.js
@@ -57,8 +78,9 @@ export default async function BlogPost({ params }: { params: Params }) {
 
   const [rows] = (await db.execute(sql`
     SELECT p.id, p.slug, p.title, p.excerpt, p.body_md, p.published_at,
-           p.hero_image_id, u.name AS author_name,
-           m.variants AS hero_variants
+           p.updated_at, p.hero_image_id, u.name AS author_name,
+           m.variants AS hero_variants,
+           p.seo_description, p.seo_meta
     FROM posts p
     LEFT JOIN users u ON u.id = p.author_id
     LEFT JOIN media m ON m.id = p.hero_image_id AND m.deleted_at IS NULL
@@ -110,6 +132,41 @@ export default async function BlogPost({ params }: { params: Params }) {
     siteOrigin,
   })
 
+  // Per-page structured data — ADDITIONS-ONLY on top of the legacy
+  // blogPostingLd PRIMARY emitted above. This emits ONLY (a) the
+  // BreadcrumbList (Home › Blog › Post) and (b) the explicit per-page
+  // override shape when the operator flips schemaType (e.g. to FAQPage /
+  // NewsArticle). It NEVER emits a default Article — that would duplicate
+  // the BlogPosting primary the legacy builder already produced for this
+  // URL. The post URL drives both the entity url + breadcrumb trail; when
+  // siteOrigin is unset we use the relative path (consistent with the
+  // legacy builders omitting absolute URLs).
+  const meta = parseSeoMeta(post.seo_meta)
+  const seoSchema = await getSetting('seo_schema')
+  const postUrl = siteOrigin
+    ? `${siteOrigin}/blog/${post.slug}`
+    : `/blog/${post.slug}`
+  const breadcrumbs = [
+    { name: 'Home', url: siteOrigin ? `${siteOrigin}/` : '/' },
+    { name: 'Blog', url: siteOrigin ? `${siteOrigin}/blog` : '/blog' },
+    { name: post.title, url: postUrl },
+  ]
+  const schemaGraph = extraSchemaForEntity({
+    entity: {
+      kind: 'post',
+      title: post.title,
+      description: post.seo_description ?? post.excerpt ?? undefined,
+      url: postUrl,
+      datePublished: publishedAt,
+      dateModified: post.updated_at ? new Date(post.updated_at) : undefined,
+      author: post.author_name ?? undefined,
+      image: heroVariants?.lg ?? undefined,
+    },
+    override: { schemaType: meta.schemaType, schemaData: meta.schemaData },
+    defaults: schemaDefaultsFromSetting(seoSchema),
+    breadcrumbs,
+  })
+
   return (
     <main className="py-12 max-w-3xl mx-auto px-4">
       <script
@@ -119,6 +176,17 @@ export default async function BlogPost({ params }: { params: Params }) {
         // never break out of the script tag.
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
       />
+      {/* Per-page schema ADDITIONS + breadcrumbs. extraSchemaForEntity
+          returns an already-filtered ordered array (no nulls, no default
+          primary); each object is emitted via safeJsonForScript like the
+          legacy BlogPosting primary above. */}
+      {schemaGraph.map((node, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: safeJsonForScript(node) }}
+        />
+      ))}
       <h1 className="text-3xl font-semibold tracking-tight">{post.title}</h1>
       <time
         className="text-xs uppercase tracking-wide text-copper-600 mt-2 inline-block"

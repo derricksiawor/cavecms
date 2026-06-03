@@ -8,6 +8,7 @@ import { typographyCss } from '@/lib/typography/fontCss'
 import { organizationLd } from '@/lib/seo/jsonLd'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { getSetting } from '@/lib/cms/getSettings'
+import { buildVerificationMetas } from '@/lib/seo/webmaster/verificationMeta'
 import { resolveMedia } from '@/lib/cms/resolveMedia'
 import { brandVarsCss } from '@/lib/cms/themeCss'
 import { SiteFooter } from '@/components/SiteFooter'
@@ -71,6 +72,35 @@ export async function generateMetadata(): Promise<Metadata> {
     // Settings/media read hiccup — keep the bundled-favicon default
     // already set on `base` rather than break document <head> rendering.
   }
+
+  // Search-engine ownership verification (Settings → SEO → Webmaster).
+  // Routed through Next's native Metadata.verification so Next owns the
+  // <meta> emission, attribute quoting, and escaping — no manual tag
+  // injection. google/yandex have first-class fields; the rest go into
+  // `verification.other` keyed by their exact meta-name. Only non-empty
+  // codes are emitted (buildVerificationMetas skips blanks). Isolated in
+  // its own try so a webmaster read hiccup can't strip the favicon set
+  // above (and vice-versa).
+  try {
+    const webmaster = await getSetting('seo_webmaster')
+    const metas = buildVerificationMetas(webmaster)
+    if (metas.length > 0) {
+      const other: Record<string, string> = {}
+      const verification: NonNullable<Metadata['verification']> = {}
+      for (const { name, content } of metas) {
+        if (name === 'google-site-verification') verification.google = content
+        else if (name === 'yandex-verification') verification.yandex = content
+        else other[name] = content
+      }
+      if (Object.keys(other).length > 0) verification.other = other
+      base.verification = verification
+    }
+  } catch {
+    // Webmaster-settings read hiccup — omit verification tags rather
+    // than break <head> rendering. The default is an empty object, so
+    // the common (no codes configured) path emits nothing anyway.
+  }
+
   return base
 }
 

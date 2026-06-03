@@ -13,7 +13,10 @@ import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
+import { notifyIndexNow } from '@/lib/seo/indexnow/notify'
 import { tagsForPostSave, tagsForPostDelete } from '@/lib/cache/tags'
+import { SeoEditorFields } from '@/lib/cms/seoEditorFields'
+import { buildSeoSetParts } from '@/lib/cms/seoEditorPersist'
 
 import { SLUG_RE, SLUG_MAX } from '@/lib/cms/slug'
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/
@@ -41,6 +44,7 @@ const EditorSchema = z
     seoTitle: z.string().max(180).nullable().optional(),
     seoDescription: z.string().max(320).nullable().optional(),
     ogImageId: z.number().int().positive().nullable().optional(),
+    ...SeoEditorFields,
     version: z.number().int().nonnegative(),
   })
   .strict()
@@ -63,6 +67,13 @@ type EditorBody = z.infer<typeof EditorSchema>
 type AdminBody = z.infer<typeof AdminSchema>
 type Body = AdminBody
 
+// The SEO editor fields (migration 0032) are persisted via the shared
+// buildSeoSetParts helper, NOT the generic EDITOR_COLS loop (booleans →
+// TINYINT, seoMeta → JSON need bespoke serialization). Subtract their
+// keys from the generic-loop field type so the exhaustiveness guards
+// below don't demand them in EDITOR_COLS / EDITOR_ROW_COL.
+type SeoEditorKey = keyof typeof SeoEditorFields
+
 interface PostRow {
   id: number
   slug: string
@@ -75,14 +86,25 @@ interface PostRow {
   og_image_id: number | null
   published: number
   version: number
+  // SEO columns (migration 0032). Booleans come back as 0|1 from raw
+  // SQL; seo_meta is the raw JSON string (MariaDB JSON ≡ LONGTEXT).
+  focus_keyphrase: string | null
+  robots_noindex: number
+  robots_nofollow: number
+  canonical_url: string | null
+  cornerstone: number
+  seo_score: number | null
+  readability_score: number | null
+  seo_meta: unknown
 }
 
 type RouteCtx = { params: Promise<{ id: string }> }
 
 // `version` is the optimistic-lock token, not a column the editor
-// can rewrite directly. Excluded so the buildSets loop's `field`
-// type stays narrow and no runtime guard is needed.
-type EditorFieldNoVersion = Exclude<keyof EditorBody, 'version'>
+// can rewrite directly. SEO fields are handled by buildSeoSetParts.
+// Both excluded so the buildSets loop's `field` type stays narrow and
+// no runtime guard is needed.
+type EditorFieldNoVersion = Exclude<keyof EditorBody, 'version' | SeoEditorKey>
 
 const EDITOR_COLS: ReadonlyArray<readonly [EditorFieldNoVersion, string]> = [
   ['title', 'title'],
@@ -164,6 +186,14 @@ function buildSets(
     parts.push(sql`${sql.raw(col)} = ${v}`)
     ;(applied as Record<string, unknown>)[field] = v
   }
+
+  // SEO editor fields (migration 0032) — booleans → TINYINT, seoMeta →
+  // JSON string, scores → INT|null. Editor-writable like seo_title, so
+  // they apply for both roles (outside the admin-only branch).
+  const seo = buildSeoSetParts(body, row)
+  parts.push(...seo.parts)
+  Object.assign(applied as Record<string, unknown>, seo.applied)
+
   if (role === 'admin') {
     for (const [field, col] of ADMIN_ONLY_COLS) {
       const v = body[field]
@@ -294,6 +324,9 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const [rows] = (await tx.execute(sql`
         SELECT id, slug, title, excerpt, body_md, hero_image_id,
                seo_title, seo_description, og_image_id,
+               focus_keyphrase, robots_noindex, robots_nofollow,
+               canonical_url, cornerstone, seo_score, readability_score,
+               seo_meta,
                published, version
         FROM posts
         WHERE id = ${id} AND deleted_at IS NULL
@@ -391,6 +424,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           newVersion: row.version,
           queueRowId: null as number | null,
           tags: [] as string[],
+          indexNowPath: null as string | null,
         }
       }
 
@@ -462,7 +496,19 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             seo_title: row.seo_title,
             seo_description: row.seo_description,
             og_image_id: row.og_image_id,
+            focus_keyphrase: row.focus_keyphrase,
+            robots_noindex: row.robots_noindex === 1,
+            robots_nofollow: row.robots_nofollow === 1,
+            canonical_url: row.canonical_url,
+            cornerstone: row.cornerstone === 1,
+            seo_score: row.seo_score,
+            readability_score: row.readability_score,
             published: row.published === 1,
+            // seo_meta intentionally omitted from the audit `from` — the
+            // raw JSON blob can be large + the `to` map already records
+            // the new value; forensic triage reads the prior value from
+            // the previous audit row's `to`. Mirrors the body_md
+            // fingerprint rationale above (bound audit payload).
             // published_at not selected by the FOR UPDATE query;
             // forensic triage that needs the prior timestamp pulls
             // it from a previous audit row's `to` block or from
@@ -495,7 +541,33 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       }).tags
 
       const queueRowId = await enqueueRevalidate(tx, tagSet)
-      return { newVersion: row.version + 1, queueRowId, tags: tagSet }
+
+      // IndexNow: announce the post's public URL when this save leaves it
+      // LIVE — on a publish transition, or any content edit while already
+      // published (we're past the no-op short-circuit here, so a real
+      // change happened). Never on draft saves (post not published) or on
+      // unpublish (publishedTransition === 'off'). The path is built from
+      // the post-rename slug; computed here, pinged after the TX commits.
+      const finalPublished =
+        publishedTransition === 'on' ||
+        (row.published === 1 && publishedTransition !== 'off')
+      // Never ping a noindexed post — IndexNow announcing a URL the
+      // sitemap excludes (excludeNoindex) is a contradictory crawl
+      // signal. Final noindex state = applied delta when this PATCH
+      // changed it, else the loaded row value.
+      const finalNoindex =
+        applied.robotsNoindex !== undefined
+          ? applied.robotsNoindex
+          : row.robots_noindex === 1
+      return {
+        newVersion: row.version + 1,
+        queueRowId,
+        tags: tagSet,
+        indexNowPath:
+          finalPublished && !finalNoindex
+            ? `/blog/${newSlug}`
+            : (null as string | null),
+      }
     })
 
     if (txResult.queueRowId !== null) {
@@ -504,6 +576,12 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       queueMicrotask(() => {
         void drainRevalidate(rowId, tags)
       })
+    }
+
+    // Fire-and-forget IndexNow ping — never awaited, never throws, never
+    // blocks the save response (the standalone server is long-lived).
+    if (txResult.indexNowPath !== null) {
+      void notifyIndexNow([txResult.indexNowPath])
     }
 
     return new Response(

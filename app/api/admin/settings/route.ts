@@ -24,6 +24,7 @@ import {
 import { clearZohoAccessTokenCache } from '@/lib/crm/zoho'
 import {
   AAD_AI_CONFIG_API_KEY,
+  AAD_SEO_INDEXING_API,
   encryptSecret,
   last4 as last4Of,
 } from '@/lib/security/secretCipher'
@@ -70,6 +71,10 @@ const CREDENTIAL_FIELDS_BY_KEY: Record<string, string[]> = {
   // shouldn't get the envelope to take offline. The UI shows
   // `apiKeyLast4` ("ends in 1234") to confirm a key is on file.
   ai_config: ['apiKey'],
+  // Encrypted Google Indexing API service-account JSON envelope. Redact
+  // even the ciphertext on GET — the operator confirms it's on file via
+  // the cleartext `serviceAccountEmail` display field.
+  seo_indexing_api: ['serviceAccountJson'],
 }
 
 // Operational keys whose SECRETS are NESTED (an array of targets, or sub-objects)
@@ -121,7 +126,14 @@ function redactSettingsRow(row: SettingRow): SettingRow {
   }
   if (fields) {
     for (const f of fields) {
-      if (typeof parsed[f] === 'string' && (parsed[f] as string).length > 0) {
+      // Blank ANY present credential, not just string-shaped ones. The
+      // CRM/SMTP/reCAPTCHA secrets are strings, but ai_config.apiKey and
+      // seo_indexing_api.serviceAccountJson are object-shaped EncryptedSecret
+      // ENVELOPES — a `typeof === 'string'` check let their ciphertext cross
+      // the wire on GET. The UI confirms "on file" via the cleartext
+      // apiKeyLast4 / serviceAccountEmail fields, never the envelope itself.
+      const v = parsed[f]
+      if (v != null && v !== '') {
         parsed[f] = ''
       }
     }
@@ -161,6 +173,22 @@ const TOKEN_WRITABLE_SETTINGS = new Set<string>([
   // per-recipient tokens / hijack the canonical host. siteUrl changes stay
   // interactive-admin + reauth only.
   'mobile_cta',
+  // ─── SEO suite (programmatic SEO is a first-class use case) ───
+  // An AI agent / automation can manage title templates, social/schema
+  // defaults, sitemap config, verification codes, IndexNow, the analysis
+  // engine config, robots additions, and the global index policy via the
+  // API. These are content/meta-class, same trust level as default_seo.
+  // seo_indexing_api is DELIBERATELY excluded — it holds the AES-GCM
+  // service-account secret and is reauth-gated like ai_config.
+  'seo_titles',
+  'seo_indexing',
+  'seo_social',
+  'seo_schema',
+  'seo_sitemap',
+  'seo_webmaster',
+  'seo_indexnow',
+  'seo_robots',
+  'seo_analysis',
   // `satisfies SettingsKey[]` makes the build FAIL if any literal stops being
   // a real registry key (rename/typo), so the cap can't silently drift open.
 ] satisfies SettingsKey[])
@@ -271,6 +299,9 @@ export const PATCH = withError(async (req: Request) => {
     // the AI key (would let an attacker proxy all AI traffic through
     // their own key + harvest block content + prompts).
     'ai_config',
+    // Google Indexing API service-account JSON — credential-class (a
+    // GCP key granting indexing-API write on the operator's property).
+    'seo_indexing_api',
   ])
   if (body.key.startsWith('security_') || REAUTH_KEYS.has(body.key)) {
     await requireFreshReauth(ctx.jti)
@@ -438,6 +469,89 @@ export const PATCH = withError(async (req: Request) => {
       // Anything else (object, number, boolean) is operator error
       // or a malformed client. Fail closed.
       throw new HttpError(400, 'invalid_api_key_value')
+    }
+    valueForValidation = merged
+  }
+
+  // ─── seo_indexing_api: encrypt-on-write credential merge ───
+  // Same discipline as ai_config. The form sends serviceAccountJson as a
+  // PLAINTEXT JSON string (the operator pasted the GCP key file); the
+  // schema expects an EncryptedSecret envelope. We encrypt here.
+  //   '' or undefined → preserve stored envelope + serviceAccountEmail.
+  //   null            → clear stored (operator "Remove key").
+  //   "<json>"        → encrypt with AAD; derive serviceAccountEmail from
+  //                     the JSON's client_email (display-only confirmation).
+  if (body.key === 'seo_indexing_api') {
+    const [existingRows] = (await db.execute(sql`
+      SELECT value FROM settings WHERE \`key\` = 'seo_indexing_api'
+    `)) as unknown as [Array<{ value: unknown }>]
+    const existing: Record<string, unknown> =
+      existingRows[0]
+        ? typeof existingRows[0].value === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(existingRows[0].value as string) as Record<string, unknown>
+              } catch {
+                return {}
+              }
+            })()
+          : ((existingRows[0].value as Record<string, unknown>) ?? {})
+        : {}
+    const incoming =
+      body.value && typeof body.value === 'object' && !Array.isArray(body.value)
+        ? (body.value as Record<string, unknown>)
+        : {}
+    const merged: Record<string, unknown> = { ...incoming }
+    // serviceAccountEmail is SERVER-DERIVED from the pasted JSON's
+    // client_email — NEVER trust the client's value (same discipline as
+    // ai_config stripping client-supplied apiKeyLast4). Drop it up front;
+    // the branches below re-establish it from the stored row or the
+    // freshly-parsed key, so a hand-edited email can't desync from the
+    // credential actually on file.
+    delete merged.serviceAccountEmail
+    const preserveExisting = () => {
+      if (existing.serviceAccountJson !== undefined) {
+        merged.serviceAccountJson = existing.serviceAccountJson
+      } else {
+        delete merged.serviceAccountJson
+      }
+      if (typeof existing.serviceAccountEmail === 'string') {
+        merged.serviceAccountEmail = existing.serviceAccountEmail
+      }
+    }
+    const incomingKey = merged.serviceAccountJson
+    if (incomingKey === undefined || incomingKey === '') {
+      preserveExisting()
+    } else if (incomingKey === null) {
+      // Explicit clear — serviceAccountEmail already stripped above.
+      delete merged.serviceAccountJson
+    } else if (typeof incomingKey === 'string') {
+      const trimmed = incomingKey.trim()
+      if (trimmed.length === 0) {
+        preserveExisting()
+      } else {
+        // Normalise before encrypting: if the paste is valid JSON, minify
+        // it (reformatted/pretty-printed JSON can't then inflate the
+        // ciphertext past the envelope cap) and derive client_email for
+        // the display-only confirmation field. If it isn't valid JSON,
+        // encrypt the raw text — the operator learns it's wrong when they
+        // test indexing, not via a cryptic 400 here.
+        let plaintext = trimmed
+        try {
+          const sa = JSON.parse(trimmed) as Record<string, unknown>
+          if (sa && typeof sa === 'object' && !Array.isArray(sa)) {
+            plaintext = JSON.stringify(sa)
+            if (typeof sa.client_email === 'string' && sa.client_email.length <= 200) {
+              merged.serviceAccountEmail = sa.client_email
+            }
+          }
+        } catch {
+          /* not JSON — encrypt raw, leave serviceAccountEmail unset */
+        }
+        merged.serviceAccountJson = encryptSecret(plaintext, AAD_SEO_INDEXING_API)
+      }
+    } else {
+      throw new HttpError(400, 'invalid_service_account_value')
     }
     valueForValidation = merged
   }
@@ -690,11 +804,22 @@ export const PATCH = withError(async (req: Request) => {
     }
   }
 
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: {
-      'content-type': 'application/json',
-      'cache-control': 'private, no-store',
+  // Return the AUTHORITATIVE post-write version so the client stays in
+  // sync even on a no-op save. When `changed` is true the stored version
+  // was bumped to body.version + 1; when false (value unchanged) the
+  // optimistic lock above guarantees the stored version still equals
+  // body.version, so we echo it back. Purely additive — existing settings
+  // clients that ignore the field keep their current behavior; SEO clients
+  // adopt this value instead of blindly incrementing, which previously
+  // drifted client/server versions on no-op saves and 409'd the next save.
+  return new Response(
+    JSON.stringify({ ok: true, version: changed ? body.version + 1 : body.version }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'private, no-store',
+      },
     },
-  })
+  )
 })

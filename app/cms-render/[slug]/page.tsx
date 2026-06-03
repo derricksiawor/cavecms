@@ -28,6 +28,9 @@ import { mintPublicPreCsrfForBlocks, pageHasVisibleH1 } from '@/app/_shared/cmsP
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { jsonLdForPage } from '@/lib/seo/page-jsonld'
+import { extraSchemaForEntity } from '@/lib/seo/schema/forPage'
+import { getSetting } from '@/lib/cms/getSettings'
+import { parseSeoMeta, schemaDefaultsFromSetting } from '@/lib/seo/seoMeta'
 import { verifyPreviewToken } from '@/lib/cms/verifyPreviewToken'
 import { SLUG_MAX, SLUG_MIN, SLUG_RE } from '@/lib/cms/slug'
 import type { PageRawRow } from '@/lib/cms/types'
@@ -69,7 +72,8 @@ export async function generateMetadata({ params }: { params: Params }) {
   // when a probe hits an unpublished slug. The render path 404s on
   // unpublished; metadata likewise falls through to the site default.
   const [rows] = (await db.execute(sql`
-    SELECT title, seo_title, seo_description, url_path
+    SELECT title, seo_title, seo_description, url_path,
+           robots_noindex, robots_nofollow, canonical_url, seo_meta
     FROM pages
     WHERE slug = ${slug}
       AND deleted_at IS NULL
@@ -82,9 +86,14 @@ export async function generateMetadata({ params }: { params: Params }) {
       seo_title: string | null
       seo_description: string | null
       url_path: string | null
+      robots_noindex: number | null
+      robots_nofollow: number | null
+      canonical_url: string | null
+      seo_meta: unknown
     }>,
   ]
   const r = rows[0]
+  const meta = parseSeoMeta(r?.seo_meta)
   // Fallback chain (audit V10 fix): seo_title → "{title} — Best World
   // Properties" → "CaveCMS". The audit found every CMS
   // page sharing the same <title>CaveCMS</title> when
@@ -102,6 +111,15 @@ export async function generateMetadata({ params }: { params: Params }) {
     // Canonical reads url_path (the STORED generated column) — never
     // hand-built `/' + slug` per the spec §2.8 url discipline.
     canonicalPath: r?.url_path ?? `/${slug}`,
+    contentType: 'page',
+    templateVars: { title: r?.title ?? undefined },
+    noindex: !!r?.robots_noindex,
+    nofollow: !!r?.robots_nofollow,
+    canonicalOverride: r?.canonical_url,
+    ogTitle: meta.ogTitle,
+    ogDescription: meta.ogDescription,
+    twitterTitle: meta.twitterTitle,
+    twitterDescription: meta.twitterDescription,
   })
 }
 
@@ -288,7 +306,37 @@ async function renderResolvedPage(
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
 
   const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
-  const ld = jsonLdForPage({ page, baseUrl: (await getSiteOrigin()) ?? '' })
+  const siteOrigin = (await getSiteOrigin()) ?? ''
+  const ld = jsonLdForPage({ page, baseUrl: siteOrigin })
+
+  // Per-page structured data — ADDITIONS-ONLY on top of the legacy
+  // jsonLdForPage PRIMARY emitted above (registry WebPage/AboutPage/…
+  // shape). This emits ONLY the BreadcrumbList (Home › Page) and the
+  // explicit per-page override shape when the operator sets schemaType —
+  // never a default WebPage, so the registry primary isn't duplicated.
+  // `page` came from `SELECT *`, so seo_meta + url_path are present at
+  // runtime even though PageRawRow doesn't type seo_meta. The page URL
+  // reads url_path (canonical STORED column), falling back to `/${slug}`
+  // only if it ever surfaces NULL.
+  const pageMeta = parseSeoMeta((page as PageRawRow & { seo_meta?: unknown }).seo_meta)
+  const pageSeoSchema = await getSetting('seo_schema')
+  const pagePath = page.url_path ?? `/${page.slug}`
+  const pageAbsUrl = siteOrigin ? `${siteOrigin}${pagePath}` : pagePath
+  const pageBreadcrumbs = [
+    { name: 'Home', url: siteOrigin ? `${siteOrigin}/` : '/' },
+    { name: page.title, url: pageAbsUrl },
+  ]
+  const pageSchemaGraph = extraSchemaForEntity({
+    entity: {
+      kind: 'page',
+      title: page.title,
+      description: page.seo_description ?? undefined,
+      url: pageAbsUrl,
+    },
+    override: { schemaType: pageMeta.schemaType, schemaData: pageMeta.schemaData },
+    defaults: schemaDefaultsFromSetting(pageSeoSchema),
+    breadcrumbs: pageBreadcrumbs,
+  })
 
   return (
     <EditableMain
@@ -319,6 +367,16 @@ async function renderResolvedPage(
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
       />
+      {/* Per-page schema ADDITIONS + breadcrumbs (Home › Page) from
+          seo_meta. extraSchemaForEntity returns an already-filtered ordered
+          array (no default primary — the jsonLdForPage primary is above). */}
+      {pageSchemaGraph.map((node, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: safeJsonForScript(node) }}
+        />
+      ))}
     </EditableMain>
   )
 }

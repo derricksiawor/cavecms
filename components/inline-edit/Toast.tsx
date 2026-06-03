@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 
 // Minimal toast system. Replaces the inline "Saved." text scattered
@@ -89,6 +90,18 @@ const DISMISSED_CAP = 200
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([])
+  // Portal target. The toast stack is `position: fixed`, but a `fixed`
+  // descendant is positioned relative to the nearest ancestor that
+  // establishes a containing block (any `transform` / `filter` /
+  // `backdrop-filter`). The admin bar (AdminBarShell) uses
+  // `backdrop-blur`, and it wraps its own <ToastProvider> — so without a
+  // portal the stack resolved against the TOP bar and slid in at the top
+  // of the screen, hidden behind it. Portalling to <body> anchors the
+  // stack to the real viewport. Mount-gated so SSR emits nothing here
+  // (no document) and hydration stays clean — the stack is empty on
+  // first paint anyway.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   // Track timers per-toast so dismiss-by-id clears the pending auto-dismiss
   // and a stale timer can't unmount the wrong toast.
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
@@ -249,21 +262,30 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={api}>
       {children}
-      <div
-        aria-live="polite"
-        aria-atomic="false"
-        className="pointer-events-none fixed bottom-6 right-6 z-[100] flex flex-col gap-3 max-w-[calc(100vw-3rem)]"
-      >
-        {items.map((t) => (
-          <ToastCard
-            key={t.id}
-            item={t}
-            onDismiss={() => dismiss(t.id)}
-            onPause={() => pauseDismiss(t.id)}
-            onResume={() => resumeDismiss(t.id, !!t.action, t.durationMs)}
-          />
-        ))}
-      </div>
+      {mounted &&
+        createPortal(
+          <div
+            aria-live="polite"
+            aria-atomic="false"
+            // Anchored bottom-right but lifted to `bottom-24` (6rem) so the
+            // stack always clears the EditModePill ("Stop editing this
+            // page"), which sits at `bottom-6 right-6` (~44px tall). On
+            // pages without the pill the stack just floats a touch higher —
+            // still bottom-right, still edge-aware via max-w.
+            className="pointer-events-none fixed bottom-24 right-6 z-[100] flex flex-col gap-3 max-w-[calc(100vw-3rem)]"
+          >
+            {items.map((t) => (
+              <ToastCard
+                key={t.id}
+                item={t}
+                onDismiss={() => dismiss(t.id)}
+                onPause={() => pauseDismiss(t.id)}
+                onResume={() => resumeDismiss(t.id, !!t.action, t.durationMs)}
+              />
+            ))}
+          </div>,
+          document.body,
+        )}
     </Ctx.Provider>
   )
 }

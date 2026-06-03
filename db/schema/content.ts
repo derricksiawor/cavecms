@@ -49,6 +49,17 @@ export const pages = mysqlTable(
     seoTitle: varchar('seo_title', { length: 180 }),
     seoDescription: varchar('seo_description', { length: 320 }),
     ogImageId: int('og_image_id'),
+    // ─── SEO suite (migration 0034) ───
+    // Real columns for the bulk-queried signals; seo_meta JSON for the
+    // render-only override bag. See db/migrations/0034_seo_fields.sql.
+    focusKeyphrase: varchar('focus_keyphrase', { length: 160 }),
+    robotsNoindex: boolean('robots_noindex').notNull().default(false),
+    robotsNofollow: boolean('robots_nofollow').notNull().default(false),
+    canonicalUrl: varchar('canonical_url', { length: 500 }),
+    cornerstone: boolean('cornerstone').notNull().default(false),
+    seoScore: int('seo_score'),
+    readabilityScore: int('readability_score'),
+    seoMeta: json('seo_meta'),
     heroImageId: int('hero_image_id'),
     // Preview-token revocation token (mirrors projects.preview_epoch).
     // Bumped on every unpublish / slug rename / soft-delete / is_home
@@ -97,6 +108,10 @@ export const pages = mysqlTable(
     publishedIdx: index('idx_pages_published').on(t.published, t.publishedAt),
     // Admin trash: WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC.
     deletedUpdatedIdx: index('idx_pages_deleted_updated').on(t.deletedAt, t.updatedAt),
+    // Sitemap: WHERE published = 1 [AND noindex...] ORDER BY is_home DESC,
+    // updated_at DESC. Serves the home-first/recency ordering from the
+    // index instead of a filesort over the whole published set.
+    sitemapIdx: index('idx_pages_sitemap').on(t.published, t.isHome, t.updatedAt),
   }),
 )
 

@@ -500,6 +500,15 @@ export interface HydratedProjectRow {
   published_at: Date | null
   seo_title: string | null
   seo_description: string | null
+  // SEO suite per-entity fields (migration 0032). Optional because some
+  // raw reads of this shape predate them; the project route's
+  // getProjectRow SELECT now projects them for the metadata + per-page
+  // schema wiring. TINYINT(1) surfaces as 0|1; seo_meta is JSON-as-string
+  // from MariaDB (parse via lib/seo/seoMeta.ts:parseSeoMeta).
+  robots_noindex?: number | null
+  robots_nofollow?: number | null
+  canonical_url?: string | null
+  seo_meta?: unknown
   version: number
 }
 

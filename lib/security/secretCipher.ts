@@ -52,6 +52,10 @@ export interface EncryptedSecret {
 // Drift between encrypt and decrypt sites would cause silent operator
 // lockout from a perfectly valid stored key.
 export const AAD_AI_CONFIG_API_KEY = 'ai_config:apiKey' as const
+// Google Indexing API service-account JSON (SEO suite). Same binding
+// discipline as the AI key — ciphertext is bound to this exact field so
+// it can't be copy-pasted into another secret-decrypting setting.
+export const AAD_SEO_INDEXING_API = 'seo_indexing_api:serviceAccountJson' as const
 // Cloud backup destinations. Each encrypted-at-rest secret binds to its
 // storage location via a dedicated AAD so a refresh token can't be replayed
 // into a different field. The connect (encrypt) + poll/disconnect/engine
@@ -98,7 +102,12 @@ export const encryptedSecretSchema = z
     alg: z.literal('aes-256-gcm'),
     iv: z.string().length(16),   // 12 bytes base64 = exactly 16 chars
     tag: z.string().length(24),  // 16 bytes base64 = exactly 24 chars
-    ct: z.string().max(4096),    // generous cap for API-key-sized plaintexts
+    // Defensive cap only (the decrypt path re-verifies byte lengths and
+    // the GCM tag). 8192 base64 chars ≈ 6KB plaintext — comfortably
+    // fits both API keys AND a full GCP service-account JSON (incl.
+    // RSA-4096 keys, ~3.8KB → ~5.1KB base64). The SEO suite stores SA
+    // JSON in this envelope (seo_indexing_api.serviceAccountJson).
+    ct: z.string().max(8192),
   })
   .strict()
 

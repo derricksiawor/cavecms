@@ -15,6 +15,8 @@ export async function generateMetadata() {
     fallbackTitle: 'News — CaveCMS',
     fallbackDescription:
       'Updates, milestones and stories from CaveCMS.',
+    contentType: 'blogIndex',
+    templateVars: { title: 'News' },
   })
 }
 

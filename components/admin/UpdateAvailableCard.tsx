@@ -5,6 +5,7 @@ import { Download, ShieldAlert, Sparkles } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { csrfFetch } from '@/lib/client/csrf'
 import { humaniseRelease, type HumanRelease } from '@/lib/updates/humaniseRelease'
+import { ReleaseNotesMarkdown } from '@/components/admin/ReleaseNotesMarkdown'
 
 // Dashboard hero card — renders when an update is available. Lives at
 // the top of /admin so an operator who never visits Settings → Updates
@@ -67,7 +68,6 @@ export function UpdateAvailableCard({
 
   if (hide || !release) return null
 
-  const previewBody = release.body.split('\n').slice(0, 4).join('\n')
   const security = release.isSecurity
 
   return (
@@ -128,10 +128,16 @@ export function UpdateAvailableCard({
           Review and update
         </Link>
       </header>
-      {previewBody.trim() && (
-        <p className="relative mt-5 max-h-32 overflow-hidden whitespace-pre-line break-words text-sm leading-relaxed text-near-black">
-          {previewBody}
-        </p>
+      {release.body.trim() && (
+        <div className="relative mt-5 max-h-32 overflow-hidden">
+          <ReleaseNotesMarkdown>{release.body}</ReleaseNotesMarkdown>
+          {/* Fade the clipped tail — the full notes live on the updates page. */}
+          <div
+            className={`pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent ${
+              security ? 'from-red-50' : 'from-cream-50'
+            }`}
+          />
+        </div>
       )}
     </motion.article>
   )

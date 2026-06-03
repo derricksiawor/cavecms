@@ -46,7 +46,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/unit/**/*.test.{ts,tsx}'],
+    include: ['tests/unit/**/*.test.{ts,tsx}', 'lib/**/*.test.{ts,tsx}'],
     pool: 'forks',
     setupFiles: ['./tests/setup.ts'],
   },
