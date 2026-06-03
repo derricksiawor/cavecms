@@ -591,10 +591,10 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
   {
     type: 'lx_posts',
     label: 'Posts',
-    description: 'Auto-grid of your latest published blog posts.',
+    description: 'A grid, cards, list, magazine or carousel of blog posts — from any source.',
     icon: Newspaper,
-    aliases: ['blog posts', 'recent posts', 'latest articles', 'loop grid'],
-    keywords: ['blog', 'news', 'articles', 'journal', 'feed'],
+    aliases: ['blog posts', 'recent posts', 'latest articles', 'loop grid', 'post carousel', 'related posts'],
+    keywords: ['blog', 'news', 'articles', 'journal', 'feed', 'carousel', 'magazine', 'related', 'grid'],
   },
   {
     type: 'lx_embed',

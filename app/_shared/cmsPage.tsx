@@ -181,7 +181,7 @@ export async function renderCmsPage(
   // public route, so we don't duplicate it here. Per-entity LD
   // (Residence, BlogPosting) lives on the route that knows about
   // the entity.
-  const { blocks, media, projects, posts, postsLoop } = hydrated
+  const { blocks, media, projects, posts, postsLoop, postCardsByBlock } = hydrated
 
   const csrf = await mintPublicPreCsrfForBlocks(blocks, slug)
 
@@ -211,6 +211,7 @@ export async function renderCmsPage(
       projects={projects}
       posts={posts}
       postsLoop={postsLoop}
+      postCardsByBlock={postCardsByBlock}
       session={session}
       editable={editable}
       showEmptyState={false}
@@ -273,7 +274,7 @@ export async function renderCmsBlogArchive(
     loopFilter,
   })
   if (!hydrated) return null
-  const { blocks, media, projects, posts, postsLoop } = hydrated
+  const { blocks, media, projects, posts, postsLoop, postCardsByBlock } = hydrated
 
   // An undefined postsLoop means the operator's `/blog` system page has no
   // loop-mode lx_posts block, so the archive can't list any posts (it still
@@ -354,6 +355,7 @@ export async function renderCmsBlogArchive(
         projects={projects}
         posts={posts}
         postsLoop={postsLoop}
+        postCardsByBlock={postCardsByBlock}
         csrf={csrf}
       />
     </main>

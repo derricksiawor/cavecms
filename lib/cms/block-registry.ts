@@ -1226,35 +1226,153 @@ export const blockSchemas = {
   //     renders inside the client editor canvas, where an async server
   //     component would throw — same constraint as lx_code).
   //
-  // No tone (auto-contrasts the ancestor surface). `category`/`tag` are
-  // slug strings validated against the canonical SLUG_RE so a malformed
-  // value can never reach the parameterised taxonomy join.
-  lx_posts: z.object({
-    mode: z.enum(['recent', 'loop']).default('recent'),
-    heading: safeText(TEXT_MAX.title).optional(),
-    // 'recent' mode cap. Loop mode ignores this in favour of postsPerPage
-    // / blog_settings; kept for back-compat + the recent-mode teaser.
-    limit: z.number().int().min(1).max(12).default(3),
-    // Loop-mode taxonomy filter — a single category OR tag slug. Optional;
-    // on a plain /blog both are unset. Validated to the canonical slug
-    // shape (lowercase, no leading/trailing/double hyphen) so the value is
-    // a safe parameter for the post_categories / post_tags join.
-    category: z.string().min(1).max(120).regex(SLUG_RE, 'invalid_category_slug').optional(),
-    tag: z.string().min(1).max(120).regex(SLUG_RE, 'invalid_tag_slug').optional(),
-    // Loop-mode page size override. When omitted the renderer uses
-    // blog_settings.postsPerPage (1..50). Bounded here to the same ceiling
-    // so a hand-edited payload can't request an unbounded page.
-    postsPerPage: z.number().int().min(1).max(50).optional(),
-    layout: z.enum(['grid', 'list']).default('grid'),
-    columns: z.union([z.literal(2), z.literal(3)]).default(3),
-    showExcerpt: z.boolean().default(true),
-    showDate: z.boolean().default(true),
-    // Loop-mode reading-time pill. Computed at hydrate (≈200 wpm over the
-    // post body text, bounded). Off by default so 'recent' teasers stay
-    // visually identical to today.
-    showReadingTime: z.boolean().default(false),
-    animation: z.enum(['none', 'fade-in', 'slide-up']).default('fade-in'),
-  }),
+  // ════════════════════════════════════════════════════════════════
+  // Posts widget (Elementor Pro: Posts / Loop Grid + JetBlog parity).
+  // The premium, opinionated subset: 5 layout TEMPLATES × 7 query
+  // SOURCES × 3 pagination modes, every choice theme-token-styled and
+  // bounded at scale (#0.251). No tone field — every template auto-
+  // contrasts the ancestor section surface.
+  //
+  // ── BACK-COMPAT (#8) ──────────────────────────────────────────────
+  // The legacy schema had `mode: recent|loop` + `layout: grid|list`.
+  // Every stored instance (home-page teaser = mode:'recent'; /blog
+  // index = mode:'loop') must keep working with ZERO migration. A
+  // top-level `z.preprocess` rewrites a legacy payload into the new
+  // `source`/`template` vocabulary BEFORE the object schema parses:
+  //   • mode:'recent'  → source:'latest'   (self-contained newest list)
+  //   • mode:'loop'    → source:'current'  (inherit the archive query)
+  //   • layout:'grid'  → template:'grid'
+  //   • layout:'list'  → template:'list'
+  // The legacy `mode`/`layout`/`limit` fields STAY in the schema (so an
+  // un-migrated payload still validates + the editor can still read the
+  // old controls), but the renderer + hydrate read the NEW fields, which
+  // the preprocess always populates. A payload that already carries
+  // `source`/`template` (new instances) passes through untouched — the
+  // preprocess only fills a new field when it is absent.
+  //
+  // `category`/`tag`/`author`/`manualPostIds` are the source operands;
+  // each is validated so a malformed value can never reach the
+  // parameterised query. Slugs use the canonical SLUG_RE; ids are
+  // positive ints; manual ids are capped (graceful "N / max").
+  // ════════════════════════════════════════════════════════════════
+  lx_posts: z.preprocess(
+    (raw) => {
+      // Defensive: only object payloads get the back-compat fill. A
+      // non-object falls straight through to Zod's "expected object"
+      // error (same as before).
+      if (raw === null || typeof raw !== 'object') return raw
+      const o = { ...(raw as Record<string, unknown>) }
+      // source ← mode (only when source is absent — new payloads win).
+      if (o.source === undefined && o.mode !== undefined) {
+        o.source = o.mode === 'loop' ? 'current' : 'latest'
+      }
+      // template ← layout (grid|list both map 1:1; magazine/cards/carousel
+      // never existed in the legacy `layout`, so no collision).
+      if (o.template === undefined && o.layout !== undefined) {
+        o.template = o.layout === 'list' ? 'list' : 'grid'
+      }
+      return o
+    },
+    z.object({
+      // ── Template (the 5 layouts) ────────────────────────────────────
+      template: z
+        .enum(['grid', 'cards', 'list', 'magazine', 'carousel'])
+        .default('grid'),
+
+      // ── Source (the "add to any page" query model) ──────────────────
+      source: z
+        .enum(['current', 'latest', 'category', 'tag', 'author', 'manual', 'related'])
+        .default('latest'),
+
+      heading: safeText(TEXT_MAX.title).optional(),
+
+      // ── Source operands ─────────────────────────────────────────────
+      // category / tag — a single term slug (source:'category'|'tag').
+      // Canonical slug shape → safe parameter for the taxonomy join.
+      category: z.string().min(1).max(120).regex(SLUG_RE, 'invalid_category_slug').optional(),
+      tag: z.string().min(1).max(120).regex(SLUG_RE, 'invalid_tag_slug').optional(),
+      // authorId — source:'author'. Positive int (users.id).
+      authorId: z.number().int().positive().optional(),
+      // manualPostIds — source:'manual'. Operator hand-picks posts; capped
+      // at 24 (graceful "N / 24" in the picker). Positive int post ids,
+      // de-dup + cap enforced here so a hand-edited payload can't blow the
+      // IN(...) list.
+      manualPostIds: z
+        .array(z.number().int().positive())
+        .max(24)
+        .optional(),
+
+      // ── Count / ordering ────────────────────────────────────────────
+      // limit — the self-contained-source card count (latest/category/tag/
+      // author/manual/related). Bounded 1..24. (Renamed-in-spirit from the
+      // legacy `limit` which was 1..12 recent-only; widened to 24 to match
+      // manual's cap. Legacy payloads carry limit≤12 → still valid.)
+      limit: z.number().int().min(1).max(24).default(6),
+      // postsPerPage — source:'current' (paginated archive) page size
+      // override. When omitted the loop uses blog_settings.postsPerPage.
+      postsPerPage: z.number().int().min(1).max(50).optional(),
+      // offset — skip the first N matches (so a magazine lead + a grid below
+      // don't duplicate). Bounded; applies to the self-contained sources.
+      offset: z.number().int().min(0).max(100).default(0),
+      orderBy: z
+        .enum(['date', 'modified', 'title', 'reading-time', 'random'])
+        .default('date'),
+      orderDir: z.enum(['desc', 'asc']).default('desc'),
+      // excludeCurrent — on a post-detail placement, drop the post being
+      // viewed from the list (always true for source:'related'; opt-in
+      // elsewhere). No-op on pages that aren't a post.
+      excludeCurrent: z.boolean().default(false),
+
+      // ── Columns (widened 1..4; back-compat: legacy 2|3 still valid) ──
+      columns: z
+        .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
+        .default(3),
+
+      // ── Card content toggles (default from blog_settings at hydrate) ─
+      showImage: z.boolean().default(true),
+      showExcerpt: z.boolean().default(true),
+      showDate: z.boolean().default(true),
+      showAuthor: z.boolean().default(false),
+      showCategory: z.boolean().default(true),
+      showReadingTime: z.boolean().default(false),
+      showReadMore: z.boolean().default(false),
+      readMoreLabel: safeText(40).optional(),
+      // titleClamp / excerptClamp — line-clamp ceilings so a long title or
+      // excerpt can't break the card grid. 0 = no clamp.
+      titleClamp: z.number().int().min(0).max(4).default(2),
+      excerptClamp: z.number().int().min(0).max(6).default(3),
+
+      // ── Styling PRESETS (theme-token-bound, never raw hex/px) ───────
+      cardStyle: z.enum(['flat', 'soft', 'elevated']).default('soft'),
+      spacing: z.enum(['tight', 'comfortable', 'airy']).default('comfortable'),
+      imageAspect: z.enum(['16:9', '4:3', '3:2', '1:1', '4:5']).default('16:9'),
+
+      // ── Pagination ──────────────────────────────────────────────────
+      // none (homepage strips), numbered (crawlable ?page=, SEO-friendly),
+      // load-more (AJAX-append next page). Only the 'current' source +
+      // grid/cards/list templates honour pagination; magazine/carousel
+      // ignore it (always 'none' effective). Default resolved at hydrate
+      // per template when left at 'auto'.
+      pagination: z.enum(['auto', 'none', 'numbered', 'load-more']).default('auto'),
+
+      // ── Carousel-only knobs (ignored by the other templates) ────────
+      autoplay: z.boolean().default(false),
+      intervalMs: z.number().int().min(2000).max(12000).default(5000),
+      carouselLoop: z.boolean().default(true),
+      showArrows: z.boolean().default(true),
+      showDots: z.boolean().default(true),
+
+      // ── Legacy fields kept for back-compat (renderer ignores them) ──
+      // The preprocess maps these into source/template; they remain in the
+      // schema so an un-migrated stored payload still validates and the
+      // pre-existing seeds (db/seeds/systemPageBlocks.ts, blockSeeds.ts)
+      // keep parsing. New instances never set them.
+      mode: z.enum(['recent', 'loop']).optional(),
+      layout: z.enum(['grid', 'list']).optional(),
+
+      animation: z.enum(['none', 'fade-in', 'slide-up']).default('fade-in'),
+    }),
+  ),
 
   // ── Security wave ───────────────────────────────────────────────
 

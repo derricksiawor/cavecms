@@ -2,7 +2,19 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
-import { LayoutGrid, Rows3, Columns2, Columns3 } from 'lucide-react'
+import {
+  LayoutGrid,
+  Rows3,
+  Square,
+  SquareStack,
+  Newspaper,
+  Columns2,
+  Columns3,
+  Minus,
+  ListOrdered,
+  MousePointerClick,
+  RectangleHorizontal,
+} from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/inline-edit/Switch'
@@ -26,10 +38,20 @@ import { structuralEqual } from '@/lib/structuralEqual'
 interface BlogSettings {
   postsPerPage: number
   layout: 'grid' | 'list'
-  columns: 2 | 3
+  template: 'grid' | 'cards' | 'list' | 'magazine'
+  columns: 1 | 2 | 3 | 4
   showExcerpt: boolean
   showDate: boolean
+  showAuthor: boolean
+  showCategory: boolean
   showReadingTime: boolean
+  showReadMore: boolean
+  readMoreLabel: string
+  excerptClamp: number
+  cardStyle: 'flat' | 'soft' | 'elevated'
+  spacing: 'tight' | 'comfortable' | 'airy'
+  imageAspect: '16:9' | '4:3' | '3:2' | '1:1' | '4:5'
+  pagination: 'numbered' | 'load-more' | 'none'
   feedItemCount: number
   relatedPostsCount: number
 }
@@ -46,6 +68,7 @@ interface Props {
 // operator can't even produce an out-of-range draft.
 const BOUNDS = {
   postsPerPage: { min: 1, max: 50 },
+  excerptClamp: { min: 0, max: 6 },
   feedItemCount: { min: 1, max: 50 },
   relatedPostsCount: { min: 0, max: 6 },
 } as const
@@ -72,7 +95,7 @@ export function BlogSettingsForm({ initial }: Props) {
   // Clamp + integer-coerce a count field on every change so a draft can never
   // hold a NaN / fractional / out-of-range value that the server would reject.
   const setCount = useCallback(
-    (key: 'postsPerPage' | 'feedItemCount' | 'relatedPostsCount', raw: string) => {
+    (key: 'postsPerPage' | 'excerptClamp' | 'feedItemCount' | 'relatedPostsCount', raw: string) => {
       const { min, max } = BOUNDS[key]
       const n = Number.parseInt(raw, 10)
       // Empty / non-numeric input → snap to min so the field never goes blank
@@ -148,37 +171,107 @@ export function BlogSettingsForm({ initial }: Props) {
             />
           </Field>
 
-          {/* Layout — segmented tiles that render what they produce (#0.59) */}
+          {/* Layout (template) — visual tiles that render what they produce (#0.59).
+              `layout` is kept in sync (grid/list) for back-compat. */}
           <Field
-            label="Layout"
-            help="Grid lays posts out in cards; List stacks them full-width with the image beside the text."
+            label="Default layout"
+            help="The default arrangement for your blog index and archives. Each post widget you place can override this."
           >
             <SegmentedControl
-              value={form.layout}
-              onChange={(v) => set('layout', v)}
+              value={form.template}
+              onChange={(v) => {
+                set('template', v)
+                // Keep the legacy grid|list switch in lockstep so an old
+                // consumer reading `layout` still resolves sensibly.
+                set('layout', v === 'list' ? 'list' : 'grid')
+              }}
               options={[
                 { value: 'grid' as const, label: 'Grid', icon: <LayoutGrid className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'cards' as const, label: 'Cards', icon: <SquareStack className="h-5 w-5" strokeWidth={1.75} /> },
                 { value: 'list' as const, label: 'List', icon: <Rows3 className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'magazine' as const, label: 'Magazine', icon: <Newspaper className="h-5 w-5" strokeWidth={1.75} /> },
               ]}
             />
           </Field>
 
-          {/* Columns — only meaningful for grid; disabled (dimmed) on list */}
+          {/* Columns — 1–4; not meaningful for list (dimmed) */}
           <Field
             label="Columns"
             help={
-              form.layout === 'list'
-                ? 'Columns apply to the Grid layout. Switch to Grid to choose.'
+              form.template === 'list'
+                ? 'Columns apply to grid, cards and magazine. List is always one column.'
                 : 'How many cards sit side by side on a wide screen.'
             }
           >
             <SegmentedControl
               value={form.columns}
               onChange={(v) => set('columns', v)}
-              disabled={form.layout === 'list'}
+              disabled={form.template === 'list'}
               options={[
+                { value: 1 as const, label: 'One', icon: <Minus className="h-5 w-5" strokeWidth={1.75} /> },
                 { value: 2 as const, label: 'Two', icon: <Columns2 className="h-5 w-5" strokeWidth={1.75} /> },
                 { value: 3 as const, label: 'Three', icon: <Columns3 className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 4 as const, label: 'Four', icon: <LayoutGrid className="h-5 w-5" strokeWidth={1.75} /> },
+              ]}
+            />
+          </Field>
+
+          {/* Card style preset */}
+          <Field
+            label="Card style"
+            help="Flat shows just the image and text; Soft adds a subtle panel; Elevated adds a soft shadow that lifts on hover."
+          >
+            <SegmentedControl
+              value={form.cardStyle}
+              onChange={(v) => set('cardStyle', v)}
+              options={[
+                { value: 'flat' as const, label: 'Flat', icon: <Square className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'soft' as const, label: 'Soft', icon: <SquareStack className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'elevated' as const, label: 'Elevated', icon: <RectangleHorizontal className="h-5 w-5" strokeWidth={1.75} /> },
+              ]}
+            />
+          </Field>
+
+          {/* Spacing preset */}
+          <Field label="Spacing" help="How much breathing room sits between cards.">
+            <SegmentedControl
+              value={form.spacing}
+              onChange={(v) => set('spacing', v)}
+              options={[
+                { value: 'tight' as const, label: 'Tight', icon: <Rows3 className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'comfortable' as const, label: 'Comfortable', icon: <LayoutGrid className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'airy' as const, label: 'Airy', icon: <SquareStack className="h-5 w-5" strokeWidth={1.75} /> },
+              ]}
+            />
+          </Field>
+
+          {/* Image aspect ratio */}
+          <Field label="Image shape" help="The aspect ratio of each post’s featured image.">
+            <SegmentedControl
+              value={form.imageAspect}
+              onChange={(v) => set('imageAspect', v)}
+              options={[
+                { value: '16:9' as const, label: '16:9', icon: <RectangleHorizontal className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: '4:3' as const, label: '4:3', icon: <RectangleHorizontal className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: '3:2' as const, label: '3:2', icon: <RectangleHorizontal className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: '1:1' as const, label: '1:1', icon: <Square className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: '4:5' as const, label: '4:5', icon: <Square className="h-5 w-5" strokeWidth={1.75} /> },
+              ]}
+            />
+          </Field>
+
+          {/* Pagination */}
+          <Field
+            label="Pagination"
+            help="How readers move through the archive. Numbered is best for SEO; Load more appends in place; None hides paging."
+          >
+            <SegmentedControl
+              value={form.pagination}
+              onChange={(v) => set('pagination', v)}
+              options={[
+                { value: 'numbered' as const, label: 'Numbered', icon: <ListOrdered className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'load-more' as const, label: 'Load more', icon: <MousePointerClick className="h-5 w-5" strokeWidth={1.75} /> },
+                { value: 'none' as const, label: 'None', icon: <Minus className="h-5 w-5" strokeWidth={1.75} /> },
               ]}
             />
           </Field>
@@ -199,12 +292,53 @@ export function BlogSettingsForm({ initial }: Props) {
                 help="The day the post was published."
               />
               <Switch
+                checked={form.showAuthor}
+                onChange={(v) => set('showAuthor', v)}
+                label="Show author"
+                help="The writer’s name with a monogram."
+              />
+              <Switch
+                checked={form.showCategory}
+                onChange={(v) => set('showCategory', v)}
+                label="Show category"
+                help="Category links on each card."
+              />
+              <Switch
                 checked={form.showReadingTime}
                 onChange={(v) => set('showReadingTime', v)}
                 label="Show reading time"
                 help="An estimated “X min read”, based on the post’s length."
               />
+              <Switch
+                checked={form.showReadMore}
+                onChange={(v) => set('showReadMore', v)}
+                label="Show “read more” link"
+                help="A read-more affordance under the excerpt."
+              />
             </div>
+          </Field>
+
+          {/* Read-more label + excerpt line limit */}
+          <Field label="Read-more label" help="The text of the read-more link (when shown).">
+            <input
+              type="text"
+              value={form.readMoreLabel}
+              maxLength={40}
+              onChange={(e) => set('readMoreLabel', e.target.value)}
+              placeholder="Read more"
+              className="h-11 w-full max-w-xs rounded-xl border border-warm-stone/25 bg-cream-50 px-4 text-sm font-medium text-near-black placeholder:text-warm-stone/50 focus:border-copper-400 focus:outline-none focus:ring-2 focus:ring-copper-300/40"
+            />
+          </Field>
+
+          <Field label="Excerpt line limit" help="Maximum lines of excerpt before it’s trimmed. 0 = no limit.">
+            <NumberStepper
+              value={form.excerptClamp}
+              min={BOUNDS.excerptClamp.min}
+              max={BOUNDS.excerptClamp.max}
+              onChange={(n) => set('excerptClamp', n)}
+              onType={(s) => setCount('excerptClamp', s)}
+              unit="lines"
+            />
           </Field>
 
           {/* Feed item count */}

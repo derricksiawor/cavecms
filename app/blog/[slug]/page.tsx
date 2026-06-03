@@ -367,9 +367,11 @@ export default async function BlogPost({
     const bodyPage = pageRows[0]
 
     if (bodyPage) {
-      const hydrated = await hydratePage(bodyPage.id)
+      // currentPostId lets a posts widget IN the body resolve source:'related'
+      // + excludeCurrent relative to THIS post.
+      const hydrated = await hydratePage(bodyPage.id, { currentPostId: post.id })
       if (hydrated) {
-        const { blocks, media, projects, posts, postsLoop } = hydrated
+        const { blocks, media, projects, posts, postsLoop, postCardsByBlock } = hydrated
         // Mint the public pre-CSRF for the body blocks EXACTLY as
         // cms-render does — covers a form-bearing block dropped into the
         // body. Identical helper, identical contract.
@@ -385,6 +387,7 @@ export default async function BlogPost({
               projects={projects}
               posts={posts}
               postsLoop={postsLoop}
+              postCardsByBlock={postCardsByBlock}
               session={session}
               editable={editable}
               // A form block in the body suppresses live submission while
@@ -434,10 +437,10 @@ export default async function BlogPost({
       LIMIT 1
     `)) as unknown as [Array<{ id: number }>]
     const hydrated = bodyPageRows[0]
-      ? await hydratePage(bodyPageRows[0].id)
+      ? await hydratePage(bodyPageRows[0].id, { currentPostId: post.id })
       : null
     if (hydrated) {
-      const { blocks, media, projects, posts } = hydrated
+      const { blocks, media, projects, posts, postsLoop, postCardsByBlock } = hydrated
       // Mint a public preCsrf nonce in case the body tree contains a
       // form-bearing block (e.g. a contact_form an operator dropped into
       // a post) — harmless + unused when none is present.
@@ -448,6 +451,8 @@ export default async function BlogPost({
           media={media}
           projects={projects}
           posts={posts}
+          postsLoop={postsLoop}
+          postCardsByBlock={postCardsByBlock}
           csrf={csrf}
         />
       )

@@ -48,6 +48,10 @@ interface Props {
    *  renderBlock dispatch so a loop-mode lx_posts block renders its
    *  paginated page. Undefined on pages without a loop block. */
   postsLoop?: HydratedPostsLoop
+  /** Posts-widget card lists keyed by block id (self-contained sources) —
+   *  see RenderContext.postCardsByBlock. renderBlock resolves each block's
+   *  own slice by id. Undefined on pages without a self-contained widget. */
+  postCardsByBlock?: RenderContext['postCardsByBlock']
   /** Public preCsrf nonce minted in `renderCmsPage()`. Threaded through
    *  every renderBlock dispatch via RenderContext so blocks that need
    *  it (today: `contact_form`) can submit without an extra round trip.
@@ -112,6 +116,7 @@ export function BlockTreeRenderer({
   projects,
   posts,
   postsLoop,
+  postCardsByBlock,
   csrf,
   project,
   preview,
@@ -151,7 +156,7 @@ export function BlockTreeRenderer({
                             {renderBlock(
                               w.blockType,
                               w.data,
-                              { media, projects, posts, postsLoop, csrf, project, preview },
+                              { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview },
                               undefined,
                               m.outerClass,
                               w.id,
@@ -178,7 +183,7 @@ export function BlockTreeRenderer({
                 {renderBlock(
                   entry.node.blockType,
                   entry.node.data,
-                  { media, projects, posts, postsLoop, csrf, project, preview },
+                  { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview },
                   undefined,
                   m.outerClass,
                   entry.node.id,

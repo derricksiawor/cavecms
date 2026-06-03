@@ -21,6 +21,8 @@ import {
   FontFamilyPickerField,
   FontWeightPickerField,
   IconPickerField,
+  TemplatePickerField,
+  PostPickerField,
 } from './pickers'
 import type { ColorToken, FontWeightToken } from '@/lib/cms/designTokens'
 
@@ -110,6 +112,27 @@ export type FieldShape =
   // Lucide icon name (kebab-case). Trigger button opens a full Lucide
   // library modal with search, recents, and a curated "common" set.
   | { kind: 'icon'; key: string; label: string; help?: string }
+  // Visual layout-template picker (#0.59) — a grid of clickable tiles, each
+  // rendering a MINI VISUAL of the layout it produces (NOT a <select> of
+  // names). Used by the Posts widget's `template` field. `options` carry the
+  // value + a short label; the mini-diagram is drawn from the value.
+  | {
+      kind: 'template_picker'
+      key: string
+      label: string
+      options: Array<{ value: string; label: string }>
+      help?: string
+    }
+  // Visual post multi-select (#2 manual source) — a searchable grid of post
+  // tiles (title + date), each toggling selection. Persists an ordered id
+  // array; caps at `maxItems` with a graceful "N / max" counter.
+  | {
+      kind: 'post_picker'
+      key: string
+      label: string
+      maxItems: number
+      help?: string
+    }
   // Per-device hide flags (mobile / tablet / desktop). Renders as a
   // fieldset with three checkboxes. The persisted value is a sparse
   // `{ hideOnMobile?, hideOnTablet?, hideOnDesktop? }` object — axes
@@ -508,6 +531,28 @@ function FieldRenderer({
           label={shape.label}
           help={shape.help}
           value={typeof value === 'string' ? value : undefined}
+          onChange={onChange}
+        />
+      )
+
+    case 'template_picker':
+      return (
+        <TemplatePickerField
+          label={shape.label}
+          help={shape.help}
+          options={shape.options}
+          value={typeof value === 'string' ? value : undefined}
+          onChange={onChange}
+        />
+      )
+
+    case 'post_picker':
+      return (
+        <PostPickerField
+          label={shape.label}
+          help={shape.help}
+          maxItems={shape.maxItems}
+          value={Array.isArray(value) ? (value as number[]) : []}
           onChange={onChange}
         />
       )
@@ -2028,36 +2073,134 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
   ],
 
   lx_posts: [
+    // ── Layout (visual template picker, #0.59) ──────────────────────────
     {
-      kind: 'select', key: 'mode', label: 'Mode',
-      help: 'Recent shows your latest posts as a teaser. Loop is the full, paginated blog archive (used on the Blog page).',
+      kind: 'template_picker', key: 'template', label: 'Layout',
+      help: 'How the posts are arranged. Carousel swipes horizontally; magazine leads with one large story.',
       options: [
-        { value: 'recent', label: 'Recent posts (teaser)' },
-        { value: 'loop', label: 'Blog loop (paginated archive)' },
+        { value: 'grid', label: 'Grid' },
+        { value: 'cards', label: 'Cards' },
+        { value: 'list', label: 'List' },
+        { value: 'magazine', label: 'Magazine' },
+        { value: 'carousel', label: 'Carousel' },
+      ],
+    },
+    // ── Source (where the posts come from) ──────────────────────────────
+    {
+      kind: 'select', key: 'source', label: 'Show posts from',
+      help: 'Latest = newest posts. Current = inherit this page’s archive (the Blog page). Category/Tag/Author = filter by one term. Manual = hand-pick. Related = posts like the one being viewed (use on a post).',
+      options: [
+        { value: 'latest', label: 'Latest posts' },
+        { value: 'current', label: 'Current archive (Blog page)' },
+        { value: 'category', label: 'A category' },
+        { value: 'tag', label: 'A tag' },
+        { value: 'author', label: 'An author' },
+        { value: 'manual', label: 'Hand-picked posts' },
+        { value: 'related', label: 'Related to this post' },
       ],
     },
     { kind: 'string', key: 'heading', label: 'Heading (optional)', maxLength: TEXT_MAX.title, placeholder: 'From the journal' },
-    { kind: 'number', key: 'limit', label: 'Number of posts (Recent mode)', min: 1, max: 12, step: 1, help: 'How many posts the Recent teaser shows. Ignored in Loop mode.' },
-    { kind: 'number', key: 'postsPerPage', label: 'Posts per page (Loop mode)', min: 1, max: 50, step: 1, help: 'Loop mode page size. Leave blank to use the site-wide default from Settings → Blog.' },
-    { kind: 'string', key: 'category', label: 'Filter by category slug (Loop mode, optional)', maxLength: 120, placeholder: 'e.g. announcements' },
-    { kind: 'string', key: 'tag', label: 'Filter by tag slug (Loop mode, optional)', maxLength: 120, placeholder: 'e.g. release-notes' },
+
+    // ── Source operands (each applies to the matching source) ───────────
+    { kind: 'string', key: 'category', label: 'Category slug', maxLength: 120, placeholder: 'e.g. announcements', help: 'Used when “Show posts from” is A category.' },
+    { kind: 'string', key: 'tag', label: 'Tag slug', maxLength: 120, placeholder: 'e.g. release-notes', help: 'Used when “Show posts from” is A tag.' },
+    { kind: 'number', key: 'authorId', label: 'Author ID', min: 1, step: 1, help: 'Used when “Show posts from” is An author (the author’s user ID).' },
+    { kind: 'post_picker', key: 'manualPostIds', label: 'Hand-picked posts', maxItems: 24, help: 'Used when “Show posts from” is Hand-picked. Search and add posts; they show in the order you add them.' },
+
+    // ── Count + ordering ────────────────────────────────────────────────
+    { kind: 'number', key: 'limit', label: 'Number of posts', min: 1, max: 24, step: 1, help: 'How many posts to show (latest / category / tag / author / manual / related). The Current archive uses Posts per page instead.' },
+    { kind: 'number', key: 'postsPerPage', label: 'Posts per page (Current archive)', min: 1, max: 50, step: 1, help: 'Page size for the Current archive. Leave blank to use the site-wide default from Settings → Blog.' },
+    { kind: 'number', key: 'offset', label: 'Skip first N posts', min: 0, max: 100, step: 1, help: 'Skip the first N matches — e.g. so a magazine lead and a grid below it don’t repeat.' },
     {
-      kind: 'select', key: 'layout', label: 'Layout',
+      kind: 'select', key: 'orderBy', label: 'Order by',
       options: [
-        { value: 'grid', label: 'Grid' },
-        { value: 'list', label: 'List' },
+        { value: 'date', label: 'Date published' },
+        { value: 'modified', label: 'Last modified' },
+        { value: 'title', label: 'Title' },
+        { value: 'reading-time', label: 'Reading time' },
+        { value: 'random', label: 'Random' },
       ],
     },
+    {
+      kind: 'select', key: 'orderDir', label: 'Order direction',
+      options: [
+        { value: 'desc', label: 'Newest / Z→A first' },
+        { value: 'asc', label: 'Oldest / A→Z first' },
+      ],
+    },
+    { kind: 'boolean', key: 'excludeCurrent', label: 'Exclude the current post', help: 'On a post page, drop the post being viewed from the list.' },
+
+    // ── Columns (1–4) ───────────────────────────────────────────────────
     {
       kind: 'select', key: 'columns', label: 'Columns', valueAsNumber: true,
+      help: 'Cards use up to 3; List is always one column.',
       options: [
+        { value: '1', label: '1' },
         { value: '2', label: '2' },
         { value: '3', label: '3' },
+        { value: '4', label: '4' },
       ],
     },
+
+    // ── Card content toggles ─────────────────────────────────────────────
+    { kind: 'boolean', key: 'showImage', label: 'Show featured image' },
     { kind: 'boolean', key: 'showExcerpt', label: 'Show excerpt' },
     { kind: 'boolean', key: 'showDate', label: 'Show date' },
-    { kind: 'boolean', key: 'showReadingTime', label: 'Show reading time (Loop mode)' },
+    { kind: 'boolean', key: 'showAuthor', label: 'Show author' },
+    { kind: 'boolean', key: 'showCategory', label: 'Show category' },
+    { kind: 'boolean', key: 'showReadingTime', label: 'Show reading time' },
+    { kind: 'boolean', key: 'showReadMore', label: 'Show “read more” link' },
+    { kind: 'string', key: 'readMoreLabel', label: 'Read-more label', maxLength: 40, placeholder: 'Read more' },
+    { kind: 'number', key: 'titleClamp', label: 'Title line limit', min: 0, max: 4, step: 1, help: '0 = no limit.' },
+    { kind: 'number', key: 'excerptClamp', label: 'Excerpt line limit', min: 0, max: 6, step: 1, help: '0 = no limit.' },
+
+    // ── Style presets (theme-bound) ──────────────────────────────────────
+    {
+      kind: 'select', key: 'cardStyle', label: 'Card style',
+      options: [
+        { value: 'flat', label: 'Flat (no card)' },
+        { value: 'soft', label: 'Soft panel' },
+        { value: 'elevated', label: 'Elevated (shadow)' },
+      ],
+    },
+    {
+      kind: 'select', key: 'spacing', label: 'Spacing',
+      options: [
+        { value: 'tight', label: 'Tight' },
+        { value: 'comfortable', label: 'Comfortable' },
+        { value: 'airy', label: 'Airy' },
+      ],
+    },
+    {
+      kind: 'select', key: 'imageAspect', label: 'Image shape',
+      options: [
+        { value: '16:9', label: 'Widescreen 16:9' },
+        { value: '4:3', label: 'Classic 4:3' },
+        { value: '3:2', label: 'Photo 3:2' },
+        { value: '1:1', label: 'Square 1:1' },
+        { value: '4:5', label: 'Portrait 4:5' },
+      ],
+    },
+
+    // ── Pagination ───────────────────────────────────────────────────────
+    {
+      kind: 'select', key: 'pagination', label: 'Pagination (Current archive)',
+      help: 'How readers move through the Current archive. Numbered is best for SEO; Load more appends in place. Other sources don’t paginate.',
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'none', label: 'None' },
+        { value: 'numbered', label: 'Numbered pages' },
+        { value: 'load-more', label: 'Load more button' },
+      ],
+    },
+
+    // ── Carousel-only knobs ──────────────────────────────────────────────
+    { kind: 'boolean', key: 'autoplay', label: 'Carousel autoplay' },
+    { kind: 'number', key: 'intervalMs', label: 'Carousel autoplay speed (ms)', min: 2000, max: 12000, step: 500 },
+    { kind: 'boolean', key: 'carouselLoop', label: 'Carousel loops' },
+    { kind: 'boolean', key: 'showArrows', label: 'Carousel arrows' },
+    { kind: 'boolean', key: 'showDots', label: 'Carousel dots' },
+
     {
       kind: 'select', key: 'animation', label: 'Animation',
       options: [

@@ -123,6 +123,11 @@ interface Props {
   // page on the public surface and a page-1 preview in the editor canvas.
   // Undefined on pages without a loop block.
   postsLoop?: RenderContext['postsLoop']
+  // Posts-widget card lists keyed by block id (self-contained sources) —
+  // see RenderContext.postCardsByBlock. Threaded into both renderer branches
+  // so a posts widget renders its own slice on the public surface and in the
+  // editor canvas. Undefined on pages without a self-contained widget.
+  postCardsByBlock?: RenderContext['postCardsByBlock']
   session: AdminSession | null
   editable: boolean
   // Optional preview-mode marker — emits `data-preview="1"` on `<main>`
@@ -173,6 +178,7 @@ export async function EditableMain(p: Props) {
       projects={p.projects}
       posts={p.posts}
       postsLoop={p.postsLoop}
+      postCardsByBlock={p.postCardsByBlock}
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}
@@ -184,6 +190,7 @@ export async function EditableMain(p: Props) {
       projects={p.projects}
       posts={p.posts}
       postsLoop={p.postsLoop}
+      postCardsByBlock={p.postCardsByBlock}
       csrf={p.csrf}
       project={p.project}
       preview={p.preview}

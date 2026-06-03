@@ -59,6 +59,22 @@ import type { BlockData, BlockType } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { SectionMeta } from '@/lib/cms/blockMeta'
 
+/** One posts-widget card (structural mirror of hydrate's HydratedPostCard;
+ *  defined inline so this server-safe module doesn't pull the server-only
+ *  fetcher into a client bundle). Threaded via RenderContext.postCardsByBlock. */
+export interface HydratedPostCardCtx {
+  id: number
+  slug: string
+  title: string
+  excerpt: string | null
+  published_at: Date | string | null
+  hero_image_id: number | null
+  reading_minutes: number
+  categories: Array<{ slug: string; name: string; url: string }>
+  author?: { id: number; name: string | null } | null
+  url: string
+}
+
 export interface RenderContext {
   media: Map<number, { variants: Record<string, string> | null; alt_text: string; width: number | null; height: number | null }>
   projects: Map<number, { slug: string; name: string; tagline: string | null; hero_image_id: number | null }>
@@ -86,6 +102,11 @@ export interface RenderContext {
      *  the archive. Defaults to /blog when absent. */
     basePath?: string
   }
+  /** Posts-widget card lists keyed by the lx_posts BLOCK id — set when the
+   *  page tree has a SELF-CONTAINED posts widget (source latest/category/tag/
+   *  author/manual/related; see hydrate.ts postCardsByBlock). The lx_posts
+   *  renderer reads its OWN block's slice via blockId. Undefined elsewhere. */
+  postCardsByBlock?: Map<number, HydratedPostCardCtx[]>
   /** Public preCsrf nonce minted once per page render. Only set when
    *  the page tree contains a block that submits a public form (today:
    *  `contact_form`). Blocks that don't need it ignore the field; an
@@ -159,6 +180,10 @@ type BlockRendererArgs<D> = {
   /** Blog Loop slice — see RenderContext.postsLoop. Only the loop-mode
    *  lx_posts renderer consumes it. */
   postsLoop?: RenderContext['postsLoop']
+  /** THIS block's posts-widget card slice (self-contained sources). Resolved
+   *  from RenderContext.postCardsByBlock by blockId in renderBlock. Only the
+   *  lx_posts renderer consumes it. */
+  postCards?: HydratedPostCardCtx[]
   csrf?: RenderContext['csrf']
   /** Singular project context — see RenderContext.project. Only the
    *  project block renderers (lx_project_hero, lx_inquiry_form,
@@ -336,8 +361,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_share: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_share'>>) => (
     <LxShare data={data} outerClass={outerClass} />
   ),
-  lx_posts: ({ data, posts, postsLoop, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
-    <LxPosts data={data} posts={posts} postsLoop={postsLoop} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
+  lx_posts: ({ data, postsLoop, postCards, media, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_posts'>>) => (
+    <LxPosts data={data} postsLoop={postsLoop} postCards={postCards} media={media} outerClass={outerClass} sectionMeta={sectionMeta} />
   ),
   lx_embed: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_embed'>>) => (
     <LxEmbed data={data} outerClass={outerClass} />
@@ -478,6 +503,9 @@ export function renderBlock(
     projects: ctx.projects,
     posts: ctx.posts,
     postsLoop: ctx.postsLoop,
+    // Resolve THIS block's posts-widget slice by id (self-contained sources).
+    postCards:
+      typeof blockId === 'number' ? ctx.postCardsByBlock?.get(blockId) : undefined,
     csrf: ctx.csrf,
     project: ctx.project,
     preview: ctx.preview,

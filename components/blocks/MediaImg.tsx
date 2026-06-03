@@ -1,11 +1,16 @@
 import type { ReactNode } from 'react'
 
-export function MediaImg({ media, alt, variant = 'md', className, priority = false }: {
+export function MediaImg({ media, alt, variant = 'md', className, priority = false, sizes }: {
   media: { variants: Record<string, string> | null; width?: number | null; height?: number | null } | undefined
   alt: string
   variant?: 'thumb' | 'md' | 'lg' | 'og'
   className?: string
   priority?: boolean
+  /** Responsive `sizes` hint paired with the generated `srcset`. Defaults to
+   *  '100vw' (full-bleed). Grid/card consumers pass a fractional hint (e.g.
+   *  '(min-width:768px) 33vw, 100vw') so the browser picks the smaller variant
+   *  and doesn't over-fetch a 1600px image into a 380px card. */
+  sizes?: string
 }): ReactNode {
   // Missing-media render: returns a className-inheriting empty
   // <div> so the wrapping widget keeps its laid-out height. The
@@ -48,8 +53,11 @@ export function MediaImg({ media, alt, variant = 'md', className, priority = fal
       alt={alt}
       className={className}
       loading={priority ? 'eager' : 'lazy'}
+      // decoding='async' lets the browser decode off the main thread so a grid
+      // of post-card thumbnails doesn't jank scroll while decoding.
+      decoding="async"
       fetchPriority={priority ? 'high' : undefined}
-      {...(srcset ? { srcSet: srcset, sizes: '100vw' } : {})}
+      {...(srcset ? { srcSet: srcset, sizes: sizes ?? '100vw' } : {})}
       {...(w != null && h != null ? { width: w, height: h } : {})}
     />
   )

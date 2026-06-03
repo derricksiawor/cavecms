@@ -1,284 +1,280 @@
 import clsx from 'clsx'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
-import { MediaImg } from '../MediaImg'
 import type { BlockData } from '@/lib/cms/block-registry'
-import type { RenderContext } from '..'
+import type { RenderContext, HydratedPostCardCtx } from '..'
 import { isSectionSurfaceDark, type SectionMeta } from '@/lib/cms/blockMeta'
+import { GridTemplate, CardsTemplate, ListTemplate, MagazineTemplate } from './templates'
+import { PostsCarousel } from './PostsCarousel'
+import { PostsLoadMore } from './PostsLoadMore'
+import { PostsHeading, PostsEmptyState, PostsItemListJsonLd } from './parts'
+import { textTones, type Columns, type PostsTemplate } from './styles'
+import type { PostCardToggles } from './PostCard'
 
-// Dynamic posts loop (Elementor: Posts / Loop Grid). Two modes — both
-// resolved by hydrate.ts (never queried here — same contract as
-// lx_featured_projects), so this component stays a PURE SYNCHRONOUS view
-// (required: it also renders inside the client editor canvas, where an
-// async server component would throw — same constraint as lx_code):
+// ════════════════════════════════════════════════════════════════════════
+// Posts widget — the SYNCHRONOUS top-level dispatcher (server + editor-canvas
+// safe; an async server component would throw in the client editor canvas —
+// same constraint as lx_code). All data-fetch happens at hydrate; this view
+// reads:
+//   • self-contained sources (latest/category/tag/author/manual/related) →
+//     this block's slice from RenderContext.postCardsByBlock (via `postCards`).
+//   • current source (paginated /blog archive) → RenderContext.postsLoop.
 //
-//   • recent — the original teaser. Reads RenderContext.posts (the latest
-//     published posts, capped 12) and slices to data.limit. Unchanged.
-//   • loop   — the paginated blog archive. Reads RenderContext.postsLoop
-//     (the keyset-paginated, filtered, bounded page hydrate fetched for the
-//     URL ?page=) and renders an accessible prev/next pager.
-//
-// Text auto-contrasts the ancestor section surface.
+// It computes the surface-aware tones + presets, then dispatches to one of the
+// five layout templates. Pagination (numbered / load-more / none) applies only
+// to the `current` source on grid/cards/list; magazine + carousel + every
+// self-contained source effectively paginate 'none'.
+// ════════════════════════════════════════════════════════════════════════
 
-const COLS: Record<BlockData<'lx_posts'>['columns'], string> = {
-  2: 'grid-cols-1 sm:grid-cols-2 gap-8 sm:gap-10',
-  3: 'grid-cols-1 md:grid-cols-3 gap-8 sm:gap-10',
+function NumberedPager({
+  postsLoop,
+  onDark,
+}: {
+  postsLoop: NonNullable<RenderContext['postsLoop']>
+  onDark: boolean
+}) {
+  const tones = textTones(onDark)
+  const base = postsLoop.basePath ?? '/blog'
+  const href = (page: number) => (page <= 1 ? base : `${base}?page=${page}`)
+  if (!postsLoop.hasPrev && !postsLoop.hasNext) return null
+  return (
+    <nav aria-label="Blog pagination" className="mt-14 flex items-center justify-between gap-4">
+      {postsLoop.hasPrev ? (
+        <a
+          href={href(postsLoop.page - 1)}
+          rel="prev"
+          className={clsx(
+            'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
+            onDark ? 'bg-ivory/10 text-ivory hover:bg-ivory/15' : 'bg-obsidian/[0.06] text-obsidian hover:bg-obsidian/[0.1]',
+          )}
+        >
+          <ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden />
+          Newer posts
+        </a>
+      ) : (
+        <span />
+      )}
+      <span className={clsx('font-sans text-xs font-semibold uppercase tracking-eyebrow', tones.meta)}>
+        Page {postsLoop.page}
+      </span>
+      {postsLoop.hasNext ? (
+        <a
+          href={href(postsLoop.page + 1)}
+          rel="next"
+          className={clsx(
+            'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
+            onDark ? 'bg-champagne text-obsidian hover:bg-champagne/90' : 'bg-obsidian text-ivory hover:bg-obsidian/90',
+          )}
+        >
+          Older posts
+          <ArrowRight className="h-4 w-4" strokeWidth={2} aria-hidden />
+        </a>
+      ) : (
+        <span />
+      )}
+    </nav>
+  )
 }
 
-function formatDate(value: Date | string | null): string | null {
-  if (!value) return null
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-}
-
-// Shared card shape for both modes. `readingMinutes` is set only in loop
-// mode (hydrate computes it); recent mode passes undefined and the pill is
-// omitted regardless of showReadingTime.
-interface PostCard {
-  id: number
-  slug: string
-  title: string
-  excerpt: string | null
-  published_at: Date | string | null
-  hero_image_id: number | null
-  readingMinutes?: number
-  // Permalink-segment-aware detail URL, baked at hydrate (Phase 5) so this
-  // synchronous renderer (which also runs in the client editor canvas) never
-  // builds a segment-aware URL itself. Recent + loop mode both carry it.
-  url: string
-  // Loop-mode only: up to 2 categories for the card cross-link pills (#0.592),
-  // each with its baked segment-aware archive URL. Recent mode leaves it empty.
-  categories?: Array<{ slug: string; name: string; url: string }>
-}
-
-// Build the loop pager href off the slice's basePath (the blog index by
-// default, or a term archive like /<seg>/category/<slug> when this loop is an
-// archive). Phase 5: basePath is baked at hydrate through lib/blog/urls with the
-// configured segment, so the pager links are segment-correct here with no async.
-// Page 1 → bare base; page >1 → `?page=N`.
-function pageHref(base: string, page: number): string {
-  return page <= 1 ? base : `${base}?page=${page}`
+// Map a postsLoop item → the unified card shape (it already carries everything
+// except `author`, which the loop slice doesn't resolve → undefined).
+function loopItemToCard(it: NonNullable<RenderContext['postsLoop']>['items'][number]): HydratedPostCardCtx {
+  return {
+    id: it.id,
+    slug: it.slug,
+    title: it.title,
+    excerpt: it.excerpt,
+    published_at: it.published_at,
+    hero_image_id: it.hero_image_id,
+    reading_minutes: it.reading_minutes,
+    categories: it.categories,
+    url: it.url,
+  }
 }
 
 export function LxPosts({
   data,
-  posts,
   postsLoop,
+  postCards,
   media,
   outerClass,
   sectionMeta,
 }: {
   data: BlockData<'lx_posts'>
-  posts?: RenderContext['posts']
   postsLoop?: RenderContext['postsLoop']
+  postCards?: HydratedPostCardCtx[]
   media: RenderContext['media']
   outerClass?: string
   sectionMeta?: SectionMeta
 }) {
   const onDark = isSectionSurfaceDark(sectionMeta)
-  const headingClass = onDark ? 'text-ivory' : 'text-obsidian'
-  const titleClass = onDark ? 'text-ivory' : 'text-obsidian'
-  const excerptClass = onDark ? 'text-ivory/70' : 'text-warm-stone'
-  const metaClass = onDark ? 'text-ivory/60' : 'text-warm-stone'
+  const isCurrent = data.source === 'current'
 
-  const isLoop = data.mode === 'loop'
+  // Resolve the card list from the active source.
+  const cards: HydratedPostCardCtx[] = isCurrent
+    ? (postsLoop?.items ?? []).map(loopItemToCard)
+    : postCards ?? []
 
-  // Resolve the card list + pager from the active mode's data source.
-  const list: PostCard[] = isLoop
-    ? (postsLoop?.items ?? []).map((p) => ({
-        id: p.id,
-        slug: p.slug,
-        title: p.title,
-        excerpt: p.excerpt,
-        published_at: p.published_at,
-        hero_image_id: p.hero_image_id,
-        readingMinutes: p.reading_minutes,
-        categories: p.categories,
-        url: p.url,
-      }))
-    : [...(posts?.values() ?? [])].slice(0, data.limit).map((p) => ({
-        id: p.id,
-        slug: p.slug,
-        title: p.title,
-        excerpt: p.excerpt,
-        published_at: p.published_at,
-        hero_image_id: p.hero_image_id,
-        url: p.url,
-      }))
+  // ── Card content toggles (the block's values; defaults from schema, which
+  //    for the current source were overwritten with blog_settings at hydrate) ─
+  const toggles: PostCardToggles = {
+    showImage: data.showImage,
+    showDate: data.showDate,
+    showAuthor: data.showAuthor,
+    showCategory: data.showCategory,
+    showExcerpt: data.showExcerpt,
+    showReadingTime: data.showReadingTime,
+    showReadMore: data.showReadMore,
+    readMoreLabel: data.readMoreLabel,
+    titleClamp: data.titleClamp,
+    excerptClamp: data.excerptClamp,
+  }
 
-  const isList = data.layout === 'list'
-
-  if (list.length === 0) {
-    // Loop mode: a real, on-brand empty state — the operator styled this
-    // page and a visitor landing on an empty archive (or a category with no
-    // posts) should see something intentional, not a blank gap. Recent mode
-    // keeps its legacy behaviour of rendering nothing (the home teaser must
-    // disappear cleanly when there are no posts yet).
-    if (!isLoop) return null
+  // ── Empty state ──────────────────────────────────────────────────────────
+  if (cards.length === 0) {
+    // The legacy recent/home teaser (source:'latest' with no heading on the
+    // home page) historically rendered NOTHING when empty so the teaser
+    // disappears cleanly. We preserve that ONLY for a headingless latest
+    // teaser; every operator-styled surface (anything with a heading, or the
+    // canonical archive) gets the designed empty state.
+    const isBareTeaser = data.source === 'latest' && !data.heading
+    if (isBareTeaser) return null
     const empty = (
       <section className={clsx('mx-auto w-full max-w-6xl', outerClass)}>
-        {data.heading && (
-          <h2 className={clsx('mb-6 font-serif text-3xl font-bold tracking-tight sm:text-4xl', headingClass)}>
-            {data.heading}
-          </h2>
-        )}
-        <p className={clsx('font-sans text-base leading-relaxed', excerptClass)}>
-          No posts here yet — check back soon.
-        </p>
+        <PostsEmptyState heading={data.heading} onDark={onDark} template={data.template} />
       </section>
     )
-    if (data.animation === 'none') return empty
-    return <MotionTarget preset={data.animation}>{empty}</MotionTarget>
+    return data.animation === 'none' ? empty : <MotionTarget preset={data.animation}>{empty}</MotionTarget>
+  }
+
+  const columns = data.columns as Columns
+  const template: PostsTemplate = data.template
+
+  // ── Body — the chosen template ───────────────────────────────────────────
+  let body: React.ReactNode
+  if (template === 'carousel') {
+    body = (
+      <PostsCarousel
+        cards={cards}
+        media={media}
+        toggles={toggles}
+        aspect={data.imageAspect}
+        onDark={onDark}
+        autoplay={data.autoplay}
+        intervalMs={data.intervalMs}
+        loop={data.carouselLoop}
+        showArrows={data.showArrows}
+        showDots={data.showDots}
+      />
+    )
+  } else if (template === 'magazine') {
+    body = (
+      <MagazineTemplate
+        cards={cards}
+        media={media}
+        toggles={toggles}
+        cardStyle={data.cardStyle}
+        spacing={data.spacing}
+        aspect={data.imageAspect}
+        columns={columns}
+        onDark={onDark}
+      />
+    )
+  } else if (template === 'list') {
+    body = (
+      <ListTemplate
+        cards={cards}
+        media={media}
+        toggles={toggles}
+        cardStyle={data.cardStyle}
+        spacing={data.spacing}
+        aspect={data.imageAspect}
+        columns={1}
+        onDark={onDark}
+        imageSide="left"
+      />
+    )
+  } else {
+    const Template = template === 'cards' ? CardsTemplate : GridTemplate
+    // cards template caps at 3 columns (its elevated cards need breathing room).
+    const effCols: Columns = template === 'cards' ? (Math.min(3, columns) as Columns) : columns
+    const grid = (
+      <Template
+        cards={cards}
+        media={media}
+        toggles={toggles}
+        cardStyle={data.cardStyle}
+        spacing={data.spacing}
+        aspect={data.imageAspect}
+        columns={effCols}
+        onDark={onDark}
+      />
+    )
+
+    // ── Pagination (current source + grid/cards/list only) ──────────────────
+    // Resolve the effective mode: 'auto' → numbered for the current source
+    // (SEO-crawlable default), none for everything else.
+    const effectivePagination = isCurrent
+      ? data.pagination === 'auto'
+        ? 'numbered'
+        : data.pagination
+      : 'none'
+
+    if (isCurrent && effectivePagination === 'load-more' && postsLoop) {
+      body = (
+        <PostsLoadMore
+          media={media}
+          toggles={toggles}
+          aspect={data.imageAspect}
+          columns={effCols}
+          spacing={data.spacing}
+          onDark={onDark}
+          initialPage={postsLoop.page}
+          initialHasNext={postsLoop.hasNext}
+          // perPage is implicit (blog_settings) on the canonical index; pass it
+          // only if the block overrode it. We don't have the resolved perPage
+          // here, so let the route fall back to blog_settings (its default).
+          category={extractTermFromBasePath(postsLoop.basePath, 'category')}
+          tag={extractTermFromBasePath(postsLoop.basePath, 'tag')}
+        >
+          {grid}
+        </PostsLoadMore>
+      )
+    } else {
+      body = (
+        <>
+          {grid}
+          {isCurrent && effectivePagination === 'numbered' && postsLoop && (
+            <NumberedPager postsLoop={postsLoop} onDark={onDark} />
+          )}
+        </>
+      )
+    }
   }
 
   const section = (
     <section className={clsx('mx-auto w-full max-w-6xl', outerClass)}>
-      {data.heading && (
-        <h2 className={clsx('mb-10 font-serif text-3xl font-bold tracking-tight sm:text-4xl', headingClass)}>
-          {data.heading}
-        </h2>
-      )}
-      <ul
-        className={clsx(
-          isList ? 'flex flex-col gap-8' : 'grid',
-          !isList && COLS[data.columns],
-        )}
-      >
-        {list.map((p) => {
-          const date = data.showDate ? formatDate(p.published_at) : null
-          const showReading =
-            isLoop && data.showReadingTime && typeof p.readingMinutes === 'number'
-          return (
-            <li key={p.id}>
-              <a
-                href={p.url}
-                className={clsx('group block', isList && 'flex flex-col gap-5 sm:flex-row sm:items-center sm:gap-8')}
-              >
-                <div className={clsx('overflow-hidden rounded-2xl', isList && 'sm:w-2/5 sm:shrink-0')}>
-                  <MediaImg
-                    media={p.hero_image_id ? media.get(p.hero_image_id) : undefined}
-                    alt={p.title}
-                    variant="md"
-                    className={clsx(
-                      'w-full object-cover transition-transform duration-standard ease-standard group-hover:scale-[1.02]',
-                      isList ? 'h-48 sm:h-44' : 'h-56',
-                    )}
-                  />
-                </div>
-                <div className={clsx(isList && 'sm:flex-1')}>
-                  {(date || showReading) && (
-                    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 sm:mt-0">
-                      {date && (
-                        <time
-                          className="block font-sans text-xs font-semibold uppercase tracking-eyebrow text-champagne"
-                          dateTime={new Date(p.published_at as string | Date).toISOString()}
-                        >
-                          {date}
-                        </time>
-                      )}
-                      {date && showReading && (
-                        <span aria-hidden className={clsx('text-xs', metaClass)}>
-                          ·
-                        </span>
-                      )}
-                      {showReading && (
-                        <span className={clsx('font-sans text-xs font-medium uppercase tracking-eyebrow', metaClass)}>
-                          {p.readingMinutes} min read
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <h3 className={clsx('mt-2 font-serif text-xl font-bold tracking-tight sm:text-2xl', titleClass)}>
-                    {p.title}
-                  </h3>
-                  {data.showExcerpt && p.excerpt && (
-                    <p className={clsx('mt-2 line-clamp-3 font-sans text-base leading-relaxed', excerptClass)}>
-                      {p.excerpt}
-                    </p>
-                  )}
-                </div>
-              </a>
-              {/* Category cross-link pills — rendered OUTSIDE the card anchor
-                  (no nested <a>) so each pill is its own link to the term
-                  archive (#0.592). Loop mode only; recent-mode cards omit. */}
-              {isLoop && p.categories && p.categories.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {p.categories.map((c) => (
-                    <a
-                      key={c.slug}
-                      href={c.url}
-                      className={clsx(
-                        // FIX 3: theme-aware category pills. On a dark section
-                        // surface, tint from ivory (theme light surface); on a
-                        // light surface, tint from the THEME accent (champagne →
-                        // --brand-accent) instead of fixed copper — so the pill
-                        // flips with the operator's theme on both surfaces.
-                        'inline-flex w-fit items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-eyebrow ring-1 transition-colors',
-                        onDark
-                          ? 'bg-ivory/10 text-ivory ring-ivory/20 hover:bg-ivory/15'
-                          : 'bg-champagne/15 text-antique-gold ring-champagne/40 hover:bg-champagne/25',
-                      )}
-                    >
-                      {c.name}
-                    </a>
-                  ))}
-                </div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-
-      {isLoop && postsLoop && (postsLoop.hasPrev || postsLoop.hasNext) && (
-        <nav
-          aria-label="Blog pagination"
-          className="mt-14 flex items-center justify-between gap-4"
-        >
-          {postsLoop.hasPrev ? (
-            <a
-              href={pageHref(postsLoop.basePath ?? '/blog', postsLoop.page - 1)}
-              rel="prev"
-              className={clsx(
-                'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
-                onDark
-                  ? 'bg-ivory/10 text-ivory hover:bg-ivory/15'
-                  : 'bg-obsidian/[0.06] text-obsidian hover:bg-obsidian/[0.1]',
-              )}
-            >
-              <ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden />
-              Newer posts
-            </a>
-          ) : (
-            <span />
-          )}
-
-          <span className={clsx('font-sans text-xs font-semibold uppercase tracking-eyebrow', metaClass)}>
-            Page {postsLoop.page}
-          </span>
-
-          {postsLoop.hasNext ? (
-            <a
-              href={pageHref(postsLoop.basePath ?? '/blog', postsLoop.page + 1)}
-              rel="next"
-              className={clsx(
-                'inline-flex w-fit items-center gap-2 rounded-full px-6 py-3 font-sans text-sm font-semibold tracking-wide transition-colors duration-standard ease-standard min-h-[44px]',
-                onDark
-                  ? 'bg-champagne text-obsidian hover:bg-champagne/90'
-                  : 'bg-obsidian text-ivory hover:bg-obsidian/90',
-              )}
-            >
-              Older posts
-              <ArrowRight className="h-4 w-4" strokeWidth={2} aria-hidden />
-            </a>
-          ) : (
-            <span />
-          )}
-        </nav>
-      )}
+      <PostsHeading heading={data.heading} onDark={onDark} />
+      {body}
+      {/* ItemList + per-item BlogPosting structured data (#7). */}
+      <PostsItemListJsonLd cards={cards} />
     </section>
   )
 
-  if (data.animation === 'none') return section
-  return <MotionTarget preset={data.animation}>{section}</MotionTarget>
+  return data.animation === 'none' ? section : <MotionTarget preset={data.animation}>{section}</MotionTarget>
+}
+
+// The archive load-more needs the term slug to re-query the right filter. The
+// pager basePath is /<seg>/category/<slug> or /<seg>/tag/<slug> on an archive,
+// or /<seg> on the plain index. Pull the slug back out for the appender's
+// fetch. Plain index → undefined (no filter).
+function extractTermFromBasePath(
+  basePath: string | undefined,
+  kind: 'category' | 'tag',
+): string | undefined {
+  if (!basePath) return undefined
+  const parts = basePath.split('/').filter(Boolean)
+  const idx = parts.indexOf(kind)
+  if (idx >= 0 && parts[idx + 1]) return parts[idx + 1]
+  return undefined
 }

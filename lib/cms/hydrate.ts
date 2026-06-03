@@ -21,6 +21,12 @@ import { isMissingTable } from '@/lib/db/errors'
 // detail page can never drift apart.
 import { publicPostGateSql } from './postStatus'
 import { readingTimeSql } from './readingTime'
+import {
+  fetchPostsWidgetSlice,
+  fetchPostCategorySlugs,
+  resolvePostsWidgetSource,
+  type HydratedPostCard,
+} from './postsWidgetSource'
 import type { BlockData } from './block-registry'
 import type { BlockKind } from './blockMeta'
 
@@ -177,6 +183,13 @@ export interface HydratedPage {
   // lx_posts block. Undefined on every other page (and for recent-mode-only
   // pages), so existing renders pay nothing.
   postsLoop?: HydratedPostsLoop
+  // Posts-widget card lists, keyed by the lx_posts BLOCK id — populated for
+  // every SELF-CONTAINED source (latest/category/tag/author/manual/related).
+  // The 'current' source uses postsLoop instead (the paginated archive). A
+  // page with three posts widgets (e.g. a magazine lead + a category grid +
+  // a related rail) gets three independent bounded slices here. Undefined
+  // when the page has no self-contained posts widget.
+  postCardsByBlock?: Map<number, HydratedPostCard[]>
 }
 
 /** Defensively parse a media row's `variants` JSON cell.
@@ -260,6 +273,13 @@ export async function hydratePage(
      *  parameter for the junction join. When unset, the block's own filter
      *  (usually none on a plain /blog) applies. */
     loopFilter?: { category: string } | { tag: string }
+    /** The post being viewed, when this page is a post BODY page
+     *  (kind='post_body'). Threaded by app/blog/[slug] so a posts widget
+     *  placed INSIDE a post body can resolve `source:'related'` and
+     *  `excludeCurrent` relative to the post. Undefined on every page that
+     *  isn't a post body — `related` then falls back to plain recency and
+     *  `excludeCurrent` is a no-op. */
+    currentPostId?: number
   },
 ): Promise<HydratedPage | null> {
   // Verify the page exists before fetching blocks — distinguishes
@@ -426,43 +446,81 @@ export async function hydratePage(
     if (p.og_image_id) mediaIds.add(p.og_image_id)
   }
 
-  // lx_posts has two modes (see block-registry):
-  //   • recent — auto-renders the latest published posts (capped 12). A
-  //     page can hold several recent blocks with different `limit`s; we
-  //     fetch the MAX once and each renderer slices to its own data.limit.
-  //   • loop   — the paginated blog archive. Each loop block gets its own
-  //     keyset-paginated, filtered, bounded slice fetched into postsLoop.
-  // Blocks are filtered by mode so a recent-only page never pays for the
-  // loop query and vice-versa.
+  // lx_posts (expanded Posts widget) resolves by SOURCE (see block-registry).
+  // After parseForRead the back-compat preprocess has populated `source`:
+  //   • current — the paginated blog archive. The FIRST current-source block
+  //     owns the ?page= slice (postsLoop); the rest share it. Reads
+  //     blog_settings as the authoritative DISPLAY (the WordPress reading-
+  //     settings model) when this page is the canonical /blog index.
+  //   • latest/category/tag/author/manual/related — SELF-CONTAINED. Each
+  //     block gets its own bounded, non-paginated slice in postCardsByBlock,
+  //     keyed by block id, so a page can carry several independent widgets
+  //     (a magazine lead + a category grid + a related rail) without one
+  //     query bleeding into another.
   const postsBlocks = blocks.filter((b) => b.blockType === 'lx_posts')
-  const recentBlocks = postsBlocks.filter(
-    (b) => ((b.data as BlockData<'lx_posts'>).mode ?? 'recent') === 'recent',
-  )
-  const loopBlocks = postsBlocks.filter(
-    (b) => (b.data as BlockData<'lx_posts'>).mode === 'loop',
-  )
-  // blog-system worktree (Phase 5): resolve the permalink segments ONCE for this
-  // page when it has any post-bearing block, then bake segment-aware URLs onto
-  // every post / loop item so the synchronous LxPosts renderer reads them
-  // directly. Skipped entirely on pages with no post block (cost-free).
+  const sourceOf = (b: HydratedBlock): BlockData<'lx_posts'>['source'] =>
+    (b.data as BlockData<'lx_posts'>).source ?? 'latest'
+  const loopBlocks = postsBlocks.filter((b) => sourceOf(b) === 'current')
+  const selfContainedBlocks = postsBlocks.filter((b) => sourceOf(b) !== 'current')
+  // Resolve the permalink segments ONCE per page when it has any posts widget,
+  // then bake segment-aware URLs onto every card so the SYNCHRONOUS LxPosts
+  // renderer reads them directly. Cost-free on pages with no posts widget.
   let segments: PermalinkSegments | null = null
-  if (recentBlocks.length > 0 || loopBlocks.length > 0) {
+  if (postsBlocks.length > 0) {
     segments = await resolveSegments()
   }
 
-  let posts: HydratedPost[] = []
-  if (recentBlocks.length > 0) {
-    const maxLimit = recentBlocks.reduce((m, b) => {
-      // b.blockType === 'lx_posts' here (filtered above), so b.data is
-      // the lx_posts shape; `limit` is a Zod-validated 1..12 int.
-      const lim = (b.data as BlockData<'lx_posts'>).limit
-      return typeof lim === 'number' && lim > m ? lim : m
-    }, 1)
-    posts = await fetchRecentPostsSafely(Math.min(12, Math.max(1, maxLimit)), segments!)
-    for (const p of posts) {
-      if (p.hero_image_id) mediaIds.add(p.hero_image_id)
+  // ── Self-contained sources: one bounded slice PER block ──────────────────
+  let postCardsByBlock: Map<number, HydratedPostCard[]> | undefined
+  if (selfContainedBlocks.length > 0) {
+    postCardsByBlock = new Map<number, HydratedPostCard[]>()
+    // For self-contained sources the per-page widget is operator-authored, so
+    // the block's OWN toggles win (unlike the canonical /blog index, which the
+    // current-source path drives from blog_settings below). We only need
+    // d.showAuthor here to decide whether to pay for the author batch query.
+    // related's anchor categories are resolved once (shared by every related
+    // block on this page — there is at most a handful).
+    let relatedCategorySlugs: string[] | undefined
+    const hasRelated = selfContainedBlocks.some((b) => sourceOf(b) === 'related')
+    if (hasRelated && typeof opts?.currentPostId === 'number') {
+      relatedCategorySlugs = await fetchPostCategorySlugs(opts.currentPostId)
+    }
+    for (const b of selfContainedBlocks) {
+      const d = b.data as BlockData<'lx_posts'>
+      const src = resolvePostsWidgetSource(d, opts?.currentPostId, relatedCategorySlugs)
+      if (!src) {
+        // A source whose operand is missing/invalid (e.g. source:'category'
+        // with no slug, or source:'related'/'author' off a post) resolves to
+        // an empty card list — the renderer shows its designed empty state.
+        postCardsByBlock.set(b.id, [])
+        continue
+      }
+      const withAuthors = d.showAuthor
+      const cards = await fetchPostsWidgetSlice({
+        segments: segments!,
+        source: src,
+        limit: d.limit,
+        offset: d.offset,
+        orderBy: d.orderBy,
+        orderDir: d.orderDir,
+        excludePostId:
+          d.excludeCurrent && typeof opts?.currentPostId === 'number'
+            ? opts.currentPostId
+            : undefined,
+        withAuthors,
+      })
+      postCardsByBlock.set(b.id, cards)
+      for (const c of cards) {
+        if (c.hero_image_id) mediaIds.add(c.hero_image_id)
+      }
     }
   }
+
+  // `posts` (the legacy recent Map) is no longer populated by the new source
+  // model — every self-contained source goes through postCardsByBlock above.
+  // Kept as an always-empty Map so the HydratedPage shape + every existing
+  // consumer (RenderContext.posts) stays unchanged.
+  const posts: HydratedPost[] = []
 
   // Loop slice. We support ONE loop block per page (the blog-index pattern);
   // if an operator drops several, the FIRST loop block owns the ?page= slice
@@ -474,29 +532,50 @@ export async function hydratePage(
   const firstLoopBlock = loopBlocks[0]
   if (firstLoopBlock) {
     const loopData = firstLoopBlock.data as BlockData<'lx_posts'>
-    // Phase 6 (blog settings): `blog_settings` is AUTHORITATIVE for the Blog
-    // Loop's DISPLAY (layout / columns / showExcerpt / showDate /
-    // showReadingTime) — the WordPress "Reading settings" model, where one
-    // clear place (Settings → Blog) controls how the blog index + archives
-    // render. We deliberately do NOT honour a per-block override for these five
-    // fields: the lx_posts schema gives them Zod `.default()`s that
-    // parseForRead/parseAndSanitize materialize into EVERY stored block, so
-    // there is no reliable "operator left this unset" signal — and a single
-    // canonical blog surface doesn't need per-instance display variance. We
-    // mutate the parsed `data` so the synchronous LxPosts renderer reads the
-    // effective values with zero renderer changes. `postsPerPage` STAYS
-    // block-overridable: it's `.optional()` with no default, so a per-block
-    // value is a genuine, detectable override (block wins; else the setting).
-    // getSetting('blog_settings') is missing-context safe and returns the
-    // registry default if the row is absent/corrupt.
+    // Phase 6 (blog settings) + Posts-widget #5: `blog_settings` is
+    // AUTHORITATIVE for the canonical Blog Loop's DISPLAY (template / columns /
+    // card toggles / presets) — the WordPress "Reading settings" model, where
+    // one clear place (Settings → Blog) controls how the blog index + archives
+    // render. We deliberately do NOT honour a per-block override for the
+    // settings-backed fields on the CURRENT source: the lx_posts schema gives
+    // them Zod `.default()`s that materialize into EVERY stored block, so there
+    // is no reliable "operator left this unset" signal — and a single canonical
+    // blog surface doesn't need per-instance display variance. We mutate the
+    // parsed `data` so the synchronous LxPosts renderer reads the effective
+    // values with zero renderer changes. `postsPerPage` STAYS block-overridable
+    // (it's `.optional()` with no default → a per-block value is a genuine,
+    // detectable override; block wins, else the setting). getSetting is
+    // missing-context safe (returns the registry default if absent/corrupt).
     const blogSettings = await getSetting('blog_settings')
     firstLoopBlock.data = {
       ...loopData,
-      layout: blogSettings.layout,
+      // `template` is the authoritative index layout (grid/cards/list/magazine);
+      // carousel is excluded at the settings schema, so a settings-driven index
+      // never becomes a carousel. `layout` (legacy grid|list) is honoured as a
+      // fallback only if an old row somehow lacks template (the schema default
+      // backfills it, so this is belt-and-suspenders).
+      template: blogSettings.template ?? (blogSettings.layout === 'list' ? 'list' : 'grid'),
       columns: blogSettings.columns,
+      showImage: true,
       showExcerpt: blogSettings.showExcerpt,
       showDate: blogSettings.showDate,
+      showAuthor: blogSettings.showAuthor,
+      showCategory: blogSettings.showCategory,
       showReadingTime: blogSettings.showReadingTime,
+      showReadMore: blogSettings.showReadMore,
+      readMoreLabel: blogSettings.readMoreLabel,
+      excerptClamp: blogSettings.excerptClamp,
+      cardStyle: blogSettings.cardStyle,
+      spacing: blogSettings.spacing,
+      imageAspect: blogSettings.imageAspect,
+      // Pagination: the settings choice drives the canonical index. A per-block
+      // 'auto' resolves to this; an explicit per-block override (numbered/load-
+      // more/none) still wins in the renderer because we only set it here when
+      // the block left it at the default 'auto'.
+      pagination:
+        loopData.pagination && loopData.pagination !== 'auto'
+          ? loopData.pagination
+          : blogSettings.pagination,
     }
     let perPage = loopData.postsPerPage
     if (typeof perPage !== 'number') {
@@ -591,6 +670,7 @@ export async function hydratePage(
     projects: new Map(projects.map((p) => [p.id, p])),
     posts: new Map(posts.map((p) => [p.id, p])),
     postsLoop,
+    postCardsByBlock,
   }
 }
 
@@ -755,6 +835,39 @@ async function fetchPostsLoopSlice(args: {
   }
 }
 
+/** Public wrapper for the bounded blog-loop slice — the data source for the
+ *  load-more pagination route (#4). Resolves segments + the effective page size
+ *  (per-block override, else blog_settings.postsPerPage) and runs the SAME
+ *  keyset/OFFSET slice the canonical /blog index renders, so an AJAX-appended
+ *  page is byte-identical to a server-rendered one. `category`/`tag` are
+ *  SLUG_RE-validated by the route before reaching here. Bounded + missing-table-
+ *  safe via fetchPostsLoopSlice. */
+export async function loadBlogLoopPage(args: {
+  page: number
+  perPage?: number
+  category?: string
+  tag?: string
+}): Promise<HydratedPostsLoop> {
+  const segments = await resolveSegments()
+  let perPage = args.perPage
+  if (typeof perPage !== 'number') {
+    const blogSettings = await getSetting('blog_settings')
+    perPage = blogSettings.postsPerPage
+  }
+  let basePath: string
+  if (args.category) basePath = categoryUrl(args.category, 1, segments)
+  else if (args.tag) basePath = tagUrl(args.tag, 1, segments)
+  else basePath = blogIndexUrl(1, segments)
+  return fetchPostsLoopSlice({
+    segments,
+    page: args.page,
+    perPage: Math.min(50, Math.max(1, Math.floor(perPage))),
+    category: args.category,
+    tag: args.tag,
+    basePath,
+  })
+}
+
 /** Fetches the Featured projects (projects.featured_order set) in order,
  *  capped at 12 — the data source for the lx_featured_projects grid.
  *  Wrapped in a missing-table feature detect so hydrate stays useful on
@@ -778,42 +891,10 @@ async function fetchFeaturedProjectsSafely(): Promise<HydratedProject[]> {
   }
 }
 
-/** Fetches the latest publicly-visible posts (newest first), capped at `limit`
- *  — the data source for the recent-mode lx_posts block (home-page teaser).
- *  Public gate via publicPostGateSql (Phase 8: published + not-trashed + publish
- *  time arrived), so a scheduled post never shows in the recent teaser before
- *  its time. Missing-table-safe like the projects fetch. */
-async function fetchRecentPostsSafely(
-  limit: number,
-  // blog-system worktree (Phase 5): resolved segments to bake the detail URL.
-  segments: PermalinkSegments,
-): Promise<HydratedPost[]> {
-  const cap = Math.min(12, Math.max(1, Math.floor(limit)))
-  try {
-    const [rows] = (await db.execute(sql`
-      SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, p.hero_image_id
-      FROM posts p
-      WHERE 1 = 1
-        ${publicPostGateSql('p')}
-      ORDER BY p.published_at DESC, p.id DESC
-      LIMIT ${cap}
-    `)) as unknown as [
-      Array<{
-        id: number
-        slug: string
-        title: string
-        excerpt: string | null
-        published_at: Date | string | null
-        hero_image_id: number | null
-      }>,
-    ]
-    // Phase 5: bake the segment-aware post detail URL (honors structure).
-    return rows.map((r) => ({ ...r, url: postUrl(r.slug, segments, r.published_at) }))
-  } catch (err) {
-    if (isMissingTable(err)) return []
-    throw err
-  }
-}
+// (fetchRecentPostsSafely removed — the legacy recent-mode teaser path is
+//  superseded by the source model: mode:'recent' maps to source:'latest', which
+//  resolves through fetchPostsWidgetSlice in lib/cms/postsWidgetSource. The
+//  `posts` Map on HydratedPage stays as an always-empty back-compat field.)
 
 // ---- hydrateProject ----
 

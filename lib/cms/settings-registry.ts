@@ -1056,11 +1056,30 @@ const permalinkSegment = (canonical: string) =>
 
 const blogSettings = z.object({
   postsPerPage: z.number().int().min(1).max(50).default(9),
+  // `layout` is the LEGACY grid|list switch (kept for back-compat — pre-Posts-
+  // widget installs persisted it). The Posts widget adds `template` (the full
+  // 5-template vocabulary); the canonical /blog index honours `template` when
+  // set, else falls back to `layout`. Both stay so an un-migrated row + the
+  // existing tests keep working.
   layout: z.enum(['grid', 'list']).default('grid'),
-  columns: z.union([z.literal(2), z.literal(3)]).default(3),
+  // `template` is the site-wide DEFAULT layout for the canonical blog index +
+  // archives (and seeds new Blog Loop blocks). Only grid/cards/list/magazine
+  // are valid as an INDEX default — carousel is a per-page-widget template, not
+  // a paginated index shape, so it's excluded here.
+  template: z.enum(['grid', 'cards', 'list', 'magazine']).default('grid'),
+  columns: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(3),
   showExcerpt: z.boolean().default(true),
   showDate: z.boolean().default(true),
+  showAuthor: z.boolean().default(false),
+  showCategory: z.boolean().default(true),
   showReadingTime: z.boolean().default(true),
+  showReadMore: z.boolean().default(false),
+  readMoreLabel: z.string().max(40).default('Read more'),
+  excerptClamp: z.number().int().min(0).max(6).default(3),
+  cardStyle: z.enum(['flat', 'soft', 'elevated']).default('soft'),
+  spacing: z.enum(['tight', 'comfortable', 'airy']).default('comfortable'),
+  imageAspect: z.enum(['16:9', '4:3', '3:2', '1:1', '4:5']).default('16:9'),
+  pagination: z.enum(['numbered', 'load-more', 'none']).default('numbered'),
   feedItemCount: z.number().int().min(1).max(50).default(20),
   relatedPostsCount: z.number().int().min(0).max(6).default(3),
 })
@@ -1334,10 +1353,20 @@ export const registry = {
     default: {
       postsPerPage: 9,
       layout: 'grid',
+      template: 'grid',
       columns: 3,
       showExcerpt: true,
       showDate: true,
+      showAuthor: false,
+      showCategory: true,
       showReadingTime: true,
+      showReadMore: false,
+      readMoreLabel: 'Read more',
+      excerptClamp: 3,
+      cardStyle: 'soft',
+      spacing: 'comfortable',
+      imageAspect: '16:9',
+      pagination: 'numbered',
       feedItemCount: 20,
       relatedPostsCount: 3,
     } satisfies z.infer<typeof blogSettings>,

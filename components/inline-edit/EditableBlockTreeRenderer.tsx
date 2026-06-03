@@ -72,6 +72,7 @@ interface Props {
    *  loop-mode lx_posts renderer; in the editor this is the page-1 preview
    *  fetched at the initial server render. */
   postsLoop?: RenderContext['postsLoop']
+  postCardsByBlock?: RenderContext['postCardsByBlock']
   /** Public preCsrf nonce minted in `renderCmsPage()`. Threaded through
    *  RenderContext to blocks that need it (today: `contact_form`).
    *  Undefined when no such block is on the page. */
@@ -90,6 +91,7 @@ export function EditableBlockTreeRenderer({
   projects,
   posts,
   postsLoop,
+  postCardsByBlock,
   csrf,
   project,
   preview,
@@ -145,6 +147,7 @@ export function EditableBlockTreeRenderer({
                   projects={projects}
                   posts={posts}
                   postsLoop={postsLoop}
+                  postCardsByBlock={postCardsByBlock}
                   csrf={csrf}
                   project={project}
                   preview={preview}
@@ -159,6 +162,7 @@ export function EditableBlockTreeRenderer({
                   projects={projects}
                   posts={posts}
                   postsLoop={postsLoop}
+                  postCardsByBlock={postCardsByBlock}
                   csrf={csrf}
                   project={project}
                   preview={preview}
@@ -183,6 +187,7 @@ interface SectionSlotProps {
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
   postsLoop?: RenderContext['postsLoop']
+  postCardsByBlock?: RenderContext['postCardsByBlock']
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -197,6 +202,7 @@ function EditableSectionSlot({
   projects,
   posts,
   postsLoop,
+  postCardsByBlock,
   csrf,
   project,
   preview,
@@ -245,6 +251,7 @@ function EditableSectionSlot({
             projects={projects}
             posts={posts}
             postsLoop={postsLoop}
+            postCardsByBlock={postCardsByBlock}
             csrf={csrf}
             project={project}
             preview={preview}
@@ -272,6 +279,7 @@ interface ColumnSlotProps {
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
   postsLoop?: RenderContext['postsLoop']
+  postCardsByBlock?: RenderContext['postCardsByBlock']
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -289,6 +297,7 @@ function EditableColumnSlot({
   projects,
   posts,
   postsLoop,
+  postCardsByBlock,
   csrf,
   project,
   preview,
@@ -343,6 +352,7 @@ function EditableColumnSlot({
               projects={projects}
               posts={posts}
               postsLoop={postsLoop}
+              postCardsByBlock={postCardsByBlock}
               csrf={csrf}
               project={project}
               preview={preview}
@@ -369,6 +379,7 @@ interface WidgetSlotProps {
   projects: Map<number, HydratedProject>
   posts: Map<number, HydratedPost>
   postsLoop?: RenderContext['postsLoop']
+  postCardsByBlock?: RenderContext['postCardsByBlock']
   csrf?: string
   project?: RenderContext['project']
   preview?: boolean
@@ -384,6 +395,7 @@ function EditableWidgetSlot({
   projects,
   posts,
   postsLoop,
+  postCardsByBlock,
   csrf,
   project,
   preview,
@@ -464,7 +476,7 @@ function EditableWidgetSlot({
   const node = renderBlock(
     block.blockType,
     effectiveData,
-    { media, projects, posts, postsLoop, csrf, project, preview },
+    { media, projects, posts, postsLoop, postCardsByBlock, csrf, project, preview },
     inlineEdit,
     widgetSpacingClass,
     block.id,

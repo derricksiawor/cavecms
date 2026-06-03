@@ -301,7 +301,7 @@ async function renderResolvedPage(
     )
   }
   if (!hydrated) notFound()
-  const { blocks, media, projects, posts, postsLoop } = hydrated
+  const { blocks, media, projects, posts, postsLoop, postCardsByBlock } = hydrated
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
 
   const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
@@ -316,6 +316,7 @@ async function renderResolvedPage(
       projects={projects}
       posts={posts}
       postsLoop={postsLoop}
+      postCardsByBlock={postCardsByBlock}
       session={session}
       editable={editable}
       preview={opts.preview}
