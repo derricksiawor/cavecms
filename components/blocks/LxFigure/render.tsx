@@ -3,6 +3,7 @@ import { MediaImg } from '../MediaImg'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import { AltTextOverlay } from '@/components/inline-edit/AltTextOverlay'
+import { FigureLightbox } from './FigureLightbox'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import type { RenderContext } from '..'
@@ -30,6 +31,25 @@ const FIT_CLASS: Record<BlockData<'lx_figure'>['fit'], string> = {
   contain: 'object-contain',
 }
 
+// Ken Burns ambient drift (Feature A). Maps the schema value to a fixed-
+// duration animation utility (globals.css). 'cms-kb-img' is the reduced-motion
+// gate. The clip happens because the figure frame is overflow-hidden.
+const KEN_BURNS_CLASS: Record<NonNullable<BlockData<'lx_figure'>['kenBurns']>, string> = {
+  none: '',
+  'zoom-in': 'cms-kb-img cms-kb-anim-zoom-in',
+  'zoom-out': 'cms-kb-img cms-kb-anim-zoom-out',
+  'pan-left': 'cms-kb-img cms-kb-anim-pan-left',
+  'pan-right': 'cms-kb-img cms-kb-anim-pan-right',
+  'zoom-pan': 'cms-kb-img cms-kb-anim-zoom-pan',
+}
+
+const OBJECT_POSITION_CLASS: Record<string, string> = {
+  center: 'object-center', top: 'object-top', bottom: 'object-bottom',
+  left: 'object-left', right: 'object-right',
+  'top left': 'object-left-top', 'top right': 'object-right-top',
+  'bottom left': 'object-left-bottom', 'bottom right': 'object-right-bottom',
+}
+
 export function LxFigure({
   data,
   media,
@@ -43,6 +63,8 @@ export function LxFigure({
 }) {
   const mediaEntry = media.get(data.image.media_id)
   const mediaMissing = !mediaEntry || !mediaEntry.variants
+  // Ken Burns drift takes precedence over hover-zoom (both drive `transform`).
+  const ambientKenBurns = !!data.kenBurns && data.kenBurns !== 'none'
 
   // Missing-media placeholder — no border (per CLAUDE.md); instead
   // uses a champagne radial glow backdrop to read as "luxury empty
@@ -76,7 +98,17 @@ export function LxFigure({
       media={mediaEntry}
       alt={data.image.alt}
       variant="lg"
-      className={clsx('w-full h-full', FIT_CLASS[data.fit])}
+      className={clsx(
+        'w-full h-full',
+        FIT_CLASS[data.fit],
+        data.objectPosition && OBJECT_POSITION_CLASS[data.objectPosition],
+        // hoverZoom and Ken Burns both animate `transform`; Ken Burns (a
+        // continuous drift) would always win, so when it's set we drop the
+        // hover-zoom rather than ship a silently dead control.
+        ambientKenBurns
+          ? KEN_BURNS_CLASS[data.kenBurns!]
+          : data.hoverZoom && 'transition-transform duration-[900ms] ease-luxury group-hover:scale-110',
+      )}
     />
   )
 
@@ -91,6 +123,7 @@ export function LxFigure({
     <div
       className={clsx(
         'relative overflow-hidden rounded-2xl',
+        data.hoverZoom && !ambientKenBurns && 'group',
         RATIO_CLASS[data.ratio],
       )}
     >
@@ -144,9 +177,34 @@ export function LxFigure({
     )
   )
 
+  // E13 — wrap the image (not the caption) in a link or a lightbox on the
+  // PUBLIC surface. In the editor we keep the bare box so the alt-text
+  // overlay stays clickable. Link wins over lightbox when both are set.
+  const fullSrc =
+    mediaEntry?.variants?.lg ?? mediaEntry?.variants?.og ?? mediaEntry?.variants?.md ?? ''
+  const interactiveBox =
+    inlineEdit || mediaMissing ? (
+      aspectBox
+    ) : data.link?.href ? (
+      <a
+        href={data.link.href}
+        target={data.link.openInNew ? '_blank' : undefined}
+        rel={data.link.openInNew ? 'noopener noreferrer' : undefined}
+        className="block"
+      >
+        {aspectBox}
+      </a>
+    ) : data.lightbox && fullSrc ? (
+      <FigureLightbox src={fullSrc} alt={data.image.alt ?? ''}>
+        {aspectBox}
+      </FigureLightbox>
+    ) : (
+      aspectBox
+    )
+
   const figure = (
     <figure className={outerClass}>
-      {aspectBox}
+      {interactiveBox}
       {captionEditable}
     </figure>
   )

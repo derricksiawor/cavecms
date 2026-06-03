@@ -4,9 +4,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
@@ -100,7 +100,11 @@ interface SiblingRow {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  // Inserts content_blocks rows (section/column/widget) into a page — a
+  // blocks write, same as saved-blocks/[id]/instantiate and every dedicated
+  // block route. (Not pages:write — no pages row is created or edited here.)
+  requireScope(ctx, 'blocks', 'write')
+  checkCmsMutationRate(ctx)
 
   const body = PostBody.parse(await readJsonBody(req))
   if (!ID_PATTERN.test(body.templateId)) {
@@ -351,6 +355,7 @@ export const POST = withError(async (req) => {
         : String(body.pageId)
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'create',
       resourceType: 'content_block',
       resourceId: auditResourceId,

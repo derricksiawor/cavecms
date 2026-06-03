@@ -1231,7 +1231,7 @@ export function EditableBlock(p: EditableBlockProps) {
         <ConfirmModal
           ariaLabel={`Remove ${friendlyType} block?`}
           title={`Remove this ${friendlyType} block?`}
-          description="It'll be hidden from the public site right away. You can restore from the admin trash within 30 days."
+          description="It stays on the live site until you publish. Removing it here adds the change to your draft — undo or discard before publishing to keep it."
           confirmLabel="Remove"
           cancelLabel="Cancel"
           destructive

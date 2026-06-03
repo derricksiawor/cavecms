@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { sql } from 'drizzle-orm'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, requireScope, HttpError } from '@/lib/auth/requireRole'
 import { checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { db } from '@/db/client'
 import { PATHS } from '@/lib/media/storage'
@@ -15,6 +15,9 @@ export const runtime = 'nodejs'
 // the raw PDF (by filename_uuid) to an admin/editor token for pull/push.
 export const GET = withError<{ params: Promise<{ uuid: string }> }>(async (_req, { params }) => {
   const ctx = await requireRole(['admin', 'editor'])
+  // Serves a raw PDF by uuid to the bundle puller — gate on sync:read so a
+  // non-sync token can't exfiltrate private PDFs (cookie sessions no-op).
+  requireScope(ctx, 'sync', 'read')
   checkReadRate(ctx.userId)
 
   const { uuid } = await params

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { BlockData } from '@/lib/cms/block-registry'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Progress bars / skill meters (Elementor: Progress Bar). Each bar fills
 // from 0 → value% when it scrolls into view (IntersectionObserver);
@@ -19,9 +20,11 @@ const TONE_TRACK: Record<string, string> = {
 export function LxProgress({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_progress'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [revealed, setRevealed] = useState(false)
@@ -47,10 +50,11 @@ export function LxProgress({
     return () => io.disconnect()
   }, [])
 
-  const isToken = isColorToken(data.tone)
-  const labelClass = isToken ? TONE_LABEL[data.tone] : undefined
-  const trackClass = isToken ? TONE_TRACK[data.tone] : 'bg-warm-stone/15'
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const labelClass = isToken ? TONE_LABEL[tone] : undefined
+  const trackClass = isToken ? TONE_TRACK[tone] : 'bg-warm-stone/15'
+  const custom = !isToken ? resolveColorValue(tone) : undefined
 
   return (
     <div ref={ref} className={clsx('mx-auto flex w-full max-w-2xl flex-col gap-5', outerClass)}>

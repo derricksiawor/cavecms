@@ -126,12 +126,27 @@ export type FontFamilyToken = 'display' | 'body'
 
 export const FONT_FAMILY_TOKENS: Record<
   FontFamilyToken,
-  { shippedWeights: ReadonlyArray<FontWeightToken> }
+  { label: string; cssVar: string; stack: string; previewName: string; shippedWeights: ReadonlyArray<FontWeightToken> }
 > = {
-  // Light weights are intentionally omitted (CLAUDE.md forbids them) so the
-  // role weight picker can't construct a "light" heading.
-  display: { shippedWeights: ['regular', 'medium', 'semibold', 'bold', 'black'] as const },
-  body: { shippedWeights: ['regular', 'medium', 'semibold', 'bold'] as const },
+  // thin/light are accepted at the DATA layer (MCP/API brand-matching can
+  // pixel-match a brand's exact type ramp); the builder weight picker
+  // deliberately exposes 400+ only (gated in ZodForm) per the house "no light
+  // weights in the operator UI" preference.
+  display: {
+    label: 'Display',
+    cssVar: '--font-display',
+    stack: 'var(--font-display)',
+    previewName: 'Montserrat Display',
+    // Montserrat ships 100–900.
+    shippedWeights: ['thin', 'light', 'regular', 'medium', 'semibold', 'bold', 'black'] as const,
+  },
+  body: {
+    label: 'Body',
+    cssVar: '--font-body',
+    stack: 'var(--font-body)',
+    previewName: 'Montserrat Body',
+    shippedWeights: ['thin', 'light', 'regular', 'medium', 'semibold', 'bold'] as const,
+  },
 } as const
 
 // ──────────────────────────────────────────────────────────────────
@@ -140,6 +155,8 @@ export const FONT_FAMILY_TOKENS: Record<
 // ──────────────────────────────────────────────────────────────────
 
 export type FontWeightToken =
+  | 'thin'
+  | 'light'
   | 'regular'
   | 'medium'
   | 'semibold'
@@ -150,6 +167,12 @@ export const FONT_WEIGHT_TOKENS: Record<
   FontWeightToken,
   { label: string; weight: number; tailwindClass: string }
 > = {
+  // thin/light are data-layer only (MCP/API can pixel-match a brand's exact
+  // type ramp, e.g. a 100-weight luxury display); the builder weight picker
+  // deliberately omits them (see ZodForm) per the house "no light weights in
+  // the operator UI" preference.
+  thin:     { label: 'Thin · 100',     weight: 100, tailwindClass: 'font-thin'     },
+  light:    { label: 'Light · 300',    weight: 300, tailwindClass: 'font-light'    },
   regular:  { label: 'Regular · 400',  weight: 400, tailwindClass: 'font-normal'   },
   medium:   { label: 'Medium · 500',   weight: 500, tailwindClass: 'font-medium'   },
   semibold: { label: 'Semibold · 600', weight: 600, tailwindClass: 'font-semibold' },
@@ -366,3 +389,13 @@ export function shippedWeightTokensFor(
 // pattern as resolveColorValue but anchored — schema-side rejects
 // anything that isn't a clean hex.
 export const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+
+// Exact typographic values (font-size / line-height / letter-spacing) for the
+// per-breakpoint responsive overrides and inline typo styles. A bounded number
+// + unit OR a 3-part clamp(). Anchored so a value can NEVER carry a CSS-rule
+// breakout (`}`, `</style>`, `;`, `:`) — lets the renderer drop anything that
+// reached the <style> emitter without passing the schema (defense-in-depth).
+// Lives here (not block-registry, which is `server-only`) so client-bundled
+// renderers can revalidate at render time too.
+export const CSS_TYPO_VALUE_RE =
+  /^(?:-?\d*\.?\d+(?:px|rem|em|vw|vh|%|pt)?|clamp\(\s*-?\d*\.?\d+(?:px|rem|em|%)\s*,\s*-?\d*\.?\d+(?:vw|vh|rem|em|px|%)\s*,\s*-?\d*\.?\d+(?:px|rem|em|%)\s*\))$/

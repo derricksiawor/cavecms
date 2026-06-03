@@ -23,7 +23,11 @@ import type { CSSProperties } from 'react'
 // `pt-[${n}px]` at build time. Operators reach for arbitrary px when
 // the 7-tier scale (0/8/16/32/64/96/128) doesn't land their target
 // value — e.g. 24px between two cards on a tight column.
-export type SpacingValue = SpacingTier | number
+// A spacing axis is a named tier, a raw px number, OR a CSS-length string
+// with an explicit unit (px/rem/em/%/vw/vh) for full Elementor-style unit
+// control. The string is validated (SAFE_SPACING_LEN) at the parse boundary.
+export type SpacingValue = SpacingTier | number | string
+export const SAFE_SPACING_LEN = /^-?\d*\.?\d+(?:px|rem|em|%|vw|vh)$/
 
 export interface SpacingMeta {
   paddingTop?: SpacingValue
@@ -63,14 +67,25 @@ export function spacingStyle(
 ): CSSProperties | undefined {
   if (!meta) return undefined
   const out: Record<string, string> = {}
-  if (typeof meta.paddingTop === 'number') out.paddingTop = `${meta.paddingTop}px`
-  if (typeof meta.paddingRight === 'number') out.paddingRight = `${meta.paddingRight}px`
-  if (typeof meta.paddingBottom === 'number') out.paddingBottom = `${meta.paddingBottom}px`
-  if (typeof meta.paddingLeft === 'number') out.paddingLeft = `${meta.paddingLeft}px`
-  if (typeof meta.marginTop === 'number') out.marginTop = `${meta.marginTop}px`
-  if (typeof meta.marginRight === 'number') out.marginRight = `${meta.marginRight}px`
-  if (typeof meta.marginBottom === 'number') out.marginBottom = `${meta.marginBottom}px`
-  if (typeof meta.marginLeft === 'number') out.marginLeft = `${meta.marginLeft}px`
+  // A numeric axis emits `${n}px`; a string axis (with an explicit unit) is
+  // emitted as-is when it passes the safe-length gate; tier axes are skipped
+  // (they surface as classes via spacingClass()).
+  const toCss = (v: SpacingValue | undefined): string | undefined =>
+    typeof v === 'number'
+      ? `${v}px`
+      : typeof v === 'string' && SAFE_SPACING_LEN.test(v)
+        ? v
+        : undefined
+  const axes: Array<[keyof SpacingMeta, string]> = [
+    ['paddingTop', 'paddingTop'], ['paddingRight', 'paddingRight'],
+    ['paddingBottom', 'paddingBottom'], ['paddingLeft', 'paddingLeft'],
+    ['marginTop', 'marginTop'], ['marginRight', 'marginRight'],
+    ['marginBottom', 'marginBottom'], ['marginLeft', 'marginLeft'],
+  ]
+  for (const [key, cssProp] of axes) {
+    const css = toCss(meta[key])
+    if (css !== undefined) out[cssProp] = css
+  }
   if (Object.keys(out).length === 0) return undefined
   return out as CSSProperties
 }

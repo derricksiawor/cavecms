@@ -9,6 +9,8 @@ import {
   resolveColorValue,
   resolveFamilyRender,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
+import { gradientTextStyle } from '@/lib/cms/gradient'
 
 // Luxury eyebrow — rendered as a BADGE per ~/.claude/CLAUDE.md
 // "Badges instead of brackets for labels." Pill-shaped tag with a
@@ -46,35 +48,55 @@ const ALIGN_FLEX: Record<BlockData<'lx_eyebrow'>['alignment'], string> = {
 const BADGE_BASE =
   'inline-flex items-center px-4 py-1.5 rounded-full text-xs uppercase tracking-eyebrow text-center md:text-left'
 
+// 'plain' variant — a quiet inline label: no pill, no tint, rendered as
+// typed (no forced uppercase). Just the tone colour + a touch of tracking.
+const PLAIN_BASE = 'inline-block font-sans text-sm tracking-wide'
+
 export function LxEyebrow({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_eyebrow'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const toneValue = data.tone
+  const toneValue = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(toneValue)
   const tonePalette = isToken ? TONE_TOKEN_CLASS[toneValue] : null
   const resolved = !isToken ? resolveColorValue(toneValue) : undefined
 
-  // Custom hex tone: bg is a 15%-alpha tint computed via the resolved
-  // colour, text uses the same colour solid. Tailwind can't express
-  // arbitrary hex alpha as a utility, so this falls back to inline
-  // style on both surfaces.
-  const customStyle = resolved
-    ? {
-        backgroundColor: `color-mix(in srgb, ${resolved} 15%, transparent)`,
-        color: resolved,
-      }
-    : undefined
+  // Plain variant = no pill tint, just the tone colour as text.
+  const isPlain = data.variant === 'plain'
+
+  // Gradient label (optional) — paints the eyebrow text with a gradient
+  // and drops the pill tint (a gradient clipped to text reads cleanest as
+  // a bare label, not inside a tinted pill).
+  const hasGradient = !!data.textGradient
+  const gradStyle = gradientTextStyle(data.textGradient)
+
+  // Custom hex tone: badge bg is a 15%-alpha tint + solid text; plain uses
+  // the tone as text colour only (no tint). Tailwind can't express
+  // arbitrary hex alpha as a utility, so hex tones fall back to inline style.
+  const customStyle = hasGradient
+    ? gradStyle
+    : resolved
+      ? isPlain
+        ? { color: resolved }
+        : {
+            backgroundColor: `color-mix(in srgb, ${resolved} 15%, transparent)`,
+            color: resolved,
+          }
+      : undefined
 
   const overrideWeight = data.weight
   const weightClass = overrideWeight
     ? fontWeightClass(overrideWeight)
-    : 'font-semibold'
+    : isPlain
+      ? 'font-medium'
+      : 'font-semibold'
 
   // Family override: role token → Tailwind class; catalog font → inline
   // font-family var (merged into the badge style below). Default font-sans.
@@ -83,11 +105,17 @@ export function LxEyebrow({
     customStyle || fam.style ? { ...customStyle, ...fam.style } : undefined
 
   const badgeClass = clsx(
-    BADGE_BASE,
+    isPlain ? PLAIN_BASE : BADGE_BASE,
+    // Per-element family override (role token → Tailwind class; catalog font
+    // → inline var on badgeStyle). Falls back to font-sans (BADGE_BASE drops
+    // its own font-sans so this override wins; PLAIN_BASE keeps font-sans but
+    // an explicit override still overrides it as the later clsx class).
     fam.className ?? 'font-sans',
     weightClass,
-    tonePalette?.bg,
-    tonePalette?.text,
+    // Badge tint only in the pill variant; the text colour token applies
+    // to both (plain just skips the background).
+    !hasGradient && !isPlain && tonePalette?.bg,
+    !hasGradient && tonePalette?.text,
   )
   const flexClass = clsx('flex w-full', ALIGN_FLEX[data.alignment])
 

@@ -17,7 +17,7 @@ import { maskLead } from '@/lib/leads/mask'
 // created index suffix — pagination scans only the rows past the
 // cursor instead of OFFSET-skipping prior pages.
 const Query = z.object({
-  source: z.enum(['contact', 'brochure', 'inquiry']).optional(),
+  source: z.enum(['contact', 'brochure', 'inquiry', 'form']).optional(),
   status: z.enum(['new', 'contacted', 'won', 'lost']).optional(),
   cursor: z.string().max(60).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),

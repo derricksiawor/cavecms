@@ -4,10 +4,10 @@ import { fileTypeFromBuffer } from 'file-type'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkUploadRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkReadRate, checkCmsUploadRate } from '@/lib/auth/cmsRateLimit'
 import {
   PATHS,
   cleanupTmp,
@@ -49,7 +49,12 @@ let busyToken: symbol | null = null
 export const POST = withError(async (req) => {
   const ctx = await requireRole(adminPolicy('uploadMedia'))
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkUploadRate(ctx.userId)
+  // Upload is a media WRITE — a scoped token must hold media:write (no-op for
+  // cookie sessions / NULL-scope tokens). checkCmsUploadRate gives a token its
+  // OWN upload bucket so an agent's uploads don't starve the human's per-user
+  // upload budget (cookie sessions still draw on the per-user bucket).
+  requireScope(ctx, 'media', 'write')
+  checkCmsUploadRate(ctx)
 
   if (busyToken !== null) {
     return new Response(JSON.stringify({ error: 'busy' }), {
@@ -256,6 +261,7 @@ export const POST = withError(async (req) => {
 export const GET = withError(async (req) => {
   const ctx = await requireRole(adminPolicy('uploadMedia'))
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'media', 'read')
   const url = new URL(req.url)
   const cursorRaw = url.searchParams.get('cursor')
   const limitRaw = url.searchParams.get('limit')

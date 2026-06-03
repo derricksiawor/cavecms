@@ -11,6 +11,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury testimonial — portrait + pull-quote + attribution (name +
 // optional title). The premium cousin of lx_quote: same restraint,
@@ -37,13 +38,15 @@ export function LxTestimonial({
   data,
   media,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_testimonial'>
   media: RenderContext['media']
   outerClass?: string
   inlineEdit?: InlineEditContext
+  sectionMeta?: SectionMeta
 }) {
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const quoteTone = isToken ? TONE_QUOTE[tone] : undefined
   const attribTone = isToken ? TONE_ATTRIB[tone] : undefined

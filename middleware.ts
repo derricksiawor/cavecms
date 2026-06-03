@@ -46,7 +46,16 @@ import type { BlogStructure } from '@/lib/blog/urls'
 // the live login path unreachable.
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|uploads/|favicon\\.ico).*)'],
+  // `api/cms/sync/stage` is excluded for the SAME reason as `uploads/`: it
+  // receives a large raw gzip bundle body (up to 200 MB), and the Edge
+  // middleware buffers/caps a matched request body at ~10 MB — which silently
+  // TRUNCATED any sync_push from a real install with >10 MB of media (the stage
+  // route streams the body to disk under its own 200 MB cap, but never saw the
+  // full body once middleware buffered it first → bundle_unreadable). The stage
+  // route self-gates (requireRole admin + requireScope sync:write + requireCsrf),
+  // so bypassing the middleware here loses no auth — and `/api/*` is already
+  // exempt from redirect-matching, so nothing else regresses.
+  matcher: ['/((?!_next/static|_next/image|uploads/|api/cms/sync/stage|favicon\\.ico).*)'],
 }
 
 // Bootstrap fallback only — used when the security-config fetch fails
@@ -78,6 +87,9 @@ interface SecurityConfig {
     projectsSegment: string
     blogStructure: BlogStructure
   }
+  /** IndexNow verification key, or null when IndexNow is disabled. When
+   *  set, middleware serves `/{key}.txt` (the key itself) at the edge. */
+  indexNowKey?: string | null
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
@@ -157,6 +169,9 @@ function bootstrapSecurityConfig(): SecurityConfig {
       projectsSegment: 'projects',
       blogStructure: 'postname',
     },
+    // No IndexNow key during a cold-start outage — the verification
+    // file simply 404s until the DB is reachable again (harmless).
+    indexNowKey: null,
   }
 }
 
@@ -605,6 +620,23 @@ export async function middleware(
   // LOGIN_PATH, instead of the pre-wizard cached snapshot.
   const justInstalled = req.cookies.get('cavecms_just_installed')?.value === '1'
   const cfg = await getSecurityConfig(req, justInstalled)
+
+  // ─── IndexNow key file ───
+  // IndexNow (Bing/Yandex/Seznam/Naver) verifies ownership by fetching
+  // `/{key}.txt` and matching its body to the submitted key. Serve it at
+  // the edge from the config-fed key. EXACT path match only — a precise
+  // `/${key}.txt` comparison can't collide with a static security.txt /
+  // ads.txt the operator might serve from /public. Public + cacheable +
+  // ungated (it carries no secret — the key is published by design).
+  if (cfg?.indexNowKey && pathname === `/${cfg.indexNowKey}.txt`) {
+    return new NextResponse(cfg.indexNowKey, {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'public, max-age=300',
+      },
+    })
+  }
 
   // ─── First-boot install gate (WordPress-style) ────────────────
   //

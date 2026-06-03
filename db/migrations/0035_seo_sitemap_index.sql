@@ -1,0 +1,12 @@
+-- Composite index to serve the dynamic sitemap's pages query without a
+-- filesort. app/sitemap.ts reads:
+--   SELECT ... FROM pages
+--   WHERE published = 1 AND deleted_at IS NULL [AND noindex...]
+--   ORDER BY is_home DESC, updated_at DESC
+--   LIMIT 50001
+-- Without a matching index the ORDER BY filesorts the whole published
+-- set on every /sitemap.xml hit. (published, is_home, updated_at) lets
+-- the engine satisfy both the published predicate AND the home-first /
+-- recency ordering from the index. Guarded IF NOT EXISTS (MariaDB 10.x)
+-- so a re-run against a partially-migrated dev DB is a no-op.
+CREATE INDEX IF NOT EXISTS idx_pages_sitemap ON pages (published, is_home, updated_at);

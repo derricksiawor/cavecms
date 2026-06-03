@@ -52,6 +52,11 @@ export async function generateMetadata({
     fallbackTitle: 'Blog — CaveCMS',
     fallbackDescription: 'Updates, milestones and stories from CaveCMS.',
     canonicalPath: blogIndexUrl(page, segments),
+    // SEO suite: when the page row carries no explicit seo_title/description,
+    // resolve through the operator's blogIndex title template (main's SEO
+    // Suite) before falling back to the literal fallbackTitle above.
+    contentType: 'blogIndex',
+    templateVars: { title: 'News' },
   })
 
   // Phase 7: RSS auto-discovery. Next renders Metadata.alternates.types as

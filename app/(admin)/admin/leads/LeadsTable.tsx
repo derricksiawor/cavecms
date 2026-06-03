@@ -426,6 +426,7 @@ export function LeadsTable({
           <option value="contact">Contact form</option>
           <option value="brochure">Brochure request</option>
           <option value="inquiry">Project inquiry</option>
+          <option value="form">Form submission</option>
         </select>
         <select
           value={filters.status ?? ''}

@@ -5,6 +5,7 @@ import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury channel card — per ~/.claude/CLAUDE.md "No borders/border
 // lines" and "Large icons with glow effects, gradient blur backgrounds
@@ -40,16 +41,18 @@ export function LxChannelCard({
   data,
   inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_channel_card'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   // Tone resolution — token names use the cacheable Tailwind classes,
   // custom hex values fall back to inline-style colours. labelText
   // stays champagne by design (it's the signature accent) so custom
   // hex tone only re-tints the value/desc text.
-  const toneRaw = data.tone
+  const toneRaw = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(toneRaw)
   const tone =
     (isToken && TONE_TOKEN_CLASSES[toneRaw]) ||

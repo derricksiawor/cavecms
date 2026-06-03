@@ -3,6 +3,7 @@ import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { registry } from '@/lib/cms/settings-registry'
 import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
+import { getCurrentVersionNotes } from '@/lib/updates/getCurrentVersionNotes'
 import { UpdatesClient } from './UpdatesClient'
 
 // Admin-only Settings → Updates surface.
@@ -62,6 +63,7 @@ export default async function UpdatesSettingsPage() {
   }
 
   const current = getCurrentVersion()
+  const currentVersionNotes = getCurrentVersionNotes()
 
   return (
     <div className="max-w-4xl">
@@ -78,7 +80,11 @@ export default async function UpdatesSettingsPage() {
         was.
       </p>
 
-      <UpdatesClient initial={initial} currentVersion={current} />
+      <UpdatesClient
+        initial={initial}
+        currentVersion={current}
+        currentVersionNotes={currentVersionNotes}
+      />
     </div>
   )
 }

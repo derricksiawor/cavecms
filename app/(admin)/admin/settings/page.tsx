@@ -11,6 +11,11 @@ const REGISTRY_KEYS = Object.keys(registry) as SettingsKey[]
 // so they're the first thing an admin sees; technical / SEO rows are
 // at the bottom.
 const KEY_ORDER: SettingsKey[] = [
+  // Site identity (public URL + name) leads — it's the most fundamental
+  // setting and the one the SEO suite (sitemap / robots / canonical /
+  // metadata) depends on. Surfaced here as the "General" card so it's
+  // editable post-install, not only during the wizard.
+  'site_general',
   'site_header',
   // mobile_cta lives near the top — the sticky bottom bar is a
   // visible-on-every-mobile-page change, so operators expect it

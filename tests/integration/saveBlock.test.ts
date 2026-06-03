@@ -50,6 +50,7 @@ describe('saveBlock', () => {
     const { blockVersion, pageVersion } = await saveBlock({
       blockId: 1,
       userId: USER_ID,
+      tokenId: null,
       ip: '127.0.0.1',
       userAgent: 'test-ua',
       requestId: 'test-req',
@@ -74,6 +75,7 @@ describe('saveBlock', () => {
     await saveBlock({
       blockId: 1,
       userId: USER_ID,
+      tokenId: null,
       ip: null,
       userAgent: null,
       requestId: null,
@@ -92,6 +94,7 @@ describe('saveBlock', () => {
     await saveBlock({
       blockId: 1,
       userId: USER_ID,
+      tokenId: null,
       ip: '127.0.0.1',
       userAgent: 'test-ua',
       requestId: 'test-req',
@@ -133,6 +136,7 @@ describe('saveBlock', () => {
       saveBlock({
         blockId: 1,
         userId: USER_ID,
+        tokenId: null,
         ip: null,
         userAgent: null,
         requestId: null,
@@ -157,6 +161,7 @@ describe('saveBlock', () => {
       saveBlock({
         blockId: 1,
         userId: USER_ID,
+        tokenId: null,
         ip: null,
         userAgent: null,
         requestId: null,
@@ -183,6 +188,7 @@ describe('saveBlock', () => {
       saveBlock({
         blockId: 1,
         userId: USER_ID,
+        tokenId: null,
         ip: null,
         userAgent: null,
         requestId: null,
@@ -203,6 +209,7 @@ describe('saveBlock', () => {
       saveBlock({
         blockId: 1,
         userId: USER_ID,
+        tokenId: null,
         ip: null,
         userAgent: null,
         requestId: null,
@@ -219,6 +226,7 @@ describe('saveBlock', () => {
       saveBlock({
         blockId: 1,
         userId: USER_ID,
+        tokenId: null,
         ip: null,
         userAgent: null,
         requestId: null,
@@ -244,6 +252,7 @@ describe('saveBlock', () => {
       saveBlock({
         blockId: 1,
         userId: USER_ID,
+        tokenId: null,
         ip: null,
         userAgent: null,
         requestId: null,

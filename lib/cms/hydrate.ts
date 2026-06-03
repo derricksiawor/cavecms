@@ -305,7 +305,17 @@ function parseMediaVariants(
  */
 export async function hydratePage(
   pageId: number,
-  opts?: {
+  // Draft → Publish (migration 0028). The PUBLISHED view (default) is what
+  // anonymous visitors read; the DRAFT view is what the inline editor renders
+  // so operators preview their pending, unpublished edits.
+  //   published: live data/meta/position/parent_id; EXCLUDE draft_state='added'
+  //              (not yet published); KEEP 'removed' (still live until publish).
+  //   draft:     COALESCE(draft_*, live) per field; EXCLUDE 'removed' (deleted
+  //              in the draft); INCLUDE 'added' (created in the draft).
+  // Phase 0 is behaviour-neutral: with every row draft_state='live' and draft_*
+  // NULL, the two views return byte-identical rows.
+  opts: {
+    draft?: boolean
     /** 1-based current page for any loop-mode lx_posts block on this page,
      *  parsed from the URL `?page=` by renderCmsPage. Defaults to 1 (the
      *  editor preview + every non-loop caller). A loop block's slice is
@@ -328,8 +338,9 @@ export async function hydratePage(
      *  isn't a post body — `related` then falls back to plain recency and
      *  `excludeCurrent` is a no-op. */
     currentPostId?: number
-  },
+  } = {},
 ): Promise<HydratedPage | null> {
+  const draft = opts.draft === true
   // Verify the page exists before fetching blocks — distinguishes
   // "real page with zero blocks" (returns an empty-shaped HydratedPage)
   // from "no such page" (returns null so the route can 404 cleanly).
@@ -345,12 +356,26 @@ export async function hydratePage(
   // migration 0011 covers the per-parent ORDER BY position sub-scans
   // a future tree-aware query refactor would do, but a single flat
   // SELECT is simpler and faster at v1 scale (10–100 blocks per page).
-  const [blockRows] = (await db.execute(sql`
-    SELECT id, parent_id, kind, block_key, block_type, position, data, meta, version
-    FROM content_blocks
-    WHERE page_id = ${pageId} AND deleted_at IS NULL
-    ORDER BY position
-  `)) as unknown as [
+  const blockQuery = draft
+    ? sql`
+        SELECT id,
+          COALESCE(draft_parent_id, parent_id) AS parent_id,
+          kind, block_key, block_type,
+          COALESCE(draft_position, position) AS position,
+          COALESCE(draft_data, data) AS data,
+          COALESCE(draft_meta, meta) AS meta,
+          version
+        FROM content_blocks
+        WHERE page_id = ${pageId} AND deleted_at IS NULL AND draft_state <> 'removed'
+        ORDER BY COALESCE(draft_position, position)
+      `
+    : sql`
+        SELECT id, parent_id, kind, block_key, block_type, position, data, meta, version
+        FROM content_blocks
+        WHERE page_id = ${pageId} AND deleted_at IS NULL AND draft_state <> 'added'
+        ORDER BY position
+      `
+  const [blockRows] = (await db.execute(blockQuery)) as unknown as [
     Array<{
       id: number
       parent_id: number | null
@@ -459,13 +484,20 @@ export async function hydratePage(
     // both SectionMeta and ColumnMeta carry the field at the same key.
     if (parsedMeta && typeof parsedMeta === 'object') {
       const mm = parsedMeta as Record<string, unknown>
-      const bgImg = mm['backgroundImage']
-      if (bgImg && typeof bgImg === 'object') {
-        const id = (bgImg as Record<string, unknown>)['media_id']
-        if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
-          mediaIds.add(id)
+      const addMediaRef = (v: unknown) => {
+        if (v && typeof v === 'object') {
+          const id = (v as Record<string, unknown>)['media_id']
+          if (typeof id === 'number' && Number.isInteger(id) && id > 0) mediaIds.add(id)
         }
       }
+      addMediaRef(mm['backgroundImage'])
+      // Animated background slideshow (Feature A) — collect every slide's
+      // media_id so the renderer can resolve each frame's variant URL.
+      // Without this the slideshow resolves to empty and never shows.
+      const slides = mm['backgroundSlides']
+      if (Array.isArray(slides)) slides.forEach(addMediaRef)
+      // Background-video poster shares the same media-ref shape.
+      addMediaRef(mm['backgroundVideoPoster'])
     }
     blocks.push({
       id: b.id,
@@ -981,6 +1013,15 @@ export interface HydratedProjectRow {
   published_at: Date | null
   seo_title: string | null
   seo_description: string | null
+  // SEO suite per-entity fields (migration 0032). Optional because some
+  // raw reads of this shape predate them; the project route's
+  // getProjectRow SELECT now projects them for the metadata + per-page
+  // schema wiring. TINYINT(1) surfaces as 0|1; seo_meta is JSON-as-string
+  // from MariaDB (parse via lib/seo/seoMeta.ts:parseSeoMeta).
+  robots_noindex?: number | null
+  robots_nofollow?: number | null
+  canonical_url?: string | null
+  seo_meta?: unknown
   version: number
 }
 

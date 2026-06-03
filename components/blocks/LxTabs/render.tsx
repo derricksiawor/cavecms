@@ -8,6 +8,7 @@ import {
   isColorToken,
   resolveColorValue,
 } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury tabs — product-page tabbed sections. Each tab carries
 // richtext body so operators can drop in mid-length editorial copy.
@@ -54,10 +55,12 @@ export function LxTabs({
   // field paths are still registered in INLINE_EDITABLE_FIELDS.
   inlineEdit: _inlineEdit,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_tabs'>
   inlineEdit?: InlineEditContext
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   const [active, setActive] = useState(data.defaultIndex)
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -65,7 +68,7 @@ export function LxTabs({
   // don't share aria-controls/aria-labelledby IDs.
   const baseId = useId()
 
-  const tone = data.tone
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
   const isToken = isColorToken(tone)
   const labelClass = isToken ? TONE_LABEL[tone] : undefined
   const labelActiveClass = isToken ? TONE_LABEL_ACTIVE[tone] : undefined

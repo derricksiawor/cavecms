@@ -3,6 +3,7 @@ import { Check } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Luxury progress tracker / stepper (Elementor: Progress Tracker) — an
 // ordered list of steps with done / current / upcoming states, laid
@@ -28,14 +29,17 @@ function nodeClasses(state: Step['state']): string {
 export function LxProgressTracker({
   data,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_progress_tracker'>
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
-  const isToken = isColorToken(data.tone)
-  const titleClass = isToken ? TONE_TITLE[data.tone] : undefined
-  const descClass = isToken ? TONE_DESC[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const titleClass = isToken ? TONE_TITLE[tone] : undefined
+  const descClass = isToken ? TONE_DESC[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
   const horizontal = data.orientation === 'horizontal'
 
   const composed = (

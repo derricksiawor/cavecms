@@ -2,9 +2,13 @@ import { createReadStream, statSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { join } from 'node:path'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, requireScope, HttpError } from '@/lib/auth/requireRole'
 import { checkReadRate } from '@/lib/auth/cmsRateLimit'
-import { resolveBackupDir, isValidArchiveBasename } from '@/lib/backups/store'
+import {
+  resolveBackupDir,
+  isValidArchiveBasename,
+  archiveBundlesPlaintextSecrets,
+} from '@/lib/backups/store'
 
 // GET /api/admin/backups/download?file=<basename> — stream a local backup to
 // the operator. Basename is strictly validated (no traversal). Admin-gated.
@@ -13,6 +17,7 @@ export const dynamic = 'force-dynamic'
 
 export const GET = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
+  requireScope(ctx, 'backups', 'read')
   checkReadRate(ctx.userId)
 
   // Block cross-site forced downloads (drive-by): a backup made with
@@ -27,6 +32,14 @@ export const GET = withError(async (req: Request) => {
 
   const file = new URL(req.url).searchParams.get('file') ?? ''
   if (!isValidArchiveBasename(file)) throw new HttpError(400, 'invalid_file')
+  // An --include-env plaintext archive bundles the install's secrets. "read" is
+  // documented as metadata-only, so a least-privilege backups:read token must
+  // NOT walk off with the secrets bundle — require the secret-tier scope
+  // (backups:delete, the same tier restore needs) for such archives. Content-
+  // only and locally-encrypted (.age) archives stay at read.
+  if (archiveBundlesPlaintextSecrets(file)) {
+    requireScope(ctx, 'backups', 'delete')
+  }
   const path = join(resolveBackupDir(), file)
   let st
   try {

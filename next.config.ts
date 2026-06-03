@@ -126,6 +126,13 @@ const config: NextConfig = {
     // /admin/help renders docs/admin-help.md at request time — the
     // standalone bundle needs the markdown copied alongside.
     '/admin/help': ['./docs/admin-help.md'],
+    // /admin/settings/updates renders the running version's release notes
+    // from release-notes/<version>.md at request time (getCurrentVersionNotes).
+    // The standalone cwd is `.next/standalone/`, so the markdown must land at
+    // `.next/standalone/release-notes/`. The trace key is static and can't be
+    // templated per-version, so the whole (text-only, git-tracked) dir is
+    // bundled; only the single current file is ever read.
+    '/admin/settings/updates': ['./release-notes/**/*.md'],
     // db/schema-fingerprint.txt is read by instrumentation.ts at
     // process boot via `path.resolve(process.cwd(), 'db/schema-
     // fingerprint.txt')`. Standalone cwd is `.next/standalone/`, so

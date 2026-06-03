@@ -3,6 +3,7 @@ import { MediaImg } from '../MediaImg'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
 import { isColorToken, resolveColorValue } from '@/lib/cms/designTokens'
+import { adaptToneForSurface, type SectionMeta } from '@/lib/cms/blockMeta'
 
 // Marquee (logo / text ticker). Pure-CSS seamless scroll: the track is
 // duplicated and translated -50%, so one set scrolls off as the copy
@@ -25,10 +26,12 @@ export function LxMarquee({
   data,
   media,
   outerClass,
+  sectionMeta,
 }: {
   data: BlockData<'lx_marquee'>
   media: RenderContext['media']
   outerClass?: string
+  sectionMeta?: SectionMeta
 }) {
   // Empty-content guard — a text marquee with no text or a logo marquee
   // with no logos would render a blank scrolling band. Render nothing
@@ -36,9 +39,10 @@ export function LxMarquee({
   if (data.mode === 'text' && !data.text?.trim()) return null
   if (data.mode === 'logos' && data.logos.length === 0) return null
 
-  const isToken = isColorToken(data.tone)
-  const textClass = isToken ? TONE_TEXT[data.tone] : undefined
-  const custom = !isToken ? resolveColorValue(data.tone) : undefined
+  const tone = adaptToneForSurface(data.tone, sectionMeta)
+  const isToken = isColorToken(tone)
+  const textClass = isToken ? TONE_TEXT[tone] : undefined
+  const custom = !isToken ? resolveColorValue(tone) : undefined
   const anim = `lx-marquee-${data.direction} ${SPEED_DUR[data.speed]} linear infinite`
 
   const oneSet =

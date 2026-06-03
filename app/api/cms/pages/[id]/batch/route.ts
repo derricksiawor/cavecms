@@ -1,24 +1,17 @@
-import { createHash } from 'node:crypto'
-import diff from 'microdiff'
 import { z, ZodError } from 'zod'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { auditLog } from '@/db/schema'
-import { withError, getRequestId } from '@/lib/api/withError'
+import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { blockSchemas, FIXED_BLOCK_KEYS_PER_PAGE } from '@/lib/cms/block-registry'
-import { AUDIT_KIND } from '@/lib/cms/auditKinds'
-import { AUDIT_DIFF_CAP, capAuditDiff, type DiffOp } from '@/lib/cms/saveBlock'
-import { clientIpFromHeaders } from '@/lib/http/clientIp'
-import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
-import { tagsForBlockSave } from '@/lib/cache/tags'
+import { ensureDraftBaseline, recordDraftRevision } from '@/lib/cms/draft'
 import {
   SectionMetaSchema,
   ColumnMetaSchema,
@@ -29,35 +22,41 @@ import {
 } from '@/lib/cms/blockMeta'
 
 // ─────────────────────────────────────────────────────────────────────
-// POST /api/cms/pages/[id]/batch — the AGENT FAST-LANE.
+// POST /api/cms/pages/[id]/batch — the AGENT FAST-LANE (DRAFT overlay).
 //
 // Why this endpoint exists. Editing a page through the per-block PATCH
-// surface is structurally serial: every block write bumps the SHARED
-// `pages.version` (saveBlock.ts), so a client editing N blocks must (1)
-// GET the whole tree for ids + versions + current meta, then (2) fire N
-// PATCHes STRICTLY in sequence — each needs the new `pageVersion` the
-// previous returned — and meta is a full replace, forcing a read-modify-
-// write per section. For an AI agent scripting "recolor 12 sections +
-// retitle 5 headings" that is one GET plus 17 serial round-trips, each
-// re-authing + a locked TX. Direct SQL does it in one multi-row UPDATE.
+// surface is structurally serial: a client scripting "recolor 12 sections
+// + retitle 5 headings" must GET the whole tree, then fire N PATCHes — one
+// per block. This endpoint collapses that into one request → one
+// transaction. Direct SQL would do it in one multi-row UPDATE, but skip
+// the API's safety boundary; this preserves it.
 //
-// This endpoint closes that gap WITHOUT abandoning the safety the API
-// adds over raw SQL. Many ops travel in ONE request → ONE transaction →
-// ONE `pages.version` bump → ONE coalesced revalidate. Optimistic-lock
-// versions are OPTIONAL (omit = last-write-wins, exactly like a direct
-// UPDATE; provide `pageVersion` / per-op `expectedVersion` = the same
-// dual-axis lock the dashboard uses). Partial-merge ops (`dataPatch` /
-// `metaPatch`) let an agent change one field without reading the current
-// value first. Every per-op apply still runs the FULL write boundary:
-// Zod + DOMPurify (parseAndSanitize), container-meta schema validation,
-// per-page htmlId uniqueness, media-reference availability + diff, the
-// column-count cap, the fixed-slot reservation, and a per-op audit row.
+// Draft → Publish (migration 0028): every op writes the DRAFT overlay
+// (draft_data / draft_meta / draft_position / draft_parent_id +
+// draft_state), NEVER the live columns the public site renders. The public
+// page is unchanged until the operator clicks Publish, which COALESCEs the
+// draft columns into the live ones. Because the draft is a single
+// operator's private working copy, draft writes are LAST-WRITE-WINS:
+//   • NO optimistic-lock checks — body.pageVersion / per-op expectedVersion
+//     are ignored (they remain accepted in the body for back-compat), and
+//     stale_version is never thrown.
+//   • pages.version (the PUBLISHED lock) is NOT bumped. The whole batch
+//     bumps pages.draft_version + has_draft ONCE so a second editor tab can
+//     detect "draft changed elsewhere".
+//   • NO revalidate — a draft write doesn't touch the public render; Publish
+//     handles cache invalidation.
+//
+// One ensureDraftBaseline(seq 0) at the start of the TX + one
+// recordDraftRevision at the end give the whole batch a single undo step.
+//
+// Every per-op apply still runs the FULL write boundary: Zod + DOMPurify
+// (parseAndSanitize), container-meta schema validation, per-page htmlId
+// uniqueness, media-reference availability, the column-count cap, the
+// fixed-slot reservation, and forward-ref tempId resolution.
 //
 // Reachable by bearer API tokens (path starts with /api/cms/ →
 // tokenAllowedPath) AND by the session-cookie dashboard. CSRF is enforced
-// for cookie callers and skipped for bearer tokens (requireCsrf honours
-// the apitoken: jti contract). Roles: admin + editor, matching every
-// per-block content route.
+// for cookie callers and skipped for bearer tokens. Roles: admin + editor.
 // ─────────────────────────────────────────────────────────────────────
 
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/
@@ -66,17 +65,17 @@ function parseId(raw: string): number {
   return Number(raw)
 }
 
+// draft_state transition shared by every modify op: a row that was 'added'
+// in this draft stays 'added' (it's draft-only either way); a 'live' (or
+// 'modified') row becomes 'modified'.
+const DRAFT_STATE_CASE = sql.raw(
+  "CASE WHEN draft_state = 'added' THEN 'added' ELSE 'modified' END",
+)
+
 // Bounds. The whole batch runs in ONE transaction holding the page row
 // FOR UPDATE, and each op issues several sequential DB round-trips, so the
 // page-write lock is held for roughly (ops × round-trips). MAX_OPS caps
-// that locked window — at 50 the worst case is a few hundred round-trips
-// (sub-second on a healthy DB), which still collapses an agent's typical
-// "edit 17 blocks" workload into a single request while bounding how long
-// concurrent same-page writers (other agents / the dashboard) can stall.
-// An agent building a large page issues a handful of batches, each one
-// round-trip. readJsonBody already caps the envelope at 256 KB.
-// orderedBlockIds gets a larger ceiling because a single reorder of a wide
-// page is one op but lists every sibling.
+// that locked window. readJsonBody already caps the envelope at 256 KB.
 const MAX_OPS = 50
 const MAX_ORDERED_IDS = 500
 // Temp-id refs (forward references between create ops in the same batch)
@@ -111,7 +110,7 @@ const PatchDataOp = z
   .object({
     op: z.literal('patchData'),
     blockId: z.number().int().positive(),
-    // Opt-in optimistic lock. Omit → last-write-wins on current version.
+    // Accepted for back-compat; IGNORED (draft writes are last-write-wins).
     expectedVersion: z.number().int().nonnegative().optional(),
     // Exactly one of: full replace (`data`) or shallow top-level merge
     // (`dataPatch`). The handler 400s if both or neither are present.
@@ -162,7 +161,7 @@ const BatchOp = z.discriminatedUnion('op', [
 
 const BatchBody = z
   .object({
-    // Whole-batch optimistic lock. Omit → last-write-wins.
+    // Accepted for back-compat; IGNORED (draft writes are last-write-wins).
     pageVersion: z.number().int().nonnegative().optional(),
     ops: z.array(BatchOp).min(1).max(MAX_OPS),
   })
@@ -178,8 +177,8 @@ function extractHtmlId(meta: unknown): string | undefined {
 }
 
 // Coerce a stored JSON column (string | null) to a plain object for
-// merge bases / audit diffs. A corrupt blob degrades to {} rather than
-// crashing the whole batch with a SyntaxError.
+// merge bases. A corrupt blob degrades to {} rather than crashing the
+// whole batch with a SyntaxError.
 function asObject(raw: string | null): Record<string, unknown> {
   if (raw === null) return {}
   try {
@@ -216,25 +215,30 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   // Charge the mutation limiter ONE tick PER OP — parity with the per-block
   // routes (which each pay one tick per single mutation). Charging per op
   // (not per request) closes the amplification gap where one 50-op batch
-  // would otherwise cost the same budget as a single PATCH, letting a
-  // token evade the limiter by fanning mutations out through batches. The
-  // charge happens before any DB work, so an over-limit batch 429s without
+  // would otherwise cost the same budget as a single PATCH. The charge
+  // happens before any DB work, so an over-limit batch 429s without
   // touching the page.
-  for (let i = 0; i < body.ops.length; i += 1) checkMutationRate(ctx.userId)
-
-  const headerObj: Record<string, string | undefined> = {}
-  req.headers.forEach((v, k) => {
-    headerObj[k] = v
-  })
-  const ip = clientIpFromHeaders(headerObj, '127.0.0.1')
-  const userAgent = (headerObj['user-agent'] ?? '').slice(0, 255) || null
-  const requestId = getRequestId(req)
+  // Scope the batch PER-OP against the `blocks` resource, mirroring the
+  // dedicated per-block routes (blocks/[id] PATCH = blocks:write, DELETE =
+  // blocks:delete). The batch is the agent fast-lane for the SAME
+  // content_blocks mutations, so it MUST enforce the same scope ceiling: a
+  // token granted only blocks:write cannot delete via a batch delete op, and a
+  // token with no blocks grant cannot create/patch/reorder blocks here. (A
+  // null-scope or cookie-session caller is unaffected — requireScope no-ops.)
+  if (body.ops.some((o) => o.op !== 'delete')) {
+    requireScope(ctx, 'blocks', 'write')
+  }
+  if (body.ops.some((o) => o.op === 'delete')) {
+    requireScope(ctx, 'blocks', 'delete')
+  }
+  for (let i = 0; i < body.ops.length; i += 1) checkCmsMutationRate(ctx)
 
   const txResult = await db.transaction(async (tx) => {
     // 1. Lock the page row FIRST (deadlock pre-emption — same lock order
-    //    as saveBlock: pages → content_blocks). One optional whole-batch
-    //    optimistic-lock check, then we bump pages.version exactly ONCE
-    //    at the end for the entire batch.
+    //    as the draft routes: pages → content_blocks). NO optimistic-lock
+    //    check — draft writes are last-write-wins. We echo the UNCHANGED
+    //    published version back to the caller and bump pages.draft_version
+    //    once at the end for the entire batch.
     // kind='page' so a hidden post-body page can NOT be driven through the
     // page-level batch fast-lane as a standalone page (spec §4.4). Body
     // editing flows through the per-block /api/cms/blocks/* routes, which
@@ -247,13 +251,13 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
     `)) as unknown as [Array<{ id: number; slug: string; version: number }>]
     const pageRow = pageRows[0]
     if (!pageRow) throw new HttpError(404, 'page_not_found')
-    if (body.pageVersion !== undefined && pageRow.version !== body.pageVersion) {
-      throw new HttpError(409, 'stale_page_version')
-    }
     const pageSlug = pageRow.slug
 
+    // Record the clean baseline (seq 0) BEFORE any change so undo can return
+    // to the published state. No-op if the page already has a draft history.
+    await ensureDraftBaseline(tx, pageId, ctx.userId)
+
     const tempIdMap = new Map<string, number>()
-    const tags = new Set<string>()
     // Lazy append cursor per parent bucket. Keyed 'null' for top-level.
     // Seeded from the live MAX(position); incremented in-memory as we
     // INSERT so multiple creates under one parent land in order. There is
@@ -310,24 +314,6 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
               LIMIT 1`,
       )) as unknown as [Array<{ id: number }>]
       if (rows.length > 0) throw opErr(index, 409, 'html_id_collision')
-    }
-
-    const audit = async (
-      action: 'create' | 'update' | 'delete' | 'reorder',
-      resourceType: 'content_block' | 'page',
-      resourceId: string,
-      auditDiff: object,
-    ): Promise<void> => {
-      await tx.insert(auditLog).values({
-        userId: ctx.userId,
-        action,
-        resourceType,
-        resourceId,
-        diff: auditDiff as unknown as object,
-        ip,
-        userAgent,
-        requestId,
-      })
     }
 
     // 2. Apply ops IN ORDER. Sequential so temp-id forward refs resolve
@@ -431,12 +417,17 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
         if (htmlId) await assertHtmlIdFree(htmlId, null, i)
 
         const position = await nextPosition(parentId)
+        // Draft insert: draft_state='added'. The live data/position/parent_id
+        // columns carry the content (exactly like the POST insert route) so
+        // Publish materialises the row by flipping it back to 'live'; the
+        // editor's draft hydrate INCLUDES it while the public hydrate EXCLUDES
+        // it until then.
         const [ins] = (await tx.execute(sql`
           INSERT INTO content_blocks
-            (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by)
+            (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by, draft_state)
           VALUES (
             ${pageId}, ${parentId}, ${kind}, ${insertBlockType},
-            ${position}, ${insertData}, ${insertMeta}, 0, ${ctx.userId}
+            ${position}, ${insertData}, ${insertMeta}, 0, ${ctx.userId}, 'added'
           )
         `)) as unknown as [{ insertId: number }]
         const newId = Number(ins.insertId)
@@ -453,34 +444,9 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
           }
         }
 
-        const createPayload =
-          kind === 'widget'
-            ? { kind: AUDIT_KIND.create, data: parsedWidgetData }
-            : {
-                kind: AUDIT_KIND.create,
-                container_kind: kind,
-                parent_id: parentId,
-                meta: insertMeta === null ? null : JSON.parse(insertMeta),
-              }
-        const serializedLen = JSON.stringify(createPayload).length
-        await audit(
-          'create',
-          'content_block',
-          String(newId),
-          serializedLen > AUDIT_DIFF_CAP
-            ? { kind: AUDIT_KIND.createTruncated, byteSize: serializedLen }
-            : createPayload,
-        )
-
         if (op.tempId) {
           if (tempIdMap.has(op.tempId)) throw opErr(i, 400, 'duplicate_temp_id')
           tempIdMap.set(op.tempId, newId)
-        }
-        for (const t of tagsForBlockSave(
-          pageSlug,
-          kind === 'widget' ? insertBlockType : undefined,
-        ).tags) {
-          tags.add(t)
         }
         results.push({
           op: 'create',
@@ -497,7 +463,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
           throw opErr(i, 400, 'exactly_one_of_data_or_data_patch')
         }
         const [rows] = (await tx.execute(sql`
-          SELECT id, kind, block_type, data, version FROM content_blocks
+          SELECT id, kind, block_type, data, draft_data FROM content_blocks
           WHERE id = ${op.blockId} AND page_id = ${pageId} AND deleted_at IS NULL
           FOR UPDATE
         `)) as unknown as [
@@ -506,23 +472,20 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
             kind: BlockKind
             block_type: string
             data: string
-            version: number
+            draft_data: string | null
           }>,
         ]
         const row = rows[0]
         if (!row) throw opErr(i, 404, 'not_found')
         if (row.kind !== 'widget') throw opErr(i, 400, 'wrong_field_for_kind')
-        if (
-          op.expectedVersion !== undefined &&
-          row.version !== op.expectedVersion
-        ) {
-          throw opErr(i, 409, 'stale_block_version')
-        }
 
-        const oldData = asObject(row.data)
+        // Merge base for dataPatch = the EFFECTIVE draft data
+        // (COALESCE(draft_data, data)) so a partial patch builds on any
+        // earlier draft edit, not the stale published value.
+        const baseData = asObject(row.draft_data ?? row.data)
         const candidate = hasFull
           ? op.data
-          : { ...oldData, ...(op.dataPatch as Record<string, unknown>) }
+          : { ...baseData, ...(op.dataPatch as Record<string, unknown>) }
         let parsed: unknown
         try {
           parsed = parseAndSanitize(row.block_type, candidate)
@@ -531,58 +494,30 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
           throw e
         }
         const parsedJson = JSON.stringify(parsed)
-        const newVersion = row.version + 1
         await tx.execute(sql`
           UPDATE content_blocks
-          SET data = ${parsedJson}, version = ${newVersion}, updated_by = ${ctx.userId}
+          SET draft_data = ${parsedJson}, draft_state = ${DRAFT_STATE_CASE}
           WHERE id = ${op.blockId}
         `)
 
-        // Media-reference diff (identical contract to saveBlock).
-        const oldRefs = collectMediaPaths(oldData)
+        // Media-reference availability for any NEW media the draft data
+        // introduces (relative to the effective base). We do NOT rewrite
+        // media_references here — those track the LIVE content; Publish
+        // rebuilds them from the materialised data. But the referenced
+        // media must still exist so Publish can't strand a dangling ref.
+        const baseRefs = collectMediaPaths(baseData)
         const newRefs = collectMediaPaths(parsed)
-        const oldSet = new Set(oldRefs.map((r) => `${r.mediaId}::${r.field}`))
-        const newSet = new Set(newRefs.map((r) => `${r.mediaId}::${r.field}`))
+        const baseSet = new Set(baseRefs.map((r) => `${r.mediaId}::${r.field}`))
         const newMediaIds = [
           ...new Set(
             newRefs
-              .filter((r) => !oldSet.has(`${r.mediaId}::${r.field}`))
+              .filter((r) => !baseSet.has(`${r.mediaId}::${r.field}`))
               .map((r) => r.mediaId),
           ),
         ]
         await assertMediaAvailable(tx, newMediaIds)
-        for (const r of oldRefs) {
-          if (!newSet.has(`${r.mediaId}::${r.field}`)) {
-            await tx.execute(sql`
-              DELETE FROM media_references
-              WHERE media_id = ${r.mediaId} AND referent_type = 'content_block'
-                AND referent_id = ${op.blockId} AND field = ${r.field}
-            `)
-          }
-        }
-        for (const r of newRefs) {
-          if (!oldSet.has(`${r.mediaId}::${r.field}`)) {
-            await tx.execute(sql`
-              INSERT IGNORE INTO media_references (media_id, referent_type, referent_id, field)
-              VALUES (${r.mediaId}, 'content_block', ${op.blockId}, ${r.field})
-            `)
-          }
-        }
 
-        const patch = diff(oldData, (parsed as object) ?? {}) as DiffOp[]
-        const cappedDiff = capAuditDiff(patch)
-        await audit(
-          'update',
-          'content_block',
-          String(op.blockId),
-          Array.isArray(cappedDiff)
-            ? { kind: AUDIT_KIND.patch, ops: cappedDiff }
-            : { ...(cappedDiff as object), kind: AUDIT_KIND.patchTruncated },
-        )
-        for (const t of tagsForBlockSave(pageSlug, row.block_type).tags) {
-          tags.add(t)
-        }
-        results.push({ op: 'patchData', id: op.blockId, version: newVersion })
+        results.push({ op: 'patchData', id: op.blockId, version: 0 })
       } else if (op.op === 'patchMeta') {
         const hasFull = op.meta !== undefined
         const hasPatch = op.metaPatch !== undefined
@@ -590,7 +525,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
           throw opErr(i, 400, 'exactly_one_of_meta_or_meta_patch')
         }
         const [rows] = (await tx.execute(sql`
-          SELECT id, kind, block_type, meta, version FROM content_blocks
+          SELECT id, kind, block_type, meta, draft_meta FROM content_blocks
           WHERE id = ${op.blockId} AND page_id = ${pageId} AND deleted_at IS NULL
           FOR UPDATE
         `)) as unknown as [
@@ -599,32 +534,28 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
             kind: BlockKind
             block_type: string
             meta: string | null
-            version: number
+            draft_meta: string | null
           }>,
         ]
         const row = rows[0]
         if (!row) throw opErr(i, 404, 'not_found')
-        if (
-          op.expectedVersion !== undefined &&
-          row.version !== op.expectedVersion
-        ) {
-          throw opErr(i, 409, 'stale_block_version')
-        }
 
-        const oldMeta = asObject(row.meta)
+        // Merge base for metaPatch = the EFFECTIVE draft meta
+        // (COALESCE(draft_meta, meta)).
+        const baseMeta = asObject(row.draft_meta ?? row.meta)
         const patchObj = (op.metaPatch ?? {}) as Record<string, unknown>
         let parsedMeta: unknown
         try {
           if (row.kind === 'section') {
             const candidate = hasFull
               ? op.meta
-              : { ...DEFAULT_SECTION_META, ...oldMeta, ...patchObj }
+              : { ...DEFAULT_SECTION_META, ...baseMeta, ...patchObj }
             parsedMeta = SectionMetaSchema.parse(candidate)
           } else if (row.kind === 'column') {
-            const candidate = hasFull ? op.meta : { ...oldMeta, ...patchObj }
+            const candidate = hasFull ? op.meta : { ...baseMeta, ...patchObj }
             parsedMeta = ColumnMetaSchema.parse(candidate)
           } else {
-            const candidate = hasFull ? op.meta : { ...oldMeta, ...patchObj }
+            const candidate = hasFull ? op.meta : { ...baseMeta, ...patchObj }
             parsedMeta = WidgetMetaSchema.parse(candidate)
           }
         } catch (e) {
@@ -635,38 +566,22 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
         const htmlId = extractHtmlId(parsedMeta)
         if (htmlId) await assertHtmlIdFree(htmlId, op.blockId, i)
 
-        const newVersion = row.version + 1
         await tx.execute(sql`
           UPDATE content_blocks
-          SET meta = ${metaJson}, version = ${newVersion}, updated_by = ${ctx.userId}
+          SET draft_meta = ${metaJson}, draft_state = ${DRAFT_STATE_CASE}
           WHERE id = ${op.blockId}
         `)
-        // Section/column/widget meta is small (< 1 KB even at maximum), so
-        // the before/after pair always fits well under AUDIT_DIFF_CAP — no
-        // truncation branch needed (matches saveBlockMeta). A future
-        // meta-schema change that adds a large field must revisit this.
-        await audit('update', 'content_block', String(op.blockId), {
-          kind: AUDIT_KIND.patch,
-          container_kind: row.kind,
-          before: row.meta === null ? null : oldMeta,
-          after: parsedMeta,
-        })
-        for (const t of tagsForBlockSave(pageSlug, row.block_type).tags) {
-          tags.add(t)
-        }
-        results.push({ op: 'patchMeta', id: op.blockId, version: newVersion })
+        results.push({ op: 'patchMeta', id: op.blockId, version: 0 })
       } else if (op.op === 'delete') {
         const [rows] = (await tx.execute(sql`
-          SELECT block_key, kind, block_type, data, version FROM content_blocks
+          SELECT block_key, kind, draft_state FROM content_blocks
           WHERE id = ${op.blockId} AND page_id = ${pageId} AND deleted_at IS NULL
           FOR UPDATE
         `)) as unknown as [
           Array<{
             block_key: string | null
             kind: BlockKind
-            block_type: string
-            data: string
-            version: number
+            draft_state: string
           }>,
         ]
         const row = rows[0]
@@ -674,77 +589,55 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
         if (row.block_key !== null) {
           throw opErr(i, 409, 'cannot_delete_fixed_block')
         }
-        if (
-          op.expectedVersion !== undefined &&
-          row.version !== op.expectedVersion
-        ) {
-          throw opErr(i, 409, 'stale_block_version')
-        }
 
-        let deletedIds: number[]
-        if (row.kind === 'widget') {
-          deletedIds = [op.blockId]
-        } else {
-          const [descRows] = (await tx.execute(sql`
-            WITH RECURSIVE descendants AS (
-              SELECT id, page_id FROM content_blocks
-              WHERE id = ${op.blockId} AND deleted_at IS NULL
-              UNION ALL
-              SELECT cb.id, cb.page_id FROM content_blocks cb
-              INNER JOIN descendants d ON cb.parent_id = d.id
-              WHERE cb.deleted_at IS NULL AND cb.page_id = d.page_id
-            )
-            SELECT id FROM descendants
+        // Subtree collection — mirror lib/cms/draft.ts deleteDraftBlock. The
+        // subtree walk considers BOTH live parent_id AND draft_parent_id so a
+        // draft-reparented descendant is still swept. Widgets have no
+        // children → the set is just the row itself.
+        let subtreeIds = [op.blockId]
+        if (row.kind !== 'widget') {
+          const [kids] = (await tx.execute(sql`
+            SELECT id FROM content_blocks
+            WHERE page_id = ${pageId} AND deleted_at IS NULL
+              AND (id = ${op.blockId}
+                   OR parent_id = ${op.blockId}
+                   OR draft_parent_id = ${op.blockId}
+                   OR parent_id IN (SELECT id FROM (
+                        SELECT id FROM content_blocks
+                        WHERE page_id = ${pageId} AND parent_id = ${op.blockId}
+                      ) AS cols)
+                   OR draft_parent_id IN (SELECT id FROM (
+                        SELECT id FROM content_blocks
+                        WHERE page_id = ${pageId} AND parent_id = ${op.blockId}
+                      ) AS cols2))
           `)) as unknown as [Array<{ id: number }>]
-          deletedIds = descRows.map((r) => r.id)
-          if (deletedIds.length === 0) deletedIds = [op.blockId]
+          subtreeIds = [...new Set([op.blockId, ...kids.map((k) => k.id)])]
         }
+        const idList = sql.join(subtreeIds, sql.raw(','))
+
+        // Hard-delete rows added in THIS draft (never existed publicly);
+        // flip the rest to 'removed' (public keeps showing them until
+        // Publish; the editor's draft view excludes them). No version bump,
+        // no deleted_at stamp — the draft layer is unlocked + invisible to
+        // the public.
+        await tx.execute(sql`
+          DELETE FROM content_blocks
+          WHERE page_id = ${pageId} AND id IN (${idList}) AND draft_state = 'added'
+        `)
         await tx.execute(sql`
           UPDATE content_blocks
-          SET deleted_at = NOW(3), version = version + 1, updated_by = ${ctx.userId}
-          WHERE deleted_at IS NULL AND id IN (${sql.join(deletedIds, sql.raw(','))})
+          SET draft_state = 'removed'
+          WHERE page_id = ${pageId} AND id IN (${idList}) AND draft_state <> 'added'
         `)
-        if (row.kind === 'widget') {
-          await tx.execute(sql`
-            DELETE FROM media_references
-            WHERE referent_type = 'content_block' AND referent_id = ${op.blockId}
-          `)
-        }
-        await audit(
-          'delete',
-          'content_block',
-          String(op.blockId),
-          row.kind === 'widget'
-            ? {
-                kind: AUDIT_KIND.delete,
-                block_type: row.block_type,
-                version: row.version,
-                data_hash: createHash('sha256')
-                  .update(row.data)
-                  .digest('hex'),
-                byte_size: row.data.length,
-              }
-            : {
-                kind: AUDIT_KIND.delete,
-                container_kind: row.kind,
-                block_type: row.block_type,
-                version: row.version,
-                cascade_ids: deletedIds,
-              },
-        )
-        for (const t of tagsForBlockSave(pageSlug, row.block_type).tags) {
-          tags.add(t)
-        }
-        results.push({ op: 'delete', id: op.blockId, deletedIds })
+        // media_references track LIVE content (Publish rebuilds them on
+        // materialise); a draft delete leaves them untouched until then.
+        results.push({ op: 'delete', id: op.blockId, deletedIds: subtreeIds })
       } else {
         // reorderChildren
         const parentId = resolveParent(op.parent, i)
         // Verify a non-null parent exists ON THIS PAGE (and lock it, same
         // deadlock-ordering discipline as create) before reading its
-        // children. The page-scoped UPDATE below already makes a forged
-        // parent harmless, but without this an off-page / missing parent
-        // would surface as a confusing incomplete_reorder instead of a
-        // precise parent_not_found — matching the create-op contract.
+        // children.
         if (parentId !== null) {
           const [pr] = (await tx.execute(sql`
             SELECT id, page_id FROM content_blocks
@@ -755,6 +648,9 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
             throw opErr(i, 404, 'parent_not_found')
           }
         }
+        // Living children read from the LIVE parent_id column (the published
+        // membership), matching the /reorder route's drift contract. The
+        // submission must be COMPLETE for that membership.
         const [living] = (await tx.execute(sql`
           SELECT id FROM content_blocks
           WHERE page_id = ${pageId} AND deleted_at IS NULL
@@ -771,13 +667,18 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
         if (seen.size !== livingIds.size) {
           throw opErr(i, 409, 'incomplete_reorder')
         }
+        // Draft reorder: write draft_position (and draft_parent_id, since a
+        // reorderChildren op declares the parent every listed child should
+        // live under) + flip draft_state. The live position/parent_id are
+        // UNTOUCHED — Publish COALESCEs the draft columns in.
         const positionCases = op.orderedBlockIds.map(
           (id, idx) => sql`WHEN ${id} THEN ${(idx + 1) * 1000}`,
         )
         await tx.execute(sql`
           UPDATE content_blocks
-          SET position = CASE id ${sql.join(positionCases, sql.raw(' '))} END,
-              version = version + 1, updated_by = ${ctx.userId}
+          SET draft_position = CASE id ${sql.join(positionCases, sql.raw(' '))} END,
+              draft_parent_id = ${parentId},
+              draft_state = ${DRAFT_STATE_CASE}
           WHERE id IN (${sql.join(op.orderedBlockIds, sql.raw(','))})
             AND page_id = ${pageId} AND deleted_at IS NULL
         `)
@@ -786,12 +687,6 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
           parentId === null ? 'null' : String(parentId),
           op.orderedBlockIds.length * 1000,
         )
-        await audit('reorder', 'page', String(pageId), {
-          kind: AUDIT_KIND.reorder,
-          cross_parent: false,
-          groups: [{ parent_id: parentId, order: op.orderedBlockIds }],
-        })
-        for (const t of tagsForBlockSave(pageSlug).tags) tags.add(t)
         results.push({
           op: 'reorderChildren',
           parentId,
@@ -804,9 +699,8 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
     // re-tagged op[<i>]:<code> so the caller knows which op failed: a bare
     // HttpError from a shared helper (assertMediaAvailable → media_missing)
     // gets the index attached, and a duplicate-key 1062 from the
-    // migration-0014 htmlId unique index (a concurrent TX committing the
-    // same htmlId between our app-level check and our write) maps to the
-    // same clean 409 html_id_collision the per-block route returns.
+    // migration-0014 htmlId unique index maps to the same clean 409
+    // html_id_collision the per-block route returns.
     for (let i = 0; i < body.ops.length; i += 1) {
       try {
         await applyOp(i, body.ops[i]!)
@@ -827,44 +721,39 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
       }
     }
 
-    // 3. ONE pages.version bump for the whole batch. Every concurrent
-    //    in-flight per-block PATCH/DELETE/reorder holding the pre-batch
-    //    pageVersion cursor will now 409 and re-fetch — the same
-    //    page-version contract the per-block routes enforce, just charged
-    //    once instead of once-per-op.
+    // 3. ONE draft-cursor bump for the whole batch — pages.draft_version +
+    //    has_draft + draft_updated_at/_by. The PUBLISHED pages.version is
+    //    NOT touched (Publish bumps it). draft_version advancing lets a
+    //    second editor tab detect "draft changed elsewhere".
     await tx.execute(sql`
       UPDATE pages
-      SET version = version + 1, updated_at = NOW(3), updated_by = ${ctx.userId}
+      SET draft_version = draft_version + 1,
+          has_draft = 1,
+          draft_updated_at = NOW(3),
+          draft_updated_by = ${ctx.userId}
       WHERE id = ${pageId}
     `)
-    const newPageVersion = pageRow.version + 1
+    // 4. Record ONE undo step for the whole batch (the post-change draft
+    //    state). A draft write does NOT change the public render → NO
+    //    revalidate here; Publish materialises + invalidates the cache.
+    await recordDraftRevision(
+      tx,
+      pageId,
+      ctx.userId,
+      `AI batch (${body.ops.length} ops)`,
+    )
 
-    // 4. ONE coalesced revalidate for the union of every op's tags. The
-    //    intent row commits inside the TX; the post-commit microtask
-    //    drains it without blocking the response.
-    const tagList = [...tags]
-    const queueRowId = tagList.length
-      ? await enqueueRevalidate(tx, tagList)
-      : null
-
+    // Echo the UNCHANGED published version (draft writes never bump it).
     return {
-      newPageVersion,
+      pageVersion: pageRow.version,
       results,
       tempIds: Object.fromEntries(tempIdMap),
-      tags: tagList,
-      queueRowId,
     }
   })
 
-  if (txResult.queueRowId !== null) {
-    queueMicrotask(() => {
-      void drainRevalidate(txResult.queueRowId!, txResult.tags)
-    })
-  }
-
   return new Response(
     JSON.stringify({
-      pageVersion: txResult.newPageVersion,
+      pageVersion: txResult.pageVersion,
       tempIds: txResult.tempIds,
       results: txResult.results,
     }),

@@ -4,10 +4,10 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -56,7 +56,8 @@ interface InsertResult {
 export const POST = withError(async (req) => {
   const ctx = await requireRole(adminPolicy('createPost'))
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'posts', 'write')
+  checkCmsMutationRate(ctx)
 
   // Parse with safeParse so the slug-specific refine/regex failures surface as
   // PRECISE error codes the client can map to an actionable message. withError
@@ -123,6 +124,7 @@ export const POST = withError(async (req) => {
 
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'create',
         resourceType: 'post',
         resourceId: String(postId),
@@ -182,7 +184,8 @@ interface PostListRow {
 // is small enough that a 50-row cap (newest first) covers the admin
 // list UI without scroll virtualization.
 export const GET = withError(async (req) => {
-  await requireRole(['admin', 'editor', 'viewer'])
+  const ctx = await requireRole(['admin', 'editor', 'viewer'])
+  requireScope(ctx, 'posts', 'read')
   const url = new URL(req.url)
   const showArchived = url.searchParams.get('archived') === '1'
 

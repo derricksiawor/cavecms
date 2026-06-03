@@ -8,6 +8,7 @@ import {
   type Ref,
 } from 'react'
 import { useRevealOnScroll } from '@/lib/motion/useRevealOnScroll'
+import { useMotionTiming } from '@/lib/motion/MotionTiming'
 import { useLineReveal } from '@/lib/motion/useLineReveal'
 import { useMagneticHover } from '@/lib/motion/useMagneticHover'
 import { useParallax } from '@/lib/motion/useParallax'
@@ -65,11 +66,21 @@ function attachRef(children: ReactNode, ref: Ref<HTMLElement>): ReactNode {
 // dispatching to a sub-component pins it to 1 listener per widget.
 
 function FadeInTarget({ children }: { children: ReactNode }) {
-  const ref = useRevealOnScroll<HTMLElement>({ y: 0 })
+  const t = useMotionTiming()
+  const ref = useRevealOnScroll<HTMLElement>({
+    y: 0,
+    ...(t.durationMs ? { duration: t.durationMs / 1000 } : {}),
+    ...(t.delayMs ? { delay: t.delayMs / 1000 } : {}),
+  })
   return attachRef(children, ref)
 }
 function SlideUpTarget({ children }: { children: ReactNode }) {
-  const ref = useRevealOnScroll<HTMLElement>({ y: 24 })
+  const t = useMotionTiming()
+  const ref = useRevealOnScroll<HTMLElement>({
+    y: 24,
+    ...(t.durationMs ? { duration: t.durationMs / 1000 } : {}),
+    ...(t.delayMs ? { delay: t.delayMs / 1000 } : {}),
+  })
   return attachRef(children, ref)
 }
 function LineRevealTarget({ children }: { children: ReactNode }) {

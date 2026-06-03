@@ -54,6 +54,7 @@ import {
   ThumbsUp,
   Footprints,
   Sparkles,
+  Shapes,
   Timer,
   SquareStack,
   Target,
@@ -131,6 +132,8 @@ export type SeedBlockType =
   | 'lx_before_after'
   | 'lx_comparison_table'
   | 'lx_timeline'
+  | 'lx_icon'
+  | 'lx_form'
 
 export interface SeedEntry {
   type: SeedBlockType
@@ -196,6 +199,7 @@ export const CATEGORY_BY_TYPE: Record<SeedBlockType, BlockCategory> = {
   lx_quote: 'text',
   lx_animated_headline: 'text',
   // Media
+  lx_icon: 'media',
   lx_figure: 'media',
   lx_cover_image: 'media',
   lx_image_pair: 'media',
@@ -240,6 +244,7 @@ export const CATEGORY_BY_TYPE: Record<SeedBlockType, BlockCategory> = {
   lx_embed: 'embed',
   lx_code: 'embed',
   contact_form: 'embed',
+  lx_form: 'embed',
   // Dynamic
   lx_featured_projects: 'dynamic',
   lx_posts: 'dynamic',
@@ -308,6 +313,14 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     icon: ArrowUpRight,
     aliases: ['btn', 'button', 'cta', 'link'],
     keywords: ['action', 'submit', 'go', 'gold'],
+  },
+  {
+    type: 'lx_icon',
+    label: 'Icon',
+    description: 'A single lucide icon at any size/colour — optional chip + link.',
+    icon: Shapes,
+    aliases: ['icon', 'glyph', 'symbol', 'svg'],
+    keywords: ['lucide', 'pictogram', 'mark', 'badge'],
   },
   {
     type: 'lx_figure',
@@ -677,6 +690,14 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     aliases: ['form', 'lead', 'message'],
     keywords: ['enquiry', 'inquiry', 'reach', 'get in touch'],
   },
+  {
+    type: 'lx_form',
+    label: 'Form builder',
+    description: 'Compose your own fields (text, email, select, checkbox…) — POSTs to the lead pipeline.',
+    icon: Shapes,
+    aliases: ['form', 'custom form', 'fields', 'survey', 'signup'],
+    keywords: ['lead', 'contact', 'composable', 'builder', 'newsletter'],
+  },
 ]
 
 export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
@@ -688,6 +709,18 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   contact_form: {
     heading: 'Send us a message',
     submit_label: 'Send message',
+  },
+
+  // lx_form — a composable form; the seed ships a sensible 3-field contact
+  // form the operator extends in the drawer.
+  lx_form: {
+    heading: 'Get in touch',
+    fields: [
+      { name: 'name', label: 'Name', type: 'text', required: true, role: 'name' },
+      { name: 'email', label: 'Email', type: 'email', required: true, role: 'email' },
+      { name: 'message', label: 'Message', type: 'textarea', required: true, role: 'none' },
+    ],
+    submitLabel: 'Send message',
   },
 
   // ─── Luxury redesign seeds ──────────────────────────────────────
@@ -711,6 +744,10 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   // lx_eyebrow — text is the only required field; .default('champagne')
   // on tone gives the editorial gold kicker on first render.
   lx_eyebrow: { text: 'New kicker' },
+
+  // lx_icon — `icon` is the only required field (iconName regex). The rest
+  // default via Zod (.default size/color/alignment/shape/rotate/animation).
+  lx_icon: { icon: 'sparkles' },
 
   // lx_action — label + href required by schema's .min(1) gates and
   // CTA_HREF_RE regex. '/contact' is a same-origin path that passes

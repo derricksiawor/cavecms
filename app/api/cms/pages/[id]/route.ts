@@ -3,9 +3,9 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -16,11 +16,13 @@ import {
 } from '@/lib/cache/tags'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
+import { notifyIndexNow } from '@/lib/seo/indexnow/notify'
 import { PageEditorPatch, PageAdminPatch } from '@/lib/cms/page-shapes'
 import { validatePageSlug } from '@/lib/cms/page-slug'
 // blog-system worktree (Phase 5): page slugs can't claim a custom permalink segment.
 import { getCustomSegmentReservedSet } from '@/lib/blog/resolveSegments'
 import type { PageRawRow } from '@/lib/cms/types'
+import { buildSeoSetParts, type SeoEditorInput } from '@/lib/cms/seoEditorPersist'
 import { env } from '@/lib/env'
 
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/
@@ -73,6 +75,7 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   checkReadRate(ctx.userId)
+  requireScope(ctx, 'pages', 'read')
 
   // kind='page' so a hidden post-body page id resolves as 404 — a body
   // page can NOT be loaded / edited as a standalone page outside the post
@@ -125,7 +128,8 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'write')
+  checkCmsMutationRate(ctx)
 
   const raw = await readJsonBody(req)
   const Schema = ctx.role === 'admin' ? PageAdminPatch : PageEditorPatch
@@ -141,7 +145,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
     slug?: string
     published?: boolean
     isHome?: boolean
-  }
+  } & SeoEditorInput
   try {
     body = Schema.parse(raw) as typeof body
   } catch (e) {
@@ -153,6 +157,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       if (offending.length > 0) {
         await db.insert(auditLog).values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'page',
           resourceId: String(id),
@@ -172,6 +177,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         .insert(auditLog)
         .values({
           userId: ctx.userId,
+          tokenId: ctx.tokenId,
           action: 'rbac_field_reject',
           resourceType: 'page',
           resourceId: String(id),
@@ -449,6 +455,13 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         applied[field] = v
       }
 
+      // Per-entity SEO fields (migration 0032) — booleans → TINYINT,
+      // seoMeta → JSON string, scores → INT|null. Editor-writable like
+      // seoTitle, so they apply for both roles (outside the admin branch).
+      const seo = buildSeoSetParts(body, row)
+      parts.push(...seo.parts)
+      Object.assign(applied, seo.applied)
+
       if (ctx.role === 'admin') {
         if (body.slug !== undefined && slugChanged) {
           parts.push(sql`slug = ${body.slug}`)
@@ -489,6 +502,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             .insert(auditLog)
             .values({
               userId: ctx.userId,
+              tokenId: ctx.tokenId,
               action: 'rbac_field_reject',
               resourceType: 'page',
               resourceId: String(id),
@@ -509,6 +523,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           newVersion: row.version,
           queueRowId: null as number | null,
           tags: [] as string[],
+          indexNowPath: null as string | null,
         }
       }
 
@@ -556,6 +571,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         applied['heroImageId'] !== undefined
       await tx.insert(auditLog).values({
         userId: ctx.userId,
+        tokenId: ctx.tokenId,
         action: 'update',
         resourceType: 'page',
         resourceId: String(id),
@@ -568,6 +584,16 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             seo_description: row.seo_description,
             hero_image_id: row.hero_image_id,
             og_image_id: row.og_image_id,
+            focus_keyphrase: row.focus_keyphrase,
+            robots_noindex: row.robots_noindex === 1,
+            robots_nofollow: row.robots_nofollow === 1,
+            canonical_url: row.canonical_url,
+            cornerstone: row.cornerstone === 1,
+            seo_score: row.seo_score,
+            readability_score: row.readability_score,
+            // seo_meta omitted from audit `from` (large JSON blob; `to`
+            // records the new value, prior reads from the prior audit
+            // row's `to`).
             published: row.published === 1,
             is_home: row.is_home === 1,
             preview_epoch: row.preview_epoch,
@@ -615,7 +641,43 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         tagSet.push(tag.page(priorHomeSlug), tag.pageSlugResolver(priorHomeSlug))
       }
       const queueRowId = await enqueueRevalidate(tx, tagSet)
-      return { newVersion: row.version + 1, queueRowId, tags: tagSet }
+
+      // IndexNow: announce the public URL to search engines when this
+      // save leaves the page LIVE on the public site — i.e. on a publish
+      // transition, or a content-affecting edit while already published.
+      // Never on draft saves (page not published) or on unpublish
+      // (publishedTransition === 'off'). Computed inside the TX where the
+      // final published + home state are known; the actual fire-and-forget
+      // ping happens after the TX commits. The canonical public path is
+      // `/` for the home row, else `/{newSlug}` (mirrors the url_path
+      // generated column).
+      const finalHome = wantsHomeTrue || (row.is_home === 1 && !wantsHomeFalse)
+      const finalPublished =
+        publishedTransition === 'on' ||
+        (row.published === 1 && publishedTransition !== 'off')
+      // Never ping a noindexed page — IndexNow announcing a URL the
+      // sitemap excludes (excludeNoindex) is a contradictory crawl
+      // signal. The final noindex state is the applied delta when this
+      // PATCH changed it, else the loaded row value.
+      const finalNoindex =
+        applied['robotsNoindex'] !== undefined
+          ? (applied['robotsNoindex'] as boolean)
+          : row.robots_noindex === 1
+      const indexNowPath =
+        finalPublished &&
+        !finalNoindex &&
+        (publishedTransition === 'on' || coreChangedFull || slugChanged || isHomeChanged)
+          ? finalHome
+            ? '/'
+            : `/${newSlug}`
+          : null
+
+      return {
+        newVersion: row.version + 1,
+        queueRowId,
+        tags: tagSet,
+        indexNowPath,
+      }
     })
 
     if (txResult.queueRowId !== null) {
@@ -624,6 +686,12 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       queueMicrotask(() => {
         void drainRevalidate(rowId, tags)
       })
+    }
+
+    // Fire-and-forget IndexNow ping — never awaited, never throws, never
+    // blocks the save response (the standalone server is long-lived).
+    if (txResult.indexNowPath !== null) {
+      void notifyIndexNow([txResult.indexNowPath])
     }
 
     return new Response(
@@ -686,7 +754,8 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
-  checkMutationRate(ctx.userId)
+  requireScope(ctx, 'pages', 'delete')
+  checkCmsMutationRate(ctx)
 
   const meta = auditMetaFromRequest(req)
 
@@ -736,6 +805,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     // Step 4: audit.
     await tx.insert(auditLog).values({
       userId: ctx.userId,
+      tokenId: ctx.tokenId,
       action: 'delete',
       resourceType: 'page',
       resourceId: String(id),

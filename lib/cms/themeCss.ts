@@ -29,19 +29,69 @@ export const THEME_PALETTE_DEFAULT: ThemePalette = {
   surfaceLight: '#F5F1EA',
 }
 
+// Normalise any HEX_COLOR_RE-valid hex (#RGB / #RRGGBB / #RRGGBBAA) to a plain
+// #RRGGBB string, or null if invalid. 3-char shorthand is expanded (#F5A →
+// #FF55AA); an 8-char value's alpha byte is DROPPED (luminance/mixing operate on
+// the opaque RGB — the alpha is irrelevant to which ink pole reads light/dark).
+// Without this, the colour math below (which assumed exactly 7 chars) silently
+// bailed to a fallback for the 3/8-char hexes that HEX_COLOR_RE accepts — e.g.
+// an 8-char surfaceLight made relLuminance return 0.5 and pick the WRONG ink.
+function normalizeHex6(hex: string): string | null {
+  if (!HEX_COLOR_RE.test(hex)) return null
+  if (hex.length === 7) return hex
+  if (hex.length === 9) return hex.slice(0, 7) // strip alpha
+  if (hex.length === 4) {
+    // #RGB → #RRGGBB
+    return `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
+  }
+  return null
+}
+
 // Mix a hex color toward black by `amount` (0..1) in sRGB. Used for the
 // two derived utility shades (hover gold, divider). sRGB (not OKLCH) is
 // deliberate: concrete hex output works in every browser, and these two
 // shades don't need perceptual-uniform precision.
 export function darkenHex(hex: string, amount: number): string {
-  if (!HEX_COLOR_RE.test(hex) || hex.length !== 7) return hex
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
+  const h6 = normalizeHex6(hex)
+  if (!h6) return hex
+  const r = parseInt(h6.slice(1, 3), 16)
+  const g = parseInt(h6.slice(3, 5), 16)
+  const b = parseInt(h6.slice(5, 7), 16)
   const f = (c: number) => Math.round(c * (1 - amount))
   const h = (c: number) => f(c).toString(16).padStart(2, '0').toUpperCase()
   return `#${h(r)}${h(g)}${h(b)}`
 }
+
+// Mix a hex toward white by `amount` (0..1). Used to derive a subtle elevated
+// divider line just above a dark base surface.
+function lightenHex(hex: string, amount: number): string {
+  const h6 = normalizeHex6(hex)
+  if (!h6) return hex
+  const r = parseInt(h6.slice(1, 3), 16)
+  const g = parseInt(h6.slice(3, 5), 16)
+  const b = parseInt(h6.slice(5, 7), 16)
+  const f = (c: number) => Math.round(c + (255 - c) * amount)
+  const h = (c: number) => f(c).toString(16).padStart(2, '0').toUpperCase()
+  return `#${h(r)}${h(g)}${h(b)}`
+}
+
+// WCAG relative luminance (0 = black, 1 = white) for a #RRGGBB hex. Used to
+// decide whether a surface colour reads as "light" or "dark" so the ink poles
+// can be anchored to the correct end of the scale.
+function relLuminance(hex: string): number {
+  const h6 = normalizeHex6(hex)
+  if (!h6) return 0.5
+  const lin = (i: number) => {
+    const c = parseInt(h6.slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  }
+  return 0.2126 * lin(1) + 0.7152 * lin(3) + 0.0722 * lin(5)
+}
+// A colour reads "light" above this luminance. Tuned so #0A0A0A (a dark card
+// surface) is NOT light while a true cream/ivory IS.
+const LIGHT_THRESHOLD = 0.4
+const FALLBACK_INK_LIGHT = '#F5F1EA' // warm near-white — readable on any dark bg
+const FALLBACK_INK_DARK = '#050505' // near-black — readable on any light bg
 
 // Build the injected <style> body. Only valid hex passes (HEX_COLOR_RE
 // also accepts 3/8-char, but the palette schema stores 6-char; we
@@ -60,14 +110,28 @@ export function brandVarsCss(p: ThemePalette): string {
   put('--brand-secondary', p.secondary)
   put('--brand-primary', p.primary)
 
-  // Base surface follows the mode (most visible "is the site light or
-  // dark" signal). Light -> light surface bg + dark fg; Dark -> inverse.
+  // CONTRAST-ANCHORED ink poles — the keystone of legible text on ANY palette.
+  // `ink-light` (the light pole behind `ivory`, light text on dark surfaces)
+  // must always read light; `ink-dark` (behind `obsidian`) must always read
+  // dark. A dark-site operator can set surfaceLight to a DARK card colour
+  // (#0A0A0A) for dark cards — so ink-light follows surfaceLight ONLY while it
+  // is genuinely light, otherwise it falls back to a guaranteed near-white.
+  // Symmetric for ink-dark. (Light palettes are unchanged: surfaceLight is
+  // light → ink-light == surfaceLight, pixel-identical to before.)
+  const inkLight = relLuminance(p.surfaceLight) >= LIGHT_THRESHOLD ? p.surfaceLight : FALLBACK_INK_LIGHT
+  const inkDark = relLuminance(p.surfaceDark) < LIGHT_THRESHOLD ? p.surfaceDark : FALLBACK_INK_DARK
+  put('--brand-ink-light', inkLight)
+  put('--brand-ink-dark', inkDark)
+
+  // Base surface follows the mode. The FOREGROUND uses the anchored ink pole
+  // (not the raw opposite surface) so the default text colour is always
+  // readable: dark site → dark bg + light ink; light site → light bg + dark ink.
   if (p.mode === 'dark') {
     put('--brand-base-bg', p.surfaceDark)
-    put('--brand-base-fg', p.surfaceLight)
+    put('--brand-base-fg', inkLight)
   } else {
     put('--brand-base-bg', p.surfaceLight)
-    put('--brand-base-fg', p.surfaceDark)
+    put('--brand-base-fg', inkDark)
   }
 
   // Derived tokens — emit ONLY when the source color changed from the
@@ -78,7 +142,17 @@ export function brandVarsCss(p: ThemePalette): string {
     put('--brand-antique-gold', darkenHex(p.accent, 0.15))
   }
   if (p.surfaceLight !== THEME_PALETTE_DEFAULT.surfaceLight) {
-    put('--brand-bone', darkenHex(p.surfaceLight, 0.08))
+    // `bone` is a subtle DIVIDER/hairline. It must stay visible against the
+    // base surface. On a light surface a slightly-darker line works; but when
+    // the light surface is itself dark (dark site), darkening it further makes
+    // the divider vanish — so derive a subtle ELEVATED line just above the dark
+    // base instead. Keeps every divider visible regardless of palette.
+    put(
+      '--brand-bone',
+      relLuminance(p.surfaceLight) >= LIGHT_THRESHOLD
+        ? darkenHex(p.surfaceLight, 0.08)
+        : lightenHex(p.surfaceDark, 0.12),
+    )
   }
 
   return `:root{${decls.join(';')}}`

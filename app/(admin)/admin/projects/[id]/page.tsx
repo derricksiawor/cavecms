@@ -5,6 +5,7 @@ import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { SECTION_KEYS } from '@/lib/cms/project-section-registry'
 import { MediaPickerProvider } from '@/components/inline-edit/MediaPickerProvider'
+import { parseSeoMeta } from '@/lib/seo/seoMeta'
 import { ProjectEditor } from './Editor'
 
 export const dynamic = 'force-dynamic'
@@ -27,6 +28,12 @@ interface ProjectMeta {
   published: number
   seo_title: string | null
   seo_description: string | null
+  focus_keyphrase: string | null
+  robots_noindex: number
+  robots_nofollow: number
+  canonical_url: string | null
+  cornerstone: number
+  seo_meta: unknown
   version: number
   deleted_at: Date | null
 }
@@ -60,7 +67,10 @@ export default async function AdminProjectEdit({
   const [projRows] = (await db.execute(sql`
     SELECT id, slug, name, tagline, status, location,
            hero_image_id, brochure_pdf_id, og_image_id, featured_order,
-           published, seo_title, seo_description, version, deleted_at
+           published, seo_title, seo_description,
+           focus_keyphrase, robots_noindex, robots_nofollow,
+           canonical_url, cornerstone, seo_meta,
+           version, deleted_at
     FROM projects WHERE id = ${id}
   `)) as unknown as [ProjectMeta[]]
   const project = projRows[0]
@@ -138,7 +148,29 @@ export default async function AdminProjectEdit({
       <MediaPickerProvider>
         <ProjectEditor
           role={ctx.role as 'admin' | 'editor'}
-          project={project}
+          project={{
+            id: project.id,
+            slug: project.slug,
+            name: project.name,
+            tagline: project.tagline,
+            status: project.status,
+            location: project.location,
+            hero_image_id: project.hero_image_id,
+            brochure_pdf_id: project.brochure_pdf_id,
+            og_image_id: project.og_image_id,
+            featured_order: project.featured_order,
+            published: project.published,
+            seo_title: project.seo_title,
+            seo_description: project.seo_description,
+            focus_keyphrase: project.focus_keyphrase,
+            robots_noindex: project.robots_noindex === 1,
+            robots_nofollow: project.robots_nofollow === 1,
+            canonical_url: project.canonical_url,
+            cornerstone: project.cornerstone === 1,
+            seo_meta: parseSeoMeta(project.seo_meta),
+            version: project.version,
+            deleted_at: project.deleted_at,
+          }}
           sections={sections}
           media={media}
           sectionKeys={SECTION_KEYS as readonly string[]}

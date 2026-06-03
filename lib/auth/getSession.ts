@@ -73,6 +73,9 @@ interface AuthState {
   // the synthetic `apitoken:<id>` jti; requireAuth surfaces this as
   // `viaApiToken` so handlers can defend sensitive surfaces explicitly.
   apiTokenId?: number
+  // The token's per-resource grants (null = unrestricted within role).
+  // Surfaced as AuthContext.scopes and enforced by requireScope.
+  apiTokenScopes?: string[] | null
 }
 
 // Intentionally not exported as part of the public API — adapters in
@@ -98,17 +101,27 @@ export const _loadAuthState = cache(async (): Promise<AuthState | null> => {
     // Check the (free, in-memory) path gate BEFORE the DB lookup so a stray
     // Authorization header on a public-page SSR render (uncacheable,
     // unthrottled) can't force an api_tokens SELECT — the token can never be
-    // honoured there anyway. x-pathname is set by middleware on every
-    // matched request.
+    // honoured there anyway. x-pathname is set by middleware on every MATCHED
+    // request; a public page is matched → x-pathname is its non-empty page
+    // path → tokenAllowedPath(page) is false → no SELECT (protection intact).
+    //
+    // EMPTY x-pathname means the request hit a route EXCLUDED from the middleware
+    // matcher. Static excludes (_next, uploads/, favicon) are served without a
+    // route handler and never reach getSession, so the ONLY excluded route that
+    // authenticates here is /api/cms/sync/stage — excluded because the Edge
+    // middleware caps its large bundle body at ~10MB. That route self-gates
+    // (requireRole admin + requireScope sync:write + requireCsrf), so an empty
+    // pathname is safe to verify: the route does the real authorization.
     const pathname = h.get('x-pathname') ?? ''
-    if (tokenAllowedPath(pathname)) {
+    if (pathname === '' || tokenAllowedPath(pathname)) {
       const tok = await verifyApiToken(authz)
       if (tok) {
         // Attribute writes to the minting user (real FK target for
-        // content_blocks.updated_by). NOTE: a token therefore shares the
-        // minting admin's per-user CMS rate-limit bucket (the same one that
-        // admin's own browser tabs use) — intentional, matching the
-        // documented per-user limiter design (cmsRateLimit.ts).
+        // content_blocks.updated_by); the acting token id is surfaced
+        // separately (apiTokenId → AuthContext.tokenId) for audit
+        // attribution + the per-TOKEN CMS mutation rate bucket
+        // (checkCmsMutationRate in cmsRateLimit.ts), so a runaway agent
+        // does not starve the minting admin's own per-user bucket.
         // Clamp the EFFECTIVE role to the creator's CURRENT role so demoting
         // the minting admin strips an over-privileged token: an admin token
         // wielded by a now-editor creator acts as editor; a now-viewer or
@@ -137,6 +150,7 @@ export const _loadAuthState = cache(async (): Promise<AuthState | null> => {
               pwp: false,
             },
             apiTokenId: tok.tokenId,
+            apiTokenScopes: tok.scopes,
           }
         }
       }

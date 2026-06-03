@@ -26,7 +26,9 @@ export const getProjectRow = cache(
       SELECT id, slug, name, tagline, status, location,
              hero_image_id, brochure_pdf_id, og_image_id,
              preview_epoch, published, published_at,
-             seo_title, seo_description, version
+             seo_title, seo_description,
+             robots_noindex, robots_nofollow, canonical_url, seo_meta,
+             version
       FROM projects
       WHERE slug = ${slug} AND deleted_at IS NULL
     `)) as unknown as [HydratedProjectRow[]]

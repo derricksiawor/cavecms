@@ -19,6 +19,10 @@ export const auditLog = mysqlTable(
   {
     id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
     userId: int('user_id').references(() => users.id, { onDelete: 'set null' }),
+    // Which API token performed this write (NULL for cookie-session actions).
+    // FK (ON DELETE SET NULL) is declared in migration 0027, not here, to
+    // avoid an import cycle with the apiTokens schema.
+    tokenId: int('token_id'),
     action: varchar('action', { length: 40 }).notNull(),
     resourceType: varchar('resource_type', { length: 40 }).notNull(),
     resourceId: varchar('resource_id', { length: 60 }),

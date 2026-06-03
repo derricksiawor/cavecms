@@ -1,5 +1,5 @@
 import { withError } from '@/lib/api/withError'
-import { requireRole } from '@/lib/auth/requireRole'
+import { requireRole, requireScope } from '@/lib/auth/requireRole'
 import { checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { buildBundleContent, contentGraphOf } from '@/lib/sync/serializeLocal'
 import { canonicalContentHash } from '@/lib/sync/contentHash'
@@ -12,6 +12,8 @@ import { canonicalContentHash } from '@/lib/sync/contentHash'
 // the existing /api/cms/* allowlist; no live writes.
 export const GET = withError(async () => {
   const ctx = await requireRole(['admin', 'editor'])
+  // Exposes the full content hash + counts cross-instance — gate on sync:read.
+  requireScope(ctx, 'sync', 'read')
   checkReadRate(ctx.userId)
 
   const content = await buildBundleContent()

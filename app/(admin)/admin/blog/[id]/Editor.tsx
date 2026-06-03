@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ExternalLink } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
@@ -9,6 +9,10 @@ import { MediaPicker } from '@/components/inline-edit/MediaPicker'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
 import { SlugInput } from '@/components/inline-edit/SlugInput'
 import { SeoFields } from '@/components/inline-edit/SeoFields'
+import { PageSeoPanel } from '@/components/seo/PageSeoPanel'
+import { useSeoFields } from '@/components/seo/useSeoFields'
+import type { PanelSeoMeta } from '@/lib/cms/seoEditorFields'
+import { extractFromMarkdown } from '@/lib/seo/analysis/extract/markdown'
 import { MarkdownEditor } from '@/components/inline-edit/MarkdownEditor'
 import { StickySaveBar } from '@/components/inline-edit/StickySaveBar'
 import { useToast } from '@/components/inline-edit/Toast'
@@ -34,6 +38,14 @@ export interface EditorPost {
   og: MediaRef | null
   seo_title: string | null
   seo_description: string | null
+  // Per-entity SEO fields (migration 0032). Booleans already coerced
+  // from TINYINT by the server page; seo_meta already parsed.
+  focus_keyphrase: string | null
+  robots_noindex: boolean
+  robots_nofollow: boolean
+  canonical_url: string | null
+  cornerstone: boolean
+  seo_meta: PanelSeoMeta
   version: number
   published: boolean
   // Phase 8: the post's current published_at (ISO string or null) so the editor
@@ -138,6 +150,18 @@ export function Editor({
     () => new Set(assignedTagIds),
   )
 
+  // Per-entity SEO fields (migration 0032) — owned by the shared hook so
+  // the six fields + scores + dirty/diff/discard logic live in ONE place
+  // across the blog + project editors (C3).
+  const seo = useSeoFields({
+    focusKeyphrase: post.focus_keyphrase,
+    robotsNoindex: post.robots_noindex,
+    robotsNofollow: post.robots_nofollow,
+    canonicalUrl: post.canonical_url,
+    cornerstone: post.cornerstone,
+    seoMeta: post.seo_meta,
+  })
+
   const [pristine, setPristine] = useState({
     title: post.title,
     slug: post.slug,
@@ -168,7 +192,8 @@ export function Editor({
     published !== pristine.published ||
     scheduledAtIso !== pristine.scheduledAtIso ||
     sigOf([...categoryIds]) !== sigOf(pristine.categoryIdsArr) ||
-    sigOf([...tagIds]) !== sigOf(pristine.tagIdsArr)
+    sigOf([...tagIds]) !== sigOf(pristine.tagIdsArr) ||
+    seo.dirty
 
   const slugInvalid = useMemo(() => {
     if (!canPublish) return null
@@ -196,6 +221,9 @@ export function Editor({
     if ((og?.media_id ?? null) !== pristine.og) {
       patch.ogImageId = og?.media_id ?? null
     }
+    // Per-entity SEO fields (migration 0032) — merged in by the shared
+    // hook (changed fields only, empty bag → null, + cached scores).
+    seo.buildSeoPatch(patch)
     if (canPublish) {
       if (slug !== pristine.slug) patch.slug = slug
       if (published !== pristine.published) patch.published = published
@@ -331,6 +359,7 @@ export function Editor({
         categoryIdsArr: [...categoryIds],
         tagIdsArr: [...tagIds],
       })
+      seo.resetPristine()
       return { ok: true }
     } finally {
       savingRef.current = false
@@ -361,6 +390,7 @@ export function Editor({
     setScheduledAtIso(pristine.scheduledAtIso)
     setCategoryIds(new Set(pristine.categoryIdsArr))
     setTagIds(new Set(pristine.tagIdsArr))
+    seo.discard()
     toast.info('Changes undone.')
   }
 
@@ -383,6 +413,14 @@ export function Editor({
 
   const fieldset = readonly ? 'opacity-60 pointer-events-none' : ''
   const postUrl = `yourdomain.com/blog/${slug || pristine.slug}`
+
+  // The post body is markdown — the engine scores the extracted prose,
+  // links and images. The identity changes with bodyMd so the panel's
+  // debounce re-fires only on a real body edit.
+  const getAnalysisContent = useCallback(
+    () => extractFromMarkdown(bodyMd),
+    [bodyMd],
+  )
 
   return (
     <section className={`space-y-8 ${fieldset}`}>
@@ -610,6 +648,30 @@ export function Editor({
         placeholderTitle={title}
         placeholderDescription={excerpt || 'No description set'}
         url={postUrl}
+      />
+
+      <PageSeoPanel
+        entityTitle={title}
+        seoTitle={seoTitle}
+        seoDescription={seoDescription || excerpt}
+        slug={slug || pristine.slug}
+        url={postUrl}
+        focusKeyphrase={seo.values.focusKeyphrase}
+        onFocusKeyphraseChange={seo.setters.setFocusKeyphrase}
+        robotsNoindex={seo.values.robotsNoindex}
+        onRobotsNoindexChange={seo.setters.setRobotsNoindex}
+        robotsNofollow={seo.values.robotsNofollow}
+        onRobotsNofollowChange={seo.setters.setRobotsNofollow}
+        canonicalUrl={seo.values.canonicalUrl}
+        onCanonicalUrlChange={seo.setters.setCanonicalUrl}
+        cornerstone={seo.values.cornerstone}
+        onCornerstoneChange={seo.setters.setCornerstone}
+        seoMeta={seo.values.seoMeta}
+        onSeoMetaChange={seo.setters.setSeoMeta}
+        getAnalysisContent={getAnalysisContent}
+        contentSignal={bodyMd.length}
+        onScores={seo.onScores}
+        disabled={readonly}
       />
 
       <StickySaveBar

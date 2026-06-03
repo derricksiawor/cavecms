@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { withError } from '@/lib/api/withError'
-import { requireRole } from '@/lib/auth/requireRole'
+import { requireRole, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { readJsonBody } from '@/lib/api/jsonBody'
@@ -24,11 +24,13 @@ const Body = z.object({
 // is the only multi-second step. Drift is refused unless `force`.
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin'])
+  // Wholesale content replacement — gate on sync:write (cookie sessions no-op).
+  requireScope(ctx, 'sync', 'write')
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   checkMutationRate(ctx.userId)
 
   const body = Body.parse(await readJsonBody(req))
-  const out = await runCutover({ stageId: body.stageId, force: body.force }, { userId: ctx.userId })
+  const out = await runCutover({ stageId: body.stageId, force: body.force }, { userId: ctx.userId, tokenId: ctx.tokenId })
 
   // A cutover wholesale-REPLACES every page + post + the 8 push settings and
   // upserts projects — so the public site's caches are now stale across the

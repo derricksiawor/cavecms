@@ -16,12 +16,15 @@ import { structuralEqual } from '@/lib/structuralEqual'
 import { SETTINGS_SHAPES, SETTINGS_HELP } from '@/lib/cms/settings-shapes'
 import { UpdatesProgressModal } from '@/components/admin/UpdatesProgressModal'
 import { UpdateHistoryTable } from '@/components/admin/UpdateHistoryTable'
+import { ReleaseNotesMarkdown } from '@/components/admin/ReleaseNotesMarkdown'
+import { WhatsNewCard } from '@/components/admin/WhatsNewCard'
 import {
   humaniseRelease,
   formatRelativeDays,
   type HumanRelease,
 } from '@/lib/updates/humaniseRelease'
 import type { CurrentVersion } from '@/lib/updates/getCurrentVersion'
+import type { CurrentVersionNotes } from '@/lib/updates/getCurrentVersionNotes'
 
 // Settings → Updates surface.
 //
@@ -91,9 +94,11 @@ function relativeDays(when: Date): string {
 export function UpdatesClient({
   initial,
   currentVersion,
+  currentVersionNotes,
 }: {
   initial: SettingRow
   currentVersion: CurrentVersion
+  currentVersionNotes: CurrentVersionNotes | null
 }) {
   const toast = useToast()
   const [checking, setChecking] = useState(false)
@@ -396,6 +401,15 @@ export function UpdatesClient({
         </header>
       </article>
 
+      {/* What's new in the running version — release notes bundled with the
+          build (getCurrentVersionNotes). Absent when no matching notes file. */}
+      {currentVersionNotes && (
+        <WhatsNewCard
+          version={currentVersionNotes.version}
+          body={currentVersionNotes.body}
+        />
+      )}
+
       {/* Available update card (or up-to-date state) */}
       {release ? (
         <article
@@ -461,9 +475,9 @@ export function UpdatesClient({
               <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-copper-600">
                 What&rsquo;s new
               </p>
-              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-near-black">
-                {release.body}
-              </p>
+              <div className="mt-2">
+                <ReleaseNotesMarkdown>{release.body}</ReleaseNotesMarkdown>
+              </div>
             </div>
           )}
         </article>

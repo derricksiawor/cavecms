@@ -4,6 +4,8 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { hydratePage } from '@/lib/cms/hydrate'
 import { hydrateProject } from '@/lib/cms/hydrate'
+import type { HydratedProjectRow } from '@/lib/cms/hydrate'
+import type { JsonLdObject } from '@/lib/seo/schema/builders'
 import { getProjectRow } from '@/lib/cms/getProjectRow'
 import { verifyPreviewJwt } from '@/lib/auth/jwt'
 import { renderSection } from '@/components/project-sections'
@@ -20,6 +22,8 @@ import { residenceLd } from '@/lib/seo/jsonLd'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
+import { extraSchemaForEntity } from '@/lib/seo/schema/forPage'
+import { parseSeoMeta, schemaDefaultsFromSetting } from '@/lib/seo/seoMeta'
 import { ensurePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
 import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { getSetting } from '@/lib/cms/getSettings'
@@ -53,14 +57,28 @@ export async function generateMetadata({
   const p = await getProjectRow(slug)
   // Phase 5: canonical honors the configured projects segment.
   const segments = await resolveSegments()
+  const meta = parseSeoMeta(p?.seo_meta)
   const base = await resolveMetadata({
     title: p?.seo_title ?? null,
     description: p?.seo_description ?? null,
     fallbackTitle: p?.name ?? 'Project',
     fallbackDescription: p?.tagline ?? undefined,
+    // blog-system: canonical reflects the operator-configured projects segment.
     canonicalPath: projectUrl(slug, segments),
+    contentType: 'project',
+    templateVars: { title: p?.name ?? undefined, excerpt: p?.tagline ?? undefined },
+    noindex: !!p?.robots_noindex,
+    nofollow: !!p?.robots_nofollow,
+    canonicalOverride: p?.canonical_url,
+    ogTitle: meta.ogTitle,
+    ogDescription: meta.ogDescription,
+    twitterTitle: meta.twitterTitle,
+    twitterDescription: meta.twitterDescription,
   })
   if (sp.preview) {
+    // Preview ALWAYS wins as noindex,nofollow — admin QA against an
+    // unpublished row must never be indexed, regardless of the row's
+    // own per-entity robots flags resolved above.
     return { ...base, robots: { index: false, follow: false } }
   }
   return base
@@ -225,6 +243,16 @@ export default async function ProjectPage({
       priceCurrency: pricingData?.price_currency,
       siteOrigin,
     })
+    // Per-page schema ADDITIONS (explicit seo_meta override + breadcrumbs
+    // Home › Projects › Project). residenceLd above is the project's
+    // canonical PRIMARY structured data; this adds ONLY the override shape
+    // (a project flipped to Product / FAQPage etc) + the breadcrumb — never
+    // a default WebPage, so the residence primary isn't duplicated.
+    const projectSchemaGraph = await buildProjectSchemaGraph(
+      hydratedProject.project,
+      siteOrigin,
+      heroVariants?.lg ?? null,
+    )
 
     return (
       <>
@@ -262,6 +290,13 @@ export default async function ProjectPage({
             type="application/ld+json"
             dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
           />
+          {projectSchemaGraph.map((node, i) => (
+            <script
+              key={i}
+              type="application/ld+json"
+              dangerouslySetInnerHTML={{ __html: safeJsonForScript(node) }}
+            />
+          ))}
         </EditableMain>
 
         {/* FactsStrip is NOT rendered page-level on the CMS branch —
@@ -332,6 +367,15 @@ export default async function ProjectPage({
     priceCurrency: pricingData?.price_currency,
     siteOrigin,
   })
+  // Per-page schema ADDITIONS — same as the CMS branch above; the legacy
+  // section render shares one additions graph so both render paths emit
+  // identical per-page additions (override shape + breadcrumb only, no
+  // duplicate residence primary).
+  const projectSchemaGraph = await buildProjectSchemaGraph(
+    hydratedProject.project,
+    siteOrigin,
+    heroVariants?.lg ?? null,
+  )
 
   const ctx = {
     preCsrf,
@@ -352,6 +396,13 @@ export default async function ProjectPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
       />
+      {projectSchemaGraph.map((node, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: safeJsonForScript(node) }}
+        />
+      ))}
       <h1 className="sr-only">{hydratedProject.project.name}</h1>
 
       {heroSection &&
@@ -394,4 +445,43 @@ export default async function ProjectPage({
       )}
     </main>
   )
+}
+
+// Per-page structured-data graph for a project — ADDITIONS-ONLY on top of
+// the residenceLd PRIMARY emitted at each render branch. Emits ONLY (a) a
+// BreadcrumbList (Home › Projects › Project) and (b) the explicit per-page
+// override shape when the operator flips schemaType (e.g. to Product /
+// FAQPage). It NEVER emits a default WebPage — that would duplicate the
+// residence primary already on the page. Shared by the CMS-page render
+// branch and the legacy project_sections branch so both emit identical
+// per-page additions. Returns an already-filtered ordered array
+// (extraSchemaForEntity drops nulls + sub-2-crumb breadcrumbs); an empty
+// override on a project yields just the breadcrumb.
+async function buildProjectSchemaGraph(
+  project: HydratedProjectRow,
+  siteOrigin: string | null,
+  heroImage: string | null,
+): Promise<JsonLdObject[]> {
+  const meta = parseSeoMeta(project.seo_meta)
+  const seoSchema = await getSetting('seo_schema')
+  const projectUrl = siteOrigin
+    ? `${siteOrigin}/projects/${project.slug}`
+    : `/projects/${project.slug}`
+  const breadcrumbs = [
+    { name: 'Home', url: siteOrigin ? `${siteOrigin}/` : '/' },
+    { name: 'Projects', url: siteOrigin ? `${siteOrigin}/projects` : '/projects' },
+    { name: project.name, url: projectUrl },
+  ]
+  return extraSchemaForEntity({
+    entity: {
+      kind: 'project',
+      title: project.name,
+      description: project.seo_description ?? project.tagline ?? undefined,
+      url: projectUrl,
+      image: heroImage ?? undefined,
+    },
+    override: { schemaType: meta.schemaType, schemaData: meta.schemaData },
+    defaults: schemaDefaultsFromSetting(seoSchema),
+    breadcrumbs,
+  })
 }

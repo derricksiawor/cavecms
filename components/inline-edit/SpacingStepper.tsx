@@ -91,7 +91,13 @@ function stepSpacing(
   axis: 'padding' | 'margin',
 ): SpacingValue {
   const minPx = axis === 'margin' ? MIN_MARGIN_PX : MIN_PADDING_PX
-  const currentPx = typeof current === 'number' ? current : TIER_TO_PX[current]
+  // current may be a tier, a px number, or a CSS-length string (units —
+  // E15). The stepper works in px/tiers; for an explicit-unit string it
+  // can't step meaningfully, so it restarts from 0.
+  const currentPx =
+    typeof current === 'number'
+      ? current
+      : (TIER_TO_PX as Record<string, number>)[current] ?? 0
   const candidatePx = currentPx + dir * NUMERIC_STEP_PX
   const clamped = Math.max(minPx, Math.min(MAX_PX, candidatePx))
   const snapTier = PX_TO_TIER.get(clamped)
