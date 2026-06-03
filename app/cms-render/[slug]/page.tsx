@@ -270,7 +270,8 @@ async function renderResolvedPage(
   // whole route. Mirrors the home page's pattern at app/page.tsx.
   let hydrated: Awaited<ReturnType<typeof hydratePage>> | null = null
   try {
-    hydrated = await hydratePage(page.id)
+    // Editor → DRAFT view, public/preview → PUBLISHED view (Phase 0: neutral).
+    hydrated = await hydratePage(page.id, { draft: editable })
   } catch (e) {
     console.error(
       JSON.stringify({

@@ -55,6 +55,19 @@ export const pages = mysqlTable(
     // change so any leaked preview URL invalidates instantly.
     previewEpoch: int('preview_epoch').notNull().default(0),
     version: int('version').notNull().default(0),
+    // Draft → Publish (migration 0028). version = published optimistic-lock token;
+    // the draft layer is tracked separately so draft autosaves never collide with
+    // the published version axis (which is what makes undo version-conflict-free).
+    //   hasDraft       — page has ≥1 block with draft_state != 'live'
+    //   draftVersion   — advances per draft autosave; advisory concurrency guard
+    //   draftUpdatedAt / draftUpdatedBy — last draft autosave audit
+    hasDraft: boolean('has_draft').notNull().default(false),
+    draftVersion: int('draft_version').notNull().default(0),
+    // Undo/redo cursor — seq of the current draft state in page_draft_revisions
+    // (migration 0029). canUndo = a revision with seq < cursor exists.
+    draftUndoCursor: int('draft_undo_cursor').notNull().default(0),
+    draftUpdatedAt: timestamp('draft_updated_at', { fsp: 3 }),
+    draftUpdatedBy: int('draft_updated_by'),
     updatedBy: int('updated_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { fsp: 3 }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { fsp: 3 }).notNull().defaultNow().onUpdateNow(),
@@ -133,6 +146,22 @@ export const contentBlocks = mysqlTable(
     // their layout config in `data`.
     meta: json('meta'),
     version: int('version').notNull().default(0),
+    // Draft → Publish overlay (migration 0028). data/meta/position/parent_id
+    // above are the PUBLISHED values the public reads; the draft_* mirrors hold
+    // pending edits, materialised into the live columns on Publish.
+    //   draftState='live'     → draft_* ignored (no pending change)
+    //   draftState='modified' → draft_* hold the edit
+    //   draftState='added'    → block exists in draft only (public excludes)
+    //   draftState='removed'  → block deleted in draft only (public keeps)
+    // draftParentId is app-validated (no self-FK): a draft move may target an
+    // 'added' block that has no stable published parent yet.
+    draftData: json('draft_data'),
+    draftMeta: json('draft_meta'),
+    draftPosition: int('draft_position'),
+    draftParentId: int('draft_parent_id'),
+    draftState: mysqlEnum('draft_state', ['live', 'modified', 'added', 'removed'])
+      .notNull()
+      .default('live'),
     deletedAt: timestamp('deleted_at', { fsp: 3 }),
     updatedBy: int('updated_by').references(() => users.id, { onDelete: 'set null' }),
     updatedAt: timestamp('updated_at', { fsp: 3 }).notNull().defaultNow().onUpdateNow(),
@@ -158,5 +187,8 @@ export const contentBlocks = mysqlTable(
       t.pageId,
       t.htmlIdLive,
     ),
+    // Migration 0028 — fast scan of a page's pending draft rows (publish /
+    // discard / "N unsaved changes" count).
+    draftStateIdx: index('idx_blocks_draft_state').on(t.pageId, t.draftState),
   }),
 )
