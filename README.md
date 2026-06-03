@@ -46,8 +46,9 @@ integrations) lives in the database and is edited from the dashboard.
   sections between columns and pages. Type `/` to drop in a block from a
   library of 30+ (hero, gallery, pricing, FAQ, contact form, and more).
 - **Edit fearlessly, with drafts.** Every change autosaves to a private draft;
-  visitors keep seeing the published page until you hit Publish. Close the
-  laptop and your draft is right where you left it, with full undo and redo.
+  visitors keep seeing the existing published page until you publish your new
+  changes. Close the laptop and your draft is right where you left it, with full
+  undo and redo.
 - **Edit with AI, inline.** Highlight any text and ask AI to rewrite, shorten,
   or translate it, in your voice, through your own Gemini key.
 - **Edit with AI agents, over a real API.** A scoped, revocable `cave_` token
