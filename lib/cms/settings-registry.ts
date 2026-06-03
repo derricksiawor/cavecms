@@ -1028,6 +1028,212 @@ const aiConfig = z
     }
   })
 
+// ════════════════════════ SEO Suite ════════════════════════
+// Ten narrow keys (one per concern, never one "seo" blob) so a bad
+// save on one surface can't roll back an unrelated one — the same
+// discipline the security/integration keys use. All but
+// `seo_indexing_api` are non-credentialed and token-writable so an AI
+// agent can drive SEO through the API. Field-level safety notes inline.
+
+// Title/description templates resolve `%variable%` tokens at render
+// time (lib/seo/templates). Bounds are generous — the resolved string
+// is what gets truncated for the SERP, not the template. The separator
+// is a single site-wide glyph reused by every template's `%sep%`.
+const seoTemplatePair = z.object({
+  title: z.string().max(220),
+  description: z.string().max(360),
+})
+const seoTitles = z.object({
+  // The `%sep%` glyph. Free-text (max 8) rather than an enum so an
+  // operator can use any separator their brand prefers; the renderer
+  // HTML-escapes it. Default en-dash matches Yoast/Rank Math.
+  separator: z.string().max(8).default('–'),
+  home: seoTemplatePair,
+  page: seoTemplatePair,
+  post: seoTemplatePair,
+  project: seoTemplatePair,
+  blogIndex: seoTemplatePair,
+  projectsIndex: seoTemplatePair,
+  // NOTE: no `search` / `notFound` templates — there is no /search route,
+  // and the 404 page uses static metadata. Adding them here would be dead
+  // config the resolver never consumes. (resolve.ts's contentType union
+  // is a harmless superset that still names them for callers.)
+})
+
+// Crawl/index policy that isn't per-page. `discourageSearchEngines` is
+// the global "noindex the whole site" kill-switch (WordPress's
+// "Discourage search engines" toggle) — when on, robots.ts serves
+// Disallow:/ and every page emits noindex. Loud + reversible.
+const seoIndexing = z.object({
+  discourageSearchEngines: z.boolean().default(false),
+  noindexSearch: z.boolean().default(true),
+  noindexPaginated: z.boolean().default(false),
+})
+
+// Default Open Graph / Twitter signals. The default OG IMAGE lives at
+// `default_seo.ogImage` (don't duplicate it) — this key carries the
+// non-image social knobs. Handles are stored with or without the
+// leading @ and normalised by the renderer.
+const twitterHandle = z
+  .string()
+  .max(40)
+  .regex(/^@?[A-Za-z0-9_]{1,30}$/, 'invalid_handle')
+  .optional()
+  // A blank input must map to "unset", not a regex-rejected '' → 400.
+  .or(z.literal('').transform(() => undefined))
+const seoSocial = z.object({
+  twitterCard: z.enum(['summary', 'summary_large_image']).default('summary_large_image'),
+  twitterSite: twitterHandle,
+  twitterCreator: twitterHandle,
+  facebookAppId: z.string().max(40).regex(/^\d*$/, 'must_be_digits').optional(),
+  ogLocale: z.string().max(12).regex(/^[a-z]{2}(_[A-Z]{2})?$/, 'invalid_locale').default('en_US'),
+})
+
+// Structured-data defaults. The Organization entity fields themselves
+// live in `organization_json_ld` (reused); this key picks the entity
+// TYPE (a personal site is a Person, not an Organization), the default
+// article subtype, breadcrumbs, and the WebSite SearchAction (Google
+// sitelinks searchbox). Per-page schema overrides live on the entity row.
+const seoSchema = z.object({
+  entityType: z.enum(['Organization', 'Person']).default('Organization'),
+  personName: z.string().max(180).optional(),
+  breadcrumbsEnabled: z.boolean().default(true),
+  articleType: z.enum(['Article', 'BlogPosting', 'NewsArticle']).default('BlogPosting'),
+  websiteSearchAction: z.boolean().default(false),
+})
+
+// XML sitemap configuration. The sitemap is a single file capped at the
+// 50,000-URL protocol maximum (see app/sitemap.ts MAX_TOTAL_ENTRIES) —
+// it never splits, so there is no per-file knob. `excludeNoindex` keeps
+// per-page noindex pages out of the sitemap (a noindexed URL in the
+// sitemap is a contradictory signal).
+const seoSitemap = z.object({
+  enabled: z.boolean().default(true),
+  includePages: z.boolean().default(true),
+  includePosts: z.boolean().default(true),
+  includeProjects: z.boolean().default(true),
+  includeImages: z.boolean().default(true),
+  excludeNoindex: z.boolean().default(true),
+})
+
+// Search-engine ownership verification codes. Each value lands in a
+// `<meta name="…-verification" content="HERE">` tag in the homepage
+// <head>. The charset is locked to token-safe characters so a value
+// can never break out of the attribute (no quotes / angle brackets).
+const verificationCode = z
+  .string()
+  .max(200)
+  .regex(/^[A-Za-z0-9_\-=.:/]*$/, 'invalid_verification_code')
+  .optional()
+  .or(z.literal('').transform(() => undefined))
+const seoWebmaster = z.object({
+  google: verificationCode,
+  bing: verificationCode,
+  yandex: verificationCode,
+  pinterest: verificationCode,
+  baidu: verificationCode,
+  naver: verificationCode,
+})
+
+// IndexNow (Bing/Yandex/Seznam/Naver — one ping, many engines). The
+// key is a 8–128 char hex-ish token served at /{key}.txt; the admin UI
+// auto-generates it on enable. `engines` selects which endpoints to
+// ping (all consume the same key).
+const seoIndexnow = z.object({
+  enabled: z.boolean().default(false),
+  key: z
+    .string()
+    .regex(/^[a-zA-Z0-9-]{8,128}$/, 'invalid_indexnow_key')
+    .optional(),
+  engines: z
+    .array(z.enum(['indexnow', 'bing', 'yandex', 'seznam', 'naver']))
+    .max(5)
+    .default(['indexnow']),
+  submitOnPublish: z.boolean().default(true),
+})
+
+// Google Indexing API service account. CREDENTIALED: the service
+// account JSON is AES-256-GCM encrypted at rest (AAD_SEO_INDEXING_API)
+// exactly like ai_config.apiKey, gated by step-up reauth on write, and
+// never returned to the client. `serviceAccountEmail` is the only
+// operator-visible record (display + "added as owner in GSC?" check).
+// Officially Google restricts this API to JobPosting/BroadcastEvent
+// pages — the UI states that; general indexing flows through sitemap + GSC.
+const seoIndexingApi = z.object({
+  enabled: z.boolean().default(false),
+  serviceAccountJson: encryptedSecretSchema.nullable().optional(),
+  serviceAccountEmail: z
+    .string()
+    .max(200)
+    .email('must_be_email')
+    .optional()
+    .or(z.literal('').transform(() => undefined)),
+})
+
+// Operator additions to robots.txt. ADDITIVE ONLY — these lines are
+// appended after the managed block; the security invariants (Disallow
+// /api, the admin base, never leaking the login path) are always
+// emitted by robots.ts regardless of this field. Defence in depth: the
+// schema ALSO rejects directives that could re-open the protected set —
+// no new `User-agent` group (would escape the managed group's
+// Disallows), no `Allow:` that re-permits /admin or /api (robots.txt
+// longest-match would override the managed Disallow), no operator-set
+// `Sitemap:`/`Host:` (managed separately). So a hostile token/admin can
+// widen restrictions but never narrow them, enforced at the input
+// boundary AND re-asserted by robots.ts. Bounded to keep the file small.
+const robotsExtraRules = z
+  .string()
+  .max(4000)
+  .default('')
+  .refine((txt) => {
+    for (const raw of txt.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (line === '' || line.startsWith('#')) continue
+      // No new groups — extraRules must stay inside the managed
+      // `User-agent: *` group so the managed Disallows always apply.
+      if (/^user-agent\s*:/i.test(line)) return false
+      // Sitemap + Host are emitted by the managed renderer.
+      if (/^sitemap\s*:/i.test(line)) return false
+      if (/^host\s*:/i.test(line)) return false
+      // Cannot re-allow the protected admin/API surface.
+      if (/^allow\s*:\s*\/(admin|api)\b/i.test(line)) return false
+    }
+    return true
+  }, 'robots_extra_rules_must_be_additive')
+const seoRobots = z.object({
+  extraRules: robotsExtraRules,
+})
+
+// Content-analysis engine config (lib/seo/analysis). Thresholds are
+// operator-tunable with battle-tested Yoast defaults; the engine reads
+// these at analysis time. `locale` selects the rule pack (transition
+// words / passive detection / syllable counting).
+const seoAnalysis = z.object({
+  enabled: z.boolean().default(true),
+  locale: z.string().max(10).default('en'),
+  seoAnalysisEnabled: z.boolean().default(true),
+  readabilityEnabled: z.boolean().default(true),
+  keyphraseDensityMin: z.number().min(0).max(10).default(0.5),
+  keyphraseDensityMax: z.number().min(0).max(10).default(3),
+  minWords: z.number().int().min(0).max(5000).default(300),
+  cornerstoneMinWords: z.number().int().min(0).max(10000).default(900),
+  fleschTarget: z.number().min(0).max(100).default(60),
+  passiveMaxPct: z.number().min(0).max(100).default(10),
+  transitionMinPct: z.number().min(0).max(100).default(30),
+})
+  // Cross-field guards — these bands feed the Phase-2 analysis engine,
+  // which assumes min ≤ max. seo_analysis is token-writable, so without
+  // these an inverted band could be persisted and break scoring for
+  // every page. Enforce the invariant at the write boundary.
+  .refine((d) => d.keyphraseDensityMin <= d.keyphraseDensityMax, {
+    message: 'keyphrase_density_min_gt_max',
+    path: ['keyphraseDensityMin'],
+  })
+  .refine((d) => d.minWords <= d.cornerstoneMinWords, {
+    message: 'min_words_gt_cornerstone_min_words',
+    path: ['minWords'],
+  })
+
 export const registry = {
   contact_info: {
     schema: contactInfo,
@@ -1279,6 +1485,90 @@ export const registry = {
       chatEnabled: false,
       voicePreset: 'default',
     } satisfies z.infer<typeof aiConfig>,
+  },
+  // ─── SEO Suite ───
+  seo_titles: {
+    schema: seoTitles,
+    default: {
+      separator: '–',
+      home: { title: '%sitename%', description: '%sitedesc%' },
+      page: { title: '%title% %sep% %sitename%', description: '%excerpt%' },
+      post: { title: '%title% %sep% %sitename%', description: '%excerpt%' },
+      project: { title: '%title% %sep% %sitename%', description: '%excerpt%' },
+      blogIndex: { title: '%title% %sep% %sitename%', description: '%sitedesc%' },
+      projectsIndex: { title: '%title% %sep% %sitename%', description: '%sitedesc%' },
+    } satisfies z.infer<typeof seoTitles>,
+  },
+  seo_indexing: {
+    schema: seoIndexing,
+    default: {
+      discourageSearchEngines: false,
+      noindexSearch: true,
+      noindexPaginated: false,
+    } satisfies z.infer<typeof seoIndexing>,
+  },
+  seo_social: {
+    schema: seoSocial,
+    default: {
+      twitterCard: 'summary_large_image',
+      ogLocale: 'en_US',
+    } satisfies z.infer<typeof seoSocial>,
+  },
+  seo_schema: {
+    schema: seoSchema,
+    default: {
+      entityType: 'Organization',
+      breadcrumbsEnabled: true,
+      articleType: 'BlogPosting',
+      websiteSearchAction: false,
+    } satisfies z.infer<typeof seoSchema>,
+  },
+  seo_sitemap: {
+    schema: seoSitemap,
+    default: {
+      enabled: true,
+      includePages: true,
+      includePosts: true,
+      includeProjects: true,
+      includeImages: true,
+      excludeNoindex: true,
+    } satisfies z.infer<typeof seoSitemap>,
+  },
+  seo_webmaster: {
+    schema: seoWebmaster,
+    default: {} satisfies z.infer<typeof seoWebmaster>,
+  },
+  seo_indexnow: {
+    schema: seoIndexnow,
+    default: {
+      enabled: false,
+      engines: ['indexnow'],
+      submitOnPublish: true,
+    } satisfies z.infer<typeof seoIndexnow>,
+  },
+  seo_indexing_api: {
+    schema: seoIndexingApi,
+    default: { enabled: false } satisfies z.infer<typeof seoIndexingApi>,
+  },
+  seo_robots: {
+    schema: seoRobots,
+    default: { extraRules: '' } satisfies z.infer<typeof seoRobots>,
+  },
+  seo_analysis: {
+    schema: seoAnalysis,
+    default: {
+      enabled: true,
+      locale: 'en',
+      seoAnalysisEnabled: true,
+      readabilityEnabled: true,
+      keyphraseDensityMin: 0.5,
+      keyphraseDensityMax: 3,
+      minWords: 300,
+      cornerstoneMinWords: 900,
+      fleschTarget: 60,
+      passiveMaxPct: 10,
+      transitionMinPct: 30,
+    } satisfies z.infer<typeof seoAnalysis>,
   },
 } as const
 

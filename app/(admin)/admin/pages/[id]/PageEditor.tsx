@@ -60,6 +60,17 @@ import {
 } from '@/components/admin/RowActionsMenu'
 import { Switch } from '@/components/inline-edit/Switch'
 import { Accordion } from '@/components/inline-edit/Accordion'
+import {
+  PageSeoPanel,
+  type AnalysisContent,
+} from '@/components/seo/PageSeoPanel'
+import {
+  type PanelSeoMeta,
+  parsePanelSeoMeta,
+  isEmptySeoMeta,
+} from '@/lib/cms/seoEditorFields'
+import { extractFromBlocks } from '@/lib/seo/analysis/extract/blocks'
+import { structuralEqual } from '@/lib/structuralEqual'
 import { MediaPicker } from '@/components/inline-edit/MediaPicker'
 import {
   MediaPickerProvider,
@@ -99,6 +110,12 @@ const BLOCK_TYPE_ICON: Record<string, LucideIcon> = {
 function iconForBlock(blockType: string): LucideIcon {
   return BLOCK_TYPE_ICON[blockType] ?? LayersIcon
 }
+
+// Client-side parse + empty-bag check live in lib/cms/seoEditorFields
+// (`parsePanelSeoMeta` / `isEmptySeoMeta`) — the ONE client parser shared
+// with the blog + project editors (C2/C3). They produce the NORMALIZED
+// shape (no `null` / empty keys) so the page editor's dirty-check is
+// symmetric with the panel's clears (#3).
 
 // Best-effort "what's in this block" excerpt for the admin editor card.
 // Returns `null` if the block has no surfaceable signal (e.g. structural
@@ -235,6 +252,15 @@ interface DirtyFields {
   ogImageId?: number | null
   published?: boolean
   isHome?: boolean
+  // Per-entity SEO fields (migration 0032).
+  focusKeyphrase?: string | null
+  robotsNoindex?: boolean
+  robotsNofollow?: boolean
+  canonicalUrl?: string | null
+  cornerstone?: boolean
+  seoScore?: number | null
+  readabilityScore?: number | null
+  seoMeta?: PanelSeoMeta | null
 }
 
 interface PageEditorProps {
@@ -277,6 +303,30 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
   )
   const [ogImageId, setOgImageId] = useState<number | null>(page.og_image_id)
   const [published, setPublished] = useState<boolean>(page.published === 1)
+
+  // Per-entity SEO fields (migration 0032). `page.seo_meta` is the raw
+  // JSON string (MariaDB JSON ≡ LONGTEXT) — parse it defensively here on
+  // the client (the server-only parseSeoMeta can't be imported into a
+  // client component).
+  const initialSeoMeta = useMemo(
+    () => parsePanelSeoMeta(page.seo_meta),
+    [page.seo_meta],
+  )
+  const [focusKeyphrase, setFocusKeyphrase] = useState(
+    page.focus_keyphrase ?? '',
+  )
+  const [robotsNoindex, setRobotsNoindex] = useState(page.robots_noindex === 1)
+  const [robotsNofollow, setRobotsNofollow] = useState(
+    page.robots_nofollow === 1,
+  )
+  const [canonicalUrl, setCanonicalUrl] = useState(page.canonical_url ?? '')
+  const [cornerstone, setCornerstone] = useState(page.cornerstone === 1)
+  const [seoMeta, setSeoMeta] = useState<PanelSeoMeta>(initialSeoMeta)
+  // Latest analysis scores, cached so a SEO save ships them too.
+  const scoresRef = useRef<{ seo: number; readability: number } | null>(null)
+  const onScores = useCallback((seo: number, readability: number) => {
+    scoresRef.current = { seo, readability }
+  }, [])
 
   const [seoOpen, setSeoOpen] = useState(false)
   const [savingFields, setSavingFields] = useState<Set<string>>(new Set())
@@ -334,6 +384,44 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
     heroImageId,
     ogImageId,
     published,
+  ])
+
+  // ── SEO-panel field diff (migration 0032) ──
+  // Computed separately from `dirty` (which feeds the 409 recovery
+  // buffer) so the buffered-recovery payload shape stays as it was.
+  // These save via a dedicated debounced batch so rapid keyphrase /
+  // toggle / schema edits coalesce into ONE PATCH + ONE version bump
+  // (avoiding the 409 races a per-field blur-save would cause).
+  const seoFieldsDirty = useMemo<DirtyFields>(() => {
+    const d: DirtyFields = {}
+    if ((focusKeyphrase || null) !== page.focus_keyphrase) {
+      d.focusKeyphrase = focusKeyphrase === '' ? null : focusKeyphrase
+    }
+    if (robotsNoindex !== (page.robots_noindex === 1)) {
+      d.robotsNoindex = robotsNoindex
+    }
+    if (robotsNofollow !== (page.robots_nofollow === 1)) {
+      d.robotsNofollow = robotsNofollow
+    }
+    if ((canonicalUrl || null) !== page.canonical_url) {
+      d.canonicalUrl = canonicalUrl === '' ? null : canonicalUrl
+    }
+    if (cornerstone !== (page.cornerstone === 1)) {
+      d.cornerstone = cornerstone
+    }
+    if (!structuralEqual(seoMeta, initialSeoMeta)) {
+      d.seoMeta = isEmptySeoMeta(seoMeta) ? null : seoMeta
+    }
+    return d
+  }, [
+    page,
+    initialSeoMeta,
+    focusKeyphrase,
+    robotsNoindex,
+    robotsNofollow,
+    canonicalUrl,
+    cornerstone,
+    seoMeta,
   ])
 
   // ─── 409 recovery banner: mount-time draft enumeration ───────────────
@@ -465,7 +553,16 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
               // the right operator message.
               break
           }
-          const write = await writeDraftBuffer(page.id, version, dirty)
+          // Buffer the operator's unsaved edits so the recovery banner
+          // can re-apply them after reload. The SEO save path lives in a
+          // SEPARATE dirty bag (`seoFieldsDirty`) than the blur-save bag
+          // (`dirty`); a 409 on the SEO batch must buffer the SEO fields
+          // too, or the operator's keyphrase / robots / canonical /
+          // schema edits are SILENTLY DROPPED (#1). Merge both bags on
+          // the SEO path so nothing is lost.
+          const bufferDiff: DirtyFields =
+            fieldKey === 'seo' ? { ...dirty, ...seoFieldsDirty } : dirty
+          const write = await writeDraftBuffer(page.id, version, bufferDiff)
           if (write.kind === 'too-large') {
             toast.error(
               'Your unsaved edits are too large to preserve locally — copy them out manually before reloading.',
@@ -552,14 +649,94 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
         untrackSave(fieldKey)
       }
     },
-    [dirty, page, router, toast, version],
+    [dirty, seoFieldsDirty, page, router, toast, version],
   )
+
+  // ─── Blur-save serializer (migration 0032 race fix, #1) ──────────────
+  // A field-blur save (title / slug / hero / og / publish) must not fire
+  // while the SEO batch — or any other save — is in flight: they share
+  // one `version` token, so an overlapping PATCH 409s. `requestBlurSave`
+  // is the single entry point for every blur handler: it fires
+  // immediately when no save is running, otherwise it QUEUES the
+  // (fields, key) so the edit is NEVER dropped. The flush effect below
+  // drains the queue once the in-flight save settles (savingFields →
+  // empty) against the now-fresh version. Last-write-wins per fieldKey
+  // (a Map) so rapid re-blurs of the same field coalesce.
+  const pendingBlurRef = useRef<Map<string, DirtyFields>>(new Map())
+  const requestBlurSave = useCallback(
+    (fields: DirtyFields, fieldKey: string) => {
+      if (savingFields.size > 0) {
+        pendingBlurRef.current.set(fieldKey, fields)
+        return
+      }
+      void patch(fields, fieldKey)
+    },
+    [savingFields, patch],
+  )
+  // Drain queued blur-saves once every in-flight save has settled. Fires
+  // them one at a time (the first dispatch repopulates savingFields, so
+  // the next drain waits for it) — serial, no overlap, no lost edits.
+  useEffect(() => {
+    if (savingFields.size > 0) return
+    if (pendingBlurRef.current.size === 0) return
+    const [key, fields] = pendingBlurRef.current.entries().next().value as [
+      string,
+      DirtyFields,
+    ]
+    pendingBlurRef.current.delete(key)
+    void patch(fields, key)
+  }, [savingFields, patch])
+
+  // ─── SEO-panel debounced batch save (migration 0032) ─────────────────
+  // Coalesce rapid keyphrase / toggle / canonical / schema edits into a
+  // single PATCH so we never fire a burst that 409s on its own version
+  // bumps. 900ms after the last change (and not while a save is already
+  // in flight), ship the whole SEO diff + the latest cached scores. The
+  // latest diff is held in a ref so the timer always sends current
+  // values even if it was scheduled an edit ago.
+  const seoDirtyRef = useRef(seoFieldsDirty)
+  useEffect(() => {
+    seoDirtyRef.current = seoFieldsDirty
+  }, [seoFieldsDirty])
+  const seoDirtyCount = Object.keys(seoFieldsDirty).length
+  // Single in-flight gate. The page editor saves SEO through this
+  // debounced batch AND saves title / slug / hero / og / publish via
+  // per-field blur. All share one `version` token with no DB-level
+  // mutex, so an overlapping send 409s. To serialize WITHOUT losing
+  // edits, the SEO batch holds off while ANY save is in flight (not just
+  // a prior 'seo' one) — a blur-save in progress will bump `version` +
+  // router.refresh(), which re-renders this effect (savingFields shrinks
+  // back to 0) and re-arms the SEO batch against the fresh version (#1).
+  const savesInFlight = savingFields.size > 0
+  useEffect(() => {
+    if (isReadOnly) return
+    if (seoDirtyCount === 0) return
+    if (savesInFlight) return
+    const t = setTimeout(() => {
+      const diff = seoDirtyRef.current
+      if (Object.keys(diff).length === 0) return
+      const payload: DirtyFields = { ...diff }
+      if (scoresRef.current) {
+        payload.seoScore = scoresRef.current.seo
+        payload.readabilityScore = scoresRef.current.readability
+      }
+      void patch(payload, 'seo')
+    }, 900)
+    return () => clearTimeout(t)
+    // Re-arm whenever the diff content changes OR an in-flight save
+    // clears (savesInFlight flips false) — the gate above prevents
+    // overlap with any concurrent blur-save.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seoDirtyCount, focusKeyphrase, robotsNoindex, robotsNofollow, canonicalUrl, cornerstone, seoMeta, isReadOnly, savesInFlight])
 
   // ─── Field-blur save handlers ────────────────────────────────────────
 
+  // Every blur-save routes through requestBlurSave so it serializes with
+  // an in-flight SEO batch (or another blur-save) instead of racing it
+  // into a 409 (#1).
   const saveTitleOnBlur = () => {
     if (title === page.title) return
-    void patch({ title }, 'title')
+    requestBlurSave({ title }, 'title')
   }
   const saveSlugOnBlur = () => {
     if (slug === page.slug) return
@@ -577,34 +754,34 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       setSlug(page.slug)
       return
     }
-    void patch({ slug }, 'slug')
+    requestBlurSave({ slug }, 'slug')
   }
   const saveSeoTitleOnBlur = () => {
     if (seoTitle === page.seo_title) return
-    void patch({ seoTitle }, 'seoTitle')
+    requestBlurSave({ seoTitle }, 'seoTitle')
   }
   const saveSeoDescriptionOnBlur = () => {
     if (seoDescription === page.seo_description) return
-    void patch({ seoDescription }, 'seoDescription')
+    requestBlurSave({ seoDescription }, 'seoDescription')
   }
   const saveHeroImage = (v: MediaRef | undefined) => {
     const newId = v?.media_id ?? null
     setHeroImageId(newId)
     if (newId !== page.hero_image_id) {
-      void patch({ heroImageId: newId }, 'heroImageId')
+      requestBlurSave({ heroImageId: newId }, 'heroImageId')
     }
   }
   const saveOgImage = (v: MediaRef | undefined) => {
     const newId = v?.media_id ?? null
     setOgImageId(newId)
     if (newId !== page.og_image_id) {
-      void patch({ ogImageId: newId }, 'ogImageId')
+      requestBlurSave({ ogImageId: newId }, 'ogImageId')
     }
   }
   const togglePublish = (v: boolean) => {
     if (!isAdmin) return
     setPublished(v)
-    void patch({ published: v }, 'published')
+    requestBlurSave({ published: v }, 'published')
   }
 
   // ─── Preview / view-live ─────────────────────────────────────────────
@@ -959,6 +1136,18 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
     if (d.heroImageId !== undefined) setHeroImageId(d.heroImageId)
     if (d.ogImageId !== undefined) setOgImageId(d.ogImageId)
     if (d.published !== undefined && isAdmin) setPublished(d.published)
+    // Per-entity SEO fields (migration 0032). The SEO-batch 409 path
+    // buffers these alongside the blur-save fields, so the recovery
+    // banner must re-apply them too — otherwise a keyphrase / robots /
+    // canonical / schema edit caught in a 409 is silently lost (#1).
+    if (d.focusKeyphrase !== undefined) {
+      setFocusKeyphrase(d.focusKeyphrase ?? '')
+    }
+    if (d.robotsNoindex !== undefined) setRobotsNoindex(d.robotsNoindex)
+    if (d.robotsNofollow !== undefined) setRobotsNofollow(d.robotsNofollow)
+    if (d.canonicalUrl !== undefined) setCanonicalUrl(d.canonicalUrl ?? '')
+    if (d.cornerstone !== undefined) setCornerstone(d.cornerstone)
+    if (d.seoMeta !== undefined) setSeoMeta(d.seoMeta ?? {})
     discardDraft(page.id, draft.baseVersion)
     setRecoveredDrafts((prev) =>
       prev.filter((p) => p.baseVersion !== draft.baseVersion),
@@ -977,6 +1166,24 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
   // ─── Render ─────────────────────────────────────────────────────────
   const slugDisabled = isReadOnly || !isAdmin || (page.system === 1 && page.is_home === 0)
   const publishDisabled = isReadOnly || !isAdmin
+
+  // Page bodies are CMS block trees — the analysis engine scores the
+  // extracted prose / links / images. blockList carries {blockType,data}
+  // in render order, which is exactly extractFromBlocks' BlockLike shape.
+  const getAnalysisContent = useCallback(
+    (): AnalysisContent => extractFromBlocks(blockList),
+    [blockList],
+  )
+  // A CHEAP fingerprint of the scored body for the panel's debounce —
+  // block count + each block's id:version. Block CONTENT is edited via
+  // the public inline drawer (not here); a content save bumps the row's
+  // version + router.refresh()es new props, so the version roll-up
+  // detects body edits without re-running the full extractor in render
+  // (#2). Cheap: a flat join over the block metas already in memory.
+  const contentSignal = useMemo(
+    () => `${blockList.length}:${blockList.map((b) => `${b.id}.${b.version}`).join(',')}`,
+    [blockList],
+  )
 
   return (
     <section className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_320px]">
@@ -1096,14 +1303,16 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
         {/* SEO + hero accordion */}
         <Accordion
           title="SEO & social"
-          subtitle="Search title, description, social card image"
+          subtitle="Search title, description, focus keyphrase, analysis"
           open={seoOpen}
           onToggle={setSeoOpen}
           hasContent={
             !!seoTitle ||
             !!seoDescription ||
             heroImageId !== null ||
-            ogImageId !== null
+            ogImageId !== null ||
+            !!focusKeyphrase ||
+            !isEmptySeoMeta(seoMeta)
           }
         >
           <div className="space-y-6">
@@ -1162,6 +1371,35 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
                 onChange={saveOgImage}
                 label="Social card image"
                 help="Used when the page is shared on social or chat."
+              />
+            </div>
+
+            {/* Live SEO analysis + advanced / social / schema controls.
+                Saves through the page editor's own patch flow via the
+                debounced SEO batch above. */}
+            <div className="border-t border-warm-stone/15 pt-6">
+              <PageSeoPanel
+                entityTitle={title}
+                seoTitle={seoTitle ?? ''}
+                seoDescription={seoDescription ?? ''}
+                slug={slug}
+                url={publicUrl}
+                focusKeyphrase={focusKeyphrase}
+                onFocusKeyphraseChange={setFocusKeyphrase}
+                robotsNoindex={robotsNoindex}
+                onRobotsNoindexChange={setRobotsNoindex}
+                robotsNofollow={robotsNofollow}
+                onRobotsNofollowChange={setRobotsNofollow}
+                canonicalUrl={canonicalUrl}
+                onCanonicalUrlChange={setCanonicalUrl}
+                cornerstone={cornerstone}
+                onCornerstoneChange={setCornerstone}
+                seoMeta={seoMeta}
+                onSeoMetaChange={setSeoMeta}
+                getAnalysisContent={getAnalysisContent}
+                contentSignal={contentSignal}
+                onScores={onScores}
+                disabled={isReadOnly}
               />
             </div>
           </div>
@@ -1802,5 +2040,13 @@ function describeDraftFields(diff: unknown): string[] {
   if ('ogImageId' in o) out.push('social card image')
   if ('published' in o) out.push('publish')
   if ('isHome' in o) out.push('home page')
+  // Per-entity SEO fields (migration 0032) — buffered on a SEO-batch 409
+  // and re-applied by the banner, so surface them in the preview too.
+  if ('focusKeyphrase' in o) out.push('focus keyphrase')
+  if ('robotsNoindex' in o) out.push('search visibility')
+  if ('robotsNofollow' in o) out.push('link following')
+  if ('canonicalUrl' in o) out.push('canonical address')
+  if ('cornerstone' in o) out.push('cornerstone')
+  if ('seoMeta' in o) out.push('social & structured data')
   return out
 }

@@ -18,6 +18,9 @@ import { mintPublicPreCsrfForBlocks, pageHasVisibleH1 } from '@/app/_shared/cmsP
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { jsonLdForPage } from '@/lib/seo/page-jsonld'
+import { extraSchemaForEntity } from '@/lib/seo/schema/forPage'
+import { getSetting } from '@/lib/cms/getSettings'
+import { parseSeoMeta, schemaDefaultsFromSetting } from '@/lib/seo/seoMeta'
 import { verifyPreviewToken } from '@/lib/cms/verifyPreviewToken'
 import { HomePageEmptyState } from '@/components/HomePageEmptyState'
 import type { PageRawRow } from '@/lib/cms/types'
@@ -43,19 +46,38 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>
 // fall back to default site metadata.
 export async function generateMetadata() {
   const [rows] = (await db.execute(sql`
-    SELECT seo_title, seo_description
+    SELECT title, seo_title, seo_description,
+           robots_noindex, robots_nofollow, canonical_url, seo_meta
     FROM pages
     WHERE is_home = 1 AND deleted_at IS NULL
     LIMIT 1
   `)) as unknown as [
-    Array<{ seo_title: string | null; seo_description: string | null }>,
+    Array<{
+      title: string | null
+      seo_title: string | null
+      seo_description: string | null
+      robots_noindex: number | null
+      robots_nofollow: number | null
+      canonical_url: string | null
+      seo_meta: unknown
+    }>,
   ]
   const r = rows[0]
+  const meta = parseSeoMeta(r?.seo_meta)
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,
     fallbackTitle: 'CaveCMS',
     canonicalPath: '/',
+    contentType: 'home',
+    templateVars: { title: r?.title ?? undefined },
+    noindex: !!r?.robots_noindex,
+    nofollow: !!r?.robots_nofollow,
+    canonicalOverride: r?.canonical_url,
+    ogTitle: meta.ogTitle,
+    ogDescription: meta.ogDescription,
+    twitterTitle: meta.twitterTitle,
+    twitterDescription: meta.twitterDescription,
   })
 }
 
@@ -204,7 +226,29 @@ async function renderHome(
   const { blocks, media, projects, posts } = hydrated
   const csrf = await mintPublicPreCsrfForBlocks(blocks, page.slug)
   const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
-  const ld = jsonLdForPage({ page, baseUrl: (await getSiteOrigin()) ?? '' })
+  const siteOrigin = (await getSiteOrigin()) ?? ''
+  const ld = jsonLdForPage({ page, baseUrl: siteOrigin })
+
+  // Per-page structured data from the home row's seo_meta override.
+  // ADDITIONS-ONLY: jsonLdForPage above already emits the home WebSite
+  // PRIMARY node; this emits ONLY the explicit per-page override shape
+  // (when the operator flips schemaType to Product / SoftwareApplication
+  // for a product homepage) so we never double-emit a primary for `/`. No
+  // breadcrumb is emitted for the home page — a single "Home" crumb is
+  // below the >= 2 floor. `page` came from `SELECT *`, so seo_meta is
+  // present at runtime even though PageRawRow doesn't type it.
+  const homeMeta = parseSeoMeta((page as PageRawRow & { seo_meta?: unknown }).seo_meta)
+  const homeSeoSchema = await getSetting('seo_schema')
+  const homeSchemaGraph = extraSchemaForEntity({
+    entity: {
+      kind: 'page',
+      title: page.title,
+      description: page.seo_description ?? undefined,
+      url: siteOrigin ? `${siteOrigin}/` : '/',
+    },
+    override: { schemaType: homeMeta.schemaType, schemaData: homeMeta.schemaData },
+    defaults: schemaDefaultsFromSetting(homeSeoSchema),
+  })
 
   return (
     <EditableMain
@@ -238,6 +282,16 @@ async function renderHome(
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(ld) }}
       />
+      {/* Per-page schema ADDITIONS from seo_meta (override shape only; no
+          breadcrumb on home — single crumb is below the >= 2 guard). The
+          home WebSite PRIMARY is the jsonLdForPage script above. */}
+      {homeSchemaGraph.map((node, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: safeJsonForScript(node) }}
+        />
+      ))}
     </EditableMain>
   )
 }

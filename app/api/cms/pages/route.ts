@@ -18,6 +18,7 @@ import { validatePageSlug } from '@/lib/cms/page-slug'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
+import { notifyIndexNow } from '@/lib/seo/indexnow/notify'
 import { env } from '@/lib/env'
 
 // POST /api/cms/pages — create. Per spec §4.1.
@@ -343,6 +344,15 @@ export const POST = withError(async (req) => {
     queueMicrotask(() => {
       void drainRevalidate(txResult.queueRowId, txResult.tags)
     })
+
+    // IndexNow: a brand-new page created directly in the published state
+    // (admin sent `published: true`) is immediately live — announce its
+    // public URL. A new page is never the home row (is_home inserted as 0)
+    // so the canonical path is always `/{slug}`. Draft creates skip this.
+    // Fire-and-forget — never awaited, never throws, never blocks the save.
+    if (wantPublished) {
+      void notifyIndexNow([`/${body.slug}`])
+    }
 
     return new Response(JSON.stringify({ id: txResult.insertId, slug: body.slug }), {
       status: 201,

@@ -12,14 +12,18 @@ export async function generateMetadata() {
   // <head>. Mirrors the renderCmsPage filter below + the dynamic
   // _page/[slug] resolver semantics.
   const [rows] = (await db.execute(sql`
-    SELECT seo_title, seo_description
+    SELECT title, seo_title, seo_description
     FROM pages
     WHERE slug = 'projects'
       AND deleted_at IS NULL
       AND published = 1
     LIMIT 1
   `)) as unknown as [
-    Array<{ seo_title: string | null; seo_description: string | null }>,
+    Array<{
+      title: string | null
+      seo_title: string | null
+      seo_description: string | null
+    }>,
   ]
   const r = rows[0]
   return resolveMetadata({
@@ -27,6 +31,8 @@ export async function generateMetadata() {
     description: r?.seo_description ?? null,
     fallbackTitle: 'Projects — CaveCMS',
     canonicalPath: '/projects',
+    contentType: 'projectsIndex',
+    templateVars: { title: r?.title ?? 'Projects' },
   })
 }
 

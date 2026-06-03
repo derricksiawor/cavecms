@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { csrfFetch } from '@/lib/client/csrf'
 import { structuralEqual } from '@/lib/structuralEqual'
@@ -12,11 +12,18 @@ import { Accordion } from '@/components/inline-edit/Accordion'
 import { Switch } from '@/components/inline-edit/Switch'
 import { SlugInput } from '@/components/inline-edit/SlugInput'
 import { SeoFields } from '@/components/inline-edit/SeoFields'
+import {
+  PageSeoPanel,
+  type AnalysisContent,
+} from '@/components/seo/PageSeoPanel'
+import { useSeoFields } from '@/components/seo/useSeoFields'
+import type { PanelSeoMeta } from '@/lib/cms/seoEditorFields'
 import { StickySaveBar } from '@/components/inline-edit/StickySaveBar'
 import { useToast } from '@/components/inline-edit/Toast'
 import { useAutoSave } from '@/hooks/useAutoSave'
 import { SaveStatus } from '@/components/inline-edit/SaveStatus'
 import { SECTION_SHAPES, SECTION_LABELS } from '@/lib/cms/project-section-shapes'
+import type { ContentNode } from '@/lib/seo/analysis/types'
 
 // Admin project editor. Three surfaces, all stitched into a single
 // page with smooth section-by-section editing:
@@ -48,6 +55,14 @@ interface ProjectMeta {
   published: number
   seo_title: string | null
   seo_description: string | null
+  // Per-entity SEO fields (migration 0032). Booleans already coerced
+  // from TINYINT by the server page; seo_meta already parsed.
+  focus_keyphrase: string | null
+  robots_noindex: boolean
+  robots_nofollow: boolean
+  canonical_url: string | null
+  cornerstone: boolean
+  seo_meta: PanelSeoMeta
   version: number
   deleted_at: Date | null
 }
@@ -67,6 +82,43 @@ interface MediaSummary {
 }
 
 import { SLUG_RE } from '@/lib/cms/slug'
+
+// Cheaply gather every human-readable string out of a section's data
+// blob for the SEO analysis. Recurses arrays/objects, skips obvious
+// non-prose keys (ids, urls, media refs), and caps depth + count so a
+// huge gallery section can't blow the budget (#0.251 scalability).
+function collectStrings(
+  value: unknown,
+  out: string[] = [],
+  depth = 0,
+): string[] {
+  if (out.length >= 400 || depth > 6) return out
+  if (typeof value === 'string') {
+    // Skip URLs / ids / very short tokens — they're not prose.
+    if (value.length > 1 && !/^(https?:\/\/|\/|#|data:|media:)/.test(value)) {
+      out.push(value)
+    }
+    return out
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      if (out.length >= 400) break
+      collectStrings(v, out, depth + 1)
+    }
+    return out
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (out.length >= 400) break
+      // Skip structural / reference keys that never carry prose.
+      if (/(_id|media_id|href|url|src|slug|icon|color|variant|alt)$/i.test(k)) {
+        continue
+      }
+      collectStrings(v, out, depth + 1)
+    }
+  }
+  return out
+}
 
 const STATUS_OPTIONS = [
   { value: 'coming_soon', label: 'Coming soon' },
@@ -124,6 +176,15 @@ export function ProjectEditor({
   const [published, setPublished] = useState(project.published === 1)
   const [seoTitle, setSeoTitle] = useState(project.seo_title ?? '')
   const [seoDescription, setSeoDescription] = useState(project.seo_description ?? '')
+  // Per-entity SEO fields (migration 0032) — owned by the shared hook (C3).
+  const seo = useSeoFields({
+    focusKeyphrase: project.focus_keyphrase,
+    robotsNoindex: project.robots_noindex,
+    robotsNofollow: project.robots_nofollow,
+    canonicalUrl: project.canonical_url,
+    cornerstone: project.cornerstone,
+    seoMeta: project.seo_meta,
+  })
   const [version, setVersion] = useState(project.version)
   const [metaBusy, setMetaBusy] = useState(false)
   const [metaErr, setMetaErr] = useState<string | null>(null)
@@ -156,7 +217,8 @@ export function ProjectEditor({
     (og?.media_id ?? null) !== pristine.og ||
     published !== pristine.published ||
     seoTitle !== pristine.seoTitle ||
-    seoDescription !== pristine.seoDescription
+    seoDescription !== pristine.seoDescription ||
+    seo.dirty
 
   const slugInvalid =
     canPublishAndSlug && slug !== pristine.slug && !SLUG_RE.test(slug)
@@ -191,6 +253,8 @@ export function ProjectEditor({
     if (seoDescription !== pristine.seoDescription) {
       patch.seoDescription = seoDescription === '' ? null : seoDescription
     }
+    // Per-entity SEO fields (migration 0032) — merged by the shared hook.
+    seo.buildSeoPatch(patch)
     if (canPublishAndSlug) {
       if (slug !== pristine.slug) patch.slug = slug
       if (published !== pristine.published) patch.published = published
@@ -246,6 +310,7 @@ export function ProjectEditor({
         seoTitle,
         seoDescription,
       })
+      seo.resetPristine()
       return { ok: true }
     } finally {
       setMetaBusy(false)
@@ -281,6 +346,7 @@ export function ProjectEditor({
     setPublished(pristine.published)
     setSeoTitle(pristine.seoTitle)
     setSeoDescription(pristine.seoDescription)
+    seo.discard()
     toast.info('Changes undone.')
   }
 
@@ -309,6 +375,34 @@ export function ProjectEditor({
   const [openSection, setOpenSection] = useState<string | null>(null)
 
   const projectUrl = `yourdomain.com/projects/${slug || pristine.slug}`
+
+  // Project bodies aren't markdown or CMS blocks — they're section JSON.
+  // There's no full block tree to extract, so we build a MINIMAL content
+  // set from the tagline + every string we can cheaply gather out of the
+  // section data. The analysis degrades gracefully: with little text the
+  // SEO checks still grade keyphrase-in-title / -meta / -slug + meta
+  // length, and the body-driven checks show "Add more content to
+  // analyze" rather than breaking.
+  const sectionsSig = useMemo(
+    () => sections.map((s) => s.version).join(','),
+    [sections],
+  )
+  const getAnalysisContent = useCallback((): AnalysisContent => {
+    const blocks: ContentNode[] = []
+    if (tagline.trim()) blocks.push({ kind: 'paragraph', text: tagline.trim() })
+    for (const s of sections) {
+      collectStrings(s.data).forEach((text) => {
+        if (text.trim()) blocks.push({ kind: 'paragraph', text: text.trim() })
+      })
+    }
+    // No reliable link/image extraction from heterogeneous section JSON
+    // without the renderer — leave those empty (their checks degrade to
+    // "add internal/outbound links" guidance, which is correct).
+    return { blocks, links: [], images: [] }
+    // tagline + the sections signature are the only inputs that change
+    // the gathered text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tagline, sectionsSig])
 
   return (
     <>
@@ -446,6 +540,32 @@ export function ProjectEditor({
             placeholderTitle={name}
             placeholderDescription={tagline || 'No description set'}
             url={projectUrl}
+          />
+        </div>
+
+        <div className="mt-8">
+          <PageSeoPanel
+            entityTitle={name}
+            seoTitle={seoTitle}
+            seoDescription={seoDescription || tagline}
+            slug={slug || pristine.slug}
+            url={projectUrl}
+            focusKeyphrase={seo.values.focusKeyphrase}
+            onFocusKeyphraseChange={seo.setters.setFocusKeyphrase}
+            robotsNoindex={seo.values.robotsNoindex}
+            onRobotsNoindexChange={seo.setters.setRobotsNoindex}
+            robotsNofollow={seo.values.robotsNofollow}
+            onRobotsNofollowChange={seo.setters.setRobotsNofollow}
+            canonicalUrl={seo.values.canonicalUrl}
+            onCanonicalUrlChange={seo.setters.setCanonicalUrl}
+            cornerstone={seo.values.cornerstone}
+            onCornerstoneChange={seo.setters.setCornerstone}
+            seoMeta={seo.values.seoMeta}
+            onSeoMetaChange={seo.setters.setSeoMeta}
+            getAnalysisContent={getAnalysisContent}
+            contentSignal={`${sectionsSig}|${tagline.length}`}
+            onScores={seo.onScores}
+            disabled={role !== 'admin' && role !== 'editor'}
           />
         </div>
 

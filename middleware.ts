@@ -65,6 +65,9 @@ interface SecurityConfig {
   /** True once an admin user has been created via the install wizard.
    *  False on a fresh deploy → middleware redirects to /install. */
   installed: boolean
+  /** IndexNow verification key, or null when IndexNow is disabled. When
+   *  set, middleware serves `/{key}.txt` (the key itself) at the edge. */
+  indexNowKey?: string | null
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
@@ -136,6 +139,9 @@ function bootstrapSecurityConfig(): SecurityConfig {
     // first cfg fetch, and /install + the wizard endpoints remain
     // reachable directly if the operator types the URL.
     installed: true,
+    // No IndexNow key during a cold-start outage — the verification
+    // file simply 404s until the DB is reachable again (harmless).
+    indexNowKey: null,
   }
 }
 
@@ -548,6 +554,23 @@ export async function middleware(
   // LOGIN_PATH, instead of the pre-wizard cached snapshot.
   const justInstalled = req.cookies.get('cavecms_just_installed')?.value === '1'
   const cfg = await getSecurityConfig(req, justInstalled)
+
+  // ─── IndexNow key file ───
+  // IndexNow (Bing/Yandex/Seznam/Naver) verifies ownership by fetching
+  // `/{key}.txt` and matching its body to the submitted key. Serve it at
+  // the edge from the config-fed key. EXACT path match only — a precise
+  // `/${key}.txt` comparison can't collide with a static security.txt /
+  // ads.txt the operator might serve from /public. Public + cacheable +
+  // ungated (it carries no secret — the key is published by design).
+  if (cfg?.indexNowKey && pathname === `/${cfg.indexNowKey}.txt`) {
+    return new NextResponse(cfg.indexNowKey, {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'public, max-age=300',
+      },
+    })
+  }
 
   // ─── First-boot install gate (WordPress-style) ────────────────
   //

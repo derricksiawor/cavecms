@@ -22,6 +22,11 @@ import {
   Palette,
   Type,
   Signpost,
+  TrendingUp,
+  LayoutTemplate,
+  Share2,
+  Map as MapIcon,
+  PlugZap,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -73,6 +78,17 @@ export const NAV: readonly NavItem[] = [
   { label: 'AI Assistant', href: '/admin/settings/ai', roles: ['admin'], icon: Sparkles, parent: '/admin/settings' },
   { label: 'Updates', href: '/admin/settings/updates', roles: ['admin'], icon: Download, parent: '/admin/settings' },
   { label: 'Backups', href: '/admin/settings/backups', roles: ['admin'], icon: Archive, parent: '/admin/settings' },
+  // ─── SEO ───
+  // Top-level group with five children. Overview (`/admin/seo`) is the
+  // hub; it doubles as the group's own href, so isActive() uses strict
+  // equality (it hasChildren) and the parent lights up only on the
+  // dashboard itself, not on /admin/seo/titles etc.
+  { label: 'SEO', href: '/admin/seo', roles: ['admin'], icon: TrendingUp },
+  { label: 'Overview', href: '/admin/seo', roles: ['admin'], icon: LayoutDashboard, parent: '/admin/seo' },
+  { label: 'Titles & Meta', href: '/admin/seo/titles', roles: ['admin'], icon: LayoutTemplate, parent: '/admin/seo' },
+  { label: 'Social & Schema', href: '/admin/seo/social', roles: ['admin'], icon: Share2, parent: '/admin/seo' },
+  { label: 'Sitemaps & Crawl', href: '/admin/seo/sitemaps', roles: ['admin'], icon: MapIcon, parent: '/admin/seo' },
+  { label: 'Connect & Verify', href: '/admin/seo/connect', roles: ['admin'], icon: PlugZap, parent: '/admin/seo' },
   { label: 'Activity', href: '/admin/activity', roles: ['admin'], icon: ShieldCheck },
   { label: 'Help', href: '/admin/help', roles: ['admin', 'editor', 'viewer'], icon: HelpCircle },
 ]

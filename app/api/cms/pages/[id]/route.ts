@@ -16,9 +16,11 @@ import {
 } from '@/lib/cache/tags'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
+import { notifyIndexNow } from '@/lib/seo/indexnow/notify'
 import { PageEditorPatch, PageAdminPatch } from '@/lib/cms/page-shapes'
 import { validatePageSlug } from '@/lib/cms/page-slug'
 import type { PageRawRow } from '@/lib/cms/types'
+import { buildSeoSetParts, type SeoEditorInput } from '@/lib/cms/seoEditorPersist'
 import { env } from '@/lib/env'
 
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/
@@ -133,7 +135,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
     slug?: string
     published?: boolean
     isHome?: boolean
-  }
+  } & SeoEditorInput
   try {
     body = Schema.parse(raw) as typeof body
   } catch (e) {
@@ -438,6 +440,13 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         applied[field] = v
       }
 
+      // Per-entity SEO fields (migration 0032) — booleans → TINYINT,
+      // seoMeta → JSON string, scores → INT|null. Editor-writable like
+      // seoTitle, so they apply for both roles (outside the admin branch).
+      const seo = buildSeoSetParts(body, row)
+      parts.push(...seo.parts)
+      Object.assign(applied, seo.applied)
+
       if (ctx.role === 'admin') {
         if (body.slug !== undefined && slugChanged) {
           parts.push(sql`slug = ${body.slug}`)
@@ -498,6 +507,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           newVersion: row.version,
           queueRowId: null as number | null,
           tags: [] as string[],
+          indexNowPath: null as string | null,
         }
       }
 
@@ -557,6 +567,16 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             seo_description: row.seo_description,
             hero_image_id: row.hero_image_id,
             og_image_id: row.og_image_id,
+            focus_keyphrase: row.focus_keyphrase,
+            robots_noindex: row.robots_noindex === 1,
+            robots_nofollow: row.robots_nofollow === 1,
+            canonical_url: row.canonical_url,
+            cornerstone: row.cornerstone === 1,
+            seo_score: row.seo_score,
+            readability_score: row.readability_score,
+            // seo_meta omitted from audit `from` (large JSON blob; `to`
+            // records the new value, prior reads from the prior audit
+            // row's `to`).
             published: row.published === 1,
             is_home: row.is_home === 1,
             preview_epoch: row.preview_epoch,
@@ -604,7 +624,43 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         tagSet.push(tag.page(priorHomeSlug), tag.pageSlugResolver(priorHomeSlug))
       }
       const queueRowId = await enqueueRevalidate(tx, tagSet)
-      return { newVersion: row.version + 1, queueRowId, tags: tagSet }
+
+      // IndexNow: announce the public URL to search engines when this
+      // save leaves the page LIVE on the public site — i.e. on a publish
+      // transition, or a content-affecting edit while already published.
+      // Never on draft saves (page not published) or on unpublish
+      // (publishedTransition === 'off'). Computed inside the TX where the
+      // final published + home state are known; the actual fire-and-forget
+      // ping happens after the TX commits. The canonical public path is
+      // `/` for the home row, else `/{newSlug}` (mirrors the url_path
+      // generated column).
+      const finalHome = wantsHomeTrue || (row.is_home === 1 && !wantsHomeFalse)
+      const finalPublished =
+        publishedTransition === 'on' ||
+        (row.published === 1 && publishedTransition !== 'off')
+      // Never ping a noindexed page — IndexNow announcing a URL the
+      // sitemap excludes (excludeNoindex) is a contradictory crawl
+      // signal. The final noindex state is the applied delta when this
+      // PATCH changed it, else the loaded row value.
+      const finalNoindex =
+        applied['robotsNoindex'] !== undefined
+          ? (applied['robotsNoindex'] as boolean)
+          : row.robots_noindex === 1
+      const indexNowPath =
+        finalPublished &&
+        !finalNoindex &&
+        (publishedTransition === 'on' || coreChangedFull || slugChanged || isHomeChanged)
+          ? finalHome
+            ? '/'
+            : `/${newSlug}`
+          : null
+
+      return {
+        newVersion: row.version + 1,
+        queueRowId,
+        tags: tagSet,
+        indexNowPath,
+      }
     })
 
     if (txResult.queueRowId !== null) {
@@ -613,6 +669,12 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       queueMicrotask(() => {
         void drainRevalidate(rowId, tags)
       })
+    }
+
+    // Fire-and-forget IndexNow ping — never awaited, never throws, never
+    // blocks the save response (the standalone server is long-lived).
+    if (txResult.indexNowPath !== null) {
+      void notifyIndexNow([txResult.indexNowPath])
     }
 
     return new Response(

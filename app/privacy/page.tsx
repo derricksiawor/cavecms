@@ -11,14 +11,18 @@ export async function generateMetadata() {
   // call below — an unpublished or trashed Privacy row must not leak its
   // draft seo_title / seo_description in the 404 page's <head>.
   const [rows] = (await db.execute(sql`
-    SELECT seo_title, seo_description
+    SELECT title, seo_title, seo_description
     FROM pages
     WHERE slug = 'privacy'
       AND deleted_at IS NULL
       AND published = 1
     LIMIT 1
   `)) as unknown as [
-    Array<{ seo_title: string | null; seo_description: string | null }>,
+    Array<{
+      title: string | null
+      seo_title: string | null
+      seo_description: string | null
+    }>,
   ]
   const r = rows[0]
   return resolveMetadata({
@@ -26,6 +30,8 @@ export async function generateMetadata() {
     description: r?.seo_description ?? null,
     fallbackTitle: 'Privacy Policy — CaveCMS',
     canonicalPath: '/privacy',
+    contentType: 'page',
+    templateVars: { title: r?.title ?? 'Privacy Policy' },
   })
 }
 
