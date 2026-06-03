@@ -45,7 +45,17 @@ export function isApiTokenJti(jti: string): boolean {
 // top of this (a token can hit /api/admin/settings but only write
 // content/branding keys).
 export function tokenAllowedPath(pathname: string): boolean {
-  return pathname.startsWith('/api/cms/') || pathname === '/api/admin/settings'
+  return (
+    pathname.startsWith('/api/cms/') ||
+    pathname === '/api/admin/settings' ||
+    // Backup operations live under /api/admin/backups/* (take / restore / list /
+    // configure destinations + schedule + encryption). A scoped bearer token
+    // reaches them so the operator's AI can run backups from the terminal; the
+    // per-route requireScope('backups', …) gate narrows what a given token can
+    // do. The /api/internal/backups/* loopback routes (scheduler tick, engine
+    // audit callback) are deliberately NOT included — they stay loopback-only.
+    pathname.startsWith('/api/admin/backups/')
+  )
 }
 
 // ── Per-resource scope model ────────────────────────────────────────────
@@ -64,6 +74,14 @@ export const SCOPE_RESOURCES = [
   'media',
   'nav',
   'settings',
+  // local↔remote content sync: read = list/inspect targets + hashes;
+  // write = configure a target, pull a remote into this install, push this
+  // install to a target (push is additionally gated destructive at the MCP tier).
+  'sync',
+  // cloud backups: read = list/status; write = take a backup + configure
+  // destinations/schedule/encryption + start an OAuth device-flow connect;
+  // delete = trash a local archive AND restore (restore overwrites live content).
+  'backups',
 ] as const
 export type ScopeResource = (typeof SCOPE_RESOURCES)[number]
 
