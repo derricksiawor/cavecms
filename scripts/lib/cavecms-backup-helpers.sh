@@ -462,7 +462,10 @@ op_lock_is_stale() {
     if kill -0 "$pid" 2>/dev/null; then
       # Alive. On Linux, confirm it's one of OUR scripts (recycled-PID guard).
       if [ -r "/proc/$pid/cmdline" ]; then
-        if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -Eq 'cavecms-(update|backup|restore|watchdog)'; then
+        # The content-sync cutover holds this lock IN-PROCESS via the CaveCMS
+        # standalone server (start-standalone.mjs) — recognise it so a live
+        # cutover holder reads as held, not a recycled-PID stale lock.
+        if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -Eq 'cavecms-(update|backup|restore|watchdog)|start-standalone\.mjs'; then
           return 1   # ours + alive → genuinely held
         fi
         return 0     # alive but not ours → recycled PID → stale

@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { acquireScrollLock, releaseScrollLock } from '@/lib/client/bodyScrollLock'
 import {
   KeyRound,
   Copy,
@@ -82,7 +83,11 @@ const relativeUsed = (v: string): string => {
 }
 
 // Public HTTP API reference + agent-onboarding destinations.
-const API_DOCS_URL = 'https://cavecms.derricksiawor.com/docs/api'
+const API_DOCS_URL = 'https://cavecms.com/docs/api'
+
+// localStorage flag for "don't ask me about AI assistants next time". Scoped
+// to this browser; admins who mint many tokens can silence the optional fork.
+const SKIP_ASSISTANT_PROMPT_KEY = 'cavecms.tokenAssistantPrompt.skip'
 
 // After the secret is shown, the reveal flow walks three steps:
 //   token     — copy the one-time secret (the existing screen)
@@ -101,7 +106,11 @@ function buildAssistantBriefing(token: string): string {
     typeof window !== 'undefined'
       ? window.location.origin
       : 'https://your-cavecms-site.example'
-  return `I'm using CaveCMS (https://cavecms.derricksiawor.com) to run my website. Please help me edit its content through the CaveCMS HTTP API.
+  // Fenced so it pastes as one clean monospace block in a chat assistant —
+  // markdown won't swallow the `<token>` placeholder or turn the `-` lines
+  // into bullets, and the structure stays intact.
+  return `\`\`\`text
+I'm using CaveCMS (https://cavecms.com) to run my website. Please help me edit its content through the CaveCMS HTTP API.
 
 Setup
 - API base URL: ${origin}
@@ -113,7 +122,8 @@ Ground rules
 - CaveCMS is a third-party CMS. Do NOT modify its source code (app/, components/, lib/, db/, scripts/, config files).
 - Build my site by creating and editing pages, blocks, posts, and branding THROUGH the API only.
 
-My token (treat it like a password): ${token}`
+My token (treat it like a password): ${token}
+\`\`\``
 }
 
 function StatusBadge({ status }: { status: TokenStatus }) {
@@ -167,6 +177,15 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
   // `revealed` is set).
   const [stage, setStage] = useState<RevealStage>('token')
   const [briefingCopied, setBriefingCopied] = useState(false)
+  // #6 — persisted "don't ask me about AI assistants" preference (this
+  // browser), and the per-reveal checkbox that sets it.
+  const [skipAssistantPrompt, setSkipAssistantPrompt] = useState(false)
+  const [dontAskAgain, setDontAskAgain] = useState(false)
+
+  // Modal a11y: container for the focus trap + initial focus, and the
+  // "Generate token" trigger to return focus to when the flow closes.
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const generateBtnRef = useRef<HTMLButtonElement>(null)
 
   const [pendingRevoke, setPendingRevoke] = useState<TokenListItem | null>(null)
   const [pendingRotate, setPendingRotate] = useState<TokenListItem | null>(null)
@@ -185,6 +204,18 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
   useEffect(() => {
     const id = setInterval(() => setNowTick((n) => n + 1), 60_000)
     return () => clearInterval(id)
+  }, [])
+
+  // Read the persisted "don't ask about AI" preference once on mount. Guarded:
+  // localStorage throws in private mode / when storage is disabled.
+  useEffect(() => {
+    try {
+      setSkipAssistantPrompt(
+        window.localStorage.getItem(SKIP_ASSISTANT_PROMPT_KEY) === '1',
+      )
+    } catch {
+      /* storage unavailable — default to asking */
+    }
   }, [])
 
   useEffect(() => {
@@ -289,6 +320,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
       }
       setCopied(false)
       setBriefingCopied(false)
+      setDontAskAgain(false)
       setStage('token')
       setRevealed({ token, name: name.trim(), role: roleOut ?? role })
       setName('')
@@ -317,17 +349,96 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
     }
   }
 
-  // Closing the whole reveal flow: drop the plaintext from memory and reload
-  // in place so the new token row appears in the list. router.refresh()
-  // re-fetches the server component WITHOUT a full navigation, so no white
-  // flash and any pending toast survives.
-  function finishFlow() {
+  // Closing the whole reveal flow: drop the plaintext from memory, return
+  // focus to the trigger, and reload in place so the new token row appears.
+  // router.refresh() re-fetches the server component WITHOUT a full navigation,
+  // so no white flash and any pending toast survives. useCallback-stable so the
+  // a11y effect (which calls it on ESC) doesn't re-bind every render.
+  const finishFlow = useCallback(() => {
     setRevealed(null)
     setStage('token')
     setCopied(false)
     setBriefingCopied(false)
+    // Return focus to where the flow began (WCAG 2.4.3) once the modal unmounts.
+    generateBtnRef.current?.focus()
     router.refresh()
+  }, [router])
+
+  // Step 1 "Done": honour the persisted "don't ask" preference — skip straight
+  // to closing, otherwise offer the optional AI-assistant fork.
+  function advanceFromToken() {
+    if (skipAssistantPrompt) finishFlow()
+    else setStage('assistant')
   }
+
+  // Step 2 choice. If the operator ticked "don't ask again", persist it so
+  // future reveals skip the fork. `yes` opens the setup step; `no` closes.
+  function chooseAssistant(yes: boolean) {
+    if (dontAskAgain) {
+      setSkipAssistantPrompt(true)
+      try {
+        window.localStorage.setItem(SKIP_ASSISTANT_PROMPT_KEY, '1')
+      } catch {
+        /* storage unavailable — preference is best-effort, in-memory only */
+      }
+    }
+    if (yes) setStage('setup')
+    else finishFlow()
+  }
+
+  // Modal a11y while the reveal flow is open: lock body scroll, close on ESC,
+  // and trap Tab focus inside the dialog. Stage-keyed sibling effect below
+  // handles initial focus per step.
+  useEffect(() => {
+    if (!revealed) return
+    acquireScrollLock()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        finishFlow()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const root = dialogRef.current
+      if (!root) return
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null)
+      if (focusables.length === 0) return
+      const first = focusables[0]!
+      const last = focusables[focusables.length - 1]!
+      const active = document.activeElement
+      if (!root.contains(active)) {
+        e.preventDefault()
+        first.focus()
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      releaseScrollLock()
+    }
+  }, [revealed, finishFlow])
+
+  // Move focus to each step's primary action as the stage changes (the keyed
+  // card remounts, so the [data-autofocus] target is fresh). rAF lets the new
+  // card paint first.
+  useEffect(() => {
+    if (!revealed) return
+    const id = requestAnimationFrame(() => {
+      dialogRef.current
+        ?.querySelector<HTMLElement>('[data-autofocus]')
+        ?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [revealed, stage])
 
   async function onConfirmRevoke() {
     if (!pendingRevoke || busy) return
@@ -542,6 +653,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
           </div>
           <div className="flex">
             <Button
+              ref={generateBtnRef}
               onClick={create}
               disabled={busy}
               className="w-full sm:w-fit"
@@ -817,7 +929,8 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
       {/* Reveal flow: token → assistant? → assistant setup */}
       {revealed && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-near-black/40 p-4 backdrop-blur-sm"
+          ref={dialogRef}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-near-black/40 p-4 backdrop-blur-sm animate-cavecms-fade-in"
           role="dialog"
           aria-modal="true"
           aria-label={
@@ -830,7 +943,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
         >
           {/* Step 1 — one-time token reveal */}
           {stage === 'token' && (
-            <div className="w-full max-w-lg rounded-2xl border border-warm-stone/20 bg-cream-50 p-7 shadow-2xl">
+            <div className="w-full max-w-lg rounded-2xl border border-warm-stone/20 bg-cream-50 p-7 shadow-2xl animate-cavecms-scale-in">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-copper-100 text-copper-700">
                   <KeyRound className="h-5 w-5" />
@@ -857,8 +970,9 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                 </code>
                 <button
                   type="button"
+                  data-autofocus
                   onClick={copyToken}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-copper-600 px-3 text-xs font-semibold text-cream-50 hover:bg-copper-700"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-copper-600 px-3 text-xs font-semibold text-cream-50 transition-colors hover:bg-copper-700 cavecms-focus-ring"
                 >
                   {copied ? (
                     <>
@@ -881,14 +995,14 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
               </p>
 
               <div className="mt-6 flex justify-end">
-                <Button onClick={() => setStage('assistant')}>Done</Button>
+                <Button onClick={advanceFromToken}>Done</Button>
               </div>
             </div>
           )}
 
           {/* Step 2 — optional fork: wiring this into an AI assistant? */}
           {stage === 'assistant' && (
-            <div className="w-full max-w-md rounded-2xl border border-warm-stone/20 bg-cream-50 p-7 shadow-2xl">
+            <div className="w-full max-w-md rounded-2xl border border-warm-stone/20 bg-cream-50 p-7 shadow-2xl animate-cavecms-scale-in">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-copper-100 text-copper-700">
                   <Sparkles className="h-5 w-5" />
@@ -912,11 +1026,21 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                 content for you.
               </p>
 
-              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="ghost" onClick={finishFlow}>
+              <label className="mt-5 flex w-fit cursor-pointer select-none items-center gap-2 text-xs text-warm-stone">
+                <input
+                  type="checkbox"
+                  checked={dontAskAgain}
+                  onChange={(e) => setDontAskAgain(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-copper-600"
+                />
+                Don&rsquo;t ask me next time
+              </label>
+
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="ghost" onClick={() => chooseAssistant(false)}>
                   No, I&rsquo;m all set
                 </Button>
-                <Button onClick={() => setStage('setup')}>
+                <Button data-autofocus onClick={() => chooseAssistant(true)}>
                   Yes, set it up
                 </Button>
               </div>
@@ -925,7 +1049,7 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
 
           {/* Step 3 — assistant setup: docs + AGENTS.md + paste-ready brief */}
           {stage === 'setup' && (
-            <div className="w-full max-w-lg rounded-2xl border border-warm-stone/20 bg-cream-50 p-7 shadow-2xl">
+            <div className="w-full max-w-lg rounded-2xl border border-warm-stone/20 bg-cream-50 p-7 shadow-2xl animate-cavecms-scale-in">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-copper-100 text-copper-700">
                   <Sparkles className="h-5 w-5" />
@@ -946,25 +1070,27 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
               </p>
 
               <div className="mt-4 space-y-3">
-                {/* API reference */}
-                <div className="flex items-start gap-3 rounded-xl border border-warm-stone/20 bg-cream-100/50 p-4">
-                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-copper-100 text-copper-700">
-                    <BookOpen className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-near-black">
-                      API reference
-                    </p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-warm-stone">
-                      The full HTTP API — endpoints, auth, and copy-paste
-                      examples.
-                    </p>
+                {/* API reference — button drops below the text on narrow screens */}
+                <div className="flex flex-col gap-3 rounded-xl border border-warm-stone/20 bg-cream-100/50 p-4 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="flex min-w-0 items-start gap-3 sm:flex-1">
+                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-copper-100 text-copper-700">
+                      <BookOpen className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-near-black">
+                        API reference
+                      </p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-warm-stone">
+                        The full HTTP API — endpoints, auth, and copy-paste
+                        examples.
+                      </p>
+                    </div>
                   </div>
                   <a
                     href={API_DOCS_URL}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warm-stone/30 px-3 py-1.5 text-[11px] font-semibold text-near-black transition-colors hover:border-copper-400 hover:bg-cream-50 hover:text-copper-700"
+                    className="inline-flex w-fit shrink-0 items-center gap-1 self-start rounded-full border border-warm-stone/30 px-3 py-1.5 text-[11px] font-semibold text-near-black transition-colors hover:border-copper-400 hover:bg-cream-50 hover:text-copper-700 cavecms-focus-ring sm:self-auto"
                   >
                     Open docs
                     <ArrowUpRight className="h-3.5 w-3.5" />
@@ -1001,8 +1127,9 @@ export function ApiTokensClient({ initial }: { initial: TokenListItem[] }) {
                 </p>
                 <button
                   type="button"
+                  data-autofocus
                   onClick={copyBriefing}
-                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-copper-600 px-5 py-2.5 text-xs font-semibold text-cream-50 transition-colors hover:bg-copper-700 sm:w-fit"
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-copper-600 px-5 py-2.5 text-xs font-semibold text-cream-50 transition-colors hover:bg-copper-700 cavecms-focus-ring sm:w-fit"
                 >
                   {briefingCopied ? (
                     <>

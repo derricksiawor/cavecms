@@ -1,6 +1,10 @@
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
-import { Montserrat, Marcellus } from 'next/font/google'
+// Self-hosted font catalog (@fontsource) — replaces next/font. This
+// side-effect import injects every catalog family's @font-face; the
+// browser only downloads a woff2 when text actually renders in it.
+import '@/lib/typography/loadFonts'
+import { typographyCss } from '@/lib/typography/fontCss'
 import { organizationLd } from '@/lib/seo/jsonLd'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { getSetting } from '@/lib/cms/getSettings'
@@ -14,23 +18,11 @@ import { ThirdPartyScripts, ThirdPartyBodyScripts } from '@/components/ThirdPart
 import { MobileCtaBar } from '@/components/MobileCtaBar'
 import './globals.css'
 
-const montserrat = Montserrat({
-  subsets: ['latin'],
-  variable: '--font-montserrat',
-  display: 'swap',
-  weight: ['400', '500', '600', '700', '800'],
-})
-
-const marcellus = Marcellus({
-  subsets: ['latin'],
-  variable: '--font-playfair',
-  display: 'swap',
-  weight: ['400'],
-})
-
-// Typography pairing: Marcellus (serif) for all headings/titles,
-// Montserrat (sans) for body copy, UI elements, buttons, eyebrows.
-// Matches the client's original brand identity.
+// Typography is now operator-configurable (Settings → Typography). The
+// shipped defaults still pair Marcellus (serif headings) + Montserrat
+// (sans body); typographyCss() below resolves the two role leaf vars
+// (--font-playfair / --font-montserrat) from the `typography_roles`
+// setting + emits the static --font-cat-* catalog map.
 
 // Root metadata. title/description stay neutral defaults (real pages
 // override them via their own generateMetadata).
@@ -120,12 +112,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // yields the luxury defaults. brandVarsCss re-validates every hex.
   const palette = await getSetting('theme_palette')
   const brandCss = brandVarsCss(palette)
+
+  // Typography roles (Settings → Typography) → the --font-cat-* catalog
+  // map + the two role leaf vars. getSetting fails-closed to the registry
+  // default, so a missing/garbage row yields Marcellus + Montserrat.
+  const typographyRoles = await getSetting('typography_roles')
+  const customFonts = await getSetting('custom_fonts')
+  // Activated Google fonts are stored self-hosted (the server fetched their
+  // woff2 once at activation) and carry the SAME CustomFont shape, so they
+  // combine straight into the runtime font list. typographyCss emits ONLY
+  // self-hosted @font-face for both tiers — no visitor request ever reaches
+  // Google (font-src 'self').
+  const googleFonts = await getSetting('google_fonts')
+  const fontCss = typographyCss(typographyRoles, [...customFonts, ...googleFonts])
   return (
-    <html
-      lang="en"
-      className={`${montserrat.variable} ${marcellus.variable}`}
-      suppressHydrationWarning
-    >
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="csp-nonce" content={nonce} />
         <script
@@ -134,6 +135,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           // so admin-controlled fields can never break out of the
           // script tag even if CSP strict-dynamic is ever relaxed.
           dangerouslySetInnerHTML={{ __html: safeJsonForScript(orgLd) }}
+        />
+        <style
+          nonce={nonce}
+          // Font catalog map + role assignments (Settings → Typography).
+          // Defines --font-cat-* for every catalog face and points the two
+          // role leaf vars (--font-playfair / --font-montserrat) at the
+          // operator's chosen fonts. Keys are re-validated against the
+          // catalog in fontCss — no operator free-text reaches CSS. Same
+          // nonce-stripping caveat as the brand block below.
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: fontCss }}
         />
         <style
           nonce={nonce}

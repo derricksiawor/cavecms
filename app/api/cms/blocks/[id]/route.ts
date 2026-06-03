@@ -4,23 +4,25 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import {
-  saveBlock,
-  saveBlockMeta,
   StaleBlockVersionError,
   StalePageVersionError,
   NotFoundError,
   WrongKindError,
   InvalidMetaJsonError,
 } from '@/lib/cms/saveBlock'
+// Draft → Publish: editor edits write the DRAFT overlay, not the live row.
+// The dual-axis optimistic lock is gone for draft writes (last-write-wins);
+// the route echoes the caller's blockVersion/pageVersion back unchanged (the
+// draft never bumps them) so the existing client keeps working untouched, plus
+// a draftVersion for the advisory concurrency signal.
+import { saveDraftBlockData, saveDraftBlockMeta } from '@/lib/cms/draft'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
-import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { isDuplicateKey } from '@/lib/db/errors'
-import { tagsForBlockSave } from '@/lib/cache/tags'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import {
   ColumnMetaSchema,
@@ -124,13 +126,8 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
 
   const body = PatchBody.parse(await readJsonBody(req))
 
-  const headerObj: Record<string, string | undefined> = {}
-  req.headers.forEach((v, k) => {
-    headerObj[k] = v
-  })
-  const ip = clientIpFromHeaders(headerObj, '127.0.0.1')
-  const userAgent = (headerObj['user-agent'] ?? '').slice(0, 255) || null
-  const requestId = getRequestId(req)
+  // Draft writes don't audit (per-keystroke noise) — the Publish action audits
+  // the materialisation. So no ip/userAgent/requestId are threaded here.
 
   // Lightweight non-locking read to discover the row's kind so we can
   // dispatch to the correct save helper. The TX-internal kind check
@@ -164,25 +161,26 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         throw new HttpError(400, 'wrong_field_for_kind')
       }
       if (body.data !== undefined) {
-        const { blockVersion, pageVersion } = await saveBlock({
+        const { draftVersion } = await saveDraftBlockData({
           blockId: id,
           userId: ctx.userId,
-          tokenId: ctx.tokenId,
-          ip,
-          userAgent,
-          requestId,
           pageId: body.pageId,
-          expectedBlockVersion: body.blockVersion,
-          expectedPageVersion: body.pageVersion,
           data: body.data,
         })
-        return new Response(JSON.stringify({ blockVersion, pageVersion }), {
-          status: 200,
-          headers: {
-            'content-type': 'application/json',
-            'cache-control': 'private, no-store',
+        return new Response(
+          JSON.stringify({
+            blockVersion: body.blockVersion,
+            pageVersion: body.pageVersion,
+            draftVersion,
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'cache-control': 'private, no-store',
+            },
           },
-        })
+        )
       }
       // Widget meta path. WidgetMetaSchema.strict() rejects any attempt
       // to slip widget data fields through the meta channel.
@@ -191,26 +189,27 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       if (newHtmlId !== undefined) {
         await assertHtmlIdUnique(db, body.pageId, newHtmlId, id)
       }
-      const { blockVersion, pageVersion } = await saveBlockMeta({
+      const { draftVersion } = await saveDraftBlockMeta({
         blockId: id,
         userId: ctx.userId,
-        tokenId: ctx.tokenId,
-        ip,
-        userAgent,
-        requestId,
         pageId: body.pageId,
-        expectedBlockVersion: body.blockVersion,
-        expectedPageVersion: body.pageVersion,
         expectedKind: 'widget',
         metaJson: JSON.stringify(parsedMeta),
       })
-      return new Response(JSON.stringify({ blockVersion, pageVersion }), {
-        status: 200,
-        headers: {
-          'content-type': 'application/json',
-          'cache-control': 'private, no-store',
+      return new Response(
+        JSON.stringify({
+          blockVersion: body.blockVersion,
+          pageVersion: body.pageVersion,
+          draftVersion,
+        }),
+        {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'private, no-store',
+          },
         },
-      })
+      )
     }
 
     // Container path — section / column meta update.
@@ -228,26 +227,27 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
     if (newHtmlId !== undefined) {
       await assertHtmlIdUnique(db, body.pageId, newHtmlId, id)
     }
-    const { blockVersion, pageVersion } = await saveBlockMeta({
+    const { draftVersion } = await saveDraftBlockMeta({
       blockId: id,
       userId: ctx.userId,
-      tokenId: ctx.tokenId,
-      ip,
-      userAgent,
-      requestId,
       pageId: body.pageId,
-      expectedBlockVersion: body.blockVersion,
-      expectedPageVersion: body.pageVersion,
       expectedKind: kind,
       metaJson: JSON.stringify(parsedMeta),
     })
-    return new Response(JSON.stringify({ blockVersion, pageVersion }), {
-      status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'cache-control': 'private, no-store',
+    return new Response(
+      JSON.stringify({
+        blockVersion: body.blockVersion,
+        pageVersion: body.pageVersion,
+        draftVersion,
+      }),
+      {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'private, no-store',
+        },
       },
-    })
+    )
   } catch (e) {
     // Distinct 409 codes so the FE recovery banner can route the
     // buffered diff to the right merge UI. NotFoundError covers BOTH
@@ -393,13 +393,21 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     // Bump version + stamp deleted_at in ONE batched UPDATE so every
     // row carries the same NOW(3) timestamp (restore's cascade filter
     // depends on the uniform deleted_at across the gesture).
+    // Draft delete: rows added in THIS draft never existed publicly → hard-
+    // delete them; the rest flip to draft_state='removed' (public keeps them
+    // until publish, the editor's draft view excludes them). No version bump
+    // and no deleted_at stamp — the draft layer is unlocked + invisible to the
+    // public until Publish.
+    await tx.execute(sql`
+      DELETE FROM content_blocks
+      WHERE id IN (${sql.join(deletedIds, sql.raw(','))}) AND draft_state = 'added'
+    `)
     await tx.execute(sql`
       UPDATE content_blocks
-      SET deleted_at = NOW(3),
-          version = version + 1,
-          updated_by = ${ctx.userId}
+      SET draft_state = 'removed'
       WHERE deleted_at IS NULL
         AND id IN (${sql.join(deletedIds, sql.raw(','))})
+        AND draft_state <> 'added'
     `)
 
     // Drop media_references for the soft-deleted ROW (containers carry
@@ -449,12 +457,14 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     // stale cursor surface as 409 stale_page_version. The client's
     // success path reads the new version from the response below and
     // advances its optimistic-lock cursor without a router.refresh.
+    // Bump the DRAFT cursor (not the published version) + flag has_draft.
     await tx.execute(sql`
       UPDATE pages
-      SET version = version + 1, updated_at = NOW(3), updated_by = ${ctx.userId}
+      SET draft_version = draft_version + 1, has_draft = 1,
+          draft_updated_at = NOW(3), draft_updated_by = ${ctx.userId}
       WHERE id = ${row.page_id}
     `)
-    const newPageVersion = pageLock.version + 1
+    const newPageVersion = pageLock.version
 
     // Read back the bumped versions + uniform deleted_at + position +
     // parent_id for every soft-deleted row. Client uses the per-row
@@ -475,26 +485,23 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
       }>,
     ]
 
-    const tags = tagsForBlockSave(row.slug, row.block_type).tags
-    const queueRowId = await enqueueRevalidate(tx, tags)
-    return { queueRowId, tags, newPageVersion, deletedRows }
-  })
-
-  queueMicrotask(() => {
-    void drainRevalidate(txResult.queueRowId, txResult.tags)
+    // Draft delete does NOT change the public render → no revalidation
+    // (that happens on Publish).
+    return { newPageVersion, deletedRows }
   })
 
   // 200 + JSON body so the FE can advance optimistic-lock cursors
   // without a router.refresh roundtrip. Body shape locked in this
   // route's contract — { pageVersion, blocks: [{ id, version,
   // deletedAt (ISO string), parentId, position }] }.
+  // 'removed' rows keep deleted_at = NULL — report a synthetic timestamp so
+  // the client keeps them hidden in the editor; the draft-view re-hydrate on
+  // router.refresh is authoritative.
+  const removedAt = new Date().toISOString()
   const responseBlocks = txResult.deletedRows.map((r) => ({
     id: r.id,
     version: r.version,
-    deletedAt:
-      r.deleted_at instanceof Date
-        ? r.deleted_at.toISOString()
-        : new Date(r.deleted_at).toISOString(),
+    deletedAt: removedAt,
     parentId: r.parent_id,
     position: r.position,
   }))

@@ -1,6 +1,6 @@
 # create-cavecms
 
-The official one-command installer for [CaveCMS](https://cavecms.derricksiawor.com).
+The official one-command installer for [CaveCMS](https://cavecms.com).
 
 ## Install
 
@@ -11,7 +11,7 @@ npx create-cavecms my-site
 That's it. The CLI:
 
 1. Detects whether you're on **VPS / laptop / cPanel** and picks the right adapter
-2. Downloads and SHA-256 + Ed25519 verifies the latest release from `cavecms.derricksiawor.com`
+2. Downloads and SHA-256 + Ed25519 verifies the latest release from `updates.cavecms.com`
 3. Unpacks the runtime to the canonical install path for the surface
 4. Prompts for the minimum it cannot auto-supply: DB connection, public URL, port
 5. Generates every bootstrap secret (JWT / CSRF / preview / brochure / internal-revalidate / secrets-encryption + a random `LOGIN_PATH`)
@@ -72,7 +72,7 @@ If a secret is ever compromised, re-run the installer with `--rotate`
 
 ## License
 
-This installer is part of [CaveCMS](https://cavecms.derricksiawor.com).
+This installer is part of [CaveCMS](https://cavecms.com).
 See the project's [LICENSE.md](../../LICENSE.md) — Prosperity Public
 License 3.0.0 (free for personal/educational/non-profit; 30-day commercial
 trial; paid license for ongoing commercial use).

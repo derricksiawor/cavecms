@@ -4,7 +4,7 @@ import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import {
-  FAMILY_TAILWIND,
+  resolveFamilyRender,
   fontWeightClass,
   isColorToken,
   resolveColorValue,
@@ -72,9 +72,11 @@ export function LxHeading({
     : undefined
 
   // Family override is opt-in — when undefined the renderer defaults
-  // to font-serif (Playfair Display) per the client brand pairing.
-  const family = data.family
-  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-serif'
+  // to font-serif (the serif role) per the client brand pairing. A role
+  // token yields a Tailwind class; a catalog font yields an inline
+  // font-family var (merged into the element style below).
+  const fam = resolveFamilyRender(data.family)
+  const familyClass = fam.className ?? 'font-serif'
 
   // Weight default is bold (luxury heading baseline per CLAUDE.md).
   // Operator overrides via the FontWeightPicker.
@@ -107,7 +109,7 @@ export function LxHeading({
           initialValue={data.text}
           as={Tag}
           className={className}
-          style={toneStyle}
+          style={{ ...toneStyle, ...fam.style }}
           placeholder="Type a heading…"
         />
       </div>
@@ -115,7 +117,7 @@ export function LxHeading({
   }
 
   const heading = (
-    <Tag className={className} style={toneStyle}>
+    <Tag className={className} style={{ ...toneStyle, ...fam.style }}>
       {data.text}
     </Tag>
   )

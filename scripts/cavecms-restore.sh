@@ -90,6 +90,7 @@ rstatus() { write_phase_status "$STATUS_PATH" "$TOTAL" "$@"; }
 # State carried across steps for the rollback path.
 SCRATCH=""
 SAFETY_DIR=""
+PULL_DIR=""
 LOCK_HELD=0
 MAINT_ON=0
 MAINT_KEEP_ON=0       # set when a FAILED rollback must leave maintenance ON
@@ -168,6 +169,11 @@ on_exit() {
   fi
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH" 2>/dev/null || true
   [ -n "$SAFETY_DIR" ] && rm -rf "$SAFETY_DIR" 2>/dev/null || true
+  [ -n "$PULL_DIR" ] && rm -rf "$PULL_DIR" 2>/dev/null || true
+  # Defence in depth: wipe the plaintext cloud creds file (decrypted refresh
+  # token + passphrase) on every exit — cloud-pull removes it on success, but a
+  # failed download/decrypt must not leave it on disk.
+  [ -n "${CAVECMS_BACKUP_CLOUD_CREDS_FILE:-}" ] && rm -f "$CAVECMS_BACKUP_CLOUD_CREDS_FILE" 2>/dev/null || true
   if [ "${CAVECMS_RESTORE_CLEANUP_ARCHIVE:-0}" = "1" ] && [ -n "$ARCHIVE" ]; then
     rm -f "$ARCHIVE" 2>/dev/null || true
   fi
@@ -256,6 +262,53 @@ if ! acquire_op_lock "$SHARED_LOCK_PATH"; then
   exit 0
 fi
 LOCK_HELD=1
+
+# ===========================================================================
+# STEP 0 — cloud download (optional, pre-mutation)
+# ===========================================================================
+# When restoring from a cloud destination, fetch the archive FIRST: cloud-pull
+# downloads the blob, verifies sha256 against the sidecar, and decrypts it if it
+# was passphrase-encrypted — all before any mutation. ARCHIVE is then the local
+# plaintext path the rest of the restore consumes unchanged.
+if [ "${CAVECMS_RESTORE_SOURCE:-file}" = "cloud" ]; then
+  rstatus validating 1 "Finding your backup in the cloud"
+  CLOUD_PULL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup/cloud-pull.mjs"
+  NODE_BIN="$(command -v node || true)"
+  PULL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cavecms-pull.XXXXXX")"
+  PULL_OUT="${PULL_DIR}/path.txt"
+  if [ -z "$NODE_BIN" ] || [ ! -f "$CLOUD_PULL" ]; then
+    rstatus failed 1 "Restore failed" "The cloud downloader isn't available on this install."
+    exit 1
+  fi
+  # Wall-clock bound on the download child so a half-open socket can't wedge the
+  # restore (and hold the shared op lock) forever. Pre-mutation, so a timeout
+  # just fails the restore cleanly with nothing changed.
+  PULL_TIMEOUT=""
+  command -v timeout >/dev/null 2>&1 && PULL_TIMEOUT="timeout --signal=TERM 10800"
+  # Capture cloud-pull's exit code so the failure message matches the actual
+  # cause. cloud-pull.mjs exits 22 (wrong passphrase / altered ciphertext),
+  # 23 (checksum mismatch — corrupt/tampered), 24 (encrypted but no passphrase
+  # set), or 1 (download/auth/not-found); `timeout` exits 124. Each needs a
+  # different operator action, so don't collapse them into one message.
+  PULL_RC=0
+  CAVECMS_RESTORE_DOWNLOAD_DIR="$PULL_DIR" CAVECMS_RESTORE_PULL_OUT="$PULL_OUT" $PULL_TIMEOUT "$NODE_BIN" "$CLOUD_PULL" || PULL_RC=$?
+  if [ "$PULL_RC" -ne 0 ]; then
+    case "$PULL_RC" in
+      22) PULL_MSG="We couldn't unlock this backup. Check that the passphrase matches the one used when the backup was made." ;;
+      23) PULL_MSG="This backup looks corrupted or was altered, so we stopped before changing anything." ;;
+      24) PULL_MSG="This backup is encrypted. Turn on “Encrypt cloud backups” under Backup settings and enter its passphrase, then try again." ;;
+      124) PULL_MSG="The download from the cloud took too long and was stopped. Nothing was changed." ;;
+      *) PULL_MSG="We couldn't download the backup from the cloud. Nothing was changed." ;;
+    esac
+    rstatus failed 1 "Restore failed" "$PULL_MSG"
+    exit 1
+  fi
+  ARCHIVE="$(cat "$PULL_OUT" 2>/dev/null || true)"
+  if [ -z "$ARCHIVE" ] || [ ! -f "$ARCHIVE" ]; then
+    rstatus failed 1 "Restore failed" "The downloaded backup couldn't be read."
+    exit 1
+  fi
+fi
 
 # ===========================================================================
 # STEP 1 — validate + compat gate (NO mutation)

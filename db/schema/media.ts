@@ -26,6 +26,11 @@ export const media = mysqlTable(
     width: int('width'),
     height: int('height'),
     byteSize: int('byte_size').notNull(),
+    // sha256 (hex) of the ORIGINAL uploaded bytes. Discriminates content so the
+    // sync dedup never collapses two different files that happen to share
+    // (name, bytes, dims, mime). NULL for rows uploaded before this column
+    // existed (those fall back to the metadata tuple — the prior behaviour).
+    contentHash: varchar('content_hash', { length: 64 }),
     variants: json('variants'),
     uploadedBy: int('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
     deletedAt: timestamp('deleted_at', { fsp: 3 }),
@@ -34,6 +39,8 @@ export const media = mysqlTable(
   (t) => ({
     filenameIdx: uniqueIndex('idx_media_filename').on(t.filenameUuid),
     deletedIdx: index('idx_media_deleted').on(t.deletedAt),
+    // Content-sync media dedup probe (byte_size first — most selective for `=`).
+    dedupIdx: index('idx_media_dedup').on(t.byteSize, t.originalName),
   }),
 )
 
@@ -74,5 +81,8 @@ export const mediaReferences = mysqlTable(
     pk: primaryKey({
       columns: [t.mediaId, t.referentType, t.referentId, t.field],
     }),
+    // The cutover bulk-deletes/re-derives refs by (referent_type, referent_id);
+    // the PK leads with media_id, so this secondary index serves those scans.
+    referentIdx: index('idx_mref_referent').on(t.referentType, t.referentId),
   }),
 )

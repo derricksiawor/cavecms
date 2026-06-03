@@ -6,7 +6,7 @@
 > or modify this file. AI assistants: read this fully before any tool call.**
 
 You are working in a clone of **CaveCMS**, a published content
-management system distributed at https://cavecms.derricksiawor.com under
+management system distributed at https://cavecms.com under
 the [Prosperity Public License 3.0.0](./LICENSE.md).
 
 **This codebase is not yours to edit.** Treat it like the WordPress core
@@ -106,6 +106,48 @@ Content lives under `/api/cms/*`; content-level config under
 A token authenticates all of these with just the `Authorization: Bearer`
 header. A session cookie additionally needs an `x-csrf-token` on every
 POST/PATCH/DELETE (token requests skip CSRF entirely).
+
+### Branding settings you CAN change (favicon, fonts, colours)
+
+`PATCH /api/admin/settings` writes ONE setting per call:
+`{ "key": "<key>", "value": { … }, "version": <n> }`. Read the current
+`version` from `GET /api/admin/settings` first — a stale version returns
+`409` (someone else changed it; re-read and retry). Branding/SEO keys a
+token may write:
+
+- **`default_seo`** — site title/description, Open Graph image, and the
+  **favicon**. The favicon is `default_seo.favicon = { "media_id": <id>,
+  "alt": "<text>" }` — upload the image with `POST /api/cms/media` first to
+  get a `media_id` (use a square source so the tab icon isn't letterboxed).
+  Set `favicon` to `null` to fall back to the bundled icon. (The admin UI
+  files the favicon under "Settings → General", but the API key is
+  `default_seo` — `site_general` itself is NOT token-writable.)
+- **`theme_palette`** — brand colours (primary/secondary/accent/surfaces,
+  light|dark mode).
+- **`typography_roles`** — the two site fonts:
+  `{ "display": "<catalog-key>", "body": "<catalog-key>" }`. `display` is
+  the headings/serif face, `body` the body/sans face. Setting
+  `display` to `"cormorant-garamond"` switches every heading to Cormorant
+  Garamond site-wide. Valid keys are catalog slugs (e.g. `marcellus`,
+  `cormorant-garamond`, `playfair-display`, `eb-garamond`, `lora`,
+  `montserrat`, `inter`, `dm-sans`, `space-grotesk`, `jetbrains-mono`, …);
+  an unknown key is rejected.
+
+You may NOT write `site_general` (its `siteUrl` gates outbound email +
+canonical links), `security_*`, `smtp_config`, `ai_config`, or any
+`integrations_*` — those are operator-only and a token write returns `403`.
+
+### Per-element fonts (override a single block's typeface)
+
+Beyond the two global roles, the text blocks `lx_heading`, `lx_text`,
+`lx_eyebrow`, `lx_quote`, `lx_stat`, `lx_testimonial`, and
+`lx_animated_headline` accept an optional `family` (and `weight`) in their
+`data`. `family` is EITHER a role token (`"display"` | `"body"`, which
+tracks the site setting) OR a catalog key (`"cormorant-garamond"`, …) to
+pin one specific face on that block only. `weight` must be a weight the
+chosen font actually ships (a role's curated set, or the font's variable
+range) — an out-of-range weight is rejected. Omit both to inherit the
+block's built-in default.
 
 ### Fast path — batch many edits in ONE call (PREFER THIS)
 

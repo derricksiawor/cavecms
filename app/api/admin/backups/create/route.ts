@@ -18,6 +18,12 @@ import {
 } from '@/lib/backups/statusFile'
 import { BACKUP_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
+import {
+  prepareBackupCloudEnv,
+  discardCloudCreds,
+  PassphraseRequiredError,
+  CloudDestinationUnavailableError,
+} from '@/lib/backups/cloud/credsFile'
 
 // POST /api/admin/backups/create — kick off a detached backup. Returns 202.
 // The Settings page polls /api/admin/backups/status?kind=backup.
@@ -54,11 +60,33 @@ export const POST = withError(async (req: Request) => {
   const active = activeError()
   if (active) return active
 
+  // Resolve the cloud destination (decrypts the refresh token + passphrase into
+  // a mode-600 creds file). Returns null for a plain local backup. Throws if
+  // "include secrets" is requested for a cloud destination with no passphrase.
+  let cloudEnv: Record<string, string> | null = null
+  try {
+    cloudEnv = await prepareBackupCloudEnv(body.includeEnv === true)
+  } catch (err) {
+    if (err instanceof PassphraseRequiredError) {
+      return new Response(JSON.stringify({ error: 'passphrase_required_for_secrets' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      })
+    }
+    if (err instanceof CloudDestinationUnavailableError) {
+      return new Response(JSON.stringify({ error: 'destination_not_connected' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      })
+    }
+    throw err
+  }
+
   // Seed status so the modal shows progress immediately.
   writeBackupStatus({
     state: 'running',
     step: 0,
-    totalSteps: BACKUP_TOTAL_STEPS,
+    totalSteps: cloudEnv ? BACKUP_TOTAL_STEPS + 1 : BACKUP_TOTAL_STEPS,
     stepLabel: 'Getting ready',
     error: undefined,
     log: undefined,
@@ -66,11 +94,14 @@ export const POST = withError(async (req: Request) => {
 
   const env: Record<string, string> = { CAVECMS_BACKUP_STATUS_PATH: getBackupStatusPath() }
   if (body.includeEnv) env.CAVECMS_BACKUP_INCLUDE_ENV = '1'
+  if (cloudEnv) Object.assign(env, cloudEnv)
 
   let pid: number | null = null
   try {
     pid = spawnBackupEngine({ script: 'cavecms-backup.sh', env })
   } catch (err) {
+    // Engine never started → wipe the plaintext creds file its trap would have.
+    if (cloudEnv) discardCloudCreds()
     writeBackupStatus({ state: 'failed', error: 'engine_unavailable' })
     throw err
   }

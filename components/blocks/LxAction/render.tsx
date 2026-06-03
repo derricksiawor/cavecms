@@ -4,6 +4,7 @@ import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
+import { resolveFamilyRender, fontWeightClass } from '@/lib/cms/designTokens'
 
 // Luxury CTA — per ~/.claude/CLAUDE.md: "Buttons: Always w-fit with
 // padding (px-6/px-8), never flex-1 or full width." Bold Montserrat,
@@ -81,19 +82,31 @@ export function LxAction({
 }) {
   const isLinkArrow = data.variant === 'link-arrow'
 
+  // Per-element font override: role token → Tailwind class; catalog/custom
+  // font → inline var (merged onto the label element below). Defaults to the
+  // body face (font-sans) + semibold, the historical CTA treatment.
+  const fam = resolveFamilyRender(data.family)
+  const familyClass = fam.className ?? 'font-sans'
+  const weightClass = data.weight ? fontWeightClass(data.weight) : 'font-semibold'
+
   // Button-style variants — rounded-full pill, w-fit per CLAUDE.md
-  // ("Always w-fit with padding"), bold typography, smooth color
-  // transition. Magnetic + pulse animations layer on top.
+  // ("Always w-fit with padding"), smooth color transition. Magnetic +
+  // pulse animations layer on top.
   const buttonClass = clsx(
-    'inline-flex items-center justify-center gap-2 w-fit rounded-full font-sans font-semibold uppercase tracking-[0.22em] min-h-[44px] transition-all duration-base ease-luxury',
+    'inline-flex items-center justify-center gap-2 w-fit rounded-full uppercase tracking-[0.22em] min-h-[44px] transition-all duration-base ease-luxury',
+    familyClass,
+    weightClass,
     SIZE_CLASS[data.size],
     VARIANT_CLASS[data.variant],
   )
 
   // Link-arrow — type + animated arrow. No pill chrome. The arrow
   // translates +4px right on hover via group-hover.
-  const linkClass =
-    'group inline-flex items-center gap-2 w-fit font-sans font-semibold text-ivory text-base min-h-[44px] hover:text-champagne transition-colors duration-base ease-luxury'
+  const linkClass = clsx(
+    'group inline-flex items-center gap-2 w-fit text-ivory text-base min-h-[44px] hover:text-champagne transition-colors duration-base ease-luxury',
+    familyClass,
+    weightClass,
+  )
 
   const containerClass = clsx(ALIGN_CONTAINER[data.alignment], outerClass)
 
@@ -118,7 +131,7 @@ export function LxAction({
     if (isLinkArrow) {
       return (
         <div className={clsx(containerClass, 'flex flex-col gap-1', ALIGN_ITEMS[data.alignment])}>
-          <span className={linkClass}>
+          <span className={linkClass} style={fam.style}>
             <InlineEditable
               blockId={inlineEdit.blockId}
               blockVersion={inlineEdit.blockVersion}
@@ -151,6 +164,7 @@ export function LxAction({
           initialValue={data.label}
           as="span"
           className={buttonClass}
+          style={fam.style}
           placeholder="Action label…"
         />
         {hrefEditor}
@@ -164,6 +178,7 @@ export function LxAction({
       target={data.openInNew ? '_blank' : undefined}
       rel={linkRel(data.href, data.openInNew)}
       className={linkClass}
+      style={fam.style}
     >
       <span>{data.label}</span>
       <ArrowUpRight
@@ -179,6 +194,7 @@ export function LxAction({
       target={data.openInNew ? '_blank' : undefined}
       rel={linkRel(data.href, data.openInNew)}
       className={buttonClass}
+      style={fam.style}
     >
       {data.label}
     </a>

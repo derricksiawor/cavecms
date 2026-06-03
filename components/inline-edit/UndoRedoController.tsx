@@ -1,44 +1,30 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useUndoActions } from './UndoStackProvider'
 
-// Chunk J — UndoRedoController
+// UndoRedoController — document-level ⌘Z / ⇧⌘Z (and Ctrl+Z / Ctrl+Y) handler
+// for the inline editor.
 //
-// Document-level keyboard handler. Listens for ⌘Z / ⇧⌘Z (Mac) and
-// Ctrl+Z / Ctrl+Y (non-Mac), defers to native browser undo when focus
-// is in an editable surface (input / textarea / select / contenteditable),
-// and otherwise calls the centralised runUndo / runRedo functions from
-// UndoStackProvider. Cursor management, executor logic, and rebind
-// semantics all live in UndoStackProvider — this file is just the
-// keyboard surface.
+// Defers to NATIVE undo when focus is in an editable surface (input / textarea
+// / select / contenteditable / InlineEditable) so the operator's per-character
+// undo wins. Otherwise it dispatches `cavecms:undo` / `cavecms:redo` window
+// events. The admin-bar DraftBar (which lives outside this provider tree)
+// listens for those and runs a SERVER-SIDE draft undo/redo
+// (POST /api/cms/pages/[id]/undo|redo over the draft revision history), so the
+// keyboard and the admin-bar Undo/Redo buttons share exactly one path.
 //
-// Industry survey informing this design (full notes at head of
-// lib/cms/undoStack.ts):
-//   • Notion / Webflow / Wix / Figma / Google Docs all intercept ⌘Z at
-//     the document level and run their own structural stack. We do
-//     the same, BUT we defer to native undo when focus is on ANY
-//     editable surface — operator's per-character keystroke undo intent
-//     must win over our chunk's structural undo.
-//   • Inline-Undo toast buttons go through the SAME runUndo path so
-//     the cursor moves consistently. A subsequent ⌘Z after clicking
-//     the toast correctly targets the NEXT command on the stack, not
-//     the just-undone one.
-
+// Draft undo/redo is server-persisted (page_draft_revisions, migration 0029):
+// it survives reloads + sessions, handles every op uniformly, and is fully
+// API-programmable — there is no client-side replay stack anymore.
 export function UndoRedoController() {
-  const { runUndo, runRedo } = useUndoActions()
-
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
       const key = e.key.toLowerCase()
+      if (key !== 'z' && key !== 'y') return
 
-      // Defer to native undo when focus is in any editable surface:
-      // form fields (input/textarea/select), an InlineEditable
-      // contenteditable, or any other contenteditable (drawer rich-
-      // text, etc.). The operator's per-character undo intent inside
-      // ANY of these must win over the chunk's structural undo.
+      // Native undo wins inside any editable surface (per-character intent).
       const active = document.activeElement as HTMLElement | null
       if (active) {
         const tag = active.tagName
@@ -54,24 +40,20 @@ export function UndoRedoController() {
       if (key === 'y' && !e.shiftKey) {
         e.preventDefault()
         e.stopPropagation()
-        void runRedo()
+        window.dispatchEvent(new Event('cavecms:redo'))
         return
       }
       if (key === 'z') {
         e.preventDefault()
         e.stopPropagation()
-        if (e.shiftKey) {
-          void runRedo()
-        } else {
-          void runUndo()
-        }
+        window.dispatchEvent(new Event(e.shiftKey ? 'cavecms:redo' : 'cavecms:undo'))
       }
     }
     document.addEventListener('keydown', onKeyDown, { capture: true })
     return () => {
       document.removeEventListener('keydown', onKeyDown, { capture: true })
     }
-  }, [runUndo, runRedo])
+  }, [])
 
   return null
 }

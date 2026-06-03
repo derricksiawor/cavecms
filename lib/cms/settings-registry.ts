@@ -7,6 +7,9 @@ import { MOBILE_CTA_ICONS } from '@/lib/cms/mobileCtaIcons'
 import { AI_MODEL_IDS } from '@/lib/cms/aiModelIds'
 import { encryptedSecretSchema } from '@/lib/security/secretCipher'
 import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
+import { isFontKeySlug, TYPOGRAPHY_ROLES_DEFAULT } from '@/lib/typography/catalog'
+import { CUSTOM_FONT_KEY_RE, CUSTOM_FONT_FILE_RE } from '@/lib/typography/customFonts'
+import { GOOGLE_FONT_KEY_RE, GOOGLE_FONT_FILE_RE } from '@/lib/typography/googleFontKeys'
 
 // One Zod schema per `settings.key`. getSetting() parses every value
 // through this registry on read — so a tampered DB cell or a
@@ -236,6 +239,59 @@ const themePalette = z.object({
   surfaceDark: z.string().regex(HEX_COLOR_RE).default('#050505'),
   surfaceLight: z.string().regex(HEX_COLOR_RE).default('#F5F1EA'),
 })
+
+// Global typography roles (the "Global Fonts" tier). Each role stores a
+// font key — a bundled catalog slug OR a runtime custom-font key — so the
+// validator is the loose slug shape, not the static catalog membership (the
+// settings layer can't see the runtime custom-font registry). roleVarsCss
+// fails closed to the default for a key that isn't ACTIVE at render time.
+// Token-writable so an AI agent can rebrand the site's typefaces via the
+// API — these are presentational, not security-sensitive like siteUrl.
+const fontKey = z
+  .string()
+  .max(64)
+  .refine((v) => isFontKeySlug(v), { message: 'unknown_font' })
+const typographyRoles = z.object({
+  display: fontKey.default(TYPOGRAPHY_ROLES_DEFAULT.display),
+  body: fontKey.default(TYPOGRAPHY_ROLES_DEFAULT.body),
+})
+
+// Operator-uploaded custom fonts. Managed ONLY by the /api/admin/fonts
+// endpoint (which validates the on-disk binary + writes this row) — the
+// generic settings PATCH rejects this key so no one can point it at an
+// arbitrary file. getSetting parses it on read; the layout emits its
+// @font-face from here.
+const customFontEntry = z.object({
+  key: z.string().regex(CUSTOM_FONT_KEY_RE),
+  family: z.string().min(1).max(60),
+  category: z.enum(['serif', 'sans', 'display', 'mono']),
+  file: z.string().regex(CUSTOM_FONT_FILE_RE),
+  format: z.enum(['woff2', 'woff', 'ttf', 'otf']),
+  weightRange: z.tuple([z.number().int(), z.number().int()]).nullable().optional(),
+  staticWeight: z.number().int().optional(),
+  italic: z.boolean().optional(),
+})
+const customFonts = z.array(customFontEntry).max(50)
+
+// Activated Google fonts. SAME shape as customFontEntry (so the CSS emitter,
+// picker, and renderer treat both lists identically) but with the `gf-`
+// key/file regexes. Managed ONLY by /api/admin/fonts/google (which fetches
+// the woff2 server-side, stores it self-hosted, and writes this row) — the
+// generic settings PATCH rejects this key, exactly like custom_fonts, so no
+// one can point it at an arbitrary file. getSetting parses it on read; the
+// layout emits its @font-face from here. Cap 100 (the activation endpoint
+// enforces the same ceiling under its mutex).
+const googleFontEntry = z.object({
+  key: z.string().regex(GOOGLE_FONT_KEY_RE),
+  family: z.string().min(1).max(80),
+  category: z.enum(['serif', 'sans', 'display', 'mono']),
+  file: z.string().regex(GOOGLE_FONT_FILE_RE),
+  format: z.literal('woff2'),
+  weightRange: z.tuple([z.number().int(), z.number().int()]).nullable().optional(),
+  staticWeight: z.number().int().optional(),
+  italic: z.boolean().optional(),
+})
+const googleFonts = z.array(googleFontEntry).max(100)
 
 // Prune abandoned rows before item validation. Runs on every parse — INCLUDING
 // reads (getSetting → safeParse) — so it MUST be non-destructive to data an
@@ -764,6 +820,76 @@ const updatesState = z.object({
   stageError: z.string().max(500).optional(),
 })
 
+// Cloud backup destinations (Google Drive / OneDrive). The refresh token is
+// stored as an encrypted envelope (AES-256-GCM via SECRETS_ENCRYPTION_KEY) —
+// never plaintext. folderId is resolved lazily on first upload, so it stays
+// undefined right after connect. clientFingerprint records which baked-in
+// public client minted the token so a future client rotation can prompt a
+// reconnect.
+const backupCloudConnection = z.object({
+  connected: z.boolean().default(false),
+  accountEmail: z.string().max(200).optional(),
+  folderId: z.string().max(200).optional(),
+  refreshToken: encryptedSecretSchema.nullable().optional(),
+  clientFingerprint: z.string().max(64).optional(),
+})
+
+// Optional passphrase encryption for cloud archives. The passphrase itself is
+// stored encrypted-at-rest (for one-click restore) AND known to the operator
+// (so a host loss doesn't strand the archive). saltB64 is the non-secret
+// scrypt salt, needed to re-derive the age identity on restore. Consumed in
+// Phase 2 — defined now to keep the shape stable.
+const backupEncryption = z.object({
+  passphraseEnabled: z.boolean().default(false),
+  passphrase: encryptedSecretSchema.nullable().optional(),
+  saltB64: z.string().max(64).optional(),
+})
+
+// Operator-facing backup configuration + per-provider connection state. Not
+// edited through the generic Settings PATCH form — the Backups page owns
+// dedicated connect/disconnect routes that write this key via writeSetting.
+const backups = z.object({
+  destination: z.enum(['local', 'gdrive', 'onedrive']).default('local'),
+  keepLocalCopy: z.boolean().default(true),
+  remoteRetention: z.number().int().min(1).max(100).default(7),
+  includeEnv: z.boolean().default(false),
+  encryption: backupEncryption.default({ passphraseEnabled: false }),
+  schedule: z.enum(['off', 'daily', 'weekly']).default('off'),
+  scheduleHour: z.number().int().min(0).max(23).default(3),
+  scheduleWeekday: z.number().int().min(0).max(6).default(0),
+  gdrive: backupCloudConnection.default({ connected: false }),
+  onedrive: backupCloudConnection.default({ connected: false }),
+})
+
+// Short-lived device-flow pending block, stashed between the connect request
+// and the poll completion. The device_code is encrypted at rest; the block is
+// cleared on success / denial / expiry.
+const backupPending = z.object({
+  deviceCode: encryptedSecretSchema,
+  userCode: z.string().max(64),
+  verificationUrl: z.string().max(300),
+  expiresAt: z.string().max(40),
+  intervalSec: z.number().int().min(1).max(60),
+})
+
+// Internal state for the Backups feature (device-flow pending + scheduler
+// bookkeeping). NOT operator-editable — no form shape.
+const backupsState = z.object({
+  gdrivePending: backupPending.optional(),
+  onedrivePending: backupPending.optional(),
+  lastScheduledBackupAt: z.string().max(40).optional(),
+  lastScheduledResult: z.enum(['ok', 'failed', 'skipped']).optional(),
+  lastScheduledError: z.string().max(300).optional(),
+  // True between a scheduler-initiated spawn and its terminal audit callback, so
+  // the audit-terminal endpoint can record the REAL outcome (a scheduled run's
+  // result reflects completion, not just that it was spawned). scheduledInFlightAt
+  // stamps the claim time so a flag left stale by a trap-bypassing kill
+  // (SIGKILL/OOM) can be detected + ignored instead of mislabelling a later
+  // manual backup's outcome as the scheduled result.
+  scheduledInFlight: z.boolean().optional(),
+  scheduledInFlightAt: z.string().max(40).optional(),
+})
+
 // SMTP configuration. Moved from .env.local so operators can configure
 // outbound email from the dashboard without SSH'ing the server.
 // Mirrors the env-var shape: host/port/secure/user/password/fromAddress/
@@ -1162,6 +1288,26 @@ export const registry = {
       surfaceLight: '#F5F1EA',
     } satisfies z.infer<typeof themePalette>,
   },
+  // ─── Typography roles (Settings → Typography) ───
+  typography_roles: {
+    schema: typographyRoles,
+    default: {
+      display: TYPOGRAPHY_ROLES_DEFAULT.display,
+      body: TYPOGRAPHY_ROLES_DEFAULT.body,
+    } satisfies z.infer<typeof typographyRoles>,
+  },
+  // ─── Operator-uploaded custom fonts (managed by /api/admin/fonts) ───
+  custom_fonts: {
+    schema: customFonts,
+    default: [] satisfies z.infer<typeof customFonts>,
+  },
+  // ─── Activated Google fonts (managed by /api/admin/fonts/google) ───
+  // Operator picks from the ~1,934-family catalog; the server fetches the
+  // woff2 ONCE and self-hosts it. Visitors never touch Google.
+  google_fonts: {
+    schema: googleFonts,
+    default: [] satisfies z.infer<typeof googleFonts>,
+  },
   // ─── Self-update preferences ───
   updates: {
     schema: updates,
@@ -1180,6 +1326,27 @@ export const registry = {
   updates_state: {
     schema: updatesState,
     default: {} satisfies z.infer<typeof updatesState>,
+  },
+  // ─── Backup destinations + schedule ───
+  backups: {
+    schema: backups,
+    default: {
+      destination: 'local',
+      keepLocalCopy: true,
+      remoteRetention: 7,
+      includeEnv: false,
+      encryption: { passphraseEnabled: false },
+      schedule: 'off',
+      scheduleHour: 3,
+      scheduleWeekday: 0,
+      gdrive: { connected: false },
+      onedrive: { connected: false },
+    } satisfies z.infer<typeof backups>,
+  },
+  // Internal Backups state — device-flow pending + scheduler bookkeeping.
+  backups_state: {
+    schema: backupsState,
+    default: {} satisfies z.infer<typeof backupsState>,
   },
   // ─── SMTP / outbound email ───
   smtp_config: {

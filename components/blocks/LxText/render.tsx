@@ -4,7 +4,7 @@ import { MotionTarget } from '@/components/motion/MotionTarget'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { InlineEditContext } from '@/lib/cms/inlineEditableFields'
 import {
-  FAMILY_TAILWIND,
+  resolveFamilyRender,
   fontWeightClass,
   isColorToken,
   resolveColorValue,
@@ -75,8 +75,10 @@ export function LxText({
     ? { color: resolveColorValue(tone) }
     : undefined
 
-  const family = data.family
-  const familyClass = family ? FAMILY_TAILWIND[family] : 'font-sans'
+  // Role token → Tailwind class; catalog font → inline font-family var
+  // (merged into the text element style below). Default font-sans (body).
+  const fam = resolveFamilyRender(data.family)
+  const familyClass = fam.className ?? 'font-sans'
 
   // Override-aware weight. When unset, fall back to the size-driven
   // editorial weight (semibold for lead body, medium otherwise).
@@ -109,7 +111,7 @@ export function LxText({
           initialValue={data.body_richtext}
           as="div"
           className={className}
-          style={toneStyle}
+          style={{ ...toneStyle, ...fam.style }}
           placeholder="Type to add text…"
         />
       </div>
@@ -123,7 +125,7 @@ export function LxText({
   const content = (
     <div
       className={className}
-      style={toneStyle}
+      style={{ ...toneStyle, ...fam.style }}
       dangerouslySetInnerHTML={{ __html: data.body_richtext }}
     />
   )

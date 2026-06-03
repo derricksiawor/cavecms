@@ -588,6 +588,9 @@ export function EditableSection(p: Props) {
       data-edit-section-version={versions.blockVersion}
       data-edit-section-page-id={p.pageId}
       data-edit-selected={isSelected ? 'true' : undefined}
+      // While this section's edit drawer is open, suppress its floating
+      // chrome (see globals.css `[data-editing]`).
+      data-editing={open ? 'true' : undefined}
       onContextMenu={onContextMenu}
       onClick={onWrapperClick}
       // Chunk H: tabIndex=-1 lets the context menu's focus-restore on
@@ -646,7 +649,13 @@ export function EditableSection(p: Props) {
         // touch-action: none required on the dnd-kit PointerSensor activator
         // — see EditableBlock for the full rationale.
         style={{ touchAction: 'none' }}
-        className="absolute -top-3 left-1/2 z-30 inline-flex h-7 w-11 -translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-full bg-near-black/90 text-cream-50 opacity-0 shadow-[0_8px_18px_-8px_rgba(5,5,5,0.5)] transition-opacity duration-quick ease-standard hover:text-copper-300 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 active:cursor-grabbing group-hover/section:opacity-100 group-focus-within/section:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:opacity-100"
+        data-edit-chrome
+        // Visibility owned by the `[data-edit-chrome]` rules in
+        // globals.css (same deepest-wins model as the section toolbar) —
+        // the handle reveals only when the section's own area is hovered/
+        // focused, not when a child column or widget is. `coarse:h-11`
+        // (sizing) stays; the visibility utilities moved to CSS.
+        className="absolute -top-3 left-1/2 z-30 inline-flex h-7 w-11 -translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-full bg-near-black/90 text-cream-50 shadow-[0_8px_18px_-8px_rgba(5,5,5,0.5)] transition-opacity duration-quick ease-standard hover:text-copper-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 active:cursor-grabbing motion-reduce:transition-none [@media(pointer:coarse)]:h-11"
       >
         <GripVertical
           size={12}
@@ -658,17 +667,18 @@ export function EditableSection(p: Props) {
 
       {/* Floating action toolbar — top-right. F1 — Move Up/Down for
           keyboard + touch operators. F10 — z-30 (section > column z-20
-          > widget z-10). F11 — visible when selected even without
-          hover, so touch operators can hit a button after the first
-          tap. */}
+          > widget z-10). Hover/focus-only on hover-capable devices;
+          on touch (no hover) a selected section keeps its toolbar
+          pinned so operators can hit a button after the first tap. */}
       <div
         data-edit-toolbar
-        className={clsx(
-          'absolute -top-4 right-6 z-30 flex items-center gap-0.5 rounded-full bg-near-black/95 p-1 shadow-[0_14px_32px_-12px_rgba(5,5,5,0.45)] backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none',
-          isSelected
-            ? 'pointer-events-auto opacity-100'
-            : 'pointer-events-none opacity-0 group-hover/section:pointer-events-auto group-hover/section:opacity-100 group-focus-within/section:pointer-events-auto group-focus-within/section:opacity-100',
-        )}
+        data-edit-chrome
+        // Visibility (hover/focus reveal limited to the section's OWN
+        // area, drawer-open hide, touch selected-pin) is owned by the
+        // `[data-edit-chrome]` rules in globals.css — see that block for
+        // the "deepest element wins" model. Hovering a child column or
+        // widget no longer reveals this section toolbar.
+        className="absolute -top-4 right-6 z-30 flex items-center gap-0.5 rounded-full bg-near-black/95 p-1 shadow-[0_14px_32px_-12px_rgba(5,5,5,0.45)] backdrop-blur-sm transition-all duration-quick ease-standard motion-reduce:transition-none"
         aria-label="Section actions"
       >
         <ToolButton

@@ -1,5 +1,5 @@
 // Curated brand-palette presets — the same eight styles advertised on the
-// marketing site (cavecms.derricksiawor.com themes gallery). One click in
+// marketing site (cavecms.com themes gallery). One click in
 // Settings → Theme fills the manual colour pickers with a complete,
 // contrast-checked palette; the operator can still fine-tune any swatch
 // before saving.

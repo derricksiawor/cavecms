@@ -180,8 +180,57 @@
     {
       "idx": 27,
       "version": "5",
-      "when": 1780300000000,
-      "tag": "0027_api_token_scopes",
+      "when": 1780360000000,
+      "tag": "0027_redirects",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1780360100000,
+      "tag": "0028_sync_stage",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1780360200000,
+      "tag": "0029_sync_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1780360300000,
+      "tag": "0030_sync_stage_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1780360400000,
+      "tag": "0031_media_content_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1780400000000,
+      "tag": "0032_draft_overlay",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1780420000000,
+      "tag": "0033_draft_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1780420100000,
+      "tag": "0034_api_token_scopes",
       "breakpoints": true
     }
   ]

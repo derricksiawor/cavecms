@@ -22,6 +22,8 @@ export const PATHS = {
   originals: path.join(ROOT, 'originals'),
   variants: path.join(ROOT, 'variants'),
   brochures: path.join(ROOT, 'brochures-private'),
+  // Operator-uploaded custom fonts — served self-hosted via /uploads/fonts/.
+  fonts: path.join(ROOT, 'fonts'),
 } as const
 
 /**

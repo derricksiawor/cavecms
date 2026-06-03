@@ -50,6 +50,7 @@ for t in \
   cavecms-media-verify \
   cavecms-static-prune \
   cavecms-updates-check \
+  cavecms-backup-run \
 ; do
   systemctl enable "${t}.timer"
   # try-restart applies any OnCalendar edits from this re-run to a

@@ -1,7 +1,7 @@
 // Human-friendly transformation of raw release metadata (SHA + commit
 // message + timestamp) into copy a non-technical operator can read.
 //
-// Once cavecms-updates.derricksiawor.com/releases/manifest.json is live, the upstream will
+// Once updates.cavecms.com/releases/manifest.json is live, the upstream will
 // carry proper semver versions + handwritten release notes, and most
 // of this scrubbing becomes a no-op (versionLabel resolves to "1.4.0"
 // instead of a date string, releaseNotes pass through clean). For
@@ -58,7 +58,7 @@ const CONV_COMMIT_RE =
 const WIP_PREFIX_RE = /^\s*WIP:\s*/i
 
 // Strip dev-speak from operator-facing copy. Applied to title AND
-// body. Once cavecms-updates.derricksiawor.com/manifest ships hand-written notes, most of
+// body. Once updates.cavecms.com/manifest ships hand-written notes, most of
 // these substitutions become no-ops on already-clean copy.
 function scrubDevSpeak(s: string): string {
   return s
@@ -169,7 +169,7 @@ export function humaniseRelease(
   const { title, body } = splitChangelog(raw.changelog)
 
   // Friendly version label. With only GitHub commits we synthesise
-  // from the release date; with the future cavecms-updates.derricksiawor.com manifest this
+  // from the release date; with the future updates.cavecms.com manifest this
   // will be replaced by the semver string carried in the manifest.
   const versionLabel = `Released ${releasedRelativeLower}`
 

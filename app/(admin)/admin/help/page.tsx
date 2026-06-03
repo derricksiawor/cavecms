@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 // the bundled help below stays available on firewalled / offline / older
 // installs and is matched to THIS install's version, while online operators
 // get the richer, latest docs + the assistant one click away.
-const DOCS_URL = 'https://cavecms.derricksiawor.com/docs'
+const DOCS_URL = 'https://cavecms.com/docs'
 
 export async function generateMetadata() {
   return { robots: { index: false, follow: false } }

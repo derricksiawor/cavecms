@@ -68,6 +68,20 @@ const ENGINE_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_COMMIT',
   'CAVECMS_RELEASE_VERSION',
   'PORT',
+  // Cloud backup destinations — paths/ids only. The actual secrets (refresh
+  // token, passphrase) live INSIDE the mode-600 creds file, never in env/argv.
+  'CAVECMS_BACKUP_DESTINATION',
+  'CAVECMS_BACKUP_CLOUD_CREDS_FILE',
+  'CAVECMS_BACKUP_CLOUD_CREDS_OUT',
+  'CAVECMS_CLOUD_STEP',
+  'CAVECMS_CLOUD_TOTAL',
+  'CAVECMS_BACKUP_REMOTE_RETENTION',
+  'CAVECMS_BACKUP_KEEP_LOCAL',
+  'CAVECMS_CLOUD_CHUNK_BYTES',
+  // Cloud restore (Phase 3).
+  'CAVECMS_RESTORE_SOURCE',
+  'CAVECMS_RESTORE_PROVIDER',
+  'CAVECMS_RESTORE_REMOTE_ID',
 ]
 
 const SHELL_DOUBLEQUOTE_DANGEROUS = /[$`\\'\x00-\x1f]/
