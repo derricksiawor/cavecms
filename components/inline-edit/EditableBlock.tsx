@@ -1105,6 +1105,12 @@ export function EditableBlock(p: EditableBlockProps) {
           title="Drag to reorder"
           {...sortable.attributes}
           {...sortable.listeners}
+          // Click (no drag) selects this block — drives the page→outline sync:
+          // the outline highlights + scrolls to this row (OutlinePanel watches
+          // selection). A real drag (>5px) activates dnd-kit and suppresses the
+          // click, so selecting and reordering don't conflict. Mirrors how the
+          // outline grip both selects (click) and reorders (drag).
+          onClick={() => selection.select(p.blockId)}
           // touch-none is REQUIRED on the dnd-kit PointerSensor activator.
           // @dnd-kit/core 6.x removed the auto-applied touch-action style;
           // without `touch-action: none` the browser claims vertical touch

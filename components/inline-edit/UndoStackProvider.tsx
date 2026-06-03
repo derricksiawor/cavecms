@@ -379,13 +379,12 @@ export function UndoStackProvider({ children }: ProviderProps) {
         }
       }
       if (!out.ok) {
-        if (out.staleVersion) {
-          toast.error('Couldn’t undo — page changed since.')
-          dispatch({ type: 'undo' })
-          router.refresh()
-        } else {
-          toast.error("We couldn’t undo that just now. Try again in a moment.")
-        }
+        // Any failed undo is recoverable — the server state is intact. Re-sync
+        // to it and tell the operator gently. NEVER surface a raw server code
+        // (stale_version, drift, …) to a designer.
+        toast.error('Hmm — that didn’t undo. We refreshed the page; try again.')
+        dispatch({ type: 'undo' })
+        router.refresh()
         return
       }
       // Skip deriveRebind on the fallback path — the rebind dispatch in
@@ -421,13 +420,10 @@ export function UndoStackProvider({ children }: ProviderProps) {
     try {
       const out = await execStep(cmd.forward)
       if (!out.ok) {
-        if (out.staleVersion) {
-          toast.error('Couldn’t redo — page changed since.')
-          dispatch({ type: 'redo' })
-          router.refresh()
-        } else {
-          toast.error("We couldn’t redo that just now. Try again in a moment.")
-        }
+        // Recoverable; never surface a raw server code to a designer.
+        toast.error('Hmm — that didn’t redo. We refreshed the page; try again.')
+        dispatch({ type: 'redo' })
+        router.refresh()
         return
       }
       const patch = deriveRebind(cmd, 'forward', out.body ?? {})

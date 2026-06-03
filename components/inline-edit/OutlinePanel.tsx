@@ -1,5 +1,6 @@
 'use client'
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -8,22 +9,37 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import {
   DndContext,
+  DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
+  type DragStartEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
   type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
   arrayMove,
+  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import {
+  flattenTree,
+  descendantIds,
+  getProjection,
+  canBeChildOf,
+  type OutlineItem,
+  type Projection,
+} from './outlineTree'
 import clsx from 'clsx'
 import {
   ChevronDown,
@@ -57,47 +73,22 @@ import { useInlineEditDispatch, useInlineEditState } from './InlineEditContext'
 //   - swapping siblings under different parents → API rejects
 //     "cross_parent_reorder_not_allowed"
 //
-// Tree model: render sections at the top level (plus any legacy
-// "loose widgets" with parent_id IS NULL). Each section is
-// collapsible and exposes its columns; each column exposes its
-// widgets. Reorders are SIBLING-ONLY by construction — a per-parent
-// SortableContext means dnd-kit never offers a drop target outside
-// the active draggable's parent. The reorder POST uses Mode 2
-// (explicit parentId) so the server's homogeneity check passes
-// trivially.
+// Tree model: ONE flat depth-ordered dnd-kit SortableContext (flattenTree in
+// ./outlineTree). Dragging computes a grammar-constrained projection
+// (getProjection) and commits either a same-parent reorder (Mode 2) or a
+// cross-parent nest/reparent (Mode 3, per-block newParentId). The server
+// independently re-validates the 3-level grammar + drift-completeness; the
+// client projection is a live preview, never trusted.
 
-interface BlockSummary {
-  id: number
-  blockKey: string | null
-  blockType: string
-  version: number
-  kind: BlockKind
-  parentId: number | null
-}
+// The outline's row shape — structurally identical to the pure module's
+// OutlineItem, aliased so the projection helpers consume `items` without a cast.
+type BlockSummary = OutlineItem
 
-interface TreeNode {
-  block: BlockSummary
-  children: TreeNode[]
-  // True for rows whose parentId references a block not present in
-  // `items` — surfaced at the top level so the operator can see them,
-  // but drag-reorder is disabled (they have no actual sibling set to
-  // reorder within; a reorder attempt would 404 at the server with
-  // parent_not_found). The operator still has the block-level edit
-  // chrome on the canvas to delete the orphan via its toolbar.
-  orphan?: boolean
-}
-
-const BLOCK_ICON: Record<string, LucideIcon> = {
-  // Containers. Every widget (lx_*) falls through to the ComponentIcon
-  // fallback below — no per-widget icon curation today.
-  section: Layers,
-  column: Columns3,
-}
-
-function iconFor(kind: BlockKind, blockType: string): LucideIcon {
+function iconFor(kind: BlockKind): LucideIcon {
   if (kind === 'section') return Layers
   if (kind === 'column') return Columns3
-  return BLOCK_ICON[blockType] ?? ComponentIcon
+  // Widgets share one neutral glyph today (no per-type curation).
+  return ComponentIcon
 }
 
 function readableBlockLabel(blockType: string, kind: BlockKind): string {
@@ -108,68 +99,71 @@ function readableBlockLabel(blockType: string, kind: BlockKind): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// Group a flat block list into a 2-deep tree (section → column →
-// widget) plus a top-level "loose widgets" bucket (legacy rows with
-// parent_id IS NULL whose kind is 'widget').
-//
-// Defensive against two pathological data shapes:
-//   1. Cycles: a row whose `parentId` chains back to itself or to a
-//      descendant. The DB doesn't enforce acyclic FKs, so a malformed
-//      reorder or direct SQL edit could land a cycle in production.
-//      The `seen` set blocks re-entry — without it, the recursion
-//      stack-overflows and crashes the entire editor.
-//   2. Orphans: a widget whose `parentId` references a block not
-//      present in `items` (parent soft-deleted but sweep hasn't run,
-//      or a partial fetch). Silently dropping them leaves the
-//      operator with a count footer that doesn't match what they
-//      can see + no way to delete the ghost row. Surface orphans at
-//      the top level with a clear visual cue so the operator can act.
-function buildTree(items: BlockSummary[]): TreeNode[] {
-  const byParent = new Map<number | null, BlockSummary[]>()
-  for (const b of items) {
-    const arr = byParent.get(b.parentId) ?? []
-    arr.push(b)
-    byParent.set(b.parentId, arr)
-  }
-  // Each bucket already arrives in position order from the server;
-  // re-sorting here would be redundant. The tree just reflects what
-  // the bucket says.
-  const allIds = new Set(items.map((b) => b.id))
-  const build = (
-    parentId: number | null,
-    seen: Set<number>,
-  ): TreeNode[] => {
-    const kids = byParent.get(parentId) ?? []
-    return kids
-      .filter((b) => !seen.has(b.id))
-      .map((block) => {
-        const nextSeen = new Set(seen)
-        nextSeen.add(block.id)
-        return { block, children: build(block.id, nextSeen) }
-      })
-  }
-  const rooted = build(null, new Set())
-  // Orphans: any bucket keyed on a parentId that isn't `null` AND
-  // isn't a row in the block set. Surface each orphan as a top-level
-  // node so the operator can see + remove it. A SHARED `orphanSeen`
-  // closes a cycle that spans two orphans referencing each other —
-  // without it, mutual references would render the same subtree
-  // twice (once per orphan).
-  const orphans: TreeNode[] = []
-  const orphanSeen = new Set<number>()
-  for (const [pid, bucket] of byParent) {
-    if (pid === null || allIds.has(pid)) continue
-    for (const orphan of bucket) {
-      if (orphanSeen.has(orphan.id)) continue
-      orphanSeen.add(orphan.id)
-      orphans.push({
-        block: orphan,
-        children: build(orphan.id, new Set([orphan.id])),
-        orphan: true,
-      })
+// Tree construction + cycle-guard + orphan surfacing now live in ./outlineTree
+// (flattenTree), which produces the single flat list this panel renders. The
+// recursive buildTree this file used to host was removed with the per-parent
+// SortableContext model it served.
+
+// Indentation step (px) per depth level: each level adds INDENT_WIDTH to the
+// row's base paddingLeft (0.625rem). Single source of truth — also the
+// horizontal drag-to-nest projection threshold (getProjection).
+const INDENT_WIDTH = 14
+
+// Reparent a block within the flat items array, preserving every other row's
+// order. buildTree/flattenTree bucket by parentId then read each bucket in
+// array order, so the moved row only needs to sit at `targetIndex` AMONG the
+// target parent's children — its absolute array position vs other parents is
+// irrelevant. Source-parent order closes up; target-parent order opens to fit.
+function applyMove(
+  items: BlockSummary[],
+  blockId: number,
+  targetParentId: number | null,
+  targetIndex: number,
+): BlockSummary[] {
+  const moving = items.find((b) => b.id === blockId)
+  if (!moving) return items
+  const movedRow: BlockSummary = { ...moving, parentId: targetParentId }
+  const without = items.filter((b) => b.id !== blockId)
+  const targetChildren = without.filter((b) => b.parentId === targetParentId)
+  const newOrder = [...targetChildren]
+  newOrder.splice(
+    Math.max(0, Math.min(targetIndex, newOrder.length)),
+    0,
+    movedRow,
+  )
+  const result: BlockSummary[] = []
+  let emitted = false
+  for (const b of without) {
+    if (b.parentId === targetParentId) {
+      if (!emitted) {
+        for (const t of newOrder) result.push(t)
+        emitted = true
+      }
+      // subsequent target-parent rows already emitted in newOrder — skip
+    } else {
+      result.push(b)
     }
   }
-  return [...rooted, ...orphans]
+  if (!emitted) result.push(movedRow) // target had no existing children
+  return result
+}
+
+// Map the reorder API's error enums to user-facing copy (never leak the raw
+// enum). Grammar rejections shouldn't happen — the projection blocks invalid
+// drops client-side — but a concurrent edit could shift the tree under us.
+function reparentErrorCopy(code?: string): string {
+  switch (code) {
+    case 'column_count_exceeded':
+      return `That section is at the ${MAX_SECTION_COLUMNS}-column maximum.`
+    case 'widget_parent_must_be_column':
+    case 'column_parent_must_be_section':
+    case 'section_cannot_have_parent':
+    case 'column_parent_required':
+    case 'cross_parent_reorder_not_allowed':
+      return "That block can't go there."
+    default:
+      return "We couldn't save the move. Refresh the page and try again."
+  }
 }
 
 interface OutlineApi {
@@ -303,6 +297,7 @@ export function OutlinePanel({
   initial: BlockSummary[]
 }) {
   const recordCommand = useRecordCommand()
+  const router = useRouter()
   // F11 — outline-level reorders need to propagate the bumped
   // pageVersion into the global optimistic context so siblings on the
   // canvas inherit the new cursor.
@@ -321,6 +316,9 @@ export function OutlinePanel({
   // real drag still activates after 5px of movement.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   )
   const [items, setItems] = useState(initial)
 
@@ -482,12 +480,67 @@ export function OutlinePanel({
     pendingInitialRef.current = null
   }, [initial])
 
-  const tree = useMemo(() => buildTree(items), [items])
+  // ── Collapse state (lifted to the panel so flattenTree can hide a
+  // collapsed container's subtree from the single flat list). ──
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set())
+  const toggleCollapse = useCallback((id: number) => {
+    setCollapsed((prev) => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  }, [])
 
-  const postReorder: OutlineApi['postReorder'] = async (
-    parentId,
-    siblingsInNewOrder,
-  ) => {
+  // ── Drag state for the flat tree DnD (nest + reparent). ──
+  const [activeId, setActiveId] = useState<number | null>(null)
+  const [overId, setOverId] = useState<number | null>(null)
+  const [offsetLeft, setOffsetLeft] = useState(0)
+
+  const itemsById = useMemo(() => {
+    const m = new Map<number, OutlineItem>()
+    for (const b of items) m.set(b.id, b)
+    return m
+  }, [items])
+
+  // While dragging, hide the dragged container's own subtree so the operator
+  // isn't dragging an expanded subtree around (canonical dnd-kit tree behaviour).
+  const effectiveCollapsed = useMemo(() => {
+    if (activeId == null) return collapsed
+    const n = new Set(collapsed)
+    n.add(activeId)
+    return n
+  }, [collapsed, activeId])
+  const flat = useMemo(
+    () => flattenTree(items, effectiveCollapsed),
+    [items, effectiveCollapsed],
+  )
+  const flatIds = useMemo(() => flat.map((n) => n.item.id), [flat])
+  // 1-based position among same-parent siblings, for the row's index badge.
+  const siblingIndexById = useMemo(() => {
+    const counts = new Map<number | null, number>()
+    const m = new Map<number, number>()
+    for (const n of flat) {
+      const c = (counts.get(n.item.parentId) ?? 0) + 1
+      counts.set(n.item.parentId, c)
+      m.set(n.item.id, c)
+    }
+    return m
+  }, [flat])
+
+  // Live drop projection — grammar-constrained {parentId, index, depth, valid}.
+  const projection: Projection | null = useMemo(() => {
+    if (activeId == null || overId == null) return null
+    return getProjection(flat, activeId, overId, offsetLeft, INDENT_WIDTH)
+  }, [activeId, overId, offsetLeft, flat])
+
+  const activeNode = useMemo(
+    () => (activeId == null ? null : (itemsById.get(activeId) ?? null)),
+    [activeId, itemsById],
+  )
+
+  const postReorder = useCallback<OutlineApi['postReorder']>(
+    async (parentId, siblingsInNewOrder) => {
     if (inFlightRef.current) return
     inFlightRef.current = true
     setBusy(true)
@@ -534,11 +587,10 @@ export function OutlinePanel({
       }
       if (!res.ok) {
         setItems(prev)
-        // Generic copy: the per-parent SortableContext model means
-        // any non-409 rejection here is architecturally unexpected
-        // (sibling-only drops are enforced client-side). Surfacing
-        // the raw server enum (column_parent_must_be_section etc.)
-        // is operator-debugger language, not user-facing copy.
+        // Generic copy — same-parent reorders are grammar-trivial, so any
+        // non-409 rejection here is unexpected (the projection already blocked
+        // invalid drops client-side). Never surface the raw server enum
+        // (column_parent_must_be_section etc.) — that's debugger language.
         setErr("We couldn't save the new order. Refresh the page and try again.")
         return
       }
@@ -619,6 +671,15 @@ export function OutlinePanel({
         },
         captures: { parentId, blockCount: priorSiblingsInOrder.length },
       })
+      // EXACT MIRROR: re-fetch so the canvas, the inline-edit context, AND this
+      // outline all re-render from the committed server state. The optimistic
+      // setItems above is just instant feedback; without this refresh the move
+      // never propagates to the page, and the `initial` sync effect can revert
+      // the outline from stale data — desyncing the outline from the page (the
+      // "element goes missing / outline isn't a mirror" bug). Also clears any
+      // mid-flight snapshot so `finally` can't re-apply a stale one.
+      pendingInitialRef.current = null
+      router.refresh()
     } catch (e) {
       setItems(prev)
       setErr(
@@ -637,7 +698,248 @@ export function OutlinePanel({
         pendingInitialRef.current = null
       }
     }
-  }
+    },
+    [items, pageId, dispatch, recordCommand, router],
+  )
+
+  // ── Cross-parent move (reparent / nest) — reorder API Mode 3. ──
+  // Submits BOTH affected parents' children: the source parent's remaining
+  // children (so its drift-completeness check passes) AND the target parent's
+  // children in the new order, with the moved block carrying newParentId. The
+  // server assigns position by submission order within each resolved bucket.
+  const postReparent = useCallback(
+    async (
+      blockId: number,
+      sourceParentId: number | null,
+      targetParentId: number | null,
+      targetIndex: number,
+    ) => {
+      if (inFlightRef.current) return
+      inFlightRef.current = true
+      setBusy(true)
+      setErr(null)
+      const prev = items
+      const moving = prev.find((b) => b.id === blockId)
+      if (!moving) {
+        inFlightRef.current = false
+        setBusy(false)
+        return
+      }
+      const sourceSiblings = prev.filter((b) => b.parentId === sourceParentId)
+      const originalIndex = sourceSiblings.findIndex((b) => b.id === blockId)
+
+      const next = applyMove(prev, blockId, targetParentId, targetIndex)
+      setItems(next)
+
+      // `next` already reparented the block, so `sourceRemaining` correctly
+      // EXCLUDES it and `targetNewOrder` INCLUDES it (carrying newParentId).
+      // INVARIANT: the moved block must appear ONCE (in targetNewOrder, not
+      // sourceRemaining). The server's drift check buckets `submittedHere` by
+      // each row's CURRENT db parent_id — the moved block still reads as a child
+      // of the source there, so it counts toward the source parent's
+      // completeness automatically. Adding it to sourceRemaining too would
+      // submit it twice → duplicate_block_id / drift 409. Do not "fix" that.
+      const sourceRemaining = next.filter((b) => b.parentId === sourceParentId)
+      const targetNewOrder = next.filter((b) => b.parentId === targetParentId)
+      const payloadBlocks = [
+        ...sourceRemaining.map((b) => ({ id: b.id, version: b.version })),
+        ...targetNewOrder.map((b) => ({
+          id: b.id,
+          version: b.version,
+          ...(b.id === blockId ? { newParentId: targetParentId } : {}),
+        })),
+      ]
+      try {
+        const res = await csrfFetch('/api/cms/blocks/reorder', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ pageId, blocks: payloadBlocks }),
+        })
+        if (res.status === 409) {
+          setItems(prev)
+          setErr(
+            'Someone else changed this page while you were here. Refresh and try again.',
+          )
+          return
+        }
+        if (!res.ok) {
+          setItems(prev)
+          const j = (await res.json().catch(() => ({}))) as { error?: string }
+          setErr(reparentErrorCopy(j.error))
+          return
+        }
+        const j = (await res.json()) as {
+          blocks: Array<{ id: number; version: number }>
+          pageVersion?: number
+        }
+        const byId = new Map(j.blocks.map((x) => [x.id, x.version]))
+        setItems((curr) =>
+          curr.map((b) => ({ ...b, version: byId.get(b.id) ?? b.version })),
+        )
+        if (typeof j.pageVersion === 'number') {
+          const pv = j.pageVersion
+          for (const [id, version] of byId.entries()) {
+            dispatch({
+              type: 'set-versions',
+              blockId: id,
+              blockVersion: version,
+              pageVersion: pv,
+            })
+          }
+        }
+        // Undo: move the block back to its source parent + original index, with
+        // the FRESH post-move versions so the inverse satisfies the lock. The
+        // forward (redo) is exactly the move we just sent (pre-move versions);
+        // UndoRedoController's deriveRebind refreshes its versions post-inverse.
+        const freshVersion = (id: number) =>
+          byId.get(id) ?? prev.find((b) => b.id === id)?.version ?? 0
+        const restored = applyMove(
+          next,
+          blockId,
+          sourceParentId,
+          originalIndex >= 0 ? originalIndex : sourceRemaining.length,
+        )
+        const inverseBlocks = [
+          ...restored
+            .filter((b) => b.parentId === targetParentId)
+            .map((b) => ({ id: b.id, version: freshVersion(b.id) })),
+          ...restored
+            .filter((b) => b.parentId === sourceParentId)
+            .map((b) => ({
+              id: b.id,
+              version: freshVersion(b.id),
+              ...(b.id === blockId ? { newParentId: sourceParentId } : {}),
+            })),
+        ]
+        recordCommand({
+          kind: 'reorder',
+          label: 'Moved block',
+          timestamp: Date.now(),
+          forward: {
+            method: 'POST',
+            path: '/api/cms/blocks/reorder',
+            body: { pageId, blocks: payloadBlocks },
+            expects: 200,
+          },
+          inverse: {
+            method: 'POST',
+            path: '/api/cms/blocks/reorder',
+            body: { pageId, blocks: inverseBlocks },
+            expects: 200,
+          },
+          captures: { parentId: sourceParentId, blockCount: payloadBlocks.length },
+        })
+        // EXACT MIRROR (see postReorder): re-fetch so the canvas + context +
+        // outline all re-render from the committed server state. A reparent is
+        // the most visible move — without this the page wouldn't reflect it.
+        pendingInitialRef.current = null
+        router.refresh()
+      } catch (e) {
+        setItems(prev)
+        setErr(
+          e instanceof Error && e.name === 'AbortError'
+            ? 'That took too long. Try again.'
+            : "We can't reach the server right now. Try again in a moment.",
+        )
+      } finally {
+        inFlightRef.current = false
+        setBusy(false)
+        if (pendingInitialRef.current) {
+          setItems(pendingInitialRef.current)
+          pendingInitialRef.current = null
+        }
+      }
+    },
+    [items, pageId, dispatch, recordCommand, router],
+  )
+
+  // Decide same-parent reorder (Mode 2) vs cross-parent move (Mode 3) from the
+  // grammar-constrained projection. Defense-in-depth grammar + cycle guards.
+  const commitMove = useCallback(
+    async (blockId: number, proj: Projection) => {
+      const moving = items.find((b) => b.id === blockId)
+      if (!moving) return
+      const sourceParentId = moving.parentId
+      const targetParentId = proj.parentId
+      const targetKind =
+        targetParentId == null
+          ? null
+          : (itemsById.get(targetParentId)?.kind ?? null)
+      if (!canBeChildOf(moving.kind, targetKind)) {
+        setErr("That block can't go there.")
+        return
+      }
+      if (
+        targetParentId != null &&
+        descendantIds(items, blockId).has(targetParentId)
+      ) {
+        setErr("You can't move a block into one of its own children.")
+        return
+      }
+      if (sourceParentId === targetParentId) {
+        const sibs = items.filter((b) => b.parentId === sourceParentId)
+        const from = sibs.findIndex((s) => s.id === blockId)
+        if (from < 0) return
+        const to = Math.max(0, Math.min(proj.index, sibs.length - 1))
+        if (from === to) return
+        await postReorder(sourceParentId, arrayMove(sibs, from, to))
+        return
+      }
+      await postReparent(blockId, sourceParentId, targetParentId, proj.index)
+    },
+    [items, itemsById, postReorder, postReparent],
+  )
+
+  // ── dnd-kit drag lifecycle ──
+  const onDragStart = useCallback((e: DragStartEvent) => {
+    const id = Number(e.active.id)
+    if (!Number.isInteger(id)) return
+    setActiveId(id)
+    setOverId(id)
+    setOffsetLeft(0)
+    setErr(null)
+  }, [])
+  const onDragMove = useCallback((e: DragMoveEvent) => {
+    setOffsetLeft(e.delta.x)
+  }, [])
+  const onDragOver = useCallback((e: DragOverEvent) => {
+    const id = e.over ? Number(e.over.id) : null
+    setOverId(id != null && Number.isInteger(id) ? id : null)
+  }, [])
+  const resetDrag = useCallback(() => {
+    setActiveId(null)
+    setOverId(null)
+    setOffsetLeft(0)
+  }, [])
+  const onDragEnd = useCallback(
+    async (e: DragEndEvent) => {
+      const aId = activeId
+      const dx = e.delta.x
+      // Recompute the projection from the final event against the drag-time
+      // flat list (active still set → its subtree hidden) so a late state
+      // flush can't make the commit use a stale projection.
+      const flatNow = flat
+      resetDrag()
+      // Released over no droppable → cancel. Don't fall back to the last-hovered
+      // `overId` and commit a move the operator dragged away from / abandoned.
+      if (!e.over) return
+      const oId = Number(e.over.id)
+      if (aId == null || !Number.isInteger(oId)) return
+      // Dropped on its own row with no horizontal intent → a click/no-move, not
+      // a move. Without this, a tiny leftward nudge (dx < 0) on a widget would
+      // project to loose-root (≠ its source column) and fire a spurious
+      // cross-parent POST for a non-move.
+      if (oId === aId && Math.abs(dx) < INDENT_WIDTH) return
+      const proj = getProjection(flatNow, aId, oId, dx, INDENT_WIDTH)
+      if (!proj.valid) {
+        setErr("That block can't go there.")
+        return
+      }
+      await commitMove(aId, proj)
+    },
+    [activeId, flat, resetDrag, commitMove],
+  )
+  const onDragCancel = useCallback(() => resetDrag(), [resetDrag])
 
   // Visibility composite — the panel renders OFF-SCREEN (slide-right
   // + opacity 0) until both conditions are met. The transition kicks
@@ -781,14 +1083,10 @@ export function OutlinePanel({
               Empty page. Pick a starting block from the page body.
             </p>
           ) : (
-            // Single DndContext for the entire tree. Each level
-            // mounts its own SortableContext (sibling-only items
-            // list), so dnd-kit's collision detection still scopes
-            // valid drop targets to siblings. The onDragEnd handler
-            // reads `active.data.current.parentId` to dispatch the
-            // reorder to the correct parent group. ONE DndContext
-            // avoids nested-context overhead + keyboard a11y
-            // mis-scoping at deep trees.
+            // ONE DndContext + ONE flat SortableContext over the whole tree.
+            // onDragMove tracks the horizontal offset, onDragOver the over-row;
+            // onDragEnd recomputes the grammar-constrained projection from the
+            // final event and commits a reorder (Mode 2) or reparent (Mode 3).
             //
             // `id` MUST be supplied explicitly. @dnd-kit's internal
             // auto-counter generates a different ID on the server vs
@@ -803,38 +1101,69 @@ export function OutlinePanel({
               id={dndContextId}
               sensors={sensors}
               collisionDetection={closestCenter}
-              onDragEnd={async (e: DragEndEvent) => {
-                if (!e.over || e.active.id === e.over.id) return
-                // Lost data-context is treated as an error rather
-                // than silently routing the drag to the top-level
-                // bucket (which would 409 server-side when the row
-                // actually belongs elsewhere).
-                const dataCurrent = e.active.data.current as
-                  | { parentId?: number | null }
-                  | undefined
-                if (!dataCurrent || dataCurrent.parentId === undefined) {
-                  setErr("That drag didn't register — try again.")
-                  return
-                }
-                const parentId = dataCurrent.parentId
-                const siblings = byParentArr(items, parentId)
-                const oldIdx = siblings.findIndex(
-                  (s) => s.id === e.active.id,
-                )
-                const newIdx = siblings.findIndex(
-                  (s) => s.id === e.over!.id,
-                )
-                if (oldIdx < 0 || newIdx < 0) return
-                const reordered = arrayMove(siblings, oldIdx, newIdx)
-                await postReorder(parentId, reordered)
-              }}
+              onDragStart={onDragStart}
+              onDragMove={onDragMove}
+              onDragOver={onDragOver}
+              onDragEnd={onDragEnd}
+              onDragCancel={onDragCancel}
             >
-              <SortableLevel
-                nodes={tree}
-                depth={0}
-                busy={busy}
-                pageId={pageId}
-              />
+              {/* ONE flat SortableContext over the whole tree. Rows displace to
+                 preview the drop (verticalListSortingStrategy); the dragged row
+                 renders at its PROJECTED depth so the operator sees exactly how
+                 deep it will nest (Elementor/Gutenberg "drag right to nest").
+                 getProjection enforces the grammar + no-cycle. */}
+              <SortableContext
+                items={flatIds}
+                strategy={verticalListSortingStrategy}
+              >
+                <ol className="space-y-1">
+                  {flat.map((fn) => (
+                    <TreeRow
+                      key={fn.item.id}
+                      item={fn.item}
+                      orphan={fn.orphan}
+                      childCount={fn.childCount}
+                      index={siblingIndexById.get(fn.item.id) ?? 1}
+                      depth={
+                        activeId === fn.item.id && projection
+                          ? projection.depth
+                          : fn.depth
+                      }
+                      busy={busy}
+                      pageId={pageId}
+                      isCollapsed={collapsed.has(fn.item.id)}
+                      onToggleCollapse={toggleCollapse}
+                      invalid={
+                        activeId === fn.item.id && projection
+                          ? !projection.valid
+                          : false
+                      }
+                    />
+                  ))}
+                </ol>
+              </SortableContext>
+              {/* Drag preview clone following the cursor, rendered at the
+                 projected depth + tinted red when the drop is blocked.
+                 PORTALED to <body>: the outline <aside> has backdrop-filter,
+                 which makes it the containing block for the overlay's
+                 fixed/translate positioning — leaving it INSIDE the aside
+                 offsets dnd-kit's viewport coordinates and renders the clone
+                 off-screen (the "can't see the drag" bug). At <body> there is
+                 no transformed/filtered ancestor, so the clone tracks the
+                 cursor correctly and isn't clipped by the panel's overflow. */}
+              {typeof document !== 'undefined' &&
+                createPortal(
+                  <DragOverlay dropAnimation={null}>
+                    {activeNode ? (
+                      <DragOverlayRow
+                        item={activeNode}
+                        depth={projection ? projection.depth : 0}
+                        invalid={projection ? !projection.valid : false}
+                      />
+                    ) : null}
+                  </DragOverlay>,
+                  document.body,
+                )}
             </DndContext>
           )}
           {/* Widget picker extracted to a separate left-pinned floating
@@ -846,71 +1175,69 @@ export function OutlinePanel({
   )
 }
 
-// A single tree level — siblings sharing parentId. Each level
-// mounts its own SortableContext (sibling-only items list) inside
-// the ONE outer DndContext at the panel root. This combination
-// gives sibling-only drag targets without paying for nested
-// DndContext keyboard/sensor overhead at deeper trees.
-function SortableLevel({
-  nodes,
+// Lightweight drag-preview clone shown in the DragOverlay (full opacity,
+// follows the cursor). Mirrors the row's icon + label at the projected
+// indentation; tints red when the drop is blocked.
+function DragOverlayRow({
+  item,
   depth,
-  busy,
-  pageId,
+  invalid,
 }: {
-  nodes: TreeNode[]
+  item: OutlineItem
   depth: number
-  // True when a reorder POST is in flight. Disables every TreeRow's
-  // useSortable so a second drag during the network round-trip
-  // doesn't silently fail — the operator sees handles greyed out.
-  busy: boolean
-  pageId: number
+  invalid: boolean
 }) {
-  // Note: parentId is read by the outer onDragEnd via
-  // `e.active.data.current.parentId` (attached on each TreeRow's
-  // useSortable.data). No prop drill needed here.
+  const Icon = iconFor(item.kind)
   return (
-    <SortableContext
-      items={nodes.map((n) => n.block.id)}
-      strategy={verticalListSortingStrategy}
+    <div
+      className={clsx(
+        'pointer-events-none flex items-center gap-2 rounded-xl border bg-cream px-2.5 py-2 text-near-black shadow-[0_12px_30px_-12px_rgba(5,5,5,0.45)]',
+        invalid
+          ? 'border-red-400/70 ring-2 ring-red-400/60'
+          : 'border-copper-400/60 ring-1 ring-copper-300/50',
+      )}
+      style={{ paddingLeft: `calc(0.625rem + ${depth * INDENT_WIDTH}px)` }}
     >
-      <ol className={clsx(depth === 0 ? 'space-y-1.5' : 'space-y-1')}>
-        {nodes.map((node, i) => (
-          <TreeRow
-            key={node.block.id}
-            node={node}
-            index={i + 1}
-            depth={depth}
-            busy={busy}
-            pageId={pageId}
-          />
-        ))}
-      </ol>
-    </SortableContext>
+      <GripVertical size={13} strokeWidth={2} className="text-warm-stone/60" />
+      <Icon size={13} strokeWidth={1.8} className="shrink-0 text-warm-stone" />
+      <span className="truncate text-[12px] font-medium">
+        {readableBlockLabel(item.blockType, item.kind)}
+      </span>
+    </div>
   )
 }
 
-// Helper — filter the flat items list by parentId. Used by the
-// single outer onDragEnd to compute the sibling slice for the
-// reorder POST.
-function byParentArr(
-  items: BlockSummary[],
-  parentId: number | null,
-): BlockSummary[] {
-  return items.filter((b) => b.parentId === parentId)
-}
-
-function TreeRow({
-  node,
+// Memoised: during a drag, `onDragMove` updates offsetLeft on every pointermove,
+// re-rendering OutlinePanel + re-running the flat.map. memo() + stable primitive
+// props (item is a stable reference from `items` while dragging; only the dragged
+// row's depth/invalid change) means only the ONE dragged row re-renders per frame
+// instead of all N rows — O(1) drag cost, not O(N). Audit pillar-4 HIGH fix.
+const TreeRow = memo(function TreeRow({
+  item,
+  orphan,
   index,
   depth,
   busy,
   pageId,
+  childCount,
+  isCollapsed,
+  onToggleCollapse,
+  invalid,
 }: {
-  node: TreeNode
+  item: OutlineItem
+  /** parent not present in the block set — surfaced at root, drag-disabled */
+  orphan: boolean
   index: number
+  /** rendered indentation depth — the PROJECTED depth while this row is the
+   *  one being dragged, else its natural depth. */
   depth: number
   busy: boolean
   pageId: number
+  childCount: number
+  isCollapsed: boolean
+  onToggleCollapse: (id: number) => void
+  /** true while this row is the active drag and the projected drop is invalid */
+  invalid: boolean
 }) {
   // `data` MUST be a stable reference between renders. dnd-kit caches
   // it on the sortable item and the outer onDragEnd reads it back via
@@ -922,8 +1249,8 @@ function TreeRow({
   // primitive parentId so the ref is identity-stable across renders
   // unless the row actually moves to a different parent.
   const sortableData = useMemo(
-    () => ({ parentId: node.block.parentId }),
-    [node.block.parentId],
+    () => ({ parentId: item.parentId, kind: item.kind }),
+    [item.parentId, item.kind],
   )
   const {
     attributes,
@@ -933,20 +1260,30 @@ function TreeRow({
     transition,
     isDragging,
   } = useSortable({
-    id: node.block.id,
-    // The outer onDragEnd inspects this `data.parentId` to route the
-    // drop to the correct parent group's siblings.
+    id: item.id,
     data: sortableData,
     // Orphans are surfaced at the top level but their parentId
     // doesn't reference a live block — a drag would 404 at the
     // server (parent_not_found). Disable the handle so the operator
     // gets visual feedback "not draggable" instead of a snap-back.
-    disabled: !!node.block.blockKey || busy || !!node.orphan,
+    disabled: !!item.blockKey || busy || !!orphan,
   })
-  const [expanded, setExpanded] = useState(true)
-  const Icon = iconFor(node.block.kind, node.block.blockType)
-  const hasChildren = node.children.length > 0
-  const isContainer = node.block.kind !== 'widget'
+  // Combine dnd-kit's node ref with our own so the page→outline sync can scroll
+  // this row into view when the block is selected on the canvas.
+  const liRef = useRef<HTMLLIElement | null>(null)
+  const setRefs = useCallback(
+    (el: HTMLLIElement | null) => {
+      setNodeRef(el)
+      liRef.current = el
+    },
+    [setNodeRef],
+  )
+  // Expand/collapse is lifted to the panel (so flattenTree can hide a
+  // collapsed subtree from the single flat list). `expanded` derives from it.
+  const expanded = !isCollapsed
+  const Icon = iconFor(item.kind)
+  const hasChildren = childCount > 0
+  const isContainer = item.kind !== 'widget'
 
   // Outline-handle click jumps the canvas to the corresponding block
   // and pulses a copper ring around it for 1.5s. Selector picks the
@@ -973,11 +1310,11 @@ function TreeRow({
   const onScrollToBlock = useCallback(() => {
     if (typeof document === 'undefined') return
     const selector =
-      node.block.kind === 'section'
-        ? `[data-edit-section-id="${node.block.id}"]`
-        : node.block.kind === 'column'
-          ? `[data-edit-column-id="${node.block.id}"]`
-          : `[data-edit-block-id="${node.block.id}"]`
+      item.kind === 'section'
+        ? `[data-edit-section-id="${item.id}"]`
+        : item.kind === 'column'
+          ? `[data-edit-column-id="${item.id}"]`
+          : `[data-edit-block-id="${item.id}"]`
     const el = document.querySelector(selector) as HTMLElement | null
     if (!el) return
     const reduce = window.matchMedia(
@@ -1001,7 +1338,7 @@ function TreeRow({
       el.classList.remove('cavecms-outline-ping')
       pingTimerRef.current = null
     }, 1600)
-  }, [node.block.id, node.block.kind])
+  }, [item.id, item.kind])
 
   // ── F2 — Selection sync ──
   // Single-click on the row "selects" the block (persistent ring) AND
@@ -1011,11 +1348,22 @@ function TreeRow({
   // surface that subscribes to the same selection state. Persistent
   // — replaces the prior 1.6s ping-and-die.
   const selection = useSelection()
-  const isRowSelected = selection.isSelected(node.block.id)
+  const isRowSelected = selection.isSelected(item.id)
+  // Page→outline sync: when this block becomes selected (operator clicked it /
+  // its drag handle on the canvas), scroll this outline row into view. Only on
+  // the false→true transition so it doesn't fight the operator's own scrolling.
+  // The row already highlights via isRowSelected.
+  const wasSelectedRef = useRef(false)
+  useEffect(() => {
+    if (isRowSelected && !wasSelectedRef.current) {
+      liRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+    wasSelectedRef.current = isRowSelected
+  }, [isRowSelected])
   const selectAndScroll = useCallback(() => {
-    selection.select(node.block.id)
+    selection.select(item.id)
     onScrollToBlock()
-  }, [selection, node.block.id, onScrollToBlock])
+  }, [selection, item.id, onScrollToBlock])
 
   // ── F6 — Spacing preview indicator ──
   // The SpacingToolbar (+ EditDrawer for meta fields) dispatch
@@ -1029,7 +1377,7 @@ function TreeRow({
   // dispatch on a different block doesn't re-render this row beyond
   // React's standard batching. Cheap.
   const editState = useInlineEditState()
-  const hasPendingPreview = editState.previews.has(node.block.id)
+  const hasPendingPreview = editState.previews.has(item.id)
 
   // ── F3 — Operator-set label ──
   // SectionMeta / ColumnMeta / WidgetMeta carry an optional `label`
@@ -1048,10 +1396,10 @@ function TreeRow({
   // so unknown fields ride through harmlessly until the schema
   // catches up).
   const liveMeta = useMemo(() => {
-    const live = editState.blocks.find((b) => b.id === node.block.id)
+    const live = editState.blocks.find((b) => b.id === item.id)
     if (!live) return null
     return (live.meta as { label?: unknown } | null) ?? null
-  }, [editState.blocks, node.block.id])
+  }, [editState.blocks, item.id])
   const liveMetaForPatch = useMemo<Record<string, unknown>>(() => {
     if (liveMeta && typeof liveMeta === 'object') {
       return { ...(liveMeta as Record<string, unknown>) }
@@ -1085,7 +1433,7 @@ function TreeRow({
     setActionBusy(true)
     try {
       const res = await csrfFetch(
-        `/api/cms/blocks/${node.block.id}/duplicate`,
+        `/api/cms/blocks/${item.id}/duplicate`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -1105,7 +1453,7 @@ function TreeRow({
     } finally {
       setActionBusy(false)
     }
-  }, [actionBusy, node.block.id, pageId, router, toast])
+  }, [actionBusy, item.id, pageId, router, toast])
 
   // Helper — DELETE /api/cms/blocks/[id]. Records an undo command
   // matching the canvas toolbar's delete path so ⌘Z resurrects via
@@ -1125,15 +1473,15 @@ function TreeRow({
   // shape exactly so the outline + canvas surfaces never drift.
   const deleteBlock = useCallback(async () => {
     if (actionBusy) return
-    const blockId = node.block.id
-    const isContainer = node.block.kind !== 'widget'
+    const blockId = item.id
+    const isContainer = item.kind !== 'widget'
     // Snapshot live row + sibling slice for the restore context.
     // Reading at click time (before the network round-trip) preserves
     // the operator's mental "this was here" position even if a
     // concurrent change reshuffles siblings post-delete.
     const liveRow = editState.blocks.find((b) => b.id === blockId) ?? null
     const liveSiblings = editState.blocks
-      .filter((b) => b.parentId === node.block.parentId)
+      .filter((b) => b.parentId === item.parentId)
       .slice()
       .sort((a, b) => a.position - b.position)
     const position = liveSiblings.findIndex((s) => s.id === blockId)
@@ -1178,7 +1526,7 @@ function TreeRow({
       recordCommand({
         kind: isContainer ? 'delete-container' : 'delete-widget',
         label: isContainer
-          ? node.block.kind === 'section'
+          ? item.kind === 'section'
             ? 'Removed section'
             : 'Removed column'
           : 'Removed block',
@@ -1194,18 +1542,18 @@ function TreeRow({
           body: {
             ...(isContainer ? { cascade: true } : {}),
             position: position >= 0 ? position : liveSiblings.length,
-            parentId: node.block.parentId,
+            parentId: item.parentId,
           },
           expects: 200,
         },
         captures: {
           blockId,
-          containerKind: node.block.kind,
-          parentId: node.block.parentId,
+          containerKind: item.kind,
+          parentId: item.parentId,
           position: position >= 0 ? position : liveSiblings.length,
           priorData,
           priorMeta,
-          blockType: node.block.blockType,
+          blockType: item.blockType,
           pageId,
         },
       })
@@ -1213,7 +1561,7 @@ function TreeRow({
       // scope visible so the operator can hit Undo before the next
       // command pushes this one out of the stack.
       const successCopy = isContainer
-        ? node.block.kind === 'section'
+        ? item.kind === 'section'
           ? 'Section removed (with all its columns).'
           : 'Column removed (with all its widgets).'
         : 'Removed.'
@@ -1237,10 +1585,10 @@ function TreeRow({
     dispatch,
     editState.blocks,
     editState.pageVersion,
-    node.block.blockType,
-    node.block.id,
-    node.block.kind,
-    node.block.parentId,
+    item.blockType,
+    item.id,
+    item.kind,
+    item.parentId,
     pageId,
     recordCommand,
     router,
@@ -1344,12 +1692,12 @@ function TreeRow({
         } else {
           nextMeta.label = trimmed
         }
-        const res = await csrfFetch(`/api/cms/blocks/${node.block.id}`, {
+        const res = await csrfFetch(`/api/cms/blocks/${item.id}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             pageId,
-            blockVersion: node.block.version,
+            blockVersion: item.version,
             pageVersion: editState.pageVersion,
             meta: nextMeta,
           }),
@@ -1371,8 +1719,8 @@ function TreeRow({
       customLabel,
       editState.pageVersion,
       liveMetaForPatch,
-      node.block.id,
-      node.block.version,
+      item.id,
+      item.version,
       pageId,
       router,
       toast,
@@ -1383,20 +1731,20 @@ function TreeRow({
   // delete + duplicate at the server, and we shouldn't show those
   // verbs in the row cluster either. Mirrors the EditableBlock
   // toolbar's gate.
-  const isFixed = !!node.block.blockKey
+  const isFixed = !!item.blockKey
   // Delete enablement: allowed when (a) the row is not fixed-slot,
   // OR (b) the row is an orphan. F4 — the orphan IS the problem the
   // operator needs to clear, so the per-row Delete must work even
   // though the row carries no live parent.
-  const canDelete = !isFixed || !!node.orphan
+  const canDelete = !isFixed || !!orphan
   // Duplicate enablement: same fixed-slot gate, but orphans CAN'T
   // duplicate (the API would 404 on the orphan's missing parent
   // chain). Operator's only option for an orphan is delete.
-  const canDuplicate = !isFixed && !node.orphan
+  const canDuplicate = !isFixed && !orphan
 
   return (
     <li
-      ref={setNodeRef}
+      ref={setRefs}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -1411,19 +1759,24 @@ function TreeRow({
         // clears the selection.
         isRowSelected
           ? 'border-copper-400/60 bg-copper-100/40 ring-1 ring-copper-300/50'
-          : node.block.blockKey
+          : item.blockKey
             ? 'border-transparent bg-warm-stone/5 text-warm-stone'
             : 'border-transparent bg-cream text-near-black hover:border-warm-stone/15 hover:bg-warm-stone/5',
         // F6 — orphan rows get a quiet red tint so they're visually
         // distinct in the tree even when the operator hasn't
         // selected them.
-        node.orphan && 'border-red-200/60 bg-red-50/40',
+        orphan && 'border-red-200/60 bg-red-50/40',
+        // Drag — the dragged row dims to a placeholder while its full-
+        // opacity clone follows the cursor in the DragOverlay; a blocked
+        // (grammar-invalid) projection rings it red.
+        isDragging && 'opacity-40',
+        isDragging && invalid && 'ring-2 ring-red-400/70',
       )}
     >
       <div
         className="flex items-center gap-2 px-2.5 py-2 text-left"
         style={{
-          paddingLeft: `calc(0.625rem + ${depth} * 0.875rem)`,
+          paddingLeft: `calc(0.625rem + ${depth * INDENT_WIDTH}px)`,
         }}
       >
         {/* Expand toggle for containers with children. Widgets stay
@@ -1431,7 +1784,7 @@ function TreeRow({
         {isContainer && hasChildren ? (
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => onToggleCollapse(item.id)}
             aria-label={expanded ? 'Collapse' : 'Expand'}
             aria-expanded={expanded}
             className="inline-flex h-5 w-5 items-center justify-center rounded text-warm-stone/70 transition-colors hover:bg-warm-stone/10 hover:text-near-black"
@@ -1451,28 +1804,28 @@ function TreeRow({
 
         <button
           type="button"
-          {...(node.block.blockKey ? {} : attributes)}
-          {...(node.block.blockKey ? {} : listeners)}
+          {...(item.blockKey ? {} : attributes)}
+          {...(item.blockKey ? {} : listeners)}
           // Click = select the block (persistent F2 ring) + scroll the
           // canvas to it + pulse copper. The dnd-kit PointerSensor
           // activation constraint (distance:5 on the parent DndContext)
           // means a no-move pointer up fires this click, while real
           // drags still activate after 5px of movement.
-          onClick={node.block.blockKey ? undefined : selectAndScroll}
-          disabled={!!node.block.blockKey}
+          onClick={item.blockKey ? undefined : selectAndScroll}
+          disabled={!!item.blockKey}
           aria-label={
-            node.block.blockKey
-              ? `${node.block.blockType} ${node.block.id} — system block, locked`
-              : `Select ${node.block.blockType} ${node.block.id} (drag to reorder)`
+            item.blockKey
+              ? `${item.blockType} ${item.id} — system block, locked`
+              : `Select ${item.blockType} ${item.id} (drag to reorder)`
           }
           className={clsx(
             'inline-flex h-6 w-6 items-center justify-center rounded text-warm-stone/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300/60',
-            node.block.blockKey
+            item.blockKey
               ? 'cursor-not-allowed'
               : 'cursor-grab active:cursor-grabbing group-hover:text-near-black hover:bg-warm-stone/10 hover:text-near-black',
           )}
         >
-          {node.block.blockKey ? (
+          {item.blockKey ? (
             <Lock size={11} strokeWidth={2} />
           ) : (
             <GripVertical size={13} strokeWidth={2} />
@@ -1553,13 +1906,13 @@ function TreeRow({
               }
             >
               {customLabel ??
-                readableBlockLabel(node.block.blockType, node.block.kind)}
-              {node.block.blockKey && (
+                readableBlockLabel(item.blockType, item.kind)}
+              {item.blockKey && (
                 <span className="ml-1.5 text-[10px] font-normal text-warm-stone">
-                  · {node.block.blockKey}
+                  · {item.blockKey}
                 </span>
               )}
-              {node.orphan && (
+              {orphan && (
                 <span className="ml-1.5 text-[10px] font-normal text-red-600">
                   · orphan
                 </span>
@@ -1601,7 +1954,7 @@ function TreeRow({
           onClick={(e) => e.stopPropagation()}
         >
           {/* Section-only verbs */}
-          {node.block.kind === 'section' && !isFixed && !node.orphan && (
+          {item.kind === 'section' && !isFixed && !orphan && (
             <>
               <OutlineRowButton
                 icon={Columns3}
@@ -1610,7 +1963,7 @@ function TreeRow({
                 onClick={() =>
                   void addChildBlock({
                     kind: 'column',
-                    parentId: node.block.id,
+                    parentId: item.id,
                   })
                 }
               />
@@ -1621,7 +1974,7 @@ function TreeRow({
                 onClick={() =>
                   void addChildBlock({
                     kind: 'section',
-                    afterBlockId: node.block.id,
+                    afterBlockId: item.id,
                   })
                 }
               />
@@ -1631,7 +1984,7 @@ function TreeRow({
               Defaults to an lx_text widget (the most common starting
               shape). Operator can then use the slash palette / drawer
               to switch type if they want a different starter. */}
-          {node.block.kind === 'column' && !isFixed && !node.orphan && (
+          {item.kind === 'column' && !isFixed && !orphan && (
             <OutlineRowButton
               icon={Plus}
               label="Add text widget"
@@ -1639,7 +1992,7 @@ function TreeRow({
               onClick={() =>
                 void addChildBlock({
                   kind: 'widget',
-                  parentId: node.block.id,
+                  parentId: item.id,
                   blockType: 'lx_text',
                 })
               }
@@ -1662,9 +2015,9 @@ function TreeRow({
             <OutlineRowButton
               icon={Trash2}
               label={
-                node.block.kind === 'section'
+                item.kind === 'section'
                   ? 'Delete section (and its columns)'
-                  : node.block.kind === 'column'
+                  : item.kind === 'column'
                     ? 'Delete column (and its widgets)'
                     : 'Delete'
               }
@@ -1676,21 +2029,9 @@ function TreeRow({
         </span>
       </div>
 
-      {/* Nested children — separate SortableLevel so sibling-only
-         drag is enforced architecturally. Indentation comes from
-         the depth-based padding above (each row carries its own
-         inset), so the nested level inherits via depth+1. */}
-      {hasChildren && expanded && (
-        <SortableLevel
-          nodes={node.children}
-          depth={depth + 1}
-          busy={busy}
-          pageId={pageId}
-        />
-      )}
     </li>
   )
-}
+})
 
 // AddBlockMenu was extracted to its own left-pinned WidgetPicker
 // component (components/inline-edit/WidgetPicker.tsx). The outline
