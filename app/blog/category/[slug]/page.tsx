@@ -8,6 +8,8 @@ import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { archiveCollectionPageLd } from '@/lib/seo/blog-jsonld'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { categoryUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 5): segment-aware canonical + JSON-LD archive URL.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
 
 // /blog/category/<slug> — a category archive. This two-segment STATIC route is
 // matched by Next BEFORE the single-segment dynamic /blog/[slug] (more-specific
@@ -48,6 +50,7 @@ export async function generateMetadata({
   if (!term) return { title: 'Not found' }
   const search = await searchParams
   const page = parseLoopPage(search)
+  const segments = await resolveSegments()
   // Page 2+ canonicalises to its own paginated archive URL so duplicate-content
   // signals stay clean — mirrors /blog's metadata discipline.
   return resolveMetadata({
@@ -57,7 +60,7 @@ export async function generateMetadata({
         ? term.description
         : `Posts in ${term.name}.`,
     fallbackTitle: `${term.name} — Blog`,
-    canonicalPath: categoryUrl(term.slug, page),
+    canonicalPath: categoryUrl(term.slug, page, segments),
   })
 }
 
@@ -82,13 +85,14 @@ export default async function CategoryArchive({
   // (not a user-facing 404). Surface it as notFound() so it's at least visible.
   if (!tree) notFound()
 
+  const segments = await resolveSegments()
   const siteOrigin = await getSiteOrigin()
   const ld = archiveCollectionPageLd({
     termKind: 'category',
     termName: term.name,
     termSlug: term.slug,
     description: term.description,
-    archivePath: categoryUrl(term.slug),
+    archivePath: categoryUrl(term.slug, 1, segments),
     siteOrigin,
   })
 

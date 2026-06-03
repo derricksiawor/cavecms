@@ -6,7 +6,12 @@ import { parseForRead, parseProjectSectionForRead } from './parse'
 import { collectMediaPaths } from './mediaRefs'
 import { getProjectRow } from './getProjectRow'
 import { getSetting } from './getSettings'
-import { categoryUrl, tagUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 5): bake permalink-segment-aware URLs at hydrate
+// (server, async) so the SYNCHRONOUS LxPosts renderer — which also runs in the
+// client editor canvas — never constructs a segment-aware URL itself.
+import { blogIndexUrl, categoryUrl, postUrl, tagUrl } from '@/lib/blog/urls'
+import { resolveSegments } from '@/lib/blog/resolveSegments'
+import type { PermalinkSegments } from '@/lib/blog/urls'
 import { isMissingTable } from '@/lib/db/errors'
 import type { BlockData } from './block-registry'
 import type { BlockKind } from './blockMeta'
@@ -97,6 +102,10 @@ export interface HydratedPost {
   excerpt: string | null
   published_at: Date | string | null
   hero_image_id: number | null
+  // blog-system worktree (Phase 5): permalink-segment-aware detail URL, baked at
+  // hydrate so the synchronous renderer reads it directly. Defaults to
+  // /blog/<slug> on a fresh install.
+  url: string
 }
 
 // One card in a Blog Loop slice. Extends the recent-post shape with the
@@ -116,8 +125,12 @@ export interface HydratedPostLoopItem {
   /** Up to 2 categories for the loop-card cross-link pills (#0.592). Batch-
    *  fetched for the WHOLE page slice in ONE query (no N+1) and capped per
    *  card so a post in 20 categories doesn't blow the card layout. Empty when
-   *  the post has no categories. */
-  categories: Array<{ slug: string; name: string }>
+   *  the post has no categories. `url` is the permalink-segment-aware archive
+   *  URL, baked at hydrate (Phase 5). */
+  categories: Array<{ slug: string; name: string; url: string }>
+  // blog-system worktree (Phase 5): permalink-segment-aware post detail URL,
+  // baked at hydrate so the synchronous loop renderer reads it directly.
+  url: string
 }
 
 // The paginated, filtered slice a loop-mode lx_posts block renders.
@@ -418,6 +431,15 @@ export async function hydratePage(
   const loopBlocks = postsBlocks.filter(
     (b) => (b.data as BlockData<'lx_posts'>).mode === 'loop',
   )
+  // blog-system worktree (Phase 5): resolve the permalink segments ONCE for this
+  // page when it has any post-bearing block, then bake segment-aware URLs onto
+  // every post / loop item so the synchronous LxPosts renderer reads them
+  // directly. Skipped entirely on pages with no post block (cost-free).
+  let segments: PermalinkSegments | null = null
+  if (recentBlocks.length > 0 || loopBlocks.length > 0) {
+    segments = await resolveSegments()
+  }
+
   let posts: HydratedPost[] = []
   if (recentBlocks.length > 0) {
     const maxLimit = recentBlocks.reduce((m, b) => {
@@ -426,7 +448,7 @@ export async function hydratePage(
       const lim = (b.data as BlockData<'lx_posts'>).limit
       return typeof lim === 'number' && lim > m ? lim : m
     }, 1)
-    posts = await fetchRecentPostsSafely(Math.min(12, Math.max(1, maxLimit)))
+    posts = await fetchRecentPostsSafely(Math.min(12, Math.max(1, maxLimit)), segments!)
     for (const p of posts) {
       if (p.hero_image_id) mediaIds.add(p.hero_image_id)
     }
@@ -460,14 +482,20 @@ export async function hydratePage(
     const filterTag =
       override && 'tag' in override ? override.tag : override ? undefined : loopData.tag
     // Pager base path: an archive override pins paging to its term archive so
-    // ?page=N stays on /blog/category/<slug>; a plain /blog leaves it default.
-    let basePath: string | undefined
+    // ?page=N stays on /<seg>/category/<slug>; a plain index uses /<seg>. Phase
+    // 5: ALWAYS set basePath through the segment-aware helpers (including the
+    // index case) so a custom segment's pager links are correct — the renderer's
+    // literal `/blog` fallback only applies when basePath is somehow absent.
+    let basePath: string
     if (override && 'category' in override) {
-      basePath = categoryUrl(override.category)
+      basePath = categoryUrl(override.category, 1, segments!)
     } else if (override && 'tag' in override) {
-      basePath = tagUrl(override.tag)
+      basePath = tagUrl(override.tag, 1, segments!)
+    } else {
+      basePath = blogIndexUrl(1, segments!)
     }
     postsLoop = await fetchPostsLoopSlice({
+      segments: segments!,
       page: opts?.loopPage ?? 1,
       perPage: Math.min(50, Math.max(1, Math.floor(perPage))),
       category: filterCategory,
@@ -562,6 +590,8 @@ export const MAX_LOOP_PAGE = 1000
  *  parameters here, so the join is injection-safe. Missing-table-safe (returns
  *  an empty page) like the other post/project fetches. */
 async function fetchPostsLoopSlice(args: {
+  // blog-system worktree (Phase 5): resolved segments to bake item/category URLs.
+  segments: PermalinkSegments
   page: number
   perPage: number
   category?: string
@@ -631,7 +661,7 @@ async function fetchPostsLoopSlice(args: {
     // (no N+1), ordered by (post, category position) so each card's pills are
     // stable. Capped to 2 per post at render to keep the card tidy. Only runs
     // when the page has posts.
-    const catByPost = new Map<number, Array<{ slug: string; name: string }>>()
+    const catByPost = new Map<number, Array<{ slug: string; name: string; url: string }>>()
     if (pageRows.length > 0) {
       const ids = pageRows.map((r) => r.id)
       const [pcRows] = (await db.execute(sql`
@@ -645,7 +675,8 @@ async function fetchPostsLoopSlice(args: {
       ]
       for (const pc of pcRows) {
         const list = catByPost.get(pc.post_id) ?? []
-        list.push({ slug: pc.slug, name: pc.name })
+        // Phase 5: bake the segment-aware archive URL per category.
+        list.push({ slug: pc.slug, name: pc.name, url: categoryUrl(pc.slug, 1, args.segments) })
         catByPost.set(pc.post_id, list)
       }
     }
@@ -661,6 +692,8 @@ async function fetchPostsLoopSlice(args: {
       // Cap at 2 categories per card so a heavily-categorised post doesn't
       // overflow the card chrome.
       categories: (catByPost.get(r.id) ?? []).slice(0, 2),
+      // Phase 5: bake the segment-aware post detail URL (honors structure).
+      url: postUrl(r.slug, args.segments, r.published_at),
     }))
     return {
       items,
@@ -713,7 +746,11 @@ async function fetchFeaturedProjectsSafely(): Promise<HydratedProject[]> {
 /** Fetches the latest published, not-soft-deleted posts (newest first),
  *  capped at `limit` — the data source for the lx_posts block. Mirrors
  *  the /blog index query. Missing-table-safe like the projects fetch. */
-async function fetchRecentPostsSafely(limit: number): Promise<HydratedPost[]> {
+async function fetchRecentPostsSafely(
+  limit: number,
+  // blog-system worktree (Phase 5): resolved segments to bake the detail URL.
+  segments: PermalinkSegments,
+): Promise<HydratedPost[]> {
   const cap = Math.min(12, Math.max(1, Math.floor(limit)))
   try {
     const [rows] = (await db.execute(sql`
@@ -723,8 +760,18 @@ async function fetchRecentPostsSafely(limit: number): Promise<HydratedPost[]> {
         AND deleted_at IS NULL
       ORDER BY published_at DESC, id DESC
       LIMIT ${cap}
-    `)) as unknown as [HydratedPost[]]
-    return rows
+    `)) as unknown as [
+      Array<{
+        id: number
+        slug: string
+        title: string
+        excerpt: string | null
+        published_at: Date | string | null
+        hero_image_id: number | null
+      }>,
+    ]
+    // Phase 5: bake the segment-aware post detail URL (honors structure).
+    return rows.map((r) => ({ ...r, url: postUrl(r.slug, segments, r.published_at) }))
   } catch (err) {
     if (isMissingTable(err)) return []
     throw err

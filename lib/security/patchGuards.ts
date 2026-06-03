@@ -247,6 +247,40 @@ export async function guardLoginPath(
     })
   }
 
+  // ─── blog-system worktree (Phase 5): symmetric permalink collision ───
+  // guardPermalink rejects a permalink segment that equals the login path; the
+  // REVERSE must hold too — a login path set equal to a live blog/projects
+  // segment would make the hidden login route and the segment rewrite contend
+  // for the same URL. Read both permalink segments inside this PATCH TX
+  // (consistent read) and reject an equal value, mirroring guardPermalink.
+  {
+    const [segRows] = (await tx.execute(sql`
+      SELECT \`key\`, value FROM settings
+      WHERE \`key\` IN ('permalink_blog', 'permalink_projects')
+    `)) as unknown as [Array<{ key: string; value: unknown }>]
+    const segOf = (k: string, dflt: string): string => {
+      const r = segRows.find((x) => x.key === k)
+      if (!r) return dflt
+      try {
+        const v = typeof r.value === 'string' ? JSON.parse(r.value) : r.value
+        const s = (v as { segment?: unknown } | null)?.segment
+        return typeof s === 'string' && s ? s.toLowerCase() : dflt
+      } catch {
+        return dflt
+      }
+    }
+    const np = newPath.toLowerCase()
+    if (
+      np === segOf('permalink_blog', 'blog') ||
+      np === segOf('permalink_projects', 'projects')
+    ) {
+      guardFail('LOGIN_PATH_COLLIDES_PERMALINK', {
+        message:
+          'That sign-in path matches your blog or projects URL base. Pick a different word.',
+      })
+    }
+  }
+
   const [rows] = (await tx.execute(sql`
     SELECT expires_at, confirmed_at
     FROM security_login_path_pending
@@ -278,6 +312,78 @@ export async function guardLoginPath(
       created_at = NOW(3),
       created_by = VALUES(created_by)
   `)
+}
+
+// ─── blog-system worktree (Phase 5): permalink cross-collision ───
+// The per-key Zod schema (settings-registry permalinkSegment) can validate a
+// segment's SHAPE + reject OTHER reserved words, but it CANNOT see the sibling
+// permalink's current value or the live login path — so the blog===projects and
+// segment===loginPath collisions are enforced HERE, at the settings-write layer,
+// where both current values are readable. Runs inside the same PATCH TX as the
+// UPDATE (consistent read of the sibling row). Throws SecurityGuardFailure →
+// 422 with a precise code the client maps to an inline error.
+//
+// `key` is the permalink key being saved ('permalink_blog' | 'permalink_projects');
+// `newSegment` is the candidate. The guard reads the OTHER permalink row's stored
+// segment + the live login path and rejects an equal value.
+//
+// `prevSegment` is the segment as currently stored. When it equals `newSegment`
+// (a structure-only save on the blog card, where only `structure` moved) the
+// segment can't introduce a NEW collision — it was already validated when set,
+// and the sibling/login-path values it would collide with are unchanged — so we
+// early-return WITHOUT the sibling-row SELECT (L3: cheap structure-only saves).
+export async function guardPermalink(
+  tx: Tx,
+  key: 'permalink_blog' | 'permalink_projects',
+  newSegment: string,
+  loginPath: string,
+  prevSegment: string,
+): Promise<void> {
+  // Segment unchanged → no collision possible; skip the SELECT + checks.
+  if (newSegment === prevSegment) return
+
+  const seg = newSegment.toLowerCase()
+
+  // Collision with the hidden admin login path — a permalink segment that
+  // equals the login path would let the segment rewrite shadow the login route
+  // (or vice versa). Reject.
+  if (loginPath && seg === loginPath.toLowerCase()) {
+    guardFail('PERMALINK_COLLIDES_LOGIN_PATH', {
+      message: 'That base matches your admin sign-in path. Pick a different word.',
+    })
+  }
+
+  // Collision with the OTHER surface's current segment. Read the sibling row;
+  // when absent (not yet seeded) fall back to that surface's default segment so
+  // a fresh install still blocks blog===projects.
+  const otherKey = key === 'permalink_blog' ? 'permalink_projects' : 'permalink_blog'
+  const otherDefault = otherKey === 'permalink_blog' ? 'blog' : 'projects'
+  const [rows] = (await tx.execute(sql`
+    SELECT value FROM settings WHERE \`key\` = ${otherKey}
+  `)) as unknown as [Array<{ value: unknown }>]
+  let otherSegment = otherDefault
+  const raw = rows[0]?.value
+  if (raw != null) {
+    try {
+      const parsed =
+        typeof raw === 'string'
+          ? (JSON.parse(raw) as { segment?: string })
+          : (raw as { segment?: string })
+      if (typeof parsed?.segment === 'string' && parsed.segment.length > 0) {
+        otherSegment = parsed.segment
+      }
+    } catch {
+      // Corrupt sibling row → use the default; the corrupt row gets healed on
+      // its own next save. We still enforce against the default so we never
+      // silently allow a blog===projects collision.
+    }
+  }
+  if (seg === otherSegment.toLowerCase()) {
+    const otherLabel = key === 'permalink_blog' ? 'Projects' : 'Blog'
+    guardFail('PERMALINK_SEGMENT_IN_USE', {
+      message: `That base is already used by ${otherLabel}. Blog and Projects need different bases.`,
+    })
+  }
 }
 
 export { sha256Hex }

@@ -23,6 +23,8 @@ import {
   Type,
   Signpost,
   FolderTree,
+  // blog-system worktree (Phase 5): Permalinks settings sub-page icon.
+  Link2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -81,6 +83,9 @@ export const NAV: readonly NavItem[] = [
   { label: 'AI Assistant', href: '/admin/settings/ai', roles: ['admin'], icon: Sparkles, parent: '/admin/settings' },
   { label: 'Updates', href: '/admin/settings/updates', roles: ['admin'], icon: Download, parent: '/admin/settings' },
   { label: 'Backups', href: '/admin/settings/backups', roles: ['admin'], icon: Archive, parent: '/admin/settings' },
+  // ── blog-system worktree (Phase 5): Permalinks (appended so a parallel SEO-
+  //    settings worktree's own appended entry merges cleanly beside this one) ──
+  { label: 'Permalinks', href: '/admin/settings/permalinks', roles: ['admin'], icon: Link2, parent: '/admin/settings' },
   { label: 'Activity', href: '/admin/activity', roles: ['admin'], icon: ShieldCheck },
   { label: 'Help', href: '/admin/help', roles: ['admin', 'editor', 'viewer'], icon: HelpCircle },
 ]

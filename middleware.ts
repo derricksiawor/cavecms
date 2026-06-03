@@ -15,6 +15,11 @@ import {
   type CompiledRuleset,
   type RedirectRule,
 } from '@/lib/cms/redirects'
+// ── blog-system worktree (Phase 5): edge-safe permalink-segment rewrite ──
+// Pure module (no node/db) — maps a public path under a NON-default configured
+// segment to its canonical internal blog/projects route. Defaults are a no-op.
+import { rewriteConfiguredSegment } from '@/lib/blog/segmentRewrite'
+import type { BlogStructure } from '@/lib/blog/urls'
 
 // Middleware runs on the default Edge runtime. All imports above are
 // Edge-compatible:
@@ -65,6 +70,14 @@ interface SecurityConfig {
   /** True once an admin user has been created via the install wizard.
    *  False on a fresh deploy → middleware redirects to /install. */
   installed: boolean
+  // ── blog-system worktree (Phase 5): resolved permalink segments ──
+  // Optional so a cold-start / older internal-config payload that predates
+  // this field falls back to the literal defaults (existing routing).
+  permalinks?: {
+    blogSegment: string
+    projectsSegment: string
+    blogStructure: BlogStructure
+  }
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
@@ -136,6 +149,14 @@ function bootstrapSecurityConfig(): SecurityConfig {
     // first cfg fetch, and /install + the wizard endpoints remain
     // reachable directly if the operator types the URL.
     installed: true,
+    // ── blog-system worktree (Phase 5) ──
+    // Default segments → the segment rewrite is a no-op, so a cold-start
+    // outage keeps today's /blog + /projects routing working.
+    permalinks: {
+      blogSegment: 'blog',
+      projectsSegment: 'projects',
+      blogStructure: 'postname',
+    },
   }
 }
 
@@ -508,7 +529,16 @@ function refuseInternalPageRoute(req: NextRequest): NextResponse | null {
   return null
 }
 
-function maybeRewriteToPageRoute(pathname: string, loginPathLower: string): string | null {
+function maybeRewriteToPageRoute(
+  pathname: string,
+  loginPathLower: string,
+  // ── blog-system worktree (Phase 5): dynamic reserved segments ──
+  // The operator-configured blog/projects base segments (lowercased) join the
+  // static RESERVED set so a NON-default segment (e.g. 'news') can never be
+  // claimed by a bare-slug CMS page rewrite — the segment rewrite owns it. The
+  // literal 'blog'/'projects' are already in RESERVED; this covers customs.
+  extraReservedLower?: ReadonlySet<string>,
+): string | null {
   const m = SINGLE_SEGMENT_RE.exec(pathname)
   if (!m) return null
   const captured = m[1]!
@@ -516,6 +546,7 @@ function maybeRewriteToPageRoute(pathname: string, loginPathLower: string): stri
   if (captured.startsWith('.')) return null
   const lowered = captured.toLowerCase()
   if (RESERVED.has(lowered)) return null
+  if (extraReservedLower?.has(lowered)) return null
   if (loginPathLower && lowered === loginPathLower) return null
   if (!SLUG_RE.test(captured)) return null
   return `${CMS_RENDER_PREFIX}/${captured}`
@@ -742,10 +773,58 @@ export async function middleware(
   // pre-set it; only the rewrite below is allowed to add it.
   reqHeaders.delete(CMS_RENDER_MARKER)
 
-  // 7. Block 2: single-segment rewrite to /_page/{slug}, unless the
+  // ── blog-system worktree (Phase 5): permalink segment rewrite ──────────────
+  // Resolve the configured blog/projects segments (cfg-backed via the cached
+  // security-config loopback; defaults when the payload predates this field).
+  // When a segment is NON-default, map a public path under it to the canonical
+  // internal blog/projects route (visitor keeps the configured segment in the
+  // URL bar; rewrite target is internal — like /cms-render). Default segments →
+  // no-op, so today's /blog + /projects file routes serve directly. This MUST
+  // run BEFORE the generic single-segment CMS rewrite (block 7), and the custom
+  // segments join a dynamic reserved set so a bare-slug page can't claim them.
+  const blogSeg = cfg?.permalinks?.blogSegment ?? 'blog'
+  const projSeg = cfg?.permalinks?.projectsSegment ?? 'projects'
+  const blogStructure = cfg?.permalinks?.blogStructure ?? 'postname'
+  const extraReservedLower = new Set<string>()
+  if (blogSeg !== 'blog') extraReservedLower.add(blogSeg)
+  if (projSeg !== 'projects') extraReservedLower.add(projSeg)
+  // Decode once for the segment matcher (handles %-encoded paths); a malformed
+  // sequence simply yields no match (segmentRewrite returns null).
+  let decodedForSegment = pathname
+  try {
+    decodedForSegment = decodeURIComponent(pathname)
+  } catch {
+    // keep raw pathname — rewriteConfiguredSegment validates shape and returns
+    // null on anything unexpected.
+  }
+  // Run the segment rewrite when EITHER a non-default segment is configured
+  // (extraReservedLower non-empty) OR the blog uses the year-month structure.
+  // The latter is required even on the DEFAULT 'blog' segment: posts under
+  // /blog/<yyyy>/<mm>/<slug> have no file route and must be rewritten to the
+  // canonical /blog/<slug> (which resolves by slug). For the pure default case
+  // (default segments + postname structure) BOTH conditions are false, so the
+  // rewrite is never invoked and behaviour stays byte-identical to today.
+  const segmentRewriteTarget =
+    extraReservedLower.size > 0 || blogStructure === 'year-month-postname'
+      ? rewriteConfiguredSegment({
+          pathname: decodedForSegment,
+          blogSegment: blogSeg,
+          projectsSegment: projSeg,
+          blogStructure,
+        })
+      : null
+
+  // 7. Block 2: single-segment rewrite to /cms-render/{slug}, unless the
   //    segment matches the resolved LOGIN_PATH (then let the dynamic
-  //    /(auth)/[loginPath] route serve it).
-  const rewriteTarget = maybeRewriteToPageRoute(pathname, loginPathLower)
+  //    /(auth)/[loginPath] route serve it) OR a configured permalink segment
+  //    (then the segment rewrite above owns it).
+  // A permalink segment rewrite (when present) wins over the generic CMS
+  // rewrite — it targets a canonical internal route, NOT /cms-render, so it
+  // does NOT set the CMS_RENDER_MARKER.
+  const cmsRenderTarget = segmentRewriteTarget
+    ? null
+    : maybeRewriteToPageRoute(pathname, loginPathLower, extraReservedLower)
+  const rewriteTarget = segmentRewriteTarget ?? cmsRenderTarget
   let res: NextResponse
   if (rewriteTarget) {
     const url = req.nextUrl.clone()
@@ -792,7 +871,13 @@ export async function middleware(
     // /cms-render/* path (which the matcher matches); without this
     // marker the guard would 404 our own rewrite — the empty-body 404
     // that broke every CMS page.
-    reqHeaders.set(CMS_RENDER_MARKER, '1')
+    //
+    // blog-system worktree (Phase 5): the marker is ONLY for /cms-render/*
+    // targets. A permalink segment rewrite (cmsRenderTarget === null) targets a
+    // canonical internal blog/projects route that the matcher re-runs harmlessly
+    // (those file routes aren't gated by refuseInternalPageRoute), so it must NOT
+    // carry the marker.
+    if (cmsRenderTarget) reqHeaders.set(CMS_RENDER_MARKER, '1')
     res = NextResponse.rewrite(url, { request: { headers: reqHeaders } })
   } else {
     res = NextResponse.next({ request: { headers: reqHeaders } })

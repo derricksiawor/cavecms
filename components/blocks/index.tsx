@@ -67,14 +67,16 @@ export interface RenderContext {
    *  Optional: callers that don't supply it (and the editor preview
    *  path) leave it undefined and the posts block renders its empty
    *  state rather than crashing. */
-  posts?: Map<number, { id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null }>
+  posts?: Map<number, { id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null; url: string }>
   /** Blog Loop slice — set ONLY when the page tree contains a loop-mode
    *  `lx_posts` block (see hydrate.ts `postsLoop`). Carries the keyset-
    *  paginated, filtered, bounded page of posts plus the pager flags the
    *  loop renderer needs. Undefined on every other page (and for recent-
-   *  mode-only pages): the loop renderer then renders its empty state. */
+   *  mode-only pages): the loop renderer then renders its empty state.
+   *  `url` (per item + per category) is the permalink-segment-aware URL baked
+   *  at hydrate (Phase 5) so the synchronous renderer never builds it. */
   postsLoop?: {
-    items: Array<{ id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null; reading_minutes: number; categories: Array<{ slug: string; name: string }> }>
+    items: Array<{ id: number; slug: string; title: string; excerpt: string | null; published_at: Date | string | null; hero_image_id: number | null; reading_minutes: number; categories: Array<{ slug: string; name: string; url: string }>; url: string }>
     page: number
     perPage: number
     hasPrev: boolean

@@ -81,6 +81,13 @@ export type ValidatePageSlugResult =
 export function validatePageSlug(
   input: string,
   loginPath: string,
+  // blog-system worktree (Phase 5): DYNAMIC reserved set — the operator-configured
+  // blog/projects base segments when they DIFFER from the literal defaults (which
+  // are already in RESERVED). A page/post slug can never claim a configured
+  // permalink segment, or the segment rewrite would shadow it. Lowercased slugs.
+  // Optional → callers that don't (yet) resolve the segments behave exactly as
+  // before; the literal 'blog'/'projects' protection still applies via RESERVED.
+  extraReserved?: ReadonlySet<string>,
 ): ValidatePageSlugResult {
   // 0. Whitespace — distinct reason code covering leading, trailing,
   //    AND internal whitespace (tab, NBSP, etc via \s). Catches the
@@ -119,6 +126,11 @@ export function validatePageSlug(
   //    constrained to lowercase + digit + hyphen by SLUG_RE so no
   //    lowercase fold needed.
   if (RESERVED.has(input)) {
+    return { ok: false, reason: 'slug_reserved' }
+  }
+  // Phase 5: dynamic reserved set (custom permalink segments). `input` is already
+  // lowercase per SLUG_RE.
+  if (extraReserved?.has(input)) {
     return { ok: false, reason: 'slug_reserved' }
   }
   if (loginPath && input === loginPath.toLowerCase()) {

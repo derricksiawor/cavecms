@@ -1,4 +1,4 @@
-import { categoryUrl, tagUrl } from '@/lib/blog/urls'
+import { categoryUrl, tagUrl, type PermalinkSegments } from '@/lib/blog/urls'
 
 export interface TermLink {
   slug: string
@@ -11,13 +11,19 @@ export interface TermLink {
 // like this" without bouncing to the nav. Pure server component (just <a>s).
 // Categories render copper-tinted (the primary grouping); tags render as quiet
 // outlined pills. Renders nothing when the post has no terms.
+//
+// Phase 5: `segments` is the resolved permalink config threaded from the page so
+// the archive URLs honor a custom blog segment. Optional → falls back to the
+// literal /blog default (byte-identical to pre-Phase-5).
 export function TaxonomyPills({
   categories,
   tags,
+  segments,
   className,
 }: {
   categories: TermLink[]
   tags: TermLink[]
+  segments?: PermalinkSegments
   className?: string
 }) {
   if (categories.length === 0 && tags.length === 0) return null
@@ -26,7 +32,7 @@ export function TaxonomyPills({
       {categories.map((c) => (
         <a
           key={`c-${c.slug}`}
-          href={categoryUrl(c.slug)}
+          href={categoryUrl(c.slug, 1, segments)}
           className="inline-flex w-fit items-center rounded-full bg-copper-500/12 px-3.5 py-1.5 text-xs font-semibold text-copper-700 ring-1 ring-copper-400/30 transition-colors hover:bg-copper-500/20"
         >
           {c.name}
@@ -35,7 +41,7 @@ export function TaxonomyPills({
       {tags.map((t) => (
         <a
           key={`t-${t.slug}`}
-          href={tagUrl(t.slug)}
+          href={tagUrl(t.slug, 1, segments)}
           className="inline-flex w-fit items-center rounded-full border border-warm-stone/30 px-3.5 py-1.5 text-xs font-medium text-warm-stone transition-colors hover:border-copper-400 hover:text-copper-700"
         >
           #{t.name}

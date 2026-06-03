@@ -1,7 +1,6 @@
 import clsx from 'clsx'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { MotionTarget } from '@/components/motion/MotionTarget'
-import { postUrl, categoryUrl } from '@/lib/blog/urls'
 import { MediaImg } from '../MediaImg'
 import type { BlockData } from '@/lib/cms/block-registry'
 import type { RenderContext } from '..'
@@ -44,16 +43,20 @@ interface PostCard {
   published_at: Date | string | null
   hero_image_id: number | null
   readingMinutes?: number
-  // Loop-mode only: up to 2 categories for the card cross-link pills (#0.592).
-  // Recent mode leaves it empty.
-  categories?: Array<{ slug: string; name: string }>
+  // Permalink-segment-aware detail URL, baked at hydrate (Phase 5) so this
+  // synchronous renderer (which also runs in the client editor canvas) never
+  // builds a segment-aware URL itself. Recent + loop mode both carry it.
+  url: string
+  // Loop-mode only: up to 2 categories for the card cross-link pills (#0.592),
+  // each with its baked segment-aware archive URL. Recent mode leaves it empty.
+  categories?: Array<{ slug: string; name: string; url: string }>
 }
 
 // Build the loop pager href off the slice's basePath (the blog index by
-// default, or a term archive like /blog/category/<slug> when this loop is an
-// archive). The configurable permalink SEGMENT is a Phase 5 concern; the
-// basePath already routes through lib/blog/urls so a segment change updates it
-// in one place. Page 1 → bare base; page >1 → `?page=N`.
+// default, or a term archive like /<seg>/category/<slug> when this loop is an
+// archive). Phase 5: basePath is baked at hydrate through lib/blog/urls with the
+// configured segment, so the pager links are segment-correct here with no async.
+// Page 1 → bare base; page >1 → `?page=N`.
 function pageHref(base: string, page: number): string {
   return page <= 1 ? base : `${base}?page=${page}`
 }
@@ -92,8 +95,17 @@ export function LxPosts({
         hero_image_id: p.hero_image_id,
         readingMinutes: p.reading_minutes,
         categories: p.categories,
+        url: p.url,
       }))
-    : [...(posts?.values() ?? [])].slice(0, data.limit)
+    : [...(posts?.values() ?? [])].slice(0, data.limit).map((p) => ({
+        id: p.id,
+        slug: p.slug,
+        title: p.title,
+        excerpt: p.excerpt,
+        published_at: p.published_at,
+        hero_image_id: p.hero_image_id,
+        url: p.url,
+      }))
 
   const isList = data.layout === 'list'
 
@@ -140,7 +152,7 @@ export function LxPosts({
           return (
             <li key={p.id}>
               <a
-                href={postUrl(p.slug)}
+                href={p.url}
                 className={clsx('group block', isList && 'flex flex-col gap-5 sm:flex-row sm:items-center sm:gap-8')}
               >
                 <div className={clsx('overflow-hidden rounded-2xl', isList && 'sm:w-2/5 sm:shrink-0')}>
@@ -195,7 +207,7 @@ export function LxPosts({
                   {p.categories.map((c) => (
                     <a
                       key={c.slug}
-                      href={categoryUrl(c.slug)}
+                      href={c.url}
                       className={clsx(
                         'inline-flex w-fit items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-eyebrow ring-1 transition-colors',
                         onDark

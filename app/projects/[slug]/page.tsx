@@ -25,6 +25,10 @@ import { getSession, resolveEditableMode } from '@/lib/auth/getSession'
 import { getSetting } from '@/lib/cms/getSettings'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
 import { mintPublicPreCsrfForBlocks } from '@/app/_shared/cmsPage'
+// blog-system worktree (Phase 5): resolve the configured projects segment once
+// per request and thread into canonical / slug-redirect / JSON-LD URLs.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
+import { projectUrl } from '@/lib/blog/urls'
 
 // Layout already forces dynamic via headers(); declaring here is
 // belt-and-braces and documents intent.
@@ -47,12 +51,14 @@ export async function generateMetadata({
   // cache(), so when the page body's hydrateProject calls it later
   // in the same request the row is already memoised.
   const p = await getProjectRow(slug)
+  // Phase 5: canonical honors the configured projects segment.
+  const segments = await resolveSegments()
   const base = await resolveMetadata({
     title: p?.seo_title ?? null,
     description: p?.seo_description ?? null,
     fallbackTitle: p?.name ?? 'Project',
     fallbackDescription: p?.tagline ?? undefined,
-    canonicalPath: `/projects/${slug}`,
+    canonicalPath: projectUrl(slug, segments),
   })
   if (sp.preview) {
     return { ...base, robots: { index: false, follow: false } }
@@ -84,6 +90,10 @@ export default async function ProjectPage({
 }) {
   const { slug } = await params
   const sp = await searchParams
+
+  // Phase 5: resolve the configured projects segment once for this render —
+  // threaded into the slug-redirect target + the Residence JSON-LD url below.
+  const segments = await resolveSegments()
 
   // ─── Session + edit mode (resolved first) ─────────────────────
   // Resolved BEFORE the project lookup so an admin in edit mode can
@@ -124,7 +134,7 @@ export default async function ProjectPage({
       SELECT new_slug FROM slug_redirects
       WHERE resource_type = 'project' AND old_slug = ${slug}
     `)) as unknown as [Array<{ new_slug: string }>]
-    if (redirRows[0]) permanentRedirect(`/projects/${redirRows[0].new_slug}`)
+    if (redirRows[0]) permanentRedirect(projectUrl(redirRows[0].new_slug, segments))
 
     // Preview-token branch — admin QA against unpublished rows.
     if (sp.preview) {
@@ -206,6 +216,8 @@ export default async function ProjectPage({
       name: hydratedProject.project.name,
       tagline: hydratedProject.project.tagline,
       slug: hydratedProject.project.slug,
+      // Phase 5: segment-aware project URL for the JSON-LD `url`.
+      urlPath: projectUrl(hydratedProject.project.slug, segments),
       heroImage: heroVariants?.lg ?? null,
       location: hydratedProject.project.location,
       priceMin: pricingData?.price_min,
@@ -309,6 +321,8 @@ export default async function ProjectPage({
     name: hydratedProject.project.name,
     tagline: hydratedProject.project.tagline,
     slug: hydratedProject.project.slug,
+    // Phase 5: segment-aware project URL for the JSON-LD `url`.
+    urlPath: projectUrl(hydratedProject.project.slug, segments),
     heroImage: heroVariants?.lg ?? null,
     location: hydratedProject.project.location,
     priceMin: pricingData?.price_min,

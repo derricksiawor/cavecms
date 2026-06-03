@@ -18,6 +18,8 @@ import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidat
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { PageEditorPatch, PageAdminPatch } from '@/lib/cms/page-shapes'
 import { validatePageSlug } from '@/lib/cms/page-slug'
+// blog-system worktree (Phase 5): page slugs can't claim a custom permalink segment.
+import { getCustomSegmentReservedSet } from '@/lib/blog/resolveSegments'
 import type { PageRawRow } from '@/lib/cms/types'
 import { env } from '@/lib/env'
 
@@ -227,8 +229,10 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
           throw new HttpError(409, 'system_slug_locked')
         }
 
-        // Validate the new slug (NFKC + ASCII + RESERVED + LOGIN_PATH).
-        const slugCheck = validatePageSlug(body.slug, env.LOGIN_PATH)
+        // Validate the new slug (NFKC + ASCII + RESERVED + LOGIN_PATH +
+        // Phase-5 custom permalink segments).
+        const customSegmentReserved = await getCustomSegmentReservedSet()
+        const slugCheck = validatePageSlug(body.slug, env.LOGIN_PATH, customSegmentReserved)
         if (!slugCheck.ok) {
           console.info(
             JSON.stringify({
@@ -252,7 +256,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         // /{LOGIN_PATH} request match a slug_redirects row and bypass
         // the public-route reserved-set defence. Same `slug_invalid`
         // public code as the new-slug failure (spec §5.2).
-        const oldSlugCheck = validatePageSlug(row.slug, env.LOGIN_PATH)
+        const oldSlugCheck = validatePageSlug(row.slug, env.LOGIN_PATH, customSegmentReserved)
         if (!oldSlugCheck.ok) {
           console.info(
             JSON.stringify({

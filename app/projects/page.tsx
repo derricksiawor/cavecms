@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { renderCmsPage } from '../_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
+// blog-system worktree (Phase 5): segment-aware canonical for the projects index.
+import { getProjectsSegment } from '@/lib/blog/resolveSegments'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,11 +24,12 @@ export async function generateMetadata() {
     Array<{ seo_title: string | null; seo_description: string | null }>,
   ]
   const r = rows[0]
+  const projectsSegment = await getProjectsSegment()
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,
     fallbackTitle: 'Projects — CaveCMS',
-    canonicalPath: '/projects',
+    canonicalPath: `/${projectsSegment}`,
   })
 }
 

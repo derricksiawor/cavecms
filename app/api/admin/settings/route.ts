@@ -19,8 +19,12 @@ import {
   guardMaintenance,
   guardRecaptcha,
   guardLoginPath,
+  guardPermalink,
   SecurityGuardFailure,
 } from '@/lib/security/patchGuards'
+// blog-system worktree (Phase 5): register old→new redirects on a segment change.
+import { registerSegmentChangeRedirects } from '@/lib/blog/permalinkRedirects'
+import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
 import { clearZohoAccessTokenCache } from '@/lib/crm/zoho'
 import {
   AAD_AI_CONFIG_API_KEY,
@@ -499,6 +503,15 @@ export const PATCH = withError(async (req: Request) => {
   // post-TX revalidate is gated on that flag — no point bumping the
   // cache tag when nothing changed.
   const newValueJson = JSON.stringify(parsed)
+
+  // blog-system worktree (Phase 5): resolve the LIVE login path BEFORE the TX
+  // (getResolvedLoginPath may itself open a TX on the auto-revert path; nesting
+  // that inside our outer TX is avoidable). Only needed for the permalink keys'
+  // collision guard. Resolved once; passed into guardPermalink inside the TX.
+  const isPermalinkKey =
+    body.key === 'permalink_blog' || body.key === 'permalink_projects'
+  const liveLoginPath = isPermalinkKey ? await getResolvedLoginPath() : ''
+
   let changed: boolean
   try {
     changed = await db.transaction<boolean>(async (tx) => {
@@ -541,6 +554,24 @@ export const PATCH = withError(async (req: Request) => {
       const prevPath =
         (prevValueForGuards as { path?: string } | null | undefined)?.path ?? env.LOGIN_PATH
       await guardLoginPath(tx, (parsed as { path: string }).path, prevPath, ctx.userId)
+    }
+    // ── blog-system worktree (Phase 5): permalink cross-collision + redirects ──
+    // Guard runs FIRST (rejects blog===projects / segment===loginPath before any
+    // write). Then, when the base segment actually changed, register the
+    // old→new catch-all 301 in the SAME TX so the segment change + its
+    // back-compat redirects commit atomically.
+    if (body.key === 'permalink_blog' || body.key === 'permalink_projects') {
+      const newSegment = (parsed as { segment: string }).segment
+      const prevSegment =
+        (prevValueForGuards as { segment?: string } | null | undefined)?.segment ??
+        (body.key === 'permalink_blog' ? 'blog' : 'projects')
+      // Guard skips the sibling-row SELECT + collision check when the segment is
+      // unchanged (structure-only save can't introduce a collision). Redirects
+      // register only on a real segment move.
+      await guardPermalink(tx, body.key, newSegment, liveLoginPath, prevSegment)
+      if (prevSegment !== newSegment) {
+        await registerSegmentChangeRedirects(tx, prevSegment, newSegment, ctx.userId)
+      }
     }
 
     // First-save path: the admin Settings page synthesizes a

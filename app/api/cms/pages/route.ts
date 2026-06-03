@@ -15,6 +15,10 @@ import { tagsForPageCreate } from '@/lib/cache/tags'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { CreatePageEditorBody, CreatePageAdminBody } from '@/lib/cms/page-shapes'
 import { validatePageSlug } from '@/lib/cms/page-slug'
+// blog-system worktree (Phase 5): a page slug can't claim a custom permalink
+// segment (the segment rewrite would shadow it). 'blog'/'projects' are already
+// in the static RESERVED set; this covers custom segments.
+import { getCustomSegmentReservedSet } from '@/lib/blog/resolveSegments'
 import { parseAndSanitize } from '@/lib/cms/parse'
 import { collectMediaPaths } from '@/lib/cms/mediaRefs'
 import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
@@ -125,7 +129,11 @@ export const POST = withError(async (req) => {
   // length, but the helper layers NFKC + ASCII + RESERVED + LOGIN_PATH
   // and is the single source of truth (§5.2). Public code collapses to
   // `slug_invalid` regardless of which granular reason fired.
-  const slugCheck = validatePageSlug(body.slug, env.LOGIN_PATH)
+  const slugCheck = validatePageSlug(
+    body.slug,
+    env.LOGIN_PATH,
+    await getCustomSegmentReservedSet(),
+  )
   if (!slugCheck.ok) {
     console.info(
       JSON.stringify({

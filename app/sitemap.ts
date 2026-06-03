@@ -4,8 +4,11 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { env } from '@/lib/env'
 import { isMissingTable } from '@/lib/db/errors'
-// blog-system worktree: taxonomy archive URL construction (Phase-5 seam)
-import { categoryUrl, tagUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 5): segment-aware URL construction for the blog +
+// projects index/detail/archive entries. resolveSegments() reads the configured
+// permalink segments once; the helpers below honor them.
+import { blogIndexUrl, categoryUrl, postUrl, projectUrl, tagUrl } from '@/lib/blog/urls'
+import { resolveSegments } from '@/lib/blog/resolveSegments'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,10 +24,12 @@ export const dynamic = 'force-dynamic'
 // truncated even if `pages` grows past the cap. `updated_at DESC` is
 // the tiebreaker so the most-recently-edited content surfaces first.
 //
-// /projects and /blog stay hard-coded — they are listing routes, not
-// CMS-managed pages. The posts SELECT below additionally adds per-
-// post entries once the table exists.
-const STATIC_LISTING_PATHS = ['/projects', '/blog']
+// The /projects and /blog INDEX entries are emitted explicitly in the return
+// below — they are listing routes, not CMS-managed pages. blog-system worktree
+// (Phase 5): those index URLs are now SEGMENT-AWARE (built from the configured
+// permalink segments via lib/blog/urls), so the former hard-coded
+// STATIC_LISTING_PATHS array was removed. The posts SELECT below adds per-post
+// entries once the table exists.
 
 // Build-time constant for static-path lastModified, validated at
 // boot via lib/env.ts. Using `new Date()` per request would lie to
@@ -54,6 +59,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const apexHost = new URL(configuredOrigin).host
   if (host !== apexHost) return []
   const origin = configuredOrigin
+
+  // blog-system worktree (Phase 5): resolve the configured permalink segments
+  // once so every blog/projects URL below honors a custom segment + structure.
+  const segments = await resolveSegments()
 
   // Parallel reads via Promise.allSettled — one query rejecting (a
   // slow lock on projects, a transient pages query) must NOT take
@@ -93,10 +102,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     (async () => {
       try {
         const [rows] = (await db.execute(sql`
-          SELECT slug, updated_at
+          SELECT slug, updated_at, published_at
           FROM posts
           WHERE published = TRUE AND deleted_at IS NULL
-        `)) as unknown as [Array<{ slug: string; updated_at: Date }>]
+        `)) as unknown as [
+          Array<{ slug: string; updated_at: Date; published_at: Date | string | null }>,
+        ]
         return rows
       } catch (err) {
         if (!isMissingTable(err)) throw err
@@ -213,29 +224,37 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     ...pageEntries,
-    ...STATIC_LISTING_PATHS.map((p) => ({
-      url: `${origin}${p}`,
+    // blog-system worktree (Phase 5): the blog + projects INDEX URLs are
+    // segment-aware (STATIC_LISTING_PATHS' literals are kept only as the
+    // structural marker — the emitted URLs come from the helpers).
+    {
+      url: `${origin}/${segments.projects}`,
       lastModified: RELEASE_LAST_MOD,
-    })),
+    },
+    {
+      url: `${origin}${blogIndexUrl(1, segments)}`,
+      lastModified: RELEASE_LAST_MOD,
+    },
     ...projectRows.map((p) => ({
-      url: `${origin}/projects/${p.slug}`,
+      url: `${origin}${projectUrl(p.slug, segments)}`,
       lastModified: p.updated_at,
     })),
     ...postRows.map((p) => ({
-      url: `${origin}/blog/${p.slug}`,
+      url: `${origin}${postUrl(p.slug, segments, p.published_at)}`,
       lastModified: p.updated_at,
     })),
     // ── blog-system worktree: taxonomy archive URLs (do not interleave) ──
     // Category + tag archives with ≥1 live post. lastModified falls back to
     // the release timestamp when the MAX() subquery returned NULL (shouldn't
     // happen given the EXISTS gate, but defends against a race). URLs route
-    // through lib/blog/urls so a Phase-5 segment change updates them here too.
+    // through lib/blog/urls (segment-aware) so a Phase-5 segment change updates
+    // them here too.
     ...categoryRows.map((c) => ({
-      url: `${origin}${categoryUrl(c.slug)}`,
+      url: `${origin}${categoryUrl(c.slug, 1, segments)}`,
       lastModified: c.last_mod ?? RELEASE_LAST_MOD,
     })),
     ...tagRows.map((t) => ({
-      url: `${origin}${tagUrl(t.slug)}`,
+      url: `${origin}${tagUrl(t.slug, 1, segments)}`,
       lastModified: t.last_mod ?? RELEASE_LAST_MOD,
     })),
     // ── end blog-system worktree taxonomy archive URLs ──────────────────

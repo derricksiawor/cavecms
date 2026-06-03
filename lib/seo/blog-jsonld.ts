@@ -1,6 +1,6 @@
 import 'server-only'
 import { breadcrumbLd } from './jsonLd'
-import { blogIndexUrl, categoryUrl, postUrl } from '@/lib/blog/urls'
+import { blogIndexUrl, categoryUrl, postUrl, type PermalinkSegments } from '@/lib/blog/urls'
 
 // Blog/taxonomy-specific JSON-LD builders. Kept SEPARATE from the shared
 // lib/seo/jsonLd.ts (per blog-system spec §11) so the parallel SEO-settings
@@ -26,20 +26,27 @@ export function postBreadcrumbLd(p: {
   /** Primary category for the middle crumb, or null to skip it. */
   primaryCategory?: { name: string; slug: string } | null
   siteOrigin?: string | null
+  // Phase 5: resolved permalink segments so the breadcrumb URLs honor a custom
+  // blog segment + post-path structure. Optional → literal /blog defaults.
+  segments?: PermalinkSegments
+  publishedAt?: Date | string | null
 }): Record<string, unknown> {
   const abs = (path: string) =>
     p.siteOrigin ? `${p.siteOrigin}${path}` : path
   const items: Array<{ name: string; url: string }> = [
     { name: 'Home', url: abs('/') },
-    { name: 'Blog', url: abs(blogIndexUrl()) },
+    { name: 'Blog', url: abs(blogIndexUrl(1, p.segments)) },
   ]
   if (p.primaryCategory) {
     items.push({
       name: p.primaryCategory.name,
-      url: abs(categoryUrl(p.primaryCategory.slug)),
+      url: abs(categoryUrl(p.primaryCategory.slug, 1, p.segments)),
     })
   }
-  items.push({ name: p.postTitle, url: abs(postUrl(p.postSlug)) })
+  items.push({
+    name: p.postTitle,
+    url: abs(postUrl(p.postSlug, p.segments, p.publishedAt ?? null)),
+  })
   return breadcrumbLd(items)
 }
 

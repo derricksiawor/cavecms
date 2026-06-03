@@ -3,6 +3,11 @@ import { env } from '@/lib/env'
 import { getSetting } from '@/lib/cms/getSettings'
 import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
 import { isInstalled } from '@/lib/install/installState'
+// blog-system worktree (Phase 5): resolved permalink segments for the middleware
+// rewrite + dynamic reserved set. Folded into THIS payload (already fetched +
+// cached per-request by middleware) so the rewrite reads them without a second
+// loopback fetch — same model the login path uses.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
 
 // Internal middleware-feeding endpoint. Middleware runs on the Edge
 // runtime and CANNOT call Drizzle/MariaDB directly. It hits this
@@ -97,6 +102,7 @@ export async function GET(req: Request): Promise<Response> {
     salesiq,
     hubspot,
     installed,
+    permalinks,
   ] = await Promise.all([
     getResolvedLoginPath(),
     getSetting('security_ip_lists'),
@@ -111,6 +117,9 @@ export async function GET(req: Request): Promise<Response> {
     // Install state — middleware uses this to redirect fresh deploys
     // to /install instead of serving a half-broken site.
     isInstalled(),
+    // blog-system worktree (Phase 5): resolved + collision-safe permalink
+    // segments for the middleware segment rewrite + dynamic reserved set.
+    resolveSegments(),
   ])
 
   return jsonResponse(
@@ -142,6 +151,13 @@ export async function GET(req: Request): Promise<Response> {
       // (it could, but keeping env access on the Node side keeps
       // the Edge bundle dependency-free).
       disableIpAllowlist: env.SECURITY_DISABLE_IP_ALLOWLIST,
+      // blog-system worktree (Phase 5): permalink segments + structure for the
+      // Edge segment rewrite + dynamic reserved set.
+      permalinks: {
+        blogSegment: permalinks.blog,
+        projectsSegment: permalinks.projects,
+        blogStructure: permalinks.structure,
+      },
     },
     200,
   )

@@ -88,6 +88,13 @@ export function residenceLd(p: {
    *  `url` field is omitted entirely (a wrong URL is worse than no
    *  URL for indexers). */
   siteOrigin?: string | null
+  // blog-system worktree (Phase 5): optional pre-built same-origin path for the
+  // project (segment-aware, from lib/blog/urls.projectUrl). When provided it
+  // overrides the literal `/projects/<slug>` so a custom projects segment is
+  // honored. Falls back to the literal default when omitted (byte-identical to
+  // pre-Phase-5). Localized, additive change — keeps this shared helper mergeable
+  // with the parallel SEO worktree (spec §11).
+  urlPath?: string
 }): Record<string, unknown> {
   const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -97,7 +104,7 @@ export function residenceLd(p: {
     image: p.heroImage ?? undefined,
   }
   if (p.siteOrigin) {
-    ld.url = `${p.siteOrigin}/projects/${p.slug}`
+    ld.url = `${p.siteOrigin}${p.urlPath ?? `/projects/${p.slug}`}`
   }
   if (p.location && p.location.trim()) {
     ld.address = {

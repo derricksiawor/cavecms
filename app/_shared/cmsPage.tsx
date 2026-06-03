@@ -9,6 +9,8 @@ import { ensurePublicPreCsrf } from '@/lib/auth/preCsrfForPublic'
 import { EditableMain } from '@/components/inline-edit/EditableMain'
 import { BlockTreeRenderer } from '@/components/inline-edit/BlockTreeRenderer'
 import { blogIndexUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 5): segment-aware breadcrumb "Blog" link.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
 
 // Block types that submit to a public lead endpoint. When any one of
 // these appears in a page's hydrated tree, the page-level renderer
@@ -291,6 +293,9 @@ export async function renderCmsBlogArchive(
 
   const csrf = await mintPublicPreCsrfForBlocks(blocks, 'blog')
 
+  // Phase 5: segment-aware "Blog" breadcrumb link.
+  const segments = await resolveSegments()
+
   const kindLabel = term.kind === 'category' ? 'Category' : 'Tag'
 
   return (
@@ -311,7 +316,7 @@ export async function renderCmsBlogArchive(
             </li>
             <li>
               <Link
-                href={blogIndexUrl()}
+                href={blogIndexUrl(1, segments)}
                 className="transition-colors hover:text-near-black"
               >
                 Blog

@@ -8,6 +8,8 @@ import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { archiveCollectionPageLd } from '@/lib/seo/blog-jsonld'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { tagUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 5): segment-aware canonical + JSON-LD archive URL.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
 
 // /blog/tag/<slug> — a tag archive. Two-segment static route, matched before
 // /blog/[slug] (more-specific static segments win). Mirror of the category
@@ -42,11 +44,12 @@ export async function generateMetadata({
   if (!term) return { title: 'Not found' }
   const search = await searchParams
   const page = parseLoopPage(search)
+  const segments = await resolveSegments()
   return resolveMetadata({
     title: `${term.name} — Blog`,
     description: `Posts tagged ${term.name}.`,
     fallbackTitle: `${term.name} — Blog`,
-    canonicalPath: tagUrl(term.slug, page),
+    canonicalPath: tagUrl(term.slug, page, segments),
   })
 }
 
@@ -69,12 +72,13 @@ export default async function TagArchive({
   )
   if (!tree) notFound()
 
+  const segments = await resolveSegments()
   const siteOrigin = await getSiteOrigin()
   const ld = archiveCollectionPageLd({
     termKind: 'tag',
     termName: term.name,
     termSlug: term.slug,
-    archivePath: tagUrl(term.slug),
+    archivePath: tagUrl(term.slug, 1, segments),
     siteOrigin,
   })
 

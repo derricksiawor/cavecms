@@ -14,6 +14,11 @@ import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { TaxonomyPills, type TermLink } from '@/components/post-sections/TaxonomyPills'
+// blog-system worktree (Phase 5): resolve the configured permalink segments once
+// per request and thread into the URL helpers so canonical / slug-redirect /
+// taxonomy-pill URLs honor a custom segment + post-path structure.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
+import { postUrl } from '@/lib/blog/urls'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +33,7 @@ export async function generateMetadata({ params }: { params: Params }) {
   // falls through to the site default for everyone, including that
   // editor. Mirrors app/cms-render/[slug]/page.tsx's metadata discipline.
   const [rows] = (await db.execute(sql`
-    SELECT title, excerpt, seo_title, seo_description
+    SELECT title, excerpt, seo_title, seo_description, published_at
     FROM posts
     WHERE slug = ${slug} AND published = TRUE AND deleted_at IS NULL
   `)) as unknown as [
@@ -37,14 +42,17 @@ export async function generateMetadata({ params }: { params: Params }) {
       excerpt: string | null
       seo_title: string | null
       seo_description: string | null
+      published_at: Date | string | null
     }>,
   ]
   const r = rows[0]
+  // Phase 5: canonical honors the configured segment + post-path structure.
+  const segments = await resolveSegments()
   return resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? r?.excerpt ?? null,
     fallbackTitle: r?.title ?? 'Post',
-    canonicalPath: `/blog/${slug}`,
+    canonicalPath: postUrl(slug, segments, r?.published_at ?? null),
   })
 }
 
@@ -82,6 +90,10 @@ export default async function BlogPost({
 }) {
   const { slug } = await params
   const search = await searchParams
+
+  // Phase 5: resolve the configured permalink segments once for this render —
+  // threaded into the slug-redirect target + taxonomy pills below.
+  const segments = await resolveSegments()
 
   // ─── Session + edit mode (resolved first) ─────────────────────
   // Resolved BEFORE the post lookup so an admin/editor in edit mode can
@@ -131,11 +143,18 @@ export default async function BlogPost({
     // Resolution order matches /projects/[slug]: published render →
     // slug_redirects 308 → 404. permanentRedirect throws
     // NEXT_REDIRECT which Next surfaces as HTTP 308.
+    // Join the target post so the redirect honors the configured segment +
+    // structure (for year-month, the canonical needs the target's published_at).
     const [redirRows] = (await db.execute(sql`
-      SELECT new_slug FROM slug_redirects
-      WHERE resource_type = 'post' AND old_slug = ${slug}
-    `)) as unknown as [Array<{ new_slug: string }>]
-    if (redirRows[0]) permanentRedirect(`/blog/${redirRows[0].new_slug}`)
+      SELECT sr.new_slug, p.published_at
+      FROM slug_redirects sr
+      LEFT JOIN posts p
+        ON p.slug = sr.new_slug AND p.deleted_at IS NULL
+      WHERE sr.resource_type = 'post' AND sr.old_slug = ${slug}
+    `)) as unknown as [Array<{ new_slug: string; published_at: Date | string | null }>]
+    if (redirRows[0]) {
+      permanentRedirect(postUrl(redirRows[0].new_slug, segments, redirRows[0].published_at))
+    }
     notFound()
   }
 
@@ -205,6 +224,9 @@ export default async function BlogPost({
     postSlug: post.slug,
     primaryCategory,
     siteOrigin,
+    // Phase 5: breadcrumb URLs honor the configured segment + structure.
+    segments,
+    publishedAt,
   })
 
   // Shared post chrome (h1 + byline + hero). Rendered around the body in
@@ -232,8 +254,9 @@ export default async function BlogPost({
         {post.author_name ? ` · ${post.author_name}` : null}
       </time>
       {/* Taxonomy cross-link pills — categories + tags link to their archives
-          so the post connects into the taxonomy graph (#0.592). */}
-      <TaxonomyPills categories={categories} tags={tags} className="mt-4" />
+          so the post connects into the taxonomy graph (#0.592). Phase 5: pass
+          the resolved segments so pill URLs honor a custom blog segment. */}
+      <TaxonomyPills categories={categories} tags={tags} segments={segments} className="mt-4" />
       {heroVariants?.lg && (
         // eslint-disable-next-line @next/next/no-img-element
         <img

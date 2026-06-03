@@ -3,6 +3,9 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { renderCmsPage, parseLoopPage } from '../_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
+// blog-system worktree (Phase 5): segment-aware canonical for the blog index.
+import { resolveSegments } from '@/lib/blog/resolveSegments'
+import { blogIndexUrl } from '@/lib/blog/urls'
 
 // /blog stays force-dynamic to mirror /projects: the underlying data is
 // small and rarely changes, but the CMS save path fires
@@ -35,6 +38,7 @@ export async function generateMetadata({
     Array<{ seo_title: string | null; seo_description: string | null }>,
   ]
   const r = rows[0]
+  const segments = await resolveSegments()
 
   // Page 2+ canonicalises to its own paginated URL so duplicate-content
   // signals stay clean across the archive. No rel=prev/next <head> hints:
@@ -46,7 +50,7 @@ export async function generateMetadata({
     description: r?.seo_description ?? null,
     fallbackTitle: 'Blog — CaveCMS',
     fallbackDescription: 'Updates, milestones and stories from CaveCMS.',
-    canonicalPath: page > 1 ? `/blog?page=${page}` : '/blog',
+    canonicalPath: blogIndexUrl(page, segments),
   })
 }
 

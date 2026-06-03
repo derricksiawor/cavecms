@@ -13,6 +13,8 @@ import { tagsForPageRestore } from '@/lib/cache/tags'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 import { RestorePageBody } from '@/lib/cms/page-shapes'
 import { validatePageSlug } from '@/lib/cms/page-slug'
+// blog-system worktree (Phase 5): page slugs can't claim a custom permalink segment.
+import { getCustomSegmentReservedSet } from '@/lib/blog/resolveSegments'
 import { env } from '@/lib/env'
 
 // POST /api/cms/pages/[id]/restore — restore from trash. Admin only.
@@ -80,7 +82,8 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
       // defence against a bulk-import that brought in a row with a
       // since-reserved slug (§4.5 step 5 mandates BOTH-end validation
       // before any slug_redirects write).
-      const targetCheck = validatePageSlug(targetSlug, env.LOGIN_PATH)
+      const customSegmentReserved = await getCustomSegmentReservedSet()
+      const targetCheck = validatePageSlug(targetSlug, env.LOGIN_PATH, customSegmentReserved)
       if (!targetCheck.ok) {
         console.info(
           JSON.stringify({
@@ -93,7 +96,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
         throw new HttpError(422, 'slug_invalid')
       }
       if (renamed) {
-        const originalCheck = validatePageSlug(originalSlug, env.LOGIN_PATH)
+        const originalCheck = validatePageSlug(originalSlug, env.LOGIN_PATH, customSegmentReserved)
         if (!originalCheck.ok) {
           // The original slug is no longer valid (LOGIN_PATH rotated
           // into it, or a future RESERVED entry collided). Surface
