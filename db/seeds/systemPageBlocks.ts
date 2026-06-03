@@ -307,9 +307,9 @@ export const BLOG_SECTIONS: SectionSpec[] = [
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'lg' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Journal', prefix: 'none', tone: 'champagne', alignment: 'left', animation: 'fade-in' } },
-      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Stories, updates, and ideas', level: 'h1', size: 'display-2xl', alignment: 'left', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
-      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>A short framing of what readers will find here — the kind of writing you publish and why it is worth their time.</p>', size: 'body-lg', alignment: 'left', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
+      { kind: 'widget', blockType: 'lx_eyebrow', data: { text: 'Journal', prefix: 'none', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { kind: 'widget', blockType: 'lx_heading', data: { text: 'Stories, updates, and ideas', level: 'h1', size: 'display-2xl', alignment: 'center', tone: 'ivory', italic: false, animation: 'slide-up' }, meta: { marginTop: 'sm' } },
+      { kind: 'widget', blockType: 'lx_text', data: { body_richtext: '<p>A short framing of what readers will find here — the kind of writing you publish and why it is worth their time.</p>', size: 'body-lg', alignment: 'center', tone: 'ivory', maxWidth: 'medium', animation: 'fade-in' }, meta: { marginTop: 'md' } },
     ] }],
   },
   {
