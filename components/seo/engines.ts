@@ -4,9 +4,11 @@
 // "what does submitting here actually do" copy.
 //
 // `logo` points at a downloaded official brand SVG under /public/icons
-// (#0.57 — never hand-rolled). Engines WITHOUT an available official mark
-// (the IndexNow protocol itself, Seznam) carry `logo: null` and the UI
-// renders a clean lettered monogram instead of inventing a logo.
+// (#0.57 — never hand-rolled). Engines WITHOUT a usable official square
+// mark (the IndexNow protocol itself; Seznam, whose only official asset is
+// a wide wordmark unreadable at tile size) carry `logo: null`, and
+// EngineLogo falls back to a clean lucide glyph (#0.58) — never an
+// invented or hand-drawn logo.
 
 import type { Engine } from '@/lib/seo/indexnow/submit'
 

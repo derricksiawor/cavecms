@@ -7,8 +7,8 @@ import { EngineLogo } from './EngineLogo'
 
 // Visual multi-select for the IndexNow engine list (#0.59 — visual
 // choices render visually, never a text dropdown). Each engine is a
-// clickable tile showing its official logo (or a monogram when none
-// exists); the selected tiles get a copper ring + tinted background so
+// clickable tile showing its official logo (or a clean lucide glyph when
+// none exists); the selected tiles get a copper ring + tinted background so
 // the active set reads at a glance. Each tile is a real <button> with
 // aria-pressed for native focus + screen-reader state.
 //

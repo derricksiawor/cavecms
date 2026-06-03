@@ -330,7 +330,22 @@ async function buildEntries(): Promise<Entry[] | null> {
     }
   })
 
-  const all = [...pageEntries, ...listingEntries, ...projectEntries, ...postEntries]
+  const ordered = [...pageEntries, ...listingEntries, ...projectEntries, ...postEntries]
+
+  // De-duplicate by URL. A system CMS page can share a path with a static
+  // listing route — e.g. the `blog` system page row (url_path=/blog) and
+  // STATIC_BLOG_PATH both resolve to `${origin}/blog`. Emitting the same
+  // <loc> twice is a redundant, slightly contradictory crawl signal
+  // (two lastModified values for one URL). Keep the FIRST occurrence:
+  // pageEntries lead, so the richer page-row entry (real updated_at +
+  // priority) wins over the static listing fallback.
+  const seen = new Set<string>()
+  const all = ordered.filter((e) => {
+    const key = typeof e.url === 'string' ? e.url : String(e.url)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 
   // Absolute safety cap on the single-file URL count. Home (`/`) is
   // ordered first (pageEntries leads, is_home first within it), so the
