@@ -408,24 +408,24 @@ function BarInner({
 function OutlineTogglePill() {
   const [dismissed, setDismissed] = useState<boolean | null>(null)
   useEffect(() => {
-    setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
+    setDismissed(safeStorage.get('cavecms:outline-dismissed') !== 'false')
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent<{ dismissed?: boolean }>).detail
       if (detail && typeof detail.dismissed === 'boolean') {
         setDismissed(detail.dismissed)
       } else {
-        setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
+        setDismissed(safeStorage.get('cavecms:outline-dismissed') !== 'false')
       }
     }
     window.addEventListener('cavecms:outline-visibility', onChange)
     return () =>
       window.removeEventListener('cavecms:outline-visibility', onChange)
   }, [])
-  // SSR + first-render: render the pill in a stable state (treats
-  // unknown as "visible" → label "Hide outline"). After mount the
-  // saved value resolves and the label updates. The pill remains
-  // clickable throughout — no flash of disabled state.
-  const isDismissed = dismissed === true
+  // SSR + first-render: render the pill in the default-HIDDEN state
+  // (unknown → "Show outline"), matching the panel which now defaults to
+  // hidden. After mount the saved value resolves and the label updates.
+  // The pill remains clickable throughout — no flash of disabled state.
+  const isDismissed = dismissed !== false
   const toggle = () => {
     if (typeof window === 'undefined') return
     const next = !isDismissed

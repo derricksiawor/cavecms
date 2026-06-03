@@ -599,18 +599,16 @@ function TriggerPill() {
       type="button"
       onClick={() => setStage(hasPending ? 'review' : 'open')}
       aria-label={hasPending ? 'View AI proposal' : 'Ask the Page Assistant'}
-      // Stacked above the EditModePill ("Stop editing" / "Edit") which
-      // sits at fixed bottom-6 right-6 (44px pill + 24px gap = top edge
-      // at 68px from bottom). Desktop anchors at bottom-[4.5rem]; on
-      // mobile we sit higher (bottom-24) so the iOS home-bar +
-      // EditModePill don't crowd the same vertical band. The inset is
-      // also tweaked via env(safe-area-inset-bottom) so a notch device
-      // doesn't clip the pill.
-      // Mobile bottom anchors above the EditModePill + iOS home-bar
-      // safe-area inset. Desktop returns to the 4.5rem stack tight
-      // against the EditModePill. The arbitrary calc() class lets
+      // Anchored bottom-LEFT, mirroring the EditModePill on the right.
+      // The right corner is reserved for the EditModePill + the toast
+      // stack (which lifts to bottom-24) — sitting on the left keeps the
+      // assistant clear of both. WidgetPicker lives at top-left (top-28),
+      // so the bottom-left corner is free. Desktop tucks into the corner
+      // (bottom-6); on mobile we sit higher (6rem) above the iOS home-bar
+      // + public MobileCtaBar, with env(safe-area-inset-bottom) so a
+      // notch device doesn't clip it. The arbitrary calc() class lets
       // Tailwind compile the safe-area expression at build time.
-      className="motion-safe:animate-cavecms-scale-in fixed right-4 sm:right-6 z-[80] inline-flex h-11 items-center gap-2 rounded-full bg-near-black px-5 text-sm font-medium text-ivory shadow-[0_18px_40px_-12px_rgba(14,14,16,0.55)] ring-1 ring-copper-500/20 transition-all duration-standard hover:-translate-y-0.5 hover:bg-obsidian hover:ring-copper-400/40 hover:shadow-[0_22px_50px_-12px_rgba(184,115,51,0.35)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300 bottom-[calc(env(safe-area-inset-bottom,0px)+6rem)] md:bottom-[4.5rem]"
+      className="motion-safe:animate-cavecms-scale-in fixed left-4 sm:left-6 z-[80] inline-flex h-11 items-center gap-2 rounded-full bg-near-black px-5 text-sm font-medium text-ivory shadow-[0_18px_40px_-12px_rgba(14,14,16,0.55)] ring-1 ring-copper-500/20 transition-all duration-standard hover:-translate-y-0.5 hover:bg-obsidian hover:ring-copper-400/40 hover:shadow-[0_22px_50px_-12px_rgba(184,115,51,0.35)] motion-reduce:transition-none motion-reduce:hover:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-copper-300 bottom-[calc(env(safe-area-inset-bottom,0px)+6rem)] md:bottom-6"
     >
       <Sparkles
         className="h-4 w-4 text-copper-400"
