@@ -53,7 +53,7 @@ export function getCapabilities() {
 
     // Feature → the tools that operate it.
     features: [
-      { feature: 'Pages', detail: 'Create/edit/trash/restore public pages; set homepage; SEO/OG; preview tokens; full block-tree editing.', tools: ['list_pages', 'get_page', 'create_page', 'update_page', 'delete_page', 'restore_page', 'page_preview_token', 'edit_page'] },
+      { feature: 'Pages', detail: 'Create/edit/trash/restore public pages; set homepage; SEO/OG; preview tokens; full block-tree editing. Block edits land in a DRAFT overlay (public site unchanged) until publish_page — see the draft lifecycle in `workflow`.', tools: ['list_pages', 'get_page', 'create_page', 'update_page', 'delete_page', 'restore_page', 'page_preview_token', 'edit_page', 'get_page_draft_status', 'publish_page', 'undo_page', 'redo_page', 'discard_page_draft'] },
       { feature: 'Blocks (page content)', detail: 'The section→column→widget tree. Batch via edit_page, or per-block create/patch/delete/duplicate/restore/reorder.', tools: ['edit_page', 'update_block', 'update_block_meta', 'create_block', 'delete_block', 'duplicate_block', 'restore_block', 'reorder_blocks'] },
       { feature: 'Blog posts', detail: 'Posts share the same block-tree body engine (+ a markdown body_md, admin-only to edit).', tools: ['list_posts', 'get_post', 'create_post', 'update_post', 'delete_post', 'restore_post'] },
       { feature: 'Projects (portfolio)', detail: 'Portfolio entries: metadata (tagline, location, SEO, hero) + a block body + featured ordering.', tools: ['list_projects', 'get_project', 'create_project', 'update_project', 'delete_project', 'restore_project', 'reorder_projects', 'update_project_section', 'project_preview_token'] },
@@ -223,6 +223,7 @@ export function getCapabilities() {
       '3. If building for a specific brand: fetch its official logo + real colors, then upload_media the logo and update_settings(theme_palette, site_header, footer) BEFORE composing.',
       '4. describe_block_types — see every block type + exact data shapes.',
       '5. Compose with edit_page (section → column → widget). Verify with get_page.',
+      '6. Draft lifecycle: edit_page writes to the page’s DRAFT (the public site is unchanged) → page_preview_token to preview the draft → get_page_draft_status to see what’s pending → publish_page to go live (the ONLY step visitors see). undo_page/redo_page step the draft; discard_page_draft throws the whole draft away.',
     ],
 
     // The full tool surface (generated live — never drifts from what’s registered).

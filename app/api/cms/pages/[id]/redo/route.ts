@@ -1,7 +1,7 @@
 import { redoDraft } from '@/lib/cms/draft'
 import { NotFoundError } from '@/lib/cms/saveBlock'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 
@@ -24,6 +24,7 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
+  requireScope(ctx, 'pages', 'write')
   checkMutationRate(ctx.userId)
 
   try {

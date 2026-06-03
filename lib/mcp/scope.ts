@@ -331,6 +331,53 @@ export const MCP_TOOLS = spec({
     summary: 'Mint a signed preview token/URL for an unpublished page.',
   },
 
+  // ── pages: draft lifecycle (draft → publish + server-side undo/redo) ──
+  get_page_draft_status: {
+    name: 'get_page_draft_status',
+    resource: 'pages',
+    action: 'read',
+    minRole: 'editor',
+    tier: 'read',
+    summary:
+      "Read whether a page has unpublished draft changes: {hasDraft, draftVersion, changeCount, canUndo, canRedo}. Call before publish/undo/redo to see what's pending.",
+  },
+  publish_page: {
+    name: 'publish_page',
+    resource: 'pages',
+    action: 'write',
+    minRole: 'editor',
+    tier: 'write',
+    summary:
+      "Publish a page's draft: atomically materialise every pending draft edit into the live public columns + revalidate. The ONLY action that changes what visitors see. Clears the page's undo/redo history (published state = new baseline). 409 html_id_collision if two blocks would share an HTML id once live. No version lock — publishes the draft's CURRENT state.",
+  },
+  undo_page: {
+    name: 'undo_page',
+    resource: 'pages',
+    action: 'write',
+    minRole: 'editor',
+    tier: 'write',
+    summary:
+      'Step the page’s DRAFT back one revision (server-side, persists). Undo stops at the published baseline; up to 80 steps; a new edit truncates the redo tail. Returns ok:false (not an error) when nothing to step. Does NOT touch the live site. History wiped on publish/discard.',
+  },
+  redo_page: {
+    name: 'redo_page',
+    resource: 'pages',
+    action: 'write',
+    minRole: 'editor',
+    tier: 'write',
+    summary:
+      'Step the page’s DRAFT forward one revision (server-side, persists). Redo stops at the newest edit; up to 80 steps; a new edit truncates the redo tail. Returns ok:false (not an error) when nothing to step. Does NOT touch the live site. History wiped on publish/discard.',
+  },
+  discard_page_draft: {
+    name: 'discard_page_draft',
+    resource: 'pages',
+    action: 'write',
+    minRole: 'editor',
+    tier: 'destructive',
+    summary:
+      'Throw away the page’s ENTIRE draft (all unpublished edits) + its undo history, reverting to the published version. Irreversible. The live site is unaffected. Requires confirm:true.',
+  },
+
   // ── posts: lifecycle extras ──
   restore_post: {
     name: 'restore_post',

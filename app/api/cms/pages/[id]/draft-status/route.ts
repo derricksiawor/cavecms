@@ -1,6 +1,6 @@
 import { getPageDraftStatus } from '@/lib/cms/draft'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { checkReadRate } from '@/lib/auth/cmsRateLimit'
 
 // GET /api/cms/pages/[id]/draft-status — report whether the page has a
@@ -25,6 +25,7 @@ export const GET = withError<RouteCtx>(async (_req, { params }) => {
   const { id: rawId } = await params
   const id = parseId(rawId)
   const ctx = await requireRole(['admin', 'editor'])
+  requireScope(ctx, 'pages', 'read')
   checkReadRate(ctx.userId)
 
   const { hasDraft, draftVersion, changeCount, canUndo, canRedo } =

@@ -81,6 +81,12 @@ import {
 } from '@/app/api/admin/settings/route'
 import { POST as pageRestore } from '@/app/api/cms/pages/[id]/restore/route'
 import { POST as pagePreviewToken } from '@/app/api/cms/pages/[id]/preview-token/route'
+// Page draft lifecycle (draft → publish + server-side undo/redo).
+import { GET as pageDraftStatus } from '@/app/api/cms/pages/[id]/draft-status/route'
+import { POST as pagePublish } from '@/app/api/cms/pages/[id]/publish/route'
+import { POST as pageUndo } from '@/app/api/cms/pages/[id]/undo/route'
+import { POST as pageRedo } from '@/app/api/cms/pages/[id]/redo/route'
+import { POST as pageDiscardDraft } from '@/app/api/cms/pages/[id]/discard-draft/route'
 import { POST as postRestore } from '@/app/api/cms/posts/[id]/restore/route'
 import { POST as projectRestore } from '@/app/api/cms/projects/[id]/restore/route'
 import { POST as projectsReorder } from '@/app/api/cms/projects/reorder/route'
@@ -764,6 +770,61 @@ export function buildServer(init: McpRequestContext): McpServer {
         method: 'POST',
         path: `/api/cms/pages/${args.id}/preview-token`,
         params: { id: String(args.id) },
+        body: {},
+      }),
+    ),
+  )
+
+  // ═══ pages: draft lifecycle (draft → publish + server-side undo/redo) ═══
+  // The canonical authoring sequence over MCP: edit_page writes to the page's
+  // DRAFT overlay → page_preview_token to preview the unpublished draft →
+  // get_page_draft_status to see what's pending → publish_page to go live.
+  // undo_page/redo_page step the draft; discard_page_draft throws it all away.
+  reg('get_page_draft_status', { pageId: num() }, async (args) =>
+    respond(
+      await callRoute(pageDraftStatus, {
+        method: 'GET',
+        path: `/api/cms/pages/${args.pageId}/draft-status`,
+        params: { id: String(args.pageId) },
+      }),
+    ),
+  )
+  reg('publish_page', { pageId: num() }, async (args) =>
+    respond(
+      await callRoute(pagePublish, {
+        method: 'POST',
+        path: `/api/cms/pages/${args.pageId}/publish`,
+        params: { id: String(args.pageId) },
+        body: {},
+      }),
+    ),
+  )
+  reg('undo_page', { pageId: num() }, async (args) =>
+    respond(
+      await callRoute(pageUndo, {
+        method: 'POST',
+        path: `/api/cms/pages/${args.pageId}/undo`,
+        params: { id: String(args.pageId) },
+        body: {},
+      }),
+    ),
+  )
+  reg('redo_page', { pageId: num() }, async (args) =>
+    respond(
+      await callRoute(pageRedo, {
+        method: 'POST',
+        path: `/api/cms/pages/${args.pageId}/redo`,
+        params: { id: String(args.pageId) },
+        body: {},
+      }),
+    ),
+  )
+  regDestructive('discard_page_draft', { pageId: num() }, async (args) =>
+    respond(
+      await callRoute(pageDiscardDraft, {
+        method: 'POST',
+        path: `/api/cms/pages/${args.pageId}/discard-draft`,
+        params: { id: String(args.pageId) },
         body: {},
       }),
     ),
