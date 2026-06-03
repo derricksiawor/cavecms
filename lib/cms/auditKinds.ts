@@ -66,6 +66,15 @@ export const AUDIT_KIND = {
   taxonomyDelete: 'taxonomy_delete',
   taxonomyAssign: 'taxonomy_assign',
   // ── end blog-system worktree taxonomy ─────────────────────────────
+  // ── blog-system worktree: bulk post actions (do not interleave) ───
+  // A single post affected by a bulk action from the /admin/blog list
+  // (publish / unpublish / trash / assign-category / add-tag). One audit
+  // row PER post, carrying the bulk `action` in the diff so a forensic
+  // query can distinguish a bulk gesture from a single-post edit, and
+  // correlate every row written by one bulk submit via the shared
+  // requestId. resourceType stays 'post'.
+  bulkPost: 'bulk_post',
+  // ── end blog-system worktree bulk post actions ────────────────────
 } as const
 
 export type AuditKind = (typeof AUDIT_KIND)[keyof typeof AUDIT_KIND]

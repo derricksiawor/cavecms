@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { MediaPicker } from '@/components/inline-edit/MediaPicker'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
-import { Switch } from '@/components/inline-edit/Switch'
 import { SlugInput } from '@/components/inline-edit/SlugInput'
 import { SeoFields } from '@/components/inline-edit/SeoFields'
 import { MarkdownEditor } from '@/components/inline-edit/MarkdownEditor'
@@ -18,6 +17,8 @@ import { SaveStatus } from '@/components/inline-edit/SaveStatus'
 import type { MediaRef } from '@/components/inline-edit/MediaPickerProvider'
 import { previewMarkdown } from './preview/action'
 import { TaxonomyChips, type TermOption } from './TaxonomyChips'
+import { ScheduleControl } from './ScheduleControl'
+import { derivePostStatus } from '@/lib/cms/postStatus'
 
 export interface EditorPost {
   id: number
@@ -31,6 +32,10 @@ export interface EditorPost {
   seo_description: string | null
   version: number
   published: boolean
+  // Phase 8: the post's current published_at (ISO string or null) so the editor
+  // can show the live status (Draft/Scheduled/Published) AND let an admin
+  // reschedule a post that's already scheduled.
+  published_at: string | null
 }
 
 import { SLUG_RE } from '@/lib/cms/slug'
@@ -75,6 +80,27 @@ export function Editor({
   const [seoTitle, setSeoTitle] = useState(post.seo_title ?? '')
   const [seoDescription, setSeoDescription] = useState(post.seo_description ?? '')
   const [published, setPublished] = useState(post.published)
+  // Phase 8 scheduling. `scheduledAtIso` is the explicit publish instant ONLY
+  // when the post is scheduled for the FUTURE; for a published-now or draft post
+  // it's null (the server stamps NOW() on first publish / preserves the original
+  // on re-publish). Seeded from the post's current published_at iff that date is
+  // in the future, so opening a scheduled post shows the picker pre-filled.
+  const initialScheduledIso =
+    post.published &&
+    post.published_at !== null &&
+    new Date(post.published_at).getTime() > Date.now()
+      ? post.published_at
+      : null
+  const [scheduledAtIso, setScheduledAtIso] = useState<string | null>(
+    initialScheduledIso,
+  )
+  // The post's CURRENT effective published_at (ISO | null), tracked locally so
+  // it stays accurate across saves (the post prop is immutable; the PATCH
+  // response only returns the new version). Drives the header status pill +
+  // the "was this scheduled in the future?" check in buildPatch.
+  const [currentPublishedAtIso, setCurrentPublishedAtIso] = useState<
+    string | null
+  >(post.published_at)
   const [version, setVersion] = useState(post.version)
   const [busy, setBusy] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(false)
@@ -104,6 +130,8 @@ export function Editor({
     seoTitle: post.seo_title ?? '',
     seoDescription: post.seo_description ?? '',
     published: post.published,
+    // Phase 8: pristine schedule instant for dirty-detection + discard reset.
+    scheduledAtIso: initialScheduledIso,
     // Pristine id arrays for the chip pickers. dirty-detection compares the
     // order-independent signature (cheap); discard resets the Sets from these.
     categoryIdsArr: assignedCategoryIds,
@@ -120,6 +148,7 @@ export function Editor({
     seoTitle !== pristine.seoTitle ||
     seoDescription !== pristine.seoDescription ||
     published !== pristine.published ||
+    scheduledAtIso !== pristine.scheduledAtIso ||
     sigOf([...categoryIds]) !== sigOf(pristine.categoryIdsArr) ||
     sigOf([...tagIds]) !== sigOf(pristine.tagIdsArr)
 
@@ -152,6 +181,32 @@ export function Editor({
     if (canPublish) {
       if (slug !== pristine.slug) patch.slug = slug
       if (published !== pristine.published) patch.published = published
+      // Phase 8 scheduling. Only admins (canPublish) send publishedAt.
+      if (published) {
+        const futureIso =
+          scheduledAtIso !== null &&
+          new Date(scheduledAtIso).getTime() > Date.now()
+            ? scheduledAtIso
+            : null
+        if (futureIso !== null) {
+          // Scheduling / rescheduling to an explicit future instant.
+          patch.publishedAt = futureIso
+        } else {
+          // "Publish now" path. If the post is CURRENTLY scheduled for the
+          // future (its stored published_at is ahead of now) and the operator
+          // switched to publish-now, we must stamp NOW explicitly — otherwise
+          // the server's COALESCE(published_at, NOW) preserves the stale future
+          // date and the post stays hidden. For a brand-new publish or a
+          // re-publish of an already-live post, we OMIT publishedAt so the
+          // server keeps its first-publish-stamps-now / preserve-original rule.
+          const wasFutureScheduled =
+            currentPublishedAtIso !== null &&
+            new Date(currentPublishedAtIso).getTime() > Date.now()
+          if (wasFutureScheduled) {
+            patch.publishedAt = new Date().toISOString()
+          }
+        }
+      }
     }
     // Taxonomy: send the FULL desired id set for an axis only when it changed
     // (the API leaves an unsent axis untouched). categoryIds/tagIds are an
@@ -183,11 +238,12 @@ export function Editor({
       return { ok: false }
     }
     setBusy(true)
+    const patch = buildPatch()
     try {
       const res = await csrfFetch(`/api/cms/posts/${post.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(buildPatch()),
+        body: JSON.stringify(patch),
       })
       if (res.status === 409) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
@@ -206,6 +262,26 @@ export function Editor({
       }
       const j = (await res.json()) as { version: number }
       setVersion(j.version)
+      // Recompute the new effective published_at locally: if the patch carried
+      // an explicit publishedAt the server honoured it; otherwise the value is
+      // unchanged (first-publish-now is stamped server-side, but for status
+      // purposes "published with no future date" already reads as Published via
+      // the null→now fallback in derivePostStatus). Keep currentPublishedAtIso +
+      // scheduledAtIso pristine in sync so a follow-up save diffs correctly.
+      const sentPublishedAt =
+        typeof patch.publishedAt === 'string' ? patch.publishedAt : undefined
+      const nextPublishedAtIso =
+        sentPublishedAt !== undefined ? sentPublishedAt : currentPublishedAtIso
+      setCurrentPublishedAtIso(nextPublishedAtIso)
+      // Re-derive the "scheduled in the future?" pristine from the new effective
+      // date so switching schedule→now→schedule across saves stays consistent.
+      const nextScheduledPristine =
+        published &&
+        nextPublishedAtIso !== null &&
+        new Date(nextPublishedAtIso).getTime() > Date.now()
+          ? nextPublishedAtIso
+          : null
+      setScheduledAtIso(nextScheduledPristine)
       setPristine({
         title,
         slug,
@@ -216,6 +292,7 @@ export function Editor({
         seoTitle,
         seoDescription,
         published,
+        scheduledAtIso: nextScheduledPristine,
         categoryIdsArr: [...categoryIds],
         tagIdsArr: [...tagIds],
       })
@@ -245,6 +322,7 @@ export function Editor({
     setSeoTitle(pristine.seoTitle)
     setSeoDescription(pristine.seoDescription)
     setPublished(pristine.published)
+    setScheduledAtIso(pristine.scheduledAtIso)
     setCategoryIds(new Set(pristine.categoryIdsArr))
     setTagIds(new Set(pristine.tagIdsArr))
     toast.info('Changes undone.')
@@ -288,15 +366,35 @@ export function Editor({
             lastSavedAt={auto.lastSavedAt}
             manualDirty={dirty && auto.status === 'pending'}
           />
-          <span
-            className={`inline-flex items-center rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${
-              published
+          {(() => {
+            // Header status pill — derived from the SAME helper the public gate
+            // + admin list use, so the editor never claims a status the public
+            // wouldn't see. A future schedule reads "Scheduled".
+            const status = derivePostStatus({
+              published,
+              published_at: published ? scheduledAtIso : null,
+              deleted_at: null,
+            })
+            const cls =
+              status === 'published'
                 ? 'bg-copper-500 text-cream-50'
-                : 'border border-warm-stone/30 text-warm-stone'
-            }`}
-          >
-            {published ? 'Published' : 'Draft'}
-          </span>
+                : status === 'scheduled'
+                  ? 'bg-near-black text-cream-50'
+                  : 'border border-warm-stone/30 text-warm-stone'
+            const label =
+              status === 'published'
+                ? 'Published'
+                : status === 'scheduled'
+                  ? 'Scheduled'
+                  : 'Draft'
+            return (
+              <span
+                className={`inline-flex items-center rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${cls}`}
+              >
+                {label}
+              </span>
+            )
+          })()}
         </div>
       </header>
 
@@ -447,14 +545,15 @@ export function Editor({
           </div>
 
           {canPublish && (
-            <div className="rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-5">
-              <Switch
-                checked={published}
-                onChange={setPublished}
-                label="Show on the public blog"
-                help={published ? 'Live for visitors.' : 'Hidden — only the team can see it.'}
-              />
-            </div>
+            <ScheduleControl
+              published={published}
+              scheduledAtIso={scheduledAtIso}
+              onChange={(next) => {
+                setPublished(next.published)
+                setScheduledAtIso(next.scheduledAtIso)
+              }}
+              disabled={readonly}
+            />
           )}
         </aside>
       </div>

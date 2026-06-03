@@ -9,6 +9,12 @@ import { isMissingTable } from '@/lib/db/errors'
 // permalink segments once; the helpers below honor them.
 import { blogIndexUrl, categoryUrl, postUrl, projectUrl, tagUrl } from '@/lib/blog/urls'
 import { resolveSegments } from '@/lib/blog/resolveSegments'
+// blog-system worktree (Phase 8): public post-visibility gate. Applied to the
+// per-post entries AND the category/tag archive "has ≥1 live post" gates so a
+// scheduled (future-dated) post never seeds a sitemap URL — for the post itself
+// OR for an archive that would otherwise become indexable on the strength of a
+// not-yet-live post.
+import { publicPostConditionSql } from '@/lib/cms/postStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -102,9 +108,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     (async () => {
       try {
         const [rows] = (await db.execute(sql`
-          SELECT slug, updated_at, published_at
-          FROM posts
-          WHERE published = TRUE AND deleted_at IS NULL
+          SELECT p.slug, p.updated_at, p.published_at
+          FROM posts p
+          WHERE ${publicPostConditionSql('p')}
         `)) as unknown as [
           Array<{ slug: string; updated_at: Date; published_at: Date | string | null }>,
         ]
@@ -115,10 +121,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       }
     })(),
     // ── blog-system worktree: taxonomy archives (do not interleave) ─────
-    // Category + tag archive URLs — ONLY for terms with ≥1 published, non-
-    // trashed post (an empty archive is a thin/soft-404 page Google
-    // shouldn't index). EXISTS keeps the gate sargable. lastModified is the
-    // newest published post in the term so crawlers get an honest signal.
+    // Category + tag archive URLs — ONLY for terms with ≥1 PUBLICLY-VISIBLE post
+    // (Phase 8 gate: published + non-trashed + publish time arrived, so a term
+    // whose only post is scheduled stays out of the sitemap until it goes live).
+    // An empty/not-yet-live archive is a thin/soft-404 page Google shouldn't
+    // index. EXISTS keeps the gate sargable. lastModified is the newest VISIBLE
+    // post in the term so crawlers get an honest signal.
     // Missing-table-safe (taxonomy may not exist on an early-migration box).
     (async () => {
       try {
@@ -128,13 +136,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
                   FROM post_categories pc
                   JOIN posts p ON p.id = pc.post_id
                   WHERE pc.category_id = c.id
-                    AND p.published = TRUE AND p.deleted_at IS NULL) AS last_mod
+                    AND ${publicPostConditionSql('p')}) AS last_mod
           FROM categories c
           WHERE EXISTS (
             SELECT 1 FROM post_categories pc
             JOIN posts p ON p.id = pc.post_id
             WHERE pc.category_id = c.id
-              AND p.published = TRUE AND p.deleted_at IS NULL
+              AND ${publicPostConditionSql('p')}
           )
         `)) as unknown as [Array<{ slug: string; last_mod: Date | null }>]
         return rows
@@ -151,13 +159,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
                   FROM post_tags pt
                   JOIN posts p ON p.id = pt.post_id
                   WHERE pt.tag_id = t.id
-                    AND p.published = TRUE AND p.deleted_at IS NULL) AS last_mod
+                    AND ${publicPostConditionSql('p')}) AS last_mod
           FROM tags t
           WHERE EXISTS (
             SELECT 1 FROM post_tags pt
             JOIN posts p ON p.id = pt.post_id
             WHERE pt.tag_id = t.id
-              AND p.published = TRUE AND p.deleted_at IS NULL
+              AND ${publicPostConditionSql('p')}
           )
         `)) as unknown as [Array<{ slug: string; last_mod: Date | null }>]
         return rows

@@ -25,6 +25,9 @@ interface PostEditorRow {
   seo_description: string | null
   version: number
   published: number
+  // Phase 8: current publish/schedule instant for the editor's status pill +
+  // reschedule picker. mysql2 may hand it back as Date or ISO string.
+  published_at: Date | string | null
 }
 
 type Params = Promise<{ id: string }>
@@ -41,7 +44,7 @@ export default async function PostEditor({ params }: { params: Params }) {
   // hides media that was soft-deleted out from under the post.
   const [rows] = (await db.execute(sql`
     SELECT p.id, p.slug, p.title, p.excerpt, p.body_md, p.version,
-           p.published,
+           p.published, p.published_at,
            p.hero_image_id, hm.alt_text AS hero_alt,
            p.og_image_id, om.alt_text AS og_alt,
            p.seo_title, p.seo_description
@@ -112,6 +115,12 @@ export default async function PostEditor({ params }: { params: Params }) {
     seo_description: row.seo_description,
     version: row.version,
     published: row.published === 1,
+    // Normalize to an ISO string (or null) so the client editor's schedule
+    // logic compares instants without re-parsing a Date|string union.
+    published_at:
+      row.published_at !== null
+        ? new Date(row.published_at).toISOString()
+        : null,
   }
 
   return (

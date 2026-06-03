@@ -7,6 +7,9 @@ import { db } from '@/db/client'
 import { getSetting } from '@/lib/cms/getSettings'
 import { resolveSegments } from '@/lib/blog/resolveSegments'
 import { blogIndexUrl, postUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 8): public post-visibility gate (adds the
+// scheduling clause so a future-dated post never surfaces in the related rail).
+import { publicPostGateSql } from '@/lib/cms/postStatus'
 import { RevealOnView } from '@/components/project-sections/_shared/RevealOnView'
 
 // Server-rendered "related posts" rail for the post detail page. Mirrors
@@ -25,7 +28,9 @@ import { RevealOnView } from '@/components/project-sections/_shared/RevealOnView
 //
 // GATES
 //   - Current post is always excluded (p.id <> currentPostId).
-//   - Only PUBLISHED, non-trashed posts (published = TRUE AND deleted_at IS NULL).
+//   - Only PUBLICLY-VISIBLE posts (publicPostGateSql: published + non-trashed +
+//     publish time arrived — Phase 8 added the scheduling clause so a future-
+//     dated post never appears as "related").
 //   - Cap = blog_settings.relatedPostsCount (0 -> render nothing, like WP's
 //     "show 0 related"). Clamped 0..6 by the registry; Math.min is belt-and-braces.
 //
@@ -70,9 +75,8 @@ export async function SimilarPostsRailSection({
     FROM posts p
     LEFT JOIN media m
       ON m.id = p.hero_image_id AND m.deleted_at IS NULL
-    WHERE p.published = TRUE
-      AND p.deleted_at IS NULL
-      AND p.id <> ${postId}
+    WHERE p.id <> ${postId}
+      ${publicPostGateSql('p')}
     ORDER BY
       CASE
         WHEN EXISTS (

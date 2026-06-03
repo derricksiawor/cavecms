@@ -162,6 +162,11 @@ export function tagsForPostSave(
     publishedChanged?: boolean
     slugChanged?: boolean
     coreChanged?: boolean
+    /** Phase 8: the post's published_at moved to a new explicit timestamp
+     *  (schedule / reschedule / publish-at-time). Changes the post's
+     *  visibility window + sitemap lastmod + index ordering, so it busts the
+     *  sitemap (in addition to the index, which coreChanged already covers). */
+    scheduleChanged?: boolean
     /** Required when slugChanged is true. Pre-rename slug whose page
      *  tag AND admin-bar slug-resolver cache must also invalidate so
      *  links to the old slug stop pointing at a stale id. */
@@ -179,10 +184,15 @@ export function tagsForPostSave(
     t.add(tag.post(opts.oldSlug))
     t.add(tag.postSlugResolver(opts.oldSlug))
   }
-  if (opts.publishedChanged || opts.slugChanged) {
+  if (opts.publishedChanged || opts.slugChanged || opts.scheduleChanged) {
     t.add(tag.sitemap)
   }
-  if (opts.publishedChanged || opts.slugChanged || opts.coreChanged) {
+  if (
+    opts.publishedChanged ||
+    opts.slugChanged ||
+    opts.coreChanged ||
+    opts.scheduleChanged
+  ) {
     t.add(tag.postsIndex)
   }
   return { tags: [...t] }

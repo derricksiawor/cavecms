@@ -13,6 +13,13 @@ import { blogIndexUrl, categoryUrl, postUrl, tagUrl } from '@/lib/blog/urls'
 import { resolveSegments } from '@/lib/blog/resolveSegments'
 import type { PermalinkSegments } from '@/lib/blog/urls'
 import { isMissingTable } from '@/lib/db/errors'
+// blog-system worktree (Phase 8): the PUBLIC post-visibility gate. Adds the
+// scheduling clause (published_at IS NOT NULL AND published_at <= NOW(3)) so a
+// post scheduled for the future stays hidden until its time, then auto-appears
+// (public pages are force-dynamic → no cron needed). Single source of truth in
+// lib/cms/postStatus so the loop, recent teaser, feed, related rail, sitemap and
+// detail page can never drift apart.
+import { publicPostGateSql } from './postStatus'
 import type { BlockData } from './block-registry'
 import type { BlockKind } from './blockMeta'
 
@@ -603,9 +610,11 @@ export const MAX_LOOP_PAGE = 1000
  *  The trailing `+1` row tells us whether a NEXT page exists without a
  *  separate COUNT(*). `page` is clamped to [1, MAX_LOOP_PAGE].
  *
- *  Public gate: `published = TRUE AND deleted_at IS NULL` (NO
- *  `published_at <= NOW()` — scheduled-post gating is Phase 8). The taxonomy
- *  filter joins post_categories / post_tags by the term's slug; both `category`
+ *  Public gate: publicPostGateSql('p') — `published = TRUE AND deleted_at IS
+ *  NULL AND published_at IS NOT NULL AND published_at <= NOW(3)` (Phase 8 added
+ *  the scheduling clause so a future-dated post stays out of the loop until its
+ *  time). The taxonomy filter joins post_categories / post_tags by the term's
+ *  slug; both `category`
  *  and `tag` are SLUG_RE-validated at the block boundary and bound as
  *  parameters here, so the join is injection-safe. Missing-table-safe (returns
  *  an empty page) like the other post/project fetches. */
@@ -657,8 +666,8 @@ async function fetchPostsLoopSlice(args: {
         p.id, p.slug, p.title, p.excerpt, p.published_at, p.hero_image_id,
         ${readingExpr} AS reading_minutes
       FROM posts p
-      WHERE p.published = TRUE
-        AND p.deleted_at IS NULL
+      WHERE 1 = 1
+        ${publicPostGateSql('p')}
         ${termFilter}
       ORDER BY p.published_at DESC, p.id DESC
       LIMIT ${window}
@@ -763,9 +772,11 @@ async function fetchFeaturedProjectsSafely(): Promise<HydratedProject[]> {
   }
 }
 
-/** Fetches the latest published, not-soft-deleted posts (newest first),
- *  capped at `limit` — the data source for the lx_posts block. Mirrors
- *  the /blog index query. Missing-table-safe like the projects fetch. */
+/** Fetches the latest publicly-visible posts (newest first), capped at `limit`
+ *  — the data source for the recent-mode lx_posts block (home-page teaser).
+ *  Public gate via publicPostGateSql (Phase 8: published + not-trashed + publish
+ *  time arrived), so a scheduled post never shows in the recent teaser before
+ *  its time. Missing-table-safe like the projects fetch. */
 async function fetchRecentPostsSafely(
   limit: number,
   // blog-system worktree (Phase 5): resolved segments to bake the detail URL.
@@ -774,11 +785,11 @@ async function fetchRecentPostsSafely(
   const cap = Math.min(12, Math.max(1, Math.floor(limit)))
   try {
     const [rows] = (await db.execute(sql`
-      SELECT id, slug, title, excerpt, published_at, hero_image_id
-      FROM posts
-      WHERE published = TRUE
-        AND deleted_at IS NULL
-      ORDER BY published_at DESC, id DESC
+      SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, p.hero_image_id
+      FROM posts p
+      WHERE 1 = 1
+        ${publicPostGateSql('p')}
+      ORDER BY p.published_at DESC, p.id DESC
       LIMIT ${cap}
     `)) as unknown as [
       Array<{

@@ -23,6 +23,11 @@ import { SimilarPostsRailSection } from '@/components/post-sections/SimilarPosts
 // taxonomy-pill URLs honor a custom segment + post-path structure.
 import { resolveSegments } from '@/lib/blog/resolveSegments'
 import { postUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 8): public post-visibility gate. The PUBLIC lookup
+// + generateMetadata both apply it (so a scheduled post is hidden until its
+// time); the EDITOR PREVIEW branch (admin/editor in edit mode) is deliberately
+// LEFT UNGATED so a draft / scheduled post stays previewable in place.
+import { publicPostGateSql } from '@/lib/cms/postStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,15 +36,18 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>
 
 export async function generateMetadata({ params }: { params: Params }) {
   const { slug } = await params
-  // Filter on `published = TRUE` so a probe on an unpublished slug never
-  // leaks draft SEO metadata — the render path serves the draft only to
-  // an authenticated editor in edit mode (gated below), but metadata
-  // falls through to the site default for everyone, including that
-  // editor. Mirrors app/cms-render/[slug]/page.tsx's metadata discipline.
+  // Apply the FULL public gate (Phase 8: published + not-trashed + publish time
+  // arrived) so a probe on an unpublished OR scheduled slug never leaks draft /
+  // scheduled SEO metadata — the render path serves a draft/scheduled post only
+  // to an authenticated editor in edit mode (gated below), but metadata falls
+  // through to the site default for everyone, including that editor. Mirrors
+  // app/cms-render/[slug]/page.tsx's metadata discipline. Aliased `p` so the
+  // shared gate fragment applies cleanly.
   const [rows] = (await db.execute(sql`
-    SELECT title, excerpt, seo_title, seo_description, published_at
-    FROM posts
-    WHERE slug = ${slug} AND published = TRUE AND deleted_at IS NULL
+    SELECT p.title, p.excerpt, p.seo_title, p.seo_description, p.published_at
+    FROM posts p
+    WHERE p.slug = ${slug}
+      ${publicPostGateSql('p')}
   `)) as unknown as [
     Array<{
       title: string
@@ -136,11 +144,14 @@ export default async function BlogPost({
   const editable = resolveEditableMode(session, c, search)
 
   // ─── Post lookup ──────────────────────────────────────────────
-  // Public gate is `published = TRUE AND deleted_at IS NULL`; an
-  // authorized editor in edit mode drops the `published = TRUE` clause
-  // so a draft body is reachable + editable in place. `deleted_at IS
-  // NULL` is NEVER dropped — a trashed post is unreachable even to an
-  // editor (it's restored from Trash, not edited live).
+  // Public gate (Phase 8): `published = TRUE AND deleted_at IS NULL AND
+  // published_at IS NOT NULL AND published_at <= NOW(3)` — a SCHEDULED post
+  // (future published_at) is hidden from the public until its time, then auto-
+  // appears (this route is force-dynamic, so no cron). An authorized editor in
+  // edit mode drops the ENTIRE publish/schedule gate (keeping only `deleted_at
+  // IS NULL`) so a DRAFT or SCHEDULED post body stays reachable + previewable +
+  // editable in place. `deleted_at IS NULL` is NEVER dropped — a trashed post is
+  // unreachable even to an editor (it's restored from Trash, not edited live).
   const [rows] = (await db.execute(sql`
     SELECT p.id, p.slug, p.title, p.excerpt, p.body_md, p.body_page_id,
            p.published, p.published_at, p.updated_at, p.hero_image_id,
@@ -151,8 +162,7 @@ export default async function BlogPost({
     LEFT JOIN users u ON u.id = p.author_id
     LEFT JOIN media m ON m.id = p.hero_image_id AND m.deleted_at IS NULL
     WHERE p.slug = ${slug}
-      AND p.deleted_at IS NULL
-      ${editable ? sql`` : sql`AND p.published = TRUE`}
+      ${editable ? sql`AND p.deleted_at IS NULL` : publicPostGateSql('p')}
   `)) as unknown as [PostDetailRow[]]
   const post = rows[0]
 
@@ -393,9 +403,10 @@ export default async function BlogPost({
   // post body composed of lx_richtext + any other block (hero, gallery,
   // CTA, quote) renders identically to a normal CMS page. The body page
   // is hydrated regardless of its own published flag — it is never routed
-  // by slug; the PUBLIC gate is the POST's published/deleted_at, already
-  // applied above. (No published_at<=NOW() scheduling gate here — that's
-  // Phase 8.)
+  // by slug; the PUBLIC gate (published + not-trashed + publish time arrived,
+  // Phase 8) is applied to the POST lookup above, so a scheduled post's body is
+  // unreachable on the public path until its time (and remains previewable on
+  // the editor path, which dropped the gate).
   //
   // FALLBACK: an un-migrated post (body_page_id NULL, mid-migration)
   // keeps rendering renderMarkdown(post.body_md) so nothing breaks while

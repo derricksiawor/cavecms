@@ -4,14 +4,20 @@ import { getSetting } from '@/lib/cms/getSettings'
 import { getSiteOrigin, getSiteName } from '@/lib/cms/getSiteOrigin'
 import { resolveSegments } from '@/lib/blog/resolveSegments'
 import { blogIndexUrl, feedUrl, postUrl } from '@/lib/blog/urls'
+// blog-system worktree (Phase 8): public post-visibility gate (adds the
+// scheduling clause so a future-dated post is never emitted into the feed).
+import { publicPostGateSql } from '@/lib/cms/postStatus'
 
 // /blog/feed — RSS 2.0 for the blog. Served at the configured segment via the
 // existing middleware rewrite (/<blogSeg>/feed | feed.xml -> /blog/feed; see
 // lib/blog/segmentRewrite.ts), and directly at /blog/feed on the default segment.
 //
 // CONTRACT
-//   - Returns the latest `blog_settings.feedItemCount` PUBLISHED posts
-//     (published = TRUE AND deleted_at IS NULL), newest first.
+//   - Returns the latest `blog_settings.feedItemCount` PUBLICLY-VISIBLE posts
+//     (publicPostGateSql: published + not-trashed + publish time arrived —
+//     Phase 8 added the scheduling clause so a future-dated post is held back),
+//     newest first. lastBuildDate derives from rows[0], so it reflects the
+//     newest VISIBLE post, never a not-yet-live scheduled one.
 //   - Valid RSS 2.0: a single <channel> with title/link/description/
 //     lastBuildDate + <atom:link rel="self">; one <item> per post carrying
 //     title/link/guid/pubDate/description.
@@ -86,8 +92,8 @@ export async function GET(): Promise<Response> {
   const [rows] = (await db.execute(sql`
     SELECT p.slug, p.title, p.excerpt, p.published_at
     FROM posts p
-    WHERE p.published = TRUE
-      AND p.deleted_at IS NULL
+    WHERE 1 = 1
+      ${publicPostGateSql('p')}
     ORDER BY p.published_at DESC, p.id DESC
     LIMIT ${limit}
   `)) as unknown as [FeedRow[]]

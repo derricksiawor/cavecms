@@ -63,10 +63,24 @@ const EditorSchema = z
   })
   .strict()
 
-// Admin allowlist extends editor with publish + slug. .strict() on
-// both — any unknown key trips a ZodError that withError converts
-// to 400. Splitting the inferred types lets buildSets refuse to put
-// an admin-only column in the editor allow-list at compile time.
+// Phase 8 scheduling: an explicit `published_at`. Admin-only (rides on
+// AdminSchema). Accepts an ISO-8601 datetime string the editor's schedule
+// picker emits (`new Date(...).toISOString()`), bounded to a sane window so a
+// malformed/hostile value can't stamp the year 9999. When present AND the post
+// is (or is becoming) published, it sets `published_at` directly — a FUTURE
+// value schedules the post (status = scheduled until NOW passes it); `null`
+// is NOT accepted (unpublishing is `published=false`, which leaves published_at
+// intact so a later re-publish keeps the original date). Parsed + re-validated
+// server-side below into a Date.
+const PUBLISHED_AT_MIN = Date.UTC(2000, 0, 1)
+// Cap ~10 years out — far past any real editorial calendar, blocks absurd
+// far-future timestamps that would never surface.
+const PUBLISHED_AT_MAX = () => Date.now() + 10 * 365 * 24 * 60 * 60 * 1000
+
+// Admin allowlist extends editor with publish + slug + the scheduling
+// published_at. .strict() on both — any unknown key trips a ZodError that
+// withError converts to 400. Splitting the inferred types lets buildSets refuse
+// to put an admin-only column in the editor allow-list at compile time.
 const AdminSchema = EditorSchema.extend({
   published: z.boolean().optional(),
   slug: z
@@ -77,6 +91,19 @@ const AdminSchema = EditorSchema.extend({
     // Reject the /blog sub-path words (category/tag/feed/page) on a slug
     // rename too — same shadowing guard as POST create / validateTermSlug.
     .refine((s) => !TAXONOMY_RESERVED.has(s.toLowerCase()), 'slug_reserved')
+    .optional(),
+  // ISO-8601 datetime → bounded epoch. .datetime() rejects junk; the refine
+  // bounds it to [2000-01-01, now+10y]. Optional: a save that doesn't touch
+  // scheduling omits it entirely.
+  publishedAt: z
+    .string()
+    .datetime({ offset: true })
+    .refine((s) => {
+      const ms = Date.parse(s)
+      return (
+        Number.isFinite(ms) && ms >= PUBLISHED_AT_MIN && ms <= PUBLISHED_AT_MAX()
+      )
+    }, 'published_at_out_of_range')
     .optional(),
 }).strict()
 
@@ -95,6 +122,11 @@ interface PostRow {
   seo_description: string | null
   og_image_id: number | null
   published: number
+  // Phase 8: needed so buildSets can (a) preserve the original publish date on a
+  // plain re-publish and (b) detect a reschedule (published_at changed to a new
+  // explicit value) so the version + index cache bust. mysql2 may hand it back
+  // as Date or ISO string (dateStrings); compared via epoch ms.
+  published_at: Date | string | null
   version: number
 }
 
@@ -119,7 +151,12 @@ const EDITOR_COLS: ReadonlyArray<readonly [EditorFieldNoVersion, string]> = [
   ['ogImageId', 'og_image_id'],
 ]
 
-type AdminOnlyKey = Exclude<keyof AdminBody, keyof EditorBody>
+// `publishedAt` is NOT a plain column write — like the publish transition it is
+// applied specially in buildSets (it sets `published_at`, possibly to a future
+// timestamp for scheduling), so it is excluded from the ADMIN_ONLY_COLS
+// allow-list + exhaustiveness guard, paralleling how `version`/`categoryIds`/
+// `tagIds` are excluded from the editor cols.
+type AdminOnlyKey = Exclude<keyof AdminBody, keyof EditorBody | 'publishedAt'>
 const ADMIN_ONLY_COLS: ReadonlyArray<readonly [AdminOnlyKey, string]> = [
   ['published', 'published'],
   ['slug', 'slug'],
@@ -166,18 +203,54 @@ function buildSets(
   role: 'admin' | 'editor' | 'viewer',
   ctxUserId: number,
   publishedTransition: 'on' | 'off' | 'none',
+  // Phase 8 scheduling: parsed explicit publish timestamp (admin-only, null when
+  // the PATCH didn't carry one) + whether the post will be PUBLISHED after this
+  // PATCH (current state unless `published` is being changed). Together they
+  // decide the published_at write.
+  scheduleAt: Date | null,
+  willBePublished: boolean,
 ): {
   setSql: ReturnType<typeof sql.join>
   applied: Partial<AdminBody>
+  /** True when published_at is being moved to a new explicit timestamp
+   *  (schedule / reschedule) — drives the version bump + index cache bust even
+   *  if no other column changed. */
+  scheduleChanged: boolean
 } {
   const parts: ReturnType<typeof sql>[] = []
   const applied: Partial<AdminBody> = {}
 
   parts.push(sql`version = version + 1`)
   parts.push(sql`updated_by = ${ctxUserId}`)
-  // First-publish stamps published_at; republish preserves the
-  // original so a bookmarked URL doesn't see the date jitter.
-  if (publishedTransition === 'on') {
+
+  // ── published_at policy (Phase 8) ───────────────────────────────────────
+  // An explicit publishedAt (admin-only) wins WHEN the post is/becomes
+  // published: it sets published_at directly, so a FUTURE value schedules the
+  // post and a now/past value publishes immediately. Only `admin` reaches here
+  // with a non-null scheduleAt (editor schema has no publishedAt field). When
+  // there's no explicit date and the post is transitioning to published, the
+  // original COALESCE(published_at, NOW(3)) applies (first-publish stamps now;
+  // a re-publish preserves the original so bookmarks don't see date jitter).
+  // Unpublish (publishedTransition='off') never touches published_at — a later
+  // re-publish keeps the original date unless explicitly rescheduled.
+  let scheduleChanged = false
+  if (role === 'admin' && scheduleAt !== null && willBePublished) {
+    const prevMs =
+      row.published_at !== null
+        ? typeof row.published_at === 'string'
+          ? Date.parse(row.published_at)
+          : row.published_at.getTime()
+        : null
+    // Only write when the target instant actually differs from the stored one
+    // (avoids a no-op version bump when the editor re-sends the same schedule).
+    if (prevMs === null || prevMs !== scheduleAt.getTime()) {
+      parts.push(sql`published_at = ${scheduleAt}`)
+      scheduleChanged = true
+      ;(applied as Record<string, unknown>).publishedAt = scheduleAt.toISOString()
+    }
+  } else if (publishedTransition === 'on') {
+    // First-publish stamps published_at; republish preserves the
+    // original so a bookmarked URL doesn't see the date jitter.
     parts.push(sql`published_at = COALESCE(published_at, NOW(3))`)
   }
 
@@ -204,7 +277,7 @@ function buildSets(
     }
   }
 
-  return { setSql: sql.join(parts, sql`, `), applied }
+  return { setSql: sql.join(parts, sql`, `), applied, scheduleChanged }
 }
 
 // ─── GET /api/cms/posts/[id] — single post for editor load ──────────
@@ -315,7 +388,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const [rows] = (await tx.execute(sql`
         SELECT id, slug, title, excerpt, body_md, hero_image_id,
                seo_title, seo_description, og_image_id,
-               published, version
+               published, published_at, version
         FROM posts
         WHERE id = ${id} AND deleted_at IS NULL
         FOR UPDATE
@@ -340,6 +413,18 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
               : 'off'
           : 'none'
       const publishedChanged = publishedTransition !== 'none'
+
+      // Phase 8 scheduling inputs. `scheduleAt` is the admin-only explicit
+      // publish instant (parsed Date | null); only admins can set it (the editor
+      // schema has no publishedAt field, so an editor's body.publishedAt is
+      // always undefined). `willBePublished` is the post's published state AFTER
+      // this PATCH — the current state unless `published` is being toggled.
+      const scheduleAt: Date | null =
+        ctx.role === 'admin' && body.publishedAt !== undefined
+          ? new Date(body.publishedAt)
+          : null
+      const willBePublished =
+        body.published !== undefined ? body.published : row.published === 1
 
       // Slug rename: insert/upsert redirect → collapse chain → drop
       // self-reference. Three statements inside the TX so a crash
@@ -380,12 +465,14 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         `)
       }
 
-      const { setSql, applied } = buildSets(
+      const { setSql, applied, scheduleChanged } = buildSets(
         body,
         row,
         ctx.role,
         ctx.userId,
         publishedTransition,
+        scheduleAt,
+        willBePublished,
       )
 
       // Sync taxonomy junctions (post_categories / post_tags) BEFORE the
@@ -414,23 +501,29 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       // affect only the detail page — those land via the post-slug
       // tag below without invalidating the whole index. A taxonomy change
       // also affects the index (pills) + archive surfaces.
+      // coreChanged also fires on a schedule change: moving a post's
+      // published_at (schedule / reschedule / publish-at-time) changes the date
+      // shown on the index card AND the order/visibility of the loop, so the
+      // posts-index + sitemap must bust.
       const coreChanged =
         applied.title !== undefined ||
         applied.excerpt !== undefined ||
         applied.heroImageId !== undefined ||
-        taxonomyChanged
+        taxonomyChanged ||
+        scheduleChanged
 
       // No-op short-circuit. If nothing actually changed AND no
       // version-affecting side effects are needed, return the
       // current version untouched — idempotent client retries hit
-      // this path on the second attempt. A taxonomy change counts as
-      // "something changed" so the version bumps + the row UPDATE runs.
+      // this path on the second attempt. A taxonomy change OR a schedule change
+      // counts as "something changed" so the version bumps + the row UPDATE runs.
       const nothingApplied = Object.keys(applied).length === 0
       if (
         nothingApplied &&
         publishedTransition === 'none' &&
         !slugChanged &&
-        !taxonomyChanged
+        !taxonomyChanged &&
+        !scheduleChanged
       ) {
         return {
           newVersion: row.version,
@@ -507,11 +600,15 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
             seo_description: row.seo_description,
             og_image_id: row.og_image_id,
             published: row.published === 1,
-            // published_at not selected by the FOR UPDATE query;
-            // forensic triage that needs the prior timestamp pulls
-            // it from a previous audit row's `to` block or from
-            // the (rare) backups. Storing it here would require an
-            // extra SELECT column for a low-value forensic signal.
+            // Phase 8: published_at IS now selected by the FOR UPDATE query
+            // (needed for the scheduling diff), so the prior publish/schedule
+            // timestamp is recorded here as an ISO string — a "who rescheduled
+            // this post and from when" forensic query reads one row. Normalized
+            // so mysql2's Date|string both land as ISO.
+            published_at:
+              row.published_at !== null
+                ? new Date(row.published_at).toISOString()
+                : null,
           },
           to: applied,
           slugChanged,
@@ -547,6 +644,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
       const tagSet = tagsForPostSave(newSlug, {
         publishedChanged,
         slugChanged,
+        scheduleChanged,
         oldSlug: slugChanged ? row.slug : undefined,
         coreChanged,
       }).tags
