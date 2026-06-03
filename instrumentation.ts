@@ -485,6 +485,47 @@ export async function register(): Promise<void> {
     updateSchedGlobal.__cavecmsUpdateChecker.unref()
   }
 
+  // ─── Scheduled-backup ticker ───────────────────────────────────
+  //
+  // Mirror of the update checker: an hourly in-process tick that runs a backup
+  // when `settings.backups.schedule` (off|daily|weekly) says it's due and no
+  // other op holds the shared lock. Paired with a systemd timer
+  // (scripts/systemd/cavecms-backup-run.timer) hitting the loopback
+  // /api/internal/backups/trigger-scheduled endpoint so a Node restart never
+  // misses a window. The scheduler claims each occurrence before spawning, so
+  // the in-process tick + the systemd trigger can't double-fire. Dynamic import
+  // keeps the backup engine's transitive deps out of the edge bundle. PM2
+  // cluster-mode is refused upstream, so only one worker ticks.
+  const backupSchedGlobal = globalThis as unknown as {
+    __cavecmsBackupScheduler?: ReturnType<typeof setInterval>
+  }
+  if (!backupSchedGlobal.__cavecmsBackupScheduler) {
+    // First fire 90s after boot — staggered after the update checker (+30s) and
+    // the AI sweeper (+60s) so the three don't contend at startup.
+    const BACKUP_FIRST_FIRE_MS = 90_000
+    const fireBackup = async (): Promise<void> => {
+      try {
+        const mod = await import('@/lib/backups/scheduler')
+        await mod.runBackupTickIfDue()
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'backup_schedule_loop_failed',
+            err: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+          }),
+        )
+      }
+    }
+    setTimeout(() => {
+      void fireBackup()
+    }, BACKUP_FIRST_FIRE_MS)
+    backupSchedGlobal.__cavecmsBackupScheduler = setInterval(() => {
+      void fireBackup()
+    }, 60 * 60 * 1000)
+    backupSchedGlobal.__cavecmsBackupScheduler.unref()
+  }
+
   // ─── AI proposal lifecycle sweeper (PR 5) ──────────────────────
   //
   // Two responsibilities on a 5-min tick: flip pending → expired past

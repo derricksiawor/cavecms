@@ -1,6 +1,6 @@
 import { withError } from '@/lib/api/withError'
 import { requireRole } from '@/lib/auth/requireRole'
-import { checkReadRate } from '@/lib/auth/cmsRateLimit'
+import { checkStatusPollRate } from '@/lib/auth/cmsRateLimit'
 import {
   readBackupStatus,
   isBackupStale,
@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic'
 
 export const GET = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
-  checkReadRate(ctx.userId)
+  checkStatusPollRate(ctx.userId)
 
   const url = new URL(req.url)
   const kind = url.searchParams.get('kind') === 'restore' ? 'restore' : 'backup'
@@ -43,6 +43,9 @@ export const GET = withError(async (req: Request) => {
     } else if (isBackupStale(s)) {
       payload = { ...s, state: 'failed', error: 'backup process timed out (no progress in 15 min)' }
     } else {
+      // NOTE: cloud token/folder reconciliation happens in the audit-terminal
+      // internal endpoint (which fires for scheduled runs too), not here — this
+      // GET stays a pure read.
       payload = s
     }
   }

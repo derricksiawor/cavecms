@@ -1,9 +1,12 @@
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { listBackups } from '@/lib/backups/store'
-import { BackupsClient, type BackupRow } from './BackupsClient'
+import { getSetting } from '@/lib/cms/getSettings'
+import { isProviderConfigured } from '@/lib/backups/cloud/clients'
+import { BackupsClient, type BackupRow, type DestinationsSummary } from './BackupsClient'
 
 // Admin-only Settings → Backups surface. Server component reads the local
-// backup list (filesystem) + hands it to the interactive client.
+// backup list (filesystem) + the cloud-destination connection summary, then
+// hands them to the interactive client.
 
 export const dynamic = 'force-dynamic'
 
@@ -21,5 +24,27 @@ export default async function BackupsSettingsPage() {
     version: e.version,
     includeEnv: e.includeEnv,
   }))
-  return <BackupsClient initialBackups={initial} />
+  const cfg = await getSetting('backups')
+  const destinations: DestinationsSummary = {
+    active: cfg.destination,
+    gdrive: {
+      connected: cfg.gdrive.connected,
+      accountEmail: cfg.gdrive.accountEmail ?? null,
+      configured: isProviderConfigured('gdrive'),
+    },
+    onedrive: {
+      connected: cfg.onedrive.connected,
+      accountEmail: cfg.onedrive.accountEmail ?? null,
+      configured: isProviderConfigured('onedrive'),
+    },
+    options: {
+      remoteRetention: cfg.remoteRetention,
+      keepLocalCopy: cfg.keepLocalCopy,
+      passphraseEnabled: cfg.encryption.passphraseEnabled,
+      schedule: cfg.schedule,
+      scheduleHour: cfg.scheduleHour,
+      scheduleWeekday: cfg.scheduleWeekday,
+    },
+  }
+  return <BackupsClient initialBackups={initial} destinations={destinations} />
 }

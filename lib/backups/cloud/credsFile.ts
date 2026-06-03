@@ -1,0 +1,241 @@
+import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { getInstallStateDir } from '@/lib/backups/statusPath'
+import { getSetting } from '@/lib/cms/getSettings'
+import { updateSettingValue } from '@/lib/cms/writeSetting'
+import {
+  decryptSecret,
+  encryptSecret,
+  AAD_BACKUP_GDRIVE_REFRESH,
+  AAD_BACKUP_ONEDRIVE_REFRESH,
+  AAD_BACKUP_PASSPHRASE,
+} from '@/lib/security/secretCipher'
+import { getClientId, getClientSecret, type CloudProvider } from '@/lib/backups/cloud/clients'
+
+// The plaintext refresh token + passphrase are handed to the spawned engine via
+// a mode-600 file in the install state dir (never argv / never the env-var
+// allowlist). The engine writes any rotated refresh token / resolved folder id
+// back to the OUT file, which the app re-encrypts + persists after completion.
+
+export class PassphraseRequiredError extends Error {
+  constructor() {
+    super('passphrase_required_for_secrets')
+    this.name = 'PassphraseRequiredError'
+  }
+}
+
+// Thrown when a cloud destination is selected but not connected (e.g. the
+// refresh token was revoked). We fail loudly rather than silently falling back
+// to a local backup, so the operator is told to reconnect instead of believing
+// their cloud backups are still running.
+export class CloudDestinationUnavailableError extends Error {
+  constructor() {
+    super('cloud_destination_unavailable')
+    this.name = 'CloudDestinationUnavailableError'
+  }
+}
+
+function credsDir(): string {
+  return getInstallStateDir() ?? tmpdir()
+}
+function credsInPath(): string {
+  return join(credsDir(), '.cavecms-cloud-creds-in.json')
+}
+
+// Remove the plaintext creds file. Call this when a spawn fails AFTER the file
+// was written but BEFORE the engine ran (so the engine's own cleanup never
+// fires). Best-effort.
+export function discardCloudCreds(): void {
+  try {
+    if (existsSync(credsInPath())) unlinkSync(credsInPath())
+  } catch {
+    /* ignore */
+  }
+}
+
+// A scheduled run's in-flight flag is considered stale after this long (longer
+// than the 3h engine wall-clock timeout + margin), so a flag left set by a
+// trap-bypassing kill is ignored rather than mislabelling a later backup.
+const SCHEDULED_INFLIGHT_STALE_MS = 4 * 60 * 60 * 1000
+function credsOutPath(): string {
+  return join(credsDir(), '.cavecms-cloud-creds-out.json')
+}
+function refreshAad(provider: CloudProvider): string {
+  return provider === 'gdrive' ? AAD_BACKUP_GDRIVE_REFRESH : AAD_BACKUP_ONEDRIVE_REFRESH
+}
+
+// Build the env additions for a cloud-destined backup, writing the mode-600
+// creds file as a side effect. Returns null when the active destination is
+// local or not connected (→ a plain local backup). Throws
+// PassphraseRequiredError if `includeEnv` is requested for a cloud destination
+// without a passphrase configured.
+export async function prepareBackupCloudEnv(
+  includeEnv: boolean,
+): Promise<Record<string, string> | null> {
+  const cfg = await getSetting('backups')
+  const dest = cfg.destination
+  if (dest === 'local') return null
+
+  // Order matters: the "include secrets" safety gate is evaluated BEFORE the
+  // connection check, so a disconnected cloud destination can never silently
+  // degrade a secrets-bearing backup into a local plaintext archive.
+  if (includeEnv && !cfg.encryption.passphraseEnabled) {
+    throw new PassphraseRequiredError()
+  }
+  const conn = cfg[dest]
+  if (!conn?.connected || !conn.refreshToken) {
+    throw new CloudDestinationUnavailableError()
+  }
+
+  const creds: {
+    provider: CloudProvider
+    clientId: string
+    clientSecret?: string
+    refreshToken: string
+    folderId?: string
+    passphrase?: string
+  } = {
+    provider: dest,
+    clientId: getClientId(dest),
+    clientSecret: getClientSecret(dest),
+    refreshToken: decryptSecret(conn.refreshToken, refreshAad(dest)),
+    folderId: conn.folderId,
+  }
+  if (cfg.encryption.passphraseEnabled && cfg.encryption.passphrase) {
+    creds.passphrase = decryptSecret(cfg.encryption.passphrase, AAD_BACKUP_PASSPHRASE)
+  }
+
+  const inPath = credsInPath()
+  const outPath = credsOutPath()
+  writeFileSync(inPath, JSON.stringify(creds), { mode: 0o600 })
+  // Clear any stale out file from a prior run so reconcile can't read garbage.
+  try {
+    if (existsSync(outPath)) unlinkSync(outPath)
+  } catch {
+    /* ignore */
+  }
+
+  return {
+    CAVECMS_BACKUP_DESTINATION: dest,
+    CAVECMS_BACKUP_CLOUD_CREDS_FILE: inPath,
+    CAVECMS_BACKUP_CLOUD_CREDS_OUT: outPath,
+    CAVECMS_BACKUP_REMOTE_RETENTION: String(cfg.remoteRetention),
+    CAVECMS_BACKUP_KEEP_LOCAL: cfg.keepLocalCopy ? '1' : '0',
+  }
+}
+
+// Write the mode-600 creds file for a cloud RESTORE (cloud-pull reads it).
+// Includes the passphrase when configured so an encrypted archive can be
+// decrypted. Returns the creds file path. Throws 'not_connected' if the
+// provider isn't connected.
+export async function prepareRestoreCloudCreds(provider: CloudProvider): Promise<string> {
+  const cfg = await getSetting('backups')
+  const conn = cfg[provider]
+  if (!conn?.connected || !conn.refreshToken) {
+    throw new Error('not_connected')
+  }
+  const creds: {
+    provider: CloudProvider
+    clientId: string
+    clientSecret?: string
+    refreshToken: string
+    folderId?: string
+    passphrase?: string
+  } = {
+    provider,
+    clientId: getClientId(provider),
+    clientSecret: getClientSecret(provider),
+    refreshToken: decryptSecret(conn.refreshToken, refreshAad(provider)),
+    folderId: conn.folderId,
+  }
+  if (cfg.encryption.passphraseEnabled && cfg.encryption.passphrase) {
+    creds.passphrase = decryptSecret(cfg.encryption.passphrase, AAD_BACKUP_PASSPHRASE)
+  }
+  const inPath = credsInPath()
+  writeFileSync(inPath, JSON.stringify(creds), { mode: 0o600 })
+  return inPath
+}
+
+// Record the terminal outcome of a SCHEDULER-initiated backup. No-op unless a
+// scheduled run is in flight (so manual backups never touch the scheduled
+// result). Clears the in-flight flag. Called from the audit-terminal endpoint
+// (which fires for every backup, scheduled or manual).
+export async function recordScheduledBackupOutcome(
+  completed: boolean,
+  errorMsg: string | null,
+): Promise<void> {
+  const state = await getSetting('backups_state')
+  if (!state.scheduledInFlight) return
+  // If the flag is stale (a scheduled engine was killed before its terminal
+  // callback, leaving the flag set), this terminal belongs to a DIFFERENT
+  // (manual) backup — clear the flag without recording its outcome as the
+  // scheduled result.
+  const stampMs = state.scheduledInFlightAt ? Date.parse(state.scheduledInFlightAt) : 0
+  const stale =
+    !Number.isFinite(stampMs) || stampMs === 0 || Date.now() - stampMs > SCHEDULED_INFLIGHT_STALE_MS
+  await updateSettingValue(
+    'backups_state',
+    (cur) => {
+      const next = { ...cur, scheduledInFlight: false }
+      delete next.scheduledInFlightAt
+      if (!stale) {
+        next.lastScheduledResult = completed ? ('ok' as const) : ('failed' as const)
+        if (completed) delete next.lastScheduledError
+        else next.lastScheduledError = (errorMsg || 'The scheduled backup failed.').slice(0, 300)
+      }
+      return next
+    },
+    null,
+  )
+}
+
+// After a backup completes, persist any rotated refresh token + resolved folder
+// id the engine wrote. Best-effort + idempotent — safe to call on every
+// terminal poll.
+export async function reconcileBackupCloudCredsOut(): Promise<void> {
+  const outPath = credsOutPath()
+  if (!existsSync(outPath)) return
+  let payload: { provider?: CloudProvider; refreshToken?: string; folderId?: string }
+  try {
+    payload = JSON.parse(readFileSync(outPath, 'utf8'))
+  } catch {
+    try {
+      unlinkSync(outPath)
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+  const provider = payload.provider
+  if (provider !== 'gdrive' && provider !== 'onedrive') {
+    try {
+      unlinkSync(outPath)
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+  await updateSettingValue(
+    'backups',
+    (cur) => {
+      const conn = { ...cur[provider] }
+      if (payload.refreshToken) {
+        conn.refreshToken = encryptSecret(payload.refreshToken, refreshAad(provider))
+      }
+      if (payload.folderId) conn.folderId = payload.folderId
+      return { ...cur, [provider]: conn }
+    },
+    null,
+  )
+  try {
+    unlinkSync(outPath)
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (existsSync(credsInPath())) unlinkSync(credsInPath())
+  } catch {
+    /* ignore */
+  }
+}
