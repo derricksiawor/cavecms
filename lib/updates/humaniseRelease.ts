@@ -109,7 +109,12 @@ function splitChangelog(raw: string): { title: string; body: string } {
     if (next === titleRaw) break
     titleRaw = next
   }
-  const stripped = titleRaw.replace(WIP_PREFIX_RE, '').trim()
+  const stripped = titleRaw
+    // Hand-written manifest notes lead with a markdown heading (`## x.y.z`);
+    // drop the `#` markers so the card title is the clean version, not `## …`.
+    .replace(/^#{1,6}\s+/, '')
+    .replace(WIP_PREFIX_RE, '')
+    .trim()
   const title = scrubDevSpeak(stripped).trim() || 'New release available'
 
   const rawBody = lines.slice(titleIdx + 1).join('\n').trim()
