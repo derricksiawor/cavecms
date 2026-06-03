@@ -2,11 +2,7 @@ import { spawnSync } from 'node:child_process'
 import {
   mkdtempSync,
   mkdirSync,
-  readFileSync,
-  statSync,
   rmSync,
-  existsSync,
-  unlinkSync,
   createReadStream,
   createWriteStream,
 } from 'node:fs'
@@ -19,20 +15,13 @@ import { withError } from '@/lib/api/withError'
 import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
-import { db } from '@/db/client'
-import { SyncBundle } from '@/lib/sync/bundleTypes'
-import { validateBundle } from '@/lib/sync/preflight'
-import { provisionBundleMedia, resolveStagedContent } from '@/lib/sync/mediaRemap'
-import { putStage, sweepExpiredStages } from '@/lib/sync/stageStore'
-import { buildBundleContent, contentGraphOf } from '@/lib/sync/serializeLocal'
-import { canonicalContentHash } from '@/lib/sync/contentHash'
-import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
+import { sweepExpiredStages } from '@/lib/sync/stageStore'
+import { stageBundleFromDir } from '@/lib/sync/stageFromDir'
 
 export const runtime = 'nodejs'
 
 const MAX_BUNDLE_BYTES = 200 * 1024 * 1024 // compressed upload cap
 const MAX_EXTRACTED_BYTES = 512 * 1024 * 1024 // decompression-bomb ceiling
-const MAX_JSON_BYTES = 64 * 1024 * 1024 // per content/*.json parse cap
 const MAX_TAR_MEMBERS = 250_000 // inode-bomb ceiling (≈50k-media site headroom)
 
 // POST /api/cms/sync/stage  (raw application/gzip body = the bundle .tgz)
@@ -62,7 +51,6 @@ export const POST = withError(async (req) => {
   const tgz = path.join(work, 'bundle.tgz')
   const tarPath = path.join(work, 'bundle.tar')
   const extract = path.join(work, 'x')
-  const written: string[] = []
   try {
     // 0. STREAM the raw request body straight to disk under a HARD byte cap —
     //    never buffer the whole compressed bundle in heap. `req.formData()` /
@@ -153,85 +141,26 @@ export const POST = withError(async (req) => {
     if (links.error || links.status !== 0) throw new HttpError(500, 'find_unavailable')
     if ((links.stdout ?? '').trim() !== '') throw new HttpError(422, 'bundle_contains_symlink')
 
-    const read = (rel: string): unknown => {
-      const p = path.join(extract, rel)
-      if (!existsSync(p)) throw new HttpError(400, `bundle_missing:${rel}`)
-      if (statSync(p).size > MAX_JSON_BYTES) throw new HttpError(413, `bundle_json_too_large:${rel}`)
-      return JSON.parse(readFileSync(p, 'utf8'))
-    }
-    const readOptional = (rel: string, fallback: unknown): unknown => {
-      const p = path.join(extract, rel)
-      if (!existsSync(p)) return fallback
-      if (statSync(p).size > MAX_JSON_BYTES) throw new HttpError(413, `bundle_json_too_large:${rel}`)
-      return JSON.parse(readFileSync(p, 'utf8'))
-    }
-    const candidate = {
-      manifest: read('manifest.json'),
-      pages: read('content/pages.json'),
-      posts: read('content/posts.json'),
-      projects: read('content/projects.json'),
-      settings: read('content/settings.json'),
-      settingsMediaRefs: readOptional('content/settings-media-refs.json', {}),
-      media: read('media/manifest.json'),
-    }
-    const parsed = SyncBundle.safeParse(candidate)
-    if (!parsed.success) throw new HttpError(422, 'bundle_malformed')
-    const bundle = parsed.data
-
-    // Resolve the target's live login path so preflight can reject a pushed
-    // page that would shadow it (best-effort — a resolver hiccup just skips the
-    // login-path check; RESERVED slugs are still enforced).
-    const loginPath = await getResolvedLoginPath().catch(() => undefined)
-    const pre = validateBundle(bundle, { loginPath })
-    if (!pre.ok) {
-      return json(422, { ok: false, errors: pre.errors, summary: pre.summary })
+    // 5. Read + validate + (unless validateOnly) provision-media + persist the
+    //    stage row. This post-extraction apply path is shared VERBATIM with the
+    //    pull orchestrator (lib/sync/orchestrate.ts) via stageBundleFromDir —
+    //    one hardened code path for both the remote-upload leg (this route) and
+    //    the in-process pull leg. The helper owns the `written[]`
+    //    file-cleanup-on-throw contract (a media file copied before a mid-stage
+    //    failure is unlinked when its transaction rolls back).
+    const out = await stageBundleFromDir(extract, ctx.userId, { validateOnly })
+    if (!out.ok) {
+      return json(422, { ok: false, errors: out.errors, summary: out.summary })
     }
     if (validateOnly) {
-      return json(200, { ok: true, validateOnly: true, summary: pre.summary, contentHash: bundle.manifest.contentHash })
+      return json(200, { ok: true, validateOnly: true, summary: out.summary, contentHash: out.contentHash })
     }
-
-    // Drift baseline = the TARGET's content hash AT STAGE TIME, computed
-    // server-side. The cutover later compares the target's live hash against
-    // THIS, so it detects a concurrent edit landing between stage and cutover.
-    // (The bundle's own manifest.baselineContentHash is source-side provenance
-    // and meaningless as a target baseline — using it made every local→prod
-    // push fire drift and forced --force.)
-    const targetBaseline = canonicalContentHash(contentGraphOf(await buildBundleContent()))
-
-    // Atomic: media rows + the stage row commit together. On rollback the media
-    // ROWS are gone; the catch below unlinks the copied FILES (in `written`).
-    const stageId = await db.transaction(async (tx) => {
-      const keyToMedia = await provisionBundleMedia(tx, bundle.media, extract, written)
-      const staged = resolveStagedContent(
-        {
-          pages: bundle.pages,
-          posts: bundle.posts,
-          projects: bundle.projects,
-          settings: bundle.settings,
-          settingsMediaRefs: bundle.settingsMediaRefs,
-        },
-        keyToMedia,
-      )
-      return putStage(staged, bundle.manifest.contentHash, targetBaseline, ctx.userId, tx)
-    })
-
     return json(200, {
       ok: true,
-      stageId,
-      contentHash: bundle.manifest.contentHash,
-      summary: pre.summary,
+      stageId: out.stageId,
+      contentHash: out.contentHash,
+      summary: out.summary,
     })
-  } catch (e) {
-    // Unlink media files copied before a mid-stage failure (the rows are gone
-    // with the rolled-back transaction; only the files would leak).
-    for (const p of written) {
-      try {
-        unlinkSync(p)
-      } catch {
-        /* already gone */
-      }
-    }
-    throw e
   } finally {
     rmSync(work, { recursive: true, force: true })
   }

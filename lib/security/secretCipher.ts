@@ -61,6 +61,11 @@ export const AAD_BACKUP_GDRIVE_REFRESH = 'backups:gdrive:refreshToken' as const
 export const AAD_BACKUP_ONEDRIVE_REFRESH = 'backups:onedrive:refreshToken' as const
 export const AAD_BACKUP_PENDING_DEVICE_CODE = 'backups:pending:deviceCode' as const
 export const AAD_BACKUP_PASSPHRASE = 'backups:encryption:passphrase' as const
+// Local→remote sync target API tokens. A named production target's bearer
+// token is stored encrypted-at-rest; the push/pull orchestrator decrypts it
+// only at transfer time and never logs it. Per-field AAD so a target token
+// can't be replayed into another secret slot.
+export const AAD_SYNC_TARGET_TOKEN = 'sync:target:token' as const
 
 const ENVELOPE_VERSION = 1 as const
 const ALG = 'aes-256-gcm' as const

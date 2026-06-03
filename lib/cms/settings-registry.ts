@@ -861,6 +861,40 @@ const backups = z.object({
   onedrive: backupCloudConnection.default({ connected: false }),
 })
 
+// Named local→remote sync targets (e.g. "production"). Each carries the target
+// site URL + an encrypted-at-rest admin API token (AES-256-GCM via
+// SECRETS_ENCRYPTION_KEY, AAD_SYNC_TARGET_TOKEN). The push/pull orchestrator
+// decrypts the token only at transfer time. `last4` is a non-secret display
+// stub. Operator config lives here (settings table), NOT in an env file or a
+// ~/.config profile (per project rule #2) — the dedicated /api/cms/sync/targets
+// route owns writes; the generic Settings PATCH never touches this key, and
+// get_settings / the public settings read NEVER surface the encrypted token.
+const syncTarget = z.object({
+  name: z
+    .string()
+    .min(1)
+    .max(60)
+    .regex(/^[a-z0-9][a-z0-9 _-]*$/i, 'letters, digits, space, dash, underscore'),
+  url: z
+    .string()
+    .max(300)
+    .refine((v) => {
+      try {
+        return new URL(v).protocol.startsWith('http')
+      } catch {
+        return false
+      }
+    }, 'must be a full http(s) URL'),
+  token: encryptedSecretSchema,
+  last4: z.string().max(8).optional(),
+  accountLabel: z.string().max(120).optional(),
+  addedAt: z.string().max(40).optional(),
+})
+const syncTargets = z.object({
+  targets: z.array(syncTarget).max(20).default([]),
+  defaultName: z.string().max(60).nullable().default(null),
+})
+
 // Short-lived device-flow pending block, stashed between the connect request
 // and the poll completion. The device_code is encrypted at rest; the block is
 // cleared on success / denial / expiry.
@@ -1347,6 +1381,12 @@ export const registry = {
   backups_state: {
     schema: backupsState,
     default: {} satisfies z.infer<typeof backupsState>,
+  },
+  // Named local→remote sync targets (encrypted API tokens). Written only by
+  // the dedicated /api/cms/sync/targets route — never the generic Settings PATCH.
+  sync_targets: {
+    schema: syncTargets,
+    default: { targets: [], defaultName: null } satisfies z.infer<typeof syncTargets>,
   },
   // ─── SMTP / outbound email ───
   smtp_config: {
