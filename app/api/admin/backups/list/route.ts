@@ -1,5 +1,5 @@
 import { withError } from '@/lib/api/withError'
-import { requireRole } from '@/lib/auth/requireRole'
+import { requireRole, requireScope } from '@/lib/auth/requireRole'
 import { checkStatusPollRate } from '@/lib/auth/cmsRateLimit'
 import { listBackups } from '@/lib/backups/store'
 
@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic'
 
 export const GET = withError(async () => {
   const ctx = await requireRole(['admin'])
+  requireScope(ctx, 'backups', 'read')
   checkStatusPollRate(ctx.userId)
   const entries = listBackups().map((e) => ({
     file: e.file,

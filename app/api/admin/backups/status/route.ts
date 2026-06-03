@@ -1,5 +1,5 @@
 import { withError } from '@/lib/api/withError'
-import { requireRole } from '@/lib/auth/requireRole'
+import { requireRole, requireScope } from '@/lib/auth/requireRole'
 import { checkStatusPollRate } from '@/lib/auth/cmsRateLimit'
 import {
   readBackupStatus,
@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic'
 
 export const GET = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
+  requireScope(ctx, 'backups', 'read')
   checkStatusPollRate(ctx.userId)
 
   const url = new URL(req.url)

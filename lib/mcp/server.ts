@@ -102,6 +102,32 @@ import {
 } from '@/app/api/cms/saved-blocks/[id]/route'
 import { POST as savedBlockInstantiate } from '@/app/api/cms/saved-blocks/[id]/instantiate/route'
 import { POST as templateInstantiate } from '@/app/api/cms/templates/instantiate/route'
+// Sync route handlers (local↔remote content sync; admin + sync scope).
+import {
+  GET as syncTargetsList,
+  PUT as syncTargetsPut,
+  DELETE as syncTargetsDelete,
+} from '@/app/api/cms/sync/targets/route'
+import { POST as syncPull } from '@/app/api/cms/sync/pull/route'
+import { POST as syncPush } from '@/app/api/cms/sync/push/route'
+// Backup route handlers (cloud + local archive backups; admin + backups scope).
+// callRoute dispatches a handler reference against any absolute app path, so the
+// /api/admin/backups/* routes pass through the SAME requireRole/requireScope/
+// requireCsrf(bearer-exempt)/rate chain as their /api/cms/* siblings.
+import { POST as backupsCreate } from '@/app/api/admin/backups/create/route'
+import { GET as backupsList } from '@/app/api/admin/backups/list/route'
+import { GET as backupsStatus } from '@/app/api/admin/backups/status/route'
+import { GET as backupsRemoteList } from '@/app/api/admin/backups/destinations/remote-list/route'
+import { POST as backupsRestore } from '@/app/api/admin/backups/restore/route'
+import { POST as backupsRestoreFromCloud } from '@/app/api/admin/backups/restore-from-cloud/route'
+import { POST as backupsDelete } from '@/app/api/admin/backups/delete/route'
+import { POST as backupsOptions } from '@/app/api/admin/backups/destinations/options/route'
+import { POST as backupsConnect } from '@/app/api/admin/backups/destinations/connect/route'
+import { POST as backupsConnectPoll } from '@/app/api/admin/backups/destinations/connect/poll/route'
+import { POST as backupsDisconnect } from '@/app/api/admin/backups/destinations/disconnect/route'
+// getSetting backs backup_configure's read-merge-write (the options route body
+// is .strict() + fully-required, so a partial update must merge onto current).
+import { getSetting } from '@/lib/cms/getSettings'
 
 // The MCP session is long-lived but the acting authority is RE-RESOLVED on every
 // HTTP request (the route enters mcpCtxStore.run with a freshly authenticated
@@ -958,6 +984,333 @@ export function buildServer(init: McpRequestContext): McpServer {
           method: 'POST',
           path: '/api/cms/templates/instantiate',
           body: args.fields,
+        }),
+      ),
+  )
+
+  // ═══ sync (local↔remote content sync; passthrough — admin + sync scope) ═══
+  reg('sync_list_targets', {}, async () =>
+    respond(
+      await callRoute(syncTargetsList, {
+        method: 'GET',
+        path: '/api/cms/sync/targets',
+      }),
+    ),
+  )
+  reg(
+    'sync_configure_target',
+    {
+      name: z.string().min(1).max(60).describe('Target name (e.g. "production").'),
+      url: z.string().min(1).max(300).describe('Target site URL (http/https).'),
+      token: z.string().min(1).max(512).describe('Admin API token for the target (stored encrypted; never echoed back).'),
+      accountLabel: z.string().max(120).optional().describe('Optional human label for the target account.'),
+    },
+    async (args) =>
+      respond(
+        await callRoute(syncTargetsPut, {
+          method: 'PUT',
+          path: '/api/cms/sync/targets',
+          body: {
+            name: args.name,
+            url: args.url,
+            token: args.token,
+            accountLabel: args.accountLabel,
+          },
+        }),
+      ),
+  )
+  reg(
+    'sync_remove_target',
+    { name: z.string().min(1).max(60).describe('Target name to remove.') },
+    async (args) =>
+      respond(
+        await callRoute(syncTargetsDelete, {
+          method: 'DELETE',
+          path: '/api/cms/sync/targets',
+          body: { name: args.name },
+        }),
+      ),
+  )
+  reg(
+    'sync_pull',
+    {
+      from: z
+        .string()
+        .min(1)
+        .max(300)
+        .optional()
+        .describe('Configured target name OR a raw http(s) URL. Omit = the default target.'),
+      token: z
+        .string()
+        .min(1)
+        .max(512)
+        .optional()
+        .describe('Inline token override (raw-URL form, or a just-rotated target).'),
+    },
+    async (args) =>
+      respond(
+        await callRoute(syncPull, {
+          method: 'POST',
+          path: '/api/cms/sync/pull',
+          body: { from: args.from, token: args.token },
+        }),
+      ),
+  )
+  // sync_push REPLACES the target's content, so it confirms like a destructive
+  // op — EXCEPT dryRun, which writes nothing. Like edit_page it can't use
+  // regDestructive's unconditional gate; it hand-rolls a conditional confirm so a
+  // dry run (validate-only) needs no confirmation while a real push does.
+  reg(
+    'sync_push',
+    {
+      to: z
+        .string()
+        .min(1)
+        .max(300)
+        .optional()
+        .describe('Configured target name OR a raw http(s) URL. Omit = the default target.'),
+      token: z
+        .string()
+        .min(1)
+        .max(512)
+        .optional()
+        .describe('Inline token override (raw-URL form, or a just-rotated target).'),
+      force: z
+        .boolean()
+        .optional()
+        .describe('Overwrite even if the target drifted since this bundle’s baseline.'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('Validate against the target only; writes nothing. No confirmation needed.'),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe('Required true for a real push (ignored for dryRun, which writes nothing).'),
+    },
+    async (args) => {
+      // A dry run writes nothing → skip the destructive confirm entirely. A real
+      // push REPLACES the target's content → require an explicit confirm (or an
+      // accepted elicitation prompt) before dispatching.
+      if (args.dryRun !== true) {
+        const okToGo = await confirmDestructive(
+          server,
+          args.confirm === true,
+          'This REPLACES the remote target’s content with this install’s content.',
+        )
+        if (!okToGo) {
+          return fail(
+            'Not confirmed. Re-call sync_push with {"confirm": true} to replace the target, or {"dryRun": true} to validate without writing.',
+          )
+        }
+      }
+      return respond(
+        await callRoute(syncPush, {
+          method: 'POST',
+          path: '/api/cms/sync/push',
+          body: {
+            to: args.to,
+            token: args.token,
+            force: args.force,
+            dryRun: args.dryRun,
+          },
+        }),
+      )
+    },
+  )
+
+  // ═══ backups (cloud + local archive; passthrough — admin + backups scope) ═══
+  reg(
+    'backup_now',
+    {
+      includeEnv: z
+        .boolean()
+        .optional()
+        .describe('Bundle secrets for full disaster recovery (needs a passphrase for cloud destinations).'),
+    },
+    async (args) =>
+      respond(
+        await callRoute(backupsCreate, {
+          method: 'POST',
+          path: '/api/admin/backups/create',
+          body: { includeEnv: args.includeEnv },
+        }),
+      ),
+  )
+  reg('backup_list', {}, async () =>
+    respond(
+      await callRoute(backupsList, {
+        method: 'GET',
+        path: '/api/admin/backups/list',
+      }),
+    ),
+  )
+  reg(
+    'backup_status',
+    {
+      kind: z
+        .enum(['backup', 'restore'])
+        .optional()
+        .describe('Which operation to inspect (default "backup").'),
+    },
+    async (args) =>
+      respond(
+        await callRoute(backupsStatus, {
+          method: 'GET',
+          path: '/api/admin/backups/status',
+          query: { kind: args.kind as string | undefined },
+        }),
+      ),
+  )
+  reg(
+    'backup_remote_list',
+    { provider: z.enum(['gdrive', 'onedrive']).describe('Connected cloud provider to list.') },
+    async (args) =>
+      respond(
+        await callRoute(backupsRemoteList, {
+          method: 'GET',
+          path: '/api/admin/backups/destinations/remote-list',
+          query: { provider: args.provider as string },
+        }),
+      ),
+  )
+  regDestructive(
+    'backup_restore',
+    {
+      file: z.string().min(1).max(200).describe('Local backup archive basename to restore from.'),
+      restoreEnv: z
+        .boolean()
+        .optional()
+        .describe('DANGER: also overwrite the install’s secrets/env from the archive. Default false — leave it false unless you mean to.'),
+    },
+    async (args) =>
+      respond(
+        await callRoute(backupsRestore, {
+          method: 'POST',
+          path: '/api/admin/backups/restore',
+          body: { file: args.file, restoreEnv: args.restoreEnv === true },
+        }),
+      ),
+  )
+  regDestructive(
+    'backup_restore_from_cloud',
+    {
+      provider: z.enum(['gdrive', 'onedrive']).describe('Cloud provider holding the backup.'),
+      remoteId: z.string().min(1).max(400).describe('Remote backup id (from backup_remote_list).'),
+      restoreEnv: z
+        .boolean()
+        .optional()
+        .describe('DANGER: also overwrite the install’s secrets/env from the archive. Default false — leave it false unless you mean to.'),
+    },
+    async (args) =>
+      respond(
+        await callRoute(backupsRestoreFromCloud, {
+          method: 'POST',
+          path: '/api/admin/backups/restore-from-cloud',
+          body: {
+            provider: args.provider,
+            remoteId: args.remoteId,
+            restoreEnv: args.restoreEnv === true,
+          },
+        }),
+      ),
+  )
+  regDestructive(
+    'backup_delete',
+    { file: z.string().min(1).max(200).describe('Local backup archive basename to trash.') },
+    async (args) =>
+      respond(
+        await callRoute(backupsDelete, {
+          method: 'POST',
+          path: '/api/admin/backups/delete',
+          body: { file: args.file },
+        }),
+      ),
+  )
+  // backup_configure: the options route body is .strict() AND every field is
+  // REQUIRED, so a partial update would 400. Read the current `backups` setting
+  // and merge the provided fields onto it before calling — only what the caller
+  // passes changes, everything else is preserved. (passphrase nests under
+  // encryption in storage but the route takes a flat write-only passphrase /
+  // passphraseEnabled; never read the stored passphrase back out.)
+  reg(
+    'backup_configure',
+    {
+      destination: z.enum(['local', 'gdrive', 'onedrive']).optional().describe('Where backups go.'),
+      remoteRetention: z.number().int().min(1).max(100).optional().describe('How many remote backups to keep.'),
+      keepLocalCopy: z.boolean().optional().describe('Keep a local copy alongside a cloud upload.'),
+      passphraseEnabled: z.boolean().optional().describe('Encrypt backups with a passphrase.'),
+      passphrase: z.string().min(12).max(400).optional().describe('New passphrase (≥12 chars). Omit to keep the existing one.'),
+      schedule: z.enum(['off', 'daily', 'weekly']).optional().describe('Automatic backup schedule.'),
+      scheduleHour: z.number().int().min(0).max(23).optional().describe('Hour of day (0–23) for scheduled backups.'),
+      scheduleWeekday: z.number().int().min(0).max(6).optional().describe('Weekday (0=Sun…6=Sat) for a weekly schedule.'),
+    },
+    async (args) => {
+      // Current config is the base; provided fields override. The route requires
+      // the FULL flat body, so reconstruct every field from cur + args.
+      const cur = await getSetting('backups')
+      const body = {
+        destination: (args.destination as string | undefined) ?? cur.destination,
+        remoteRetention:
+          (args.remoteRetention as number | undefined) ?? cur.remoteRetention,
+        keepLocalCopy:
+          args.keepLocalCopy === undefined ? cur.keepLocalCopy : args.keepLocalCopy === true,
+        passphraseEnabled:
+          args.passphraseEnabled === undefined
+            ? cur.encryption.passphraseEnabled
+            : args.passphraseEnabled === true,
+        schedule: (args.schedule as string | undefined) ?? cur.schedule,
+        scheduleHour: (args.scheduleHour as number | undefined) ?? cur.scheduleHour,
+        scheduleWeekday:
+          (args.scheduleWeekday as number | undefined) ?? cur.scheduleWeekday,
+        // Write-only: passed only when the caller supplies a new passphrase.
+        // Omitted → the route keeps the existing encrypted passphrase.
+        ...(typeof args.passphrase === 'string' && args.passphrase.length > 0
+          ? { passphrase: args.passphrase }
+          : {}),
+      }
+      return respond(
+        await callRoute(backupsOptions, {
+          method: 'POST',
+          path: '/api/admin/backups/destinations/options',
+          body,
+        }),
+      )
+    },
+  )
+  reg(
+    'backup_connect_drive',
+    { provider: z.enum(['gdrive', 'onedrive']).describe('Cloud provider to connect.') },
+    async (args) =>
+      respond(
+        await callRoute(backupsConnect, {
+          method: 'POST',
+          path: '/api/admin/backups/destinations/connect',
+          body: { provider: args.provider },
+        }),
+      ),
+  )
+  reg(
+    'backup_connect_poll',
+    { provider: z.enum(['gdrive', 'onedrive']).describe('Cloud provider whose pending connect to poll.') },
+    async (args) =>
+      respond(
+        await callRoute(backupsConnectPoll, {
+          method: 'POST',
+          path: '/api/admin/backups/destinations/connect/poll',
+          body: { provider: args.provider },
+        }),
+      ),
+  )
+  reg(
+    'backup_disconnect_drive',
+    { provider: z.enum(['gdrive', 'onedrive']).describe('Cloud provider to disconnect.') },
+    async (args) =>
+      respond(
+        await callRoute(backupsDisconnect, {
+          method: 'POST',
+          path: '/api/admin/backups/destinations/disconnect',
+          body: { provider: args.provider },
         }),
       ),
   )

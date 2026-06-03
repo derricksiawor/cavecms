@@ -3,7 +3,7 @@ import { db } from '@/db/client'
 import { auditLog } from '@/db/schema'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, requireScope, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
@@ -44,6 +44,7 @@ function conflict(error: string): Response {
 
 export const POST = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
+  requireScope(ctx, 'backups', 'delete')
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   checkMutationRate(ctx.userId)
   const body = Body.parse(await readJsonBody(req))

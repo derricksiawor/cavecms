@@ -479,6 +479,151 @@ export const MCP_TOOLS = spec({
     tier: 'write',
     summary: 'Instantiate a section template into a page (clones its blocks).',
   },
+
+  // ── sync (local↔remote content sync; admin-only on every route) ──
+  sync_list_targets: {
+    name: 'sync_list_targets',
+    resource: 'sync',
+    action: 'read',
+    minRole: 'admin',
+    tier: 'read',
+    summary:
+      'List the configured sync targets (redacted: url + last4 stub only, never the token) and which one is the default.',
+  },
+  sync_configure_target: {
+    name: 'sync_configure_target',
+    resource: 'sync',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Add or update a named sync target (name, http(s) url, admin API token, optional accountLabel). The token is encrypted at rest and never echoed back.',
+  },
+  sync_remove_target: {
+    name: 'sync_remove_target',
+    resource: 'sync',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary: 'Remove a named sync target.',
+  },
+  sync_pull: {
+    name: 'sync_pull',
+    resource: 'sync',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Pull a remote source INTO this install (replaces this install’s content). Source = a configured target name or a raw http(s) url + inline token; omit to use the default target.',
+  },
+  sync_push: {
+    name: 'sync_push',
+    resource: 'sync',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'destructive',
+    summary:
+      'Push THIS install’s content to a remote target, REPLACING the target’s content. Pass dryRun:true to validate against the target without writing anything (no confirm needed); a real push requires confirmation. force overwrites even if the target drifted.',
+  },
+
+  // ── backups (cloud + local archive backups; admin-only on every route) ──
+  backup_now: {
+    name: 'backup_now',
+    resource: 'backups',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Start a backup now (detached). includeEnv:true bundles secrets for full disaster recovery (requires a passphrase when the destination is cloud). Poll backup_status to watch progress.',
+  },
+  backup_list: {
+    name: 'backup_list',
+    resource: 'backups',
+    action: 'read',
+    minRole: 'admin',
+    tier: 'read',
+    summary: 'List local backup archives (file, size, createdAt, encrypted, version).',
+  },
+  backup_status: {
+    name: 'backup_status',
+    resource: 'backups',
+    action: 'read',
+    minRole: 'admin',
+    tier: 'read',
+    summary:
+      'Read the live backup or restore progress (kind:"backup" default, or "restore").',
+  },
+  backup_remote_list: {
+    name: 'backup_remote_list',
+    resource: 'backups',
+    action: 'read',
+    minRole: 'admin',
+    tier: 'read',
+    summary:
+      'List the remote backups stored with a connected cloud provider (gdrive|onedrive).',
+  },
+  backup_restore: {
+    name: 'backup_restore',
+    resource: 'backups',
+    action: 'delete',
+    minRole: 'admin',
+    tier: 'destructive',
+    summary:
+      'Restore from an existing LOCAL backup archive. THIS OVERWRITES ALL LIVE CONTENT with the archive. restoreEnv:true ALSO overwrites the install’s secrets/env — leave it false unless you mean to.',
+  },
+  backup_restore_from_cloud: {
+    name: 'backup_restore_from_cloud',
+    resource: 'backups',
+    action: 'delete',
+    minRole: 'admin',
+    tier: 'destructive',
+    summary:
+      'Download a remote backup (provider + remoteId) and restore from it. THIS OVERWRITES ALL LIVE CONTENT. restoreEnv:true ALSO overwrites the install’s secrets/env — leave it false unless you mean to.',
+  },
+  backup_delete: {
+    name: 'backup_delete',
+    resource: 'backups',
+    action: 'delete',
+    minRole: 'admin',
+    tier: 'destructive',
+    summary: 'Move a local backup archive to trash (it is never hard-removed).',
+  },
+  backup_configure: {
+    name: 'backup_configure',
+    resource: 'backups',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Update backup options — destination (local|gdrive|onedrive), remoteRetention, keepLocalCopy, passphrase encryption, schedule. Only the fields you pass change; the rest are read from the current config and preserved.',
+  },
+  backup_connect_drive: {
+    name: 'backup_connect_drive',
+    resource: 'backups',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Start the OAuth device flow to connect a cloud destination (gdrive|onedrive). Returns a userCode + verificationUrl the HUMAN opens in a browser to approve — there is no CMS login step. Then call backup_connect_poll until it reports success.',
+  },
+  backup_connect_poll: {
+    name: 'backup_connect_poll',
+    resource: 'backups',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Poll a pending cloud-connect device flow (gdrive|onedrive). Returns pending / slow_down / success / denied / expired until the human approves the code.',
+  },
+  backup_disconnect_drive: {
+    name: 'backup_disconnect_drive',
+    resource: 'backups',
+    action: 'write',
+    minRole: 'admin',
+    tier: 'write',
+    summary:
+      'Disconnect a cloud destination (gdrive|onedrive): revoke the token (best-effort) and wipe the stored connection.',
+  },
 })
 
 export type McpToolName = keyof typeof MCP_TOOLS

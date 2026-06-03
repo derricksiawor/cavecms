@@ -2,7 +2,7 @@ import { createReadStream, statSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { join } from 'node:path'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, requireScope, HttpError } from '@/lib/auth/requireRole'
 import { checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { resolveBackupDir, isValidArchiveBasename } from '@/lib/backups/store'
 
@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic'
 
 export const GET = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
+  requireScope(ctx, 'backups', 'read')
   checkReadRate(ctx.userId)
 
   // Block cross-site forced downloads (drive-by): a backup made with
