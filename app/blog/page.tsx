@@ -5,7 +5,8 @@ import { renderCmsPage, parseLoopPage } from '../_shared/cmsPage'
 import { resolveMetadata } from '@/lib/seo/resolve'
 // blog-system worktree (Phase 5): segment-aware canonical for the blog index.
 import { resolveSegments } from '@/lib/blog/resolveSegments'
-import { blogIndexUrl } from '@/lib/blog/urls'
+// Phase 7 adds feedUrl for the RSS <link rel="alternate"> auto-discovery hint.
+import { blogIndexUrl, feedUrl } from '@/lib/blog/urls'
 
 // /blog stays force-dynamic to mirror /projects: the underlying data is
 // small and rarely changes, but the CMS save path fires
@@ -45,13 +46,30 @@ export async function generateMetadata({
   // Next.js renders Metadata.other as `<meta name>`, NOT the `<link rel>`
   // those hints require, and Google deprecated rel=prev/next anyway. The
   // in-content Blog Loop pager already carries the rel=prev/next links.
-  return resolveMetadata({
+  const base = await resolveMetadata({
     title: r?.seo_title ?? null,
     description: r?.seo_description ?? null,
     fallbackTitle: 'Blog — CaveCMS',
     fallbackDescription: 'Updates, milestones and stories from CaveCMS.',
     canonicalPath: blogIndexUrl(page, segments),
   })
+
+  // Phase 7: RSS auto-discovery. Next renders Metadata.alternates.types as
+  // `<link rel="alternate" type="<key>" href="<value>">` in <head>, which is
+  // exactly the feed-discovery hint readers + browsers look for. The href is
+  // segment-aware (feedUrl honors a custom blog segment). Merged onto the
+  // resolved base so the canonical from resolveMetadata is preserved.
+  return {
+    ...base,
+    alternates: {
+      ...base.alternates,
+      types: {
+        'application/rss+xml': [
+          { url: feedUrl(segments), title: `${r?.seo_title ?? 'Blog'} RSS Feed` },
+        ],
+      },
+    },
+  }
 }
 
 // CMS-driven /blog index. The hero, intro, and CTA live as content_blocks;

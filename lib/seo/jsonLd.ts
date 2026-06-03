@@ -133,6 +133,12 @@ export function blogPostingLd(p: {
   title: string
   slug: string
   publishedAt: Date
+  // blog-system worktree (Phase 7): the post's last-edit time (posts.updated_at).
+  // Additive + optional so the call sites that don't pass it (and the parallel
+  // SEO worktree) stay byte-identical — `dateModified` is emitted only when a
+  // value is supplied. Localized to this single field per spec §11 to keep the
+  // shared helper mergeable.
+  modifiedAt?: Date | null
   excerpt?: string | null
   heroImage?: string | null
   author: string
@@ -145,6 +151,14 @@ export function blogPostingLd(p: {
     '@type': 'BlogPosting',
     headline: p.title,
     datePublished: p.publishedAt.toISOString(),
+    // blog-system worktree (Phase 7): emit dateModified when updated_at is
+    // supplied AND it is a valid date. Google's Article rich-result spec
+    // recommends dateModified alongside datePublished; omitting it when absent
+    // (rather than defaulting to publishedAt) keeps the signal honest.
+    dateModified:
+      p.modifiedAt && !Number.isNaN(p.modifiedAt.getTime())
+        ? p.modifiedAt.toISOString()
+        : undefined,
     description: p.excerpt ?? undefined,
     image: p.heroImage ?? undefined,
     author: { '@type': 'Person', name: p.author },

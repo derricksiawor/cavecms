@@ -11,9 +11,13 @@ import { mintPublicPreCsrfForBlocks } from '@/app/_shared/cmsPage'
 import { blogPostingLd } from '@/lib/seo/jsonLd'
 import { postBreadcrumbLd } from '@/lib/seo/blog-jsonld'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
+// Phase 7: blog_settings (showReadingTime / relatedPostsCount) for the detail chrome.
+import { getSetting } from '@/lib/cms/getSettings'
 import { resolveMetadata } from '@/lib/seo/resolve'
 import { safeJsonForScript } from '@/lib/seo/escape'
 import { TaxonomyPills, type TermLink } from '@/components/post-sections/TaxonomyPills'
+// blog-system worktree (Phase 7): related-posts rail (mirrors SimilarProjectsRail).
+import { SimilarPostsRailSection } from '@/components/post-sections/SimilarPostsRail/render'
 // blog-system worktree (Phase 5): resolve the configured permalink segments once
 // per request and thread into the URL helpers so canonical / slug-redirect /
 // taxonomy-pill URLs honor a custom segment + post-path structure.
@@ -72,9 +76,20 @@ interface PostDetailRow {
   // mysql2 may return TIMESTAMP as Date OR ISO string depending on
   // driver config (`dateStrings`). Accept both and convert at use.
   published_at: Date | string | null
+  // Phase 7: post last-edit time → drives the "Updated <date>" chrome line +
+  // the BlogPosting dateModified JSON-LD. mysql2 may hand it back as Date OR
+  // string (dateStrings); normalized at use like published_at.
+  updated_at: Date | string | null
   hero_image_id: number | null
   author_name: string | null
   hero_variants: string | { lg?: string } | null
+  // Phase 7: ≈200-wpm reading-time estimate computed in SQL from body_md char
+  // length — IDENTICAL formula to the Blog Loop hydrate (lib/cms/hydrate.ts):
+  // ceil(CHAR_LENGTH(body_md) / 1000), min 1 (≈5 chars/word, ≈200 wpm). Keeping
+  // the body text out of app memory and the estimate consistent with the index
+  // card. body_md is retained as the body source of truth even after the
+  // block-tree migration, so it stays the word-count source for both surfaces.
+  reading_minutes: number | string | bigint
 }
 
 // NOTE: do NOT wrap the body of this function in try/catch. Next.js
@@ -128,8 +143,10 @@ export default async function BlogPost({
   // editor (it's restored from Trash, not edited live).
   const [rows] = (await db.execute(sql`
     SELECT p.id, p.slug, p.title, p.excerpt, p.body_md, p.body_page_id,
-           p.published, p.published_at, p.hero_image_id, u.name AS author_name,
-           m.variants AS hero_variants
+           p.published, p.published_at, p.updated_at, p.hero_image_id,
+           u.name AS author_name,
+           m.variants AS hero_variants,
+           GREATEST(1, CEIL(CHAR_LENGTH(COALESCE(p.body_md, '')) / 1000)) AS reading_minutes
     FROM posts p
     LEFT JOIN users u ON u.id = p.author_id
     LEFT JOIN media m ON m.id = p.hero_image_id AND m.deleted_at IS NULL
@@ -182,6 +199,27 @@ export default async function BlogPost({
     ? new Date(post.published_at)
     : new Date()
 
+  // ─── Phase 7: reading time + updated date ─────────────────────
+  // reading_minutes comes straight from SQL (same formula as the Blog Loop
+  // card), normalized to a whole minute ≥ 1. Gated on blog_settings.showReadingTime
+  // so an operator who hides it on the index hides it on the detail too — one
+  // consistent toggle.
+  const blog = await getSetting('blog_settings')
+  const readingMinutes = Math.max(1, Number(post.reading_minutes) || 1)
+  const showReadingTime = blog.showReadingTime !== false
+
+  // "Updated <date>" shows only when updated_at MATERIALLY post-dates
+  // published_at (> 1 day later) — a tiny same-day metadata touch (e.g. a
+  // taxonomy reassignment) shouldn't read as a content revision. Both are UTC
+  // as stored; compared as epoch ms. updatedAt is also threaded into the
+  // BlogPosting dateModified JSON-LD below.
+  const updatedAt = post.updated_at ? new Date(post.updated_at) : null
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000
+  const showUpdated =
+    updatedAt !== null &&
+    !Number.isNaN(updatedAt.getTime()) &&
+    updatedAt.getTime() - publishedAt.getTime() > ONE_DAY_MS
+
   // Load this post's categories + tags for the cross-link pills + breadcrumb.
   // Two small junction-PK-indexed reads; ordered by category position / tag
   // name so the rendered pills are stable. The FIRST category (lowest
@@ -211,6 +249,10 @@ export default async function BlogPost({
     title: post.title,
     slug: post.slug,
     publishedAt,
+    // Phase 7: dateModified — emitted only when updated_at materially post-dates
+    // published_at (same > 1-day gate as the "Updated <date>" chrome line), so
+    // the rich-result signal matches what the page visibly claims.
+    modifiedAt: showUpdated ? updatedAt : null,
     excerpt: post.excerpt,
     heroImage: heroVariants?.lg ?? null,
     author: post.author_name ?? 'CaveCMS',
@@ -246,13 +288,28 @@ export default async function BlogPost({
         dangerouslySetInnerHTML={{ __html: safeJsonForScript(breadcrumb) }}
       />
       <h1 className="text-3xl font-semibold tracking-tight">{post.title}</h1>
-      <time
-        className="text-xs uppercase tracking-wide text-copper-600 mt-2 inline-block"
-        dateTime={publishedAt.toISOString()}
-      >
-        {publishedAt.toISOString().slice(0, 10)}
-        {post.author_name ? ` · ${post.author_name}` : null}
-      </time>
+      {/* Byline meta row: published date · author · reading time. Reading time
+          gated on blog_settings.showReadingTime (consistent with the index card)
+          and rendered with a middot separator only when shown. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs uppercase tracking-wide text-copper-600">
+        <time dateTime={publishedAt.toISOString()}>
+          {publishedAt.toISOString().slice(0, 10)}
+        </time>
+        {post.author_name ? <span>· {post.author_name}</span> : null}
+        {showReadingTime ? (
+          <span>· {readingMinutes} min read</span>
+        ) : null}
+      </div>
+      {/* "Updated <date>" — only when updated_at materially post-dates
+          published_at (> 1 day). Quiet, secondary to the publish date. */}
+      {showUpdated && updatedAt ? (
+        <p className="mt-1 text-[11px] uppercase tracking-wide text-warm-stone">
+          Updated{' '}
+          <time dateTime={updatedAt.toISOString()}>
+            {updatedAt.toISOString().slice(0, 10)}
+          </time>
+        </p>
+      ) : null}
       {/* Taxonomy cross-link pills — categories + tags link to their archives
           so the post connects into the taxonomy graph (#0.592). Phase 5: pass
           the resolved segments so pill URLs honor a custom blog segment. */}
@@ -402,9 +459,19 @@ export default async function BlogPost({
   }
 
   return (
-    <main className="py-12 max-w-3xl mx-auto px-4">
-      {chrome}
-      {bodyNode}
-    </main>
+    <>
+      <main className="py-12 max-w-3xl mx-auto px-4">
+        {chrome}
+        {bodyNode}
+      </main>
+      {/* Phase 7: related-posts rail — a page-level discovery surface placed
+          OUTSIDE <main> (like app/projects/[slug]'s SimilarProjectsRail), so it
+          spans full width with its own max-w-7xl container instead of being
+          clamped to the article's max-w-3xl measure. The component self-gates:
+          renders nothing when blog_settings.relatedPostsCount is 0 or no other
+          published post exists. Only on the read-only (public + non-edit-mode)
+          path — the editable branch above is a focused authoring view. */}
+      <SimilarPostsRailSection postId={post.id} />
+    </>
   )
 }
