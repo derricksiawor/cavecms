@@ -102,6 +102,29 @@ describe('gdrive.list', () => {
     const out = await gdrive.list(stubToken)
     expect(out).toEqual([{ remoteId: 'x', name: 'n.tar.gz', sizeBytes: 123, createdAt: 'T' }])
   })
+
+  it('follows nextPageToken to return ALL files across pages', async () => {
+    queueFetch([
+      res({ status: 200, json: { nextPageToken: 'PG2', files: [{ id: 'a', name: 'a.tar.gz', createdTime: 'T1' }] } }),
+      res({ status: 200, json: { files: [{ id: 'b', name: 'b.tar.gz', createdTime: 'T2' }] } }),
+    ])
+    const out = await gdrive.list(stubToken)
+    expect(out.map((e) => e.remoteId)).toEqual(['a', 'b'])
+    // Second request carried the pageToken.
+    expect(calls[1]!.url).toContain('pageToken=PG2')
+  })
+})
+
+describe('onedrive.list', () => {
+  it('follows @odata.nextLink to return ALL items across pages', async () => {
+    queueFetch([
+      res({ status: 200, json: { '@odata.nextLink': 'https://graph/next', value: [{ id: 'a', name: 'a.tar.gz' }] } }),
+      res({ status: 200, json: { value: [{ id: 'b', name: 'b.tar.gz' }] } }),
+    ])
+    const out = await onedrive.list({ token: { getAccessToken: async () => 'AT' } })
+    expect(out.map((e) => e.remoteId)).toEqual(['a', 'b'])
+    expect(calls[1]!.url).toBe('https://graph/next')
+  })
 })
 
 describe('makeTokenProvider', () => {

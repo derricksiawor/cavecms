@@ -120,19 +120,26 @@ export async function upload(ctx, localPath, remoteName, onProgress, _restarted 
   }
 }
 
+// List ALL app-folder items, following @odata.nextLink so the result is
+// complete regardless of folder size (retention + the restore UI rely on it).
 export async function list(ctx) {
-  const res = await fetchRetry(
-    `${GRAPH}/me/drive/special/approot/children?$select=id,name,size,createdDateTime&$top=999`,
-    { headers: { authorization: await authHeader(ctx) } },
-  )
-  if (!res.ok) throw new Error(`onedrive_list_failed:${res.status}`)
-  const j = await res.json()
-  return (j.value || []).map((f) => ({
-    remoteId: f.id,
-    name: f.name,
-    sizeBytes: typeof f.size === 'number' ? f.size : 0,
-    createdAt: f.createdDateTime || null,
-  }))
+  const out = []
+  let url = `${GRAPH}/me/drive/special/approot/children?$select=id,name,size,createdDateTime&$top=999`
+  while (url) {
+    const res = await fetchRetry(url, { headers: { authorization: await authHeader(ctx) } })
+    if (!res.ok) throw new Error(`onedrive_list_failed:${res.status}`)
+    const j = await res.json()
+    for (const f of j.value || []) {
+      out.push({
+        remoteId: f.id,
+        name: f.name,
+        sizeBytes: typeof f.size === 'number' ? f.size : 0,
+        createdAt: f.createdDateTime || null,
+      })
+    }
+    url = j['@odata.nextLink'] || ''
+  }
+  return out
 }
 
 export async function download(ctx, remoteId, destPath, onProgress) {

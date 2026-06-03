@@ -108,23 +108,33 @@ export async function upload(ctx, localPath, remoteName, onProgress) {
   })
 }
 
-// List backup archives in the folder. Returns [{ remoteId, name, sizeBytes, createdAt }].
+// List ALL backup archives in the folder, following nextPageToken so the result
+// is complete regardless of folder size (retention + the restore UI both rely
+// on a complete list). Returns [{ remoteId, name, sizeBytes, createdAt }].
 export async function list(ctx) {
   const folderId = await ensureFolder(ctx)
   const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`)
-  const fields = encodeURIComponent('files(id,name,size,createdTime)')
-  const res = await fetchRetry(
-    `${API}/files?q=${q}&fields=${fields}&orderBy=createdTime desc&pageSize=1000`,
-    { headers: { authorization: await authHeader(ctx) } },
-  )
-  if (!res.ok) throw new Error(`gdrive_list_failed:${res.status}`)
-  const j = await res.json()
-  return (j.files || []).map((f) => ({
-    remoteId: f.id,
-    name: f.name,
-    sizeBytes: f.size ? Number(f.size) : 0,
-    createdAt: f.createdTime || null,
-  }))
+  const fields = encodeURIComponent('nextPageToken,files(id,name,size,createdTime)')
+  const out = []
+  let pageToken = ''
+  do {
+    const url =
+      `${API}/files?q=${q}&fields=${fields}&orderBy=createdTime desc&pageSize=1000` +
+      (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '')
+    const res = await fetchRetry(url, { headers: { authorization: await authHeader(ctx) } })
+    if (!res.ok) throw new Error(`gdrive_list_failed:${res.status}`)
+    const j = await res.json()
+    for (const f of j.files || []) {
+      out.push({
+        remoteId: f.id,
+        name: f.name,
+        sizeBytes: f.size ? Number(f.size) : 0,
+        createdAt: f.createdTime || null,
+      })
+    }
+    pageToken = j.nextPageToken || ''
+  } while (pageToken)
+  return out
 }
 
 export async function download(ctx, remoteId, destPath, onProgress) {
