@@ -25,6 +25,8 @@ import {
   FolderTree,
   // blog-system worktree (Phase 5): Permalinks settings sub-page icon.
   Link2,
+  // blog-system worktree (Phase 6): Blog settings sub-page icon.
+  Newspaper,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -86,6 +88,10 @@ export const NAV: readonly NavItem[] = [
   // ── blog-system worktree (Phase 5): Permalinks (appended so a parallel SEO-
   //    settings worktree's own appended entry merges cleanly beside this one) ──
   { label: 'Permalinks', href: '/admin/settings/permalinks', roles: ['admin'], icon: Link2, parent: '/admin/settings' },
+  // ── blog-system worktree (Phase 6): Blog (appended in the same fenced region
+  //    as Permalinks so the parallel SEO-settings worktree's appended entry
+  //    merges cleanly beside both) ──
+  { label: 'Blog', href: '/admin/settings/blog', roles: ['admin'], icon: Newspaper, parent: '/admin/settings' },
   { label: 'Activity', href: '/admin/activity', roles: ['admin'], icon: ShieldCheck },
   { label: 'Help', href: '/admin/help', roles: ['admin', 'editor', 'viewer'], icon: HelpCircle },
 ]

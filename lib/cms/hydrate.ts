@@ -464,12 +464,32 @@ export async function hydratePage(
   const firstLoopBlock = loopBlocks[0]
   if (firstLoopBlock) {
     const loopData = firstLoopBlock.data as BlockData<'lx_posts'>
+    // Phase 6 (blog settings): `blog_settings` is AUTHORITATIVE for the Blog
+    // Loop's DISPLAY (layout / columns / showExcerpt / showDate /
+    // showReadingTime) — the WordPress "Reading settings" model, where one
+    // clear place (Settings → Blog) controls how the blog index + archives
+    // render. We deliberately do NOT honour a per-block override for these five
+    // fields: the lx_posts schema gives them Zod `.default()`s that
+    // parseForRead/parseAndSanitize materialize into EVERY stored block, so
+    // there is no reliable "operator left this unset" signal — and a single
+    // canonical blog surface doesn't need per-instance display variance. We
+    // mutate the parsed `data` so the synchronous LxPosts renderer reads the
+    // effective values with zero renderer changes. `postsPerPage` STAYS
+    // block-overridable: it's `.optional()` with no default, so a per-block
+    // value is a genuine, detectable override (block wins; else the setting).
+    // getSetting('blog_settings') is missing-context safe and returns the
+    // registry default if the row is absent/corrupt.
+    const blogSettings = await getSetting('blog_settings')
+    firstLoopBlock.data = {
+      ...loopData,
+      layout: blogSettings.layout,
+      columns: blogSettings.columns,
+      showExcerpt: blogSettings.showExcerpt,
+      showDate: blogSettings.showDate,
+      showReadingTime: blogSettings.showReadingTime,
+    }
     let perPage = loopData.postsPerPage
     if (typeof perPage !== 'number') {
-      // Fall back to the site-wide default. getSetting is missing-context
-      // safe (uncached direct read outside a request) and returns the Zod
-      // default if the row is absent/corrupt.
-      const blogSettings = await getSetting('blog_settings')
       perPage = blogSettings.postsPerPage
     }
     // Archive override wins over the block's own filter. The override pins the
