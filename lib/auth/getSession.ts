@@ -101,10 +101,19 @@ export const _loadAuthState = cache(async (): Promise<AuthState | null> => {
     // Check the (free, in-memory) path gate BEFORE the DB lookup so a stray
     // Authorization header on a public-page SSR render (uncacheable,
     // unthrottled) can't force an api_tokens SELECT — the token can never be
-    // honoured there anyway. x-pathname is set by middleware on every
-    // matched request.
+    // honoured there anyway. x-pathname is set by middleware on every MATCHED
+    // request; a public page is matched → x-pathname is its non-empty page
+    // path → tokenAllowedPath(page) is false → no SELECT (protection intact).
+    //
+    // EMPTY x-pathname means the request hit a route EXCLUDED from the middleware
+    // matcher. Static excludes (_next, uploads/, favicon) are served without a
+    // route handler and never reach getSession, so the ONLY excluded route that
+    // authenticates here is /api/cms/sync/stage — excluded because the Edge
+    // middleware caps its large bundle body at ~10MB. That route self-gates
+    // (requireRole admin + requireScope sync:write + requireCsrf), so an empty
+    // pathname is safe to verify: the route does the real authorization.
     const pathname = h.get('x-pathname') ?? ''
-    if (tokenAllowedPath(pathname)) {
+    if (pathname === '' || tokenAllowedPath(pathname)) {
       const tok = await verifyApiToken(authz)
       if (tok) {
         // Attribute writes to the minting user (real FK target for
