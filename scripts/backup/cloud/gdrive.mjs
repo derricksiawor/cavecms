@@ -15,10 +15,31 @@ async function authHeader(ctx, forceRefresh = false) {
   return `Bearer ${await ctx.token.getAccessToken(forceRefresh)}`
 }
 
-// Create the "CaveCMS Backups" folder once; return its id. If ctx.folderId is
-// already set, reuse it.
+// Resolve the "CaveCMS Backups" folder id. If we already know it, reuse it.
+// Otherwise SEARCH for an existing one by name first (idempotent — drive.file
+// only sees folders this app created, so a name match is our own folder), and
+// only create one if none exists. This makes folder resolution independent of
+// whether the persisted folderId survived — without it, a lost folderId would
+// silently create duplicate folders and strand earlier backups.
 export async function ensureFolder(ctx) {
   if (ctx.folderId) return ctx.folderId
+
+  const q = encodeURIComponent(
+    `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+  )
+  const found = await fetchRetry(
+    `${API}/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime&pageSize=10`,
+    { headers: { authorization: await authHeader(ctx) } },
+  )
+  if (found.ok) {
+    const fj = await found.json()
+    if (fj.files && fj.files.length > 0) {
+      // Oldest match wins, so all clients converge on the same folder.
+      ctx.folderId = fj.files[0].id
+      return ctx.folderId
+    }
+  }
+
   const res = await fetchRetry(`${API}/files?fields=id`, {
     method: 'POST',
     headers: { authorization: await authHeader(ctx), 'content-type': 'application/json' },

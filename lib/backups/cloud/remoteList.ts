@@ -62,6 +62,43 @@ function compatFor(sidecar: {
   return { compatible: true, note: null }
 }
 
+// Resolve the provider's backup folder once and persist its id on the
+// connection, so every later backup/list uses the SAME folder. Called right
+// after a successful connect — this is what prevents duplicate "CaveCMS
+// Backups" folders forming when the post-backup reconcile is delayed/failed.
+// Best-effort; gdrive only (OneDrive's AppFolder is a fixed special folder).
+export async function resolveAndPersistFolder(provider: CloudProvider): Promise<void> {
+  if (provider !== 'gdrive') return
+  const cfg = await getSetting('backups')
+  const conn = cfg[provider]
+  if (!conn?.connected || !conn.refreshToken || conn.folderId) return
+  const refreshToken = decryptSecret(conn.refreshToken, refreshAad(provider))
+  let rotated: string | null = null
+  const dest = createDestination({
+    provider,
+    clientId: getClientId(provider),
+    clientSecret: getClientSecret(provider),
+    refreshToken,
+    folderId: undefined,
+    onRotate: (rt) => {
+      rotated = rt
+    },
+  })
+  const folderId = await dest.ensureFolder()
+  await updateSettingValue(
+    'backups',
+    (cur) => ({
+      ...cur,
+      [provider]: {
+        ...cur[provider],
+        folderId,
+        ...(rotated ? { refreshToken: encryptSecret(rotated, refreshAad(provider)) } : {}),
+      },
+    }),
+    null,
+  )
+}
+
 // List the remote backups for a connected provider, reading the cleartext
 // sidecars for metadata + a compat badge. Persists any rotated refresh token.
 export async function listRemoteBackups(provider: CloudProvider): Promise<RemoteBackupRow[]> {

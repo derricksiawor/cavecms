@@ -100,7 +100,7 @@ export const POST = withError(async (req: Request) => {
       [provider]: {
         connected: true,
         accountEmail: accountEmail ?? undefined,
-        folderId: cur[provider]?.folderId, // resolved lazily on first upload (Phase 2)
+        folderId: cur[provider]?.folderId,
         refreshToken: encRefresh,
         clientFingerprint: clientFingerprint(provider),
       },
@@ -108,6 +108,16 @@ export const POST = withError(async (req: Request) => {
     ctx.userId,
   )
   await clearPending(provider, ctx.userId)
+
+  // Create + persist the cloud folder NOW (best-effort) so every backup/list
+  // uses the same folder — prevents duplicate folders forming if a later
+  // post-backup reconcile is delayed or fails.
+  try {
+    const { resolveAndPersistFolder } = await import('@/lib/backups/cloud/remoteList')
+    await resolveAndPersistFolder(provider)
+  } catch {
+    /* lazily resolved on first backup if this fails */
+  }
 
   const meta = auditMetaFromRequest(req)
   try {
