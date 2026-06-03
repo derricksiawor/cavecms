@@ -34,6 +34,7 @@ import type {
   TaxonomyFilterTerm,
 } from '@/lib/cms/listPosts'
 import { TaxonomyChips, type TermOption } from './[id]/TaxonomyChips'
+import { mapServerError } from '@/lib/cms/errorCopy'
 
 // Phase 8 (blog-system worktree): the SERVER-MODE admin posts list. AdminTable
 // runs in `server` mode — sort + page + page-size changes call back into here
@@ -185,8 +186,11 @@ export function PostsClient({
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
         // A whole-request failure (403/400/429) → mark every row failed with
-        // the server reason so the bulk bar surfaces it.
-        const reason = j.error ?? `Failed (${r.status})`
+        // friendly copy so the bulk bar surfaces a calm, jargon-free reason.
+        const reason = mapServerError(
+          j.error,
+          "We couldn't update those just now. Try again.",
+        )
         return {
           ok: 0,
           failed: ids.map((id) => ({
@@ -221,7 +225,12 @@ export function PostsClient({
         if (j.error === 'not_found') {
           toast.success('Moved to Trash.')
         } else {
-          toast.error(`Failed (${r.status})`)
+          toast.error(
+            mapServerError(
+              j.error,
+              "We couldn't move that to Trash. Try again in a moment.",
+            ),
+          )
           return
         }
       } else {
@@ -280,7 +289,11 @@ export function PostsClient({
       }
       if (r.failed.length > 0) {
         const reasons = Array.from(
-          new Set(r.failed.map((f) => f.reason)),
+          new Set(
+            r.failed.map((f) =>
+              mapServerError(f.reason, 'it could not be updated'),
+            ),
+          ),
         ).join('; ')
         toast.error(`${r.failed.length} could not be updated: ${reasons}`)
       }

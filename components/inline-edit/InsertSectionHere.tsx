@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Plus, Loader2, Columns3, ImageIcon } from 'lucide-react'
 import clsx from 'clsx'
 import { csrfFetch } from '@/lib/client/csrf'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { useToast } from './Toast'
 import { type MediaRef, useMediaPicker } from './MediaPickerProvider'
 
@@ -130,7 +131,9 @@ export function InsertSectionHere({
             "Couldn't insert here — the position gap is full. Refresh the page and try again.",
           )
         } else {
-          toast.error(j.error ?? "We couldn't add the section. Try again.")
+          toast.error(
+            mapServerError(j.error, "We couldn't add the section. Try again in a moment."),
+          )
         }
         return
       }

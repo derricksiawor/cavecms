@@ -26,6 +26,7 @@ import clsx from 'clsx'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { csrfFetch } from '@/lib/client/csrf'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import type { SectionBackground } from '@/lib/cms/blockMeta'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { EditDrawer, type TabKey } from './EditDrawer'
@@ -363,7 +364,7 @@ export function EditableColumn(p: Props) {
           )
           return
         }
-        toast.error(j.error ?? 'Reorder failed.')
+        toast.error(mapServerError(j.error, "We couldn't save the new order. Refresh and try again."))
         return
       }
       // F11 — reorder bumps pages.version too; advance both cursors so
@@ -413,7 +414,7 @@ export function EditableColumn(p: Props) {
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? "We couldn't remove the column.")
+        toast.error(mapServerError(j.error, "We couldn't remove the column. Try again in a moment."))
         setOptimisticallyDeleted(false)
         return
       }

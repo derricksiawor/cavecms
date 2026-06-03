@@ -46,7 +46,8 @@ export function TrashClient({ initial }: { initial: Row[] }) {
         "Setup changed since it was deleted — an admin will need to help.",
       )
     }
-    if (!res.ok) throw new Error(`Restore failed (${res.status})`)
+    if (!res.ok)
+      throw new Error("We couldn't restore that item. Try again in a moment.")
   }
 
   async function restoreFromRow(row: Row) {

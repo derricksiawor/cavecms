@@ -25,6 +25,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import type { Role } from '@/lib/auth/requireRole'
 
 // Row shape for the active pages list. is_home/system/published are
@@ -120,13 +121,15 @@ export function PagesClient({
       const r = await csrfFetch(`/api/cms/pages/${row.id}`, { method: 'DELETE' })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error ?? `Failed (${r.status})`)
+        throw new Error(
+          mapServerError(j.error, "We couldn't do that just now. Try again."),
+        )
       }
       removeRow(row.id)
       toast.success('Moved to Trash.')
       router.refresh()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Delete failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't do that just now. Try again in a moment.")
     } finally {
       setDeleting(false)
       setPendingDeleteRow(null)
@@ -147,7 +150,9 @@ export function PagesClient({
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error ?? `Failed (${r.status})`)
+        throw new Error(
+          mapServerError(j.error, "We couldn't do that just now. Try again."),
+        )
       }
       const j = (await r.json()) as { version: number }
       updateRow(row.id, (prev) => ({
@@ -180,7 +185,9 @@ export function PagesClient({
       })
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error ?? 'Couldn’t mint preview link.')
+        throw new Error(
+          mapServerError(j.error, "We couldn't create a preview link. Try again."),
+        )
       }
       const j = (await r.json()) as { token: string }
       window.open(
@@ -301,7 +308,9 @@ export function PagesClient({
             })
             if (!r.ok) {
               const j = (await r.json().catch(() => ({}))) as { error?: string }
-              throw new Error(j.error ?? `Failed (${r.status})`)
+              throw new Error(
+                mapServerError(j.error, "We couldn't do that just now. Try again."),
+              )
             }
           })
           if (result.ok > 0) {

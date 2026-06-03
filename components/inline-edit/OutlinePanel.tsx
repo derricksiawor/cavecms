@@ -40,6 +40,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { safeStorage } from '@/lib/client/safeStorage'
 import { MAX_SECTION_COLUMNS, type BlockKind } from '@/lib/cms/blockMeta'
 import { useRecordCommand, useUndoActions } from './UndoStackProvider'
@@ -812,7 +813,7 @@ export function OutlinePanel({
                   | { parentId?: number | null }
                   | undefined
                 if (!dataCurrent || dataCurrent.parentId === undefined) {
-                  setErr("Lost the drag context — try again.")
+                  setErr("That drag didn't register — try again.")
                   return
                 }
                 const parentId = dataCurrent.parentId
@@ -1093,7 +1094,7 @@ function TreeRow({
       )
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? 'Duplicate failed.')
+        toast.error(mapServerError(j.error, "We couldn't duplicate that. Try again in a moment."))
         if (res.status === 404) router.refresh()
         return
       }
@@ -1145,7 +1146,7 @@ function TreeRow({
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? 'Delete failed.')
+        toast.error(mapServerError(j.error, "We couldn't remove that. Try again in a moment."))
         return
       }
       // F2 — apply per-row versions from the DELETE response so
@@ -1293,7 +1294,7 @@ function TreeRow({
               `This section is at the ${MAX_SECTION_COLUMNS}-column maximum.`,
             )
           } else {
-            toast.error(j.error ?? "We couldn't add the block.")
+            toast.error(mapServerError(j.error, "We couldn't add the block. Try again in a moment."))
           }
           return
         }
@@ -1355,7 +1356,7 @@ function TreeRow({
         })
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as { error?: string }
-          toast.error(j.error ?? "We couldn't save the label.")
+          toast.error(mapServerError(j.error, "We couldn't save the label. Try again in a moment."))
           return
         }
         router.refresh()

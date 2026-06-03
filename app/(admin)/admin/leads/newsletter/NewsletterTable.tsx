@@ -212,14 +212,15 @@ export function NewsletterTable({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ status: 'unsubscribed' }),
     })
-    if (!r.ok) throw new Error(`Unsubscribe failed (${r.status})`)
+    if (!r.ok) throw new Error("We couldn't unsubscribe that contact. Try again.")
   }
 
   async function deleteOne(id: number): Promise<void> {
     const r = await csrfFetch(`/api/admin/newsletter/${id}`, {
       method: 'DELETE',
     })
-    if (!r.ok && r.status !== 204) throw new Error(`Delete failed (${r.status})`)
+    if (!r.ok && r.status !== 204)
+      throw new Error("We couldn't remove that contact. Try again.")
   }
 
   async function onConfirmUnsubscribe() {

@@ -7,6 +7,7 @@ import { motion } from 'framer-motion'
 import { X } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { ALL_TEMPLATES, type SectionTemplate } from '@/lib/cms/sectionTemplates'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { useToast } from './Toast'
 import { useRecordCommand, useUndoActions } from './UndoStackProvider'
 import type { Command } from '@/lib/cms/undoStack'
@@ -199,7 +200,7 @@ export function SectionTemplateGallery({ pageId, afterBlockId, returnFocus, onCl
         })
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as { error?: string }
-          toast.error(`Couldn’t insert template (${j.error ?? 'unknown'}).`)
+          toast.error(mapServerError(j.error, "We couldn't add that layout. Refresh the page and try again."))
           return
         }
         const data = (await res.json().catch(() => ({}))) as {
@@ -210,7 +211,7 @@ export function SectionTemplateGallery({ pageId, afterBlockId, returnFocus, onCl
         const rootId = data.rootBlockId
         const allIds = data.createdBlockIds ?? []
         if (typeof rootId !== 'number') {
-          toast.error('Server response missing root id.')
+          toast.error("That layout was added but didn't load cleanly — refreshing to show it.")
           return
         }
         // Build the undo command. Inverse is a DELETE of the root

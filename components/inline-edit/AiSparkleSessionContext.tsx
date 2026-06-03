@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { mergeFieldValues } from '@/lib/ai/inlineEligibility'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { useInlineEditDispatch, useEffectiveVersions } from './InlineEditContext'
 import { useToast } from './Toast'
 
@@ -508,7 +509,9 @@ export function AiSparkleSessionProvider({ children }: { children: ReactNode }) 
       }
       if (!response.ok) {
         const j = (await response.json().catch(() => ({}))) as { error?: string }
-        toast.error(j.error ?? 'Apply failed.')
+        toast.error(
+          mapServerError(j.error, "We couldn't apply those suggestions. Try again in a moment."),
+        )
         setSession((cur) => (cur ? { ...cur, status: 'ready' } : cur))
         return
       }

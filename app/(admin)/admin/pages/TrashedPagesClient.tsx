@@ -12,6 +12,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { EmptyState } from '@/components/inline-edit/EmptyState'
 
 // Trashed-pages client. Restore is admin-only per spec §4.5; the
@@ -85,12 +86,14 @@ export function TrashedPagesClient({
       throw new Error(
         j.error === 'slug_taken'
           ? `That web address is already in use. Pick a different one.`
-          : j.error ?? `Restore failed (${r.status})`,
+          : mapServerError(j.error, "We couldn't restore that page. Try again in a moment."),
       )
     }
     if (!r.ok) {
       const j = (await r.json().catch(() => ({}))) as { error?: string }
-      throw new Error(j.error ?? `Restore failed (${r.status})`)
+      throw new Error(
+        mapServerError(j.error, "We couldn't restore that page. Try again in a moment."),
+      )
     }
     return 'ok'
   }
@@ -116,7 +119,7 @@ export function TrashedPagesClient({
       setRenameFor(null)
       router.refresh()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Restore failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't restore that page. Try again in a moment.")
     } finally {
       setBusyRowId(null)
     }
@@ -187,7 +190,9 @@ export function TrashedPagesClient({
             })
             if (!r.ok) {
               const j = (await r.json().catch(() => ({}))) as { error?: string }
-              throw new Error(j.error ?? `Restore failed (${r.status})`)
+              throw new Error(
+                mapServerError(j.error, "We couldn't restore that page. Try again in a moment."),
+              )
             }
           })
           if (result.ok > 0) {

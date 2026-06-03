@@ -300,7 +300,7 @@ export function MediaLibrary({ role }: { role: 'admin' | 'editor' }) {
       throw new Error('Conflict — refresh and try again.')
     }
     if (!res.ok && res.status !== 204) {
-      throw new Error(`Failed (${res.status})`)
+      throw new Error("We couldn't do that just now. Try again.")
     }
   }
 
@@ -313,7 +313,7 @@ export function MediaLibrary({ role }: { role: 'admin' | 'editor' }) {
       setItems((prev) => prev.filter((m) => m.id !== item.id))
       toast.success('File moved to Trash.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Delete failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't delete that just now. Try again in a moment.")
     } finally {
       setDeleteBusy(false)
       setPendingDelete(null)
@@ -349,7 +349,7 @@ export function MediaLibrary({ role }: { role: 'admin' | 'editor' }) {
       }
       clearSelection()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Bulk delete failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't delete that just now. Try again in a moment.")
     } finally {
       setBulkRunning(false)
       setPendingBulk(false)

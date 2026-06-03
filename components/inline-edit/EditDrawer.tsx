@@ -16,6 +16,7 @@ import { safeStorage } from '@/lib/client/safeStorage'
 import { SHAPES_FOR_BLOCK, ZodForm, type FieldShape } from './ZodForm'
 import { CrmDestinationsPanel } from './CrmDestinationsPanel'
 import { SEED_ENTRIES, type SeedBlockType } from '@/lib/cms/blockSeeds'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { useToast } from './Toast'
 import { useRecordCommand } from './UndoStackProvider'
 import { emitSaveBegin, emitSaveEnd } from './SaveStatusIndicator'
@@ -676,11 +677,18 @@ export function EditDrawer({
             dispatch({ type: 'clear-preview', blockId })
           }
           toast.error(
-            j.error ??
+            mapServerError(
+              j.error,
               "We couldn't save those changes — your last saved values are restored.",
+            ),
           )
         } else {
-          toast.error(j.error ?? "We couldn't save. Try again in a moment.")
+          toast.error(
+            mapServerError(
+              j.error,
+              "We couldn't save those changes. Try again in a moment.",
+            ),
+          )
         }
         return
       }

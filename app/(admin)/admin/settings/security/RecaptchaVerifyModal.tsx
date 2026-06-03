@@ -173,7 +173,8 @@ export function RecaptchaVerifyModal({
       let token = ''
       if (version === 'v3') {
         const g = getGrecaptcha()
-        if (!g?.execute) throw new Error('grecaptcha_unavailable')
+        if (!g?.execute)
+          throw new Error("reCAPTCHA didn't load. Refresh the page and try again.")
         token = await g.execute(siteKey, { action: 'verify_keys' })
       } else {
         token = v2TokenRef.current

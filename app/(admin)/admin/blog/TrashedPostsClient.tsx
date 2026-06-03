@@ -12,6 +12,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { mapServerError } from '@/lib/cms/errorCopy'
 import { EmptyState } from '@/components/inline-edit/EmptyState'
 import { Trash2 } from 'lucide-react'
 
@@ -53,7 +54,7 @@ export function TrashedPostsClient({ initial }: { initial: Row[] }) {
       )
     }
     if (!r.ok) {
-      throw new Error(`Restore failed (${r.status})`)
+      throw new Error("We couldn't restore that post. Try again.")
     }
   }
 
@@ -66,7 +67,7 @@ export function TrashedPostsClient({ initial }: { initial: Row[] }) {
       toast.success('Post restored as a draft.')
       router.refresh()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Restore failed.')
+      toast.error(e instanceof Error ? e.message : "We couldn't restore that post. Try again.")
     } finally {
       setBusy(null)
     }
@@ -118,7 +119,9 @@ export function TrashedPostsClient({ initial }: { initial: Row[] }) {
           })
           if (!r.ok) {
             const j = (await r.json().catch(() => ({}))) as { error?: string }
-            throw new Error(j.error ?? `Restore failed (${r.status})`)
+            throw new Error(
+              mapServerError(j.error, "We couldn't restore that post. Try again."),
+            )
           }
         })
         router.refresh()
