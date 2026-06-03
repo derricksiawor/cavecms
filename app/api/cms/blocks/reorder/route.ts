@@ -174,13 +174,17 @@ export const POST = withError(async (req) => {
     }
     const currentById = new Map(submittedRows.map((r) => [r.id, r]))
 
-    // Step 3: optimistic-lock check on every submitted block.
+    // Step 3: existence/drift check on every submitted block. The per-block
+    // optimistic-lock VERSION compare is intentionally OMITTED. A reorder is a
+    // structural sibling operation (last-write-wins), not a content edit where a
+    // lost update matters — and gating it on the published version made every
+    // undo/redo replay (whose body carries versions frozen at record time) 409
+    // with 'stale_version' the moment ANY intervening move bumped a version. The
+    // operator then saw a cryptic "Couldn't undo (stale_version)". The
+    // drift-completeness, grammar (Step 6), cycle, and column-cap checks below
+    // still prevent structural corruption against a genuinely-changed tree.
     for (const b of body.blocks) {
-      const cur = currentById.get(b.id)
-      if (!cur) throw new HttpError(409, 'drift')
-      if (cur.version !== b.version) {
-        throw new HttpError(409, 'stale_version')
-      }
+      if (!currentById.get(b.id)) throw new HttpError(409, 'drift')
     }
 
     // Step 4: resolve newParent per block according to mode.
