@@ -141,6 +141,20 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
       delete payload.apiKeyLast4
       // Server sets verifiedAt only on successful verify — never trust client.
       delete payload.verifiedAt
+      // The model selects use '' for the "— pick a model —" option, which
+      // is not a valid model id and would fail validation. Send only the
+      // surfaces with a real pick (and drop the field entirely when neither
+      // is set) so a cleared select — or a fully-disabled config — saves
+      // cleanly. Omitting a model also clears the stored value, since this
+      // field is replaced wholesale server-side.
+      if (payload.models && typeof payload.models === 'object') {
+        const m = payload.models as { inline?: string; chat?: string }
+        const cleaned: { inline?: string; chat?: string } = {}
+        if (m.inline) cleaned.inline = m.inline
+        if (m.chat) cleaned.chat = m.chat
+        if (cleaned.inline || cleaned.chat) payload.models = cleaned
+        else delete payload.models
+      }
       const r = await csrfFetch('/api/admin/settings', {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -163,17 +177,23 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
       // a new plaintext, last4 updates to the new tail.
       const justSavedPlaintext =
         typeof form.apiKey === 'string' && form.apiKey.trim().length > 0
+      // null apiKey is the explicit "Clear saved key" signal — the server
+      // removed the stored envelope, so drop the on-file affordance locally.
+      const justClearedKey = form.apiKey === null
       if (justSavedPlaintext) {
         setKeyOnFile(true)
         setKeyLast4(form.apiKey!.trim().slice(-4))
+      } else if (justClearedKey) {
+        setKeyOnFile(false)
+        setKeyLast4(undefined)
       }
       const next: AiConfigDraft = { ...form, apiKey: '' }
       setForm(next)
       setPristine(next)
       setVersion((v) => v + 1)
-      // A saved-plaintext rotation invalidates the prior verifiedAt
-      // server-side; mirror that locally so the green-check pill clears.
-      if (justSavedPlaintext) setVerifyResult(null)
+      // A saved-plaintext rotation (or a cleared key) invalidates the prior
+      // verifiedAt server-side; mirror that locally so the green-check clears.
+      if (justSavedPlaintext || justClearedKey) setVerifyResult(null)
       toast.success('AI settings saved.')
     } finally {
       setSaving(false)
@@ -274,19 +294,45 @@ export function AiAssistantClient({ initial }: { initial: InitialRow }) {
               type="password"
               autoComplete="off"
               placeholder={
-                keyOnFile && keyLast4
-                  ? `Key on file — ends in •••${keyLast4}. Paste a new key to replace.`
-                  : 'AIzaSy…'
+                form.apiKey === null
+                  ? 'Saved key will be removed when you save'
+                  : keyOnFile && keyLast4
+                    ? `Key on file — ends in •••${keyLast4}. Paste a new key to replace.`
+                    : 'AIzaSy…'
               }
               value={typeof form.apiKey === 'string' ? form.apiKey : ''}
               onChange={(e) => setField('apiKey', e.target.value)}
               className="mt-2"
             />
-            <span className="mt-1 block text-[11px] text-warm-stone">
-              {keyOnFile
-                ? 'Leave blank to keep the saved key, or paste a new one to replace it.'
-                : 'Paste your key and click Save.'}
-            </span>
+            {form.apiKey === null ? (
+              <span className="mt-1 block text-[11px] text-copper-700">
+                Saved key will be removed when you save.{' '}
+                <button
+                  type="button"
+                  onClick={() => setField('apiKey', '')}
+                  className="font-medium underline underline-offset-2 hover:text-copper-800"
+                >
+                  Keep it
+                </button>
+              </span>
+            ) : (
+              <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-warm-stone">
+                <span>
+                  {keyOnFile
+                    ? 'Leave blank to keep the saved key, or paste a new one to replace it.'
+                    : 'Paste your key and click Save.'}
+                </span>
+                {keyOnFile && (
+                  <button
+                    type="button"
+                    onClick={() => setField('apiKey', null)}
+                    className="font-medium text-copper-700 underline underline-offset-2 hover:text-copper-800"
+                  >
+                    Clear saved key
+                  </button>
+                )}
+              </span>
+            )}
           </label>
 
           <fieldset className="rounded-xl border border-warm-stone/20 p-4">
