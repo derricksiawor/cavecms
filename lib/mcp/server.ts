@@ -1031,6 +1031,11 @@ export function buildServer(init: McpRequestContext): McpServer {
         }),
       ),
   )
+  // sync_pull OVERWRITES this install's content with a remote's — wholesale
+  // replace of every page/post/project/setting. There is NO read-only variant
+  // (no dryRun), so a real pull ALWAYS requires an explicit confirm, exactly
+  // like a destructive op. Hand-rolled (not regDestructive) only so the confirm
+  // copy can name what gets replaced.
   reg(
     'sync_pull',
     {
@@ -1046,15 +1051,30 @@ export function buildServer(init: McpRequestContext): McpServer {
         .max(512)
         .optional()
         .describe('Inline token override (raw-URL form, or a just-rotated target).'),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe('Required true — pull REPLACES this install’s entire content with the source’s.'),
     },
-    async (args) =>
-      respond(
+    async (args) => {
+      const okToGo = await confirmDestructive(
+        server,
+        args.confirm === true,
+        'This REPLACES this install’s entire content (pages, posts, projects, settings) with the source’s.',
+      )
+      if (!okToGo) {
+        return fail(
+          'Not confirmed. Re-call sync_pull with {"confirm": true} to overwrite this install with the source’s content.',
+        )
+      }
+      return respond(
         await callRoute(syncPull, {
           method: 'POST',
           path: '/api/cms/sync/pull',
           body: { from: args.from, token: args.token },
         }),
-      ),
+      )
+    },
   )
   // sync_push REPLACES the target's content, so it confirms like a destructive
   // op — EXCEPT dryRun, which writes nothing. Like edit_page it can't use

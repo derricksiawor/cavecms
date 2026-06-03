@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { withError } from '@/lib/api/withError'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkReadRate, checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import {
   listTargets,
@@ -58,7 +58,7 @@ export const PUT = withError(async (req) => {
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   requireScope(ctx, 'sync', 'write')
-  checkMutationRate(ctx.userId)
+  checkCmsMutationRate(ctx)
 
   const raw = await readJsonBody(req)
 
@@ -93,7 +93,7 @@ export const DELETE = withError(async (req) => {
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   requireScope(ctx, 'sync', 'write')
-  checkMutationRate(ctx.userId)
+  checkCmsMutationRate(ctx)
 
   const parsed = DeleteBody.safeParse(await readJsonBody(req))
   if (!parsed.success) throw new HttpError(400, 'invalid_request')

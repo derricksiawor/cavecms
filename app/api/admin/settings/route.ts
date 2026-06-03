@@ -72,11 +72,41 @@ const CREDENTIAL_FIELDS_BY_KEY: Record<string, string[]> = {
   ai_config: ['apiKey'],
 }
 
+// Operational keys whose SECRETS are NESTED (an array of targets, or sub-objects)
+// rather than flat top-level strings — so the CREDENTIAL_FIELDS_BY_KEY loop can't
+// reach them. We null the ciphertext envelopes before serving any GET, exactly
+// like ai_config.apiKey (defence-in-depth: a stolen admin SESSION shouldn't walk
+// off with the encrypted blobs). These keys are ALSO never returned to API
+// tokens (the TOKEN_WRITABLE_SETTINGS GET filter), so this hardens the
+// cookie-admin GET specifically. The dedicated Backups + sync-targets routes own
+// reads that legitimately need connection state (which they redact themselves).
+const DEEP_REDACT_KEYS = new Set<string>(['sync_targets', 'backups', 'backups_state'])
+function deepRedactOperationalSecrets(key: string, v: Record<string, unknown>): void {
+  const nullify = (obj: unknown, field: string) => {
+    if (obj && typeof obj === 'object' && field in (obj as Record<string, unknown>)) {
+      ;(obj as Record<string, unknown>)[field] = null
+    }
+  }
+  if (key === 'sync_targets') {
+    const targets = v['targets']
+    if (Array.isArray(targets)) for (const t of targets) nullify(t, 'token')
+  } else if (key === 'backups') {
+    nullify(v['gdrive'], 'refreshToken')
+    nullify(v['onedrive'], 'refreshToken')
+    nullify(v['encryption'], 'passphrase')
+  } else if (key === 'backups_state') {
+    nullify(v['gdrivePending'], 'deviceCode')
+    nullify(v['onedrivePending'], 'deviceCode')
+  }
+}
+
 function redactSettingsRow(row: SettingRow): SettingRow {
   const fields = CREDENTIAL_FIELDS_BY_KEY[row.key]
-  if (!fields) return row
+  const hasDeep = DEEP_REDACT_KEYS.has(row.key)
+  if (!fields && !hasDeep) return row
   // Value may arrive as a JSON string (MariaDB LONGTEXT-aliased JSON
-  // column) or a parsed object (some drivers). Handle both.
+  // column) or a parsed object (some drivers). Handle both; deep-clone the
+  // object case so the nested redaction can never mutate the DB query result.
   let parsed: Record<string, unknown>
   if (typeof row.value === 'string') {
     try {
@@ -85,15 +115,18 @@ function redactSettingsRow(row: SettingRow): SettingRow {
       return row
     }
   } else if (row.value && typeof row.value === 'object' && !Array.isArray(row.value)) {
-    parsed = { ...(row.value as Record<string, unknown>) }
+    parsed = JSON.parse(JSON.stringify(row.value)) as Record<string, unknown>
   } else {
     return row
   }
-  for (const f of fields) {
-    if (typeof parsed[f] === 'string' && (parsed[f] as string).length > 0) {
-      parsed[f] = ''
+  if (fields) {
+    for (const f of fields) {
+      if (typeof parsed[f] === 'string' && (parsed[f] as string).length > 0) {
+        parsed[f] = ''
+      }
     }
   }
+  if (hasDeep) deepRedactOperationalSecrets(row.key, parsed)
   // Return same wire-shape as the original (string vs object).
   return {
     ...row,

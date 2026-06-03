@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { withError } from '@/lib/api/withError'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import {
   resolveTarget,
@@ -33,7 +33,7 @@ export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin'])
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   requireScope(ctx, 'sync', 'write')
-  checkMutationRate(ctx.userId)
+  checkCmsMutationRate(ctx)
 
   const body = Body.parse((await readJsonBody(req)) ?? {})
 

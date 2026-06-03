@@ -512,9 +512,12 @@ export const MCP_TOOLS = spec({
     resource: 'sync',
     action: 'write',
     minRole: 'admin',
-    tier: 'write',
+    // Destructive: a pull wholesale-replaces this install's content. The handler
+    // hand-rolls a confirm gate (no read-only variant), and the catalog tier
+    // reflects the true blast radius for any UI/telemetry that reads it.
+    tier: 'destructive',
     summary:
-      'Pull a remote source INTO this install (replaces this install’s content). Source = a configured target name or a raw http(s) url + inline token; omit to use the default target.',
+      'Pull a remote source INTO this install (REPLACES this install’s entire content — requires confirm:true). Source = a configured target name or a raw http(s) url + inline token; omit to use the default target.',
   },
   sync_push: {
     name: 'sync_push',

@@ -12,7 +12,7 @@ import { Transform, Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { withError } from '@/lib/api/withError'
-import { requireRole, HttpError } from '@/lib/auth/requireRole'
+import { requireRole, requireScope, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { sweepExpiredStages } from '@/lib/sync/stageStore'
@@ -30,6 +30,12 @@ const MAX_TAR_MEMBERS = 250_000 // inode-bomb ceiling (≈50k-media site headroo
 //   atomically (media rows + stage row in one transaction).
 export const POST = withError(async (req) => {
   const ctx = await requireRole(['admin'])
+  // Wire-protocol route reached cross-instance by a target's token during a
+  // remote push — gate it on the sync scope so a narrow-scoped admin token
+  // can't stage a bundle (cookie sessions no-op). The push/pull HTTP routes
+  // and the in-process orchestrator are the local callers; this protects the
+  // RECEIVING side.
+  requireScope(ctx, 'sync', 'write')
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   checkMutationRate(ctx.userId)
 
