@@ -1,5 +1,5 @@
 import 'server-only'
-import { getSetting } from '@/lib/cms/getSettings'
+import { getSettingUncached } from '@/lib/cms/getSettings'
 import { updateSettingValue } from '@/lib/cms/writeSetting'
 import {
   encryptSecret,
@@ -51,7 +51,7 @@ export async function listTargets(): Promise<{
   targets: RedactedTarget[]
   defaultName: string | null
 }> {
-  const cfg = await getSetting('sync_targets')
+  const cfg = await getSettingUncached('sync_targets')
   return {
     defaultName: cfg.defaultName ?? null,
     targets: cfg.targets.map((t) => ({
@@ -82,7 +82,7 @@ export async function resolveTarget(
     }
     return { name: trimmed, url: normalizeUrl(trimmed), token: explicitToken.trim() }
   }
-  const cfg = await getSetting('sync_targets')
+  const cfg = await getSettingUncached('sync_targets')
   const t = cfg.targets.find((x) => x.name.toLowerCase() === trimmed.toLowerCase())
   if (!t) throw new TargetNotFoundError(trimmed)
   if (explicitToken && explicitToken.trim()) {
@@ -100,7 +100,7 @@ export async function resolveTarget(
 
 /** Resolve the default target (or the only one), for a no-arg push/pull. */
 export async function resolveDefaultTarget(): Promise<ResolvedTarget> {
-  const cfg = await getSetting('sync_targets')
+  const cfg = await getSettingUncached('sync_targets')
   const name =
     cfg.defaultName ?? (cfg.targets.length === 1 ? cfg.targets[0]!.name : null)
   if (!name) throw new TargetNotFoundError('(default)')
