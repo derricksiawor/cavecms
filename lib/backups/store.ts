@@ -84,6 +84,28 @@ function readManifestMeta(dir: string, file: string, mtimeMs: number, size: numb
   return meta
 }
 
+/**
+ * True iff downloading this archive would hand over PLAINTEXT install secrets:
+ * a non-encrypted archive whose manifest reports `env.included`. A backup made
+ * with --include-env bundles env.production (DATABASE_URL, JWT/CSRF/encryption
+ * keys, the hidden login path). Locally-encrypted (.age) archives keep that env
+ * encrypted at rest (the host age identity is needed to decrypt), so they don't
+ * leak in plaintext. The download route uses this to require the secret-tier
+ * scope (backups:delete) for env-bearing plaintext archives, keeping a
+ * backups:read token to metadata-only reach as its scope label promises.
+ */
+export function archiveBundlesPlaintextSecrets(file: string): boolean {
+  if (file.endsWith('.age')) return false
+  const dir = resolveBackupDir()
+  let st
+  try {
+    st = statSync(join(dir, file))
+  } catch {
+    return false
+  }
+  return readManifestMeta(dir, file, st.mtimeMs, st.size).includeEnv === true
+}
+
 /** List backups newest-first, reading each plaintext archive's manifest. */
 export function listBackups(): BackupEntry[] {
   const dir = resolveBackupDir()
