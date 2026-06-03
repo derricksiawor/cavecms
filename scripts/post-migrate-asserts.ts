@@ -225,7 +225,7 @@ async function main(): Promise<void> {
     //    home/about/services/contact seeded by 0010_pages_cms.sql;
     //    privacy/terms seeded by 0015_legal_pages.sql;
     //    projects seeded by 0016_projects_page.sql;
-    //    blog seeded by 0034_blog_system_page.sql.
+    //    blog seeded by 0039_blog_system_page.sql.
     // -------------------------------------------------------------------
     const [sysSlugs] = await conn.execute<mysql.RowDataPacket[]>(`
       SELECT slug, system FROM pages

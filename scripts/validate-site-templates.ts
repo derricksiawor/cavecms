@@ -157,7 +157,7 @@ for (const t of SITE_TEMPLATES) {
   // survive the template wipe (route preservedPageIds), so a template that
   // also declared one would lose its content to the preserved row or hit a
   // slug-unique collision. 'blog' is preserved (F2) — its index is
-  // template-agnostic (0034 row + boot backfill own it), so no template
+  // template-agnostic (0039 row + boot backfill own it), so no template
   // ships a blog page.
   const PRESERVED = new Set([
     'privacy',

@@ -1,6 +1,6 @@
 -- §5: seed the Blog index as a system CMS page.
 --
--- Pre-0034 the /blog route was a hardcoded React shim (app/blog/page.tsx)
+-- Pre-0039 the /blog route was a hardcoded React shim (app/blog/page.tsx)
 -- that queried the `posts` table and rendered its own grid — the hero copy,
 -- intro, and CTA on the index weren't operator-editable, violating the
 -- project's CMS-first contract (#1). This migration inserts the
@@ -11,7 +11,7 @@
 -- the welcome/default template seeds it via app/api/install/template, and on
 -- EXISTING installs the boot-time runBlogPageBackfillOnce (instrumentation.ts)
 -- seeds the blocks into this row if it is empty — so the migration only needs
--- to guarantee the ROW exists. `kind` defaults to 'page' (migration 0033), so
+-- to guarantee the ROW exists. `kind` defaults to 'page' (migration 0038), so
 -- this is a normal, surfaceable system page (NOT a hidden post_body page).
 --
 -- The post LISTING data still lives in the `posts` table — the loop block
