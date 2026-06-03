@@ -180,6 +180,7 @@ next-env.d.ts
 
 # Local operator notes — never tracked.
 /instructions.md
+/Story.md
 
 # Session status / feature-notes doc — local reference, never shipped (#0.55).
 /features.md
