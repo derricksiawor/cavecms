@@ -1,5 +1,5 @@
 'use client'
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
@@ -15,9 +15,16 @@ export function NewPostForm() {
   const [slug, setSlug] = useState('')
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
+  // Synchronous double-submit guard — `busy` state disables the button only
+  // after a re-render, so a rapid second submit (double-click / Enter-twice)
+  // could fire a duplicate POST that re-uses the consumed single-use CSRF
+  // token → 403. The ref flips before any await so the racing duplicate is
+  // dropped immediately.
+  const submittingRef = useRef(false)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    if (submittingRef.current) return
     if (title.trim().length === 0) {
       toast.error('Please add a title.')
       return
@@ -30,6 +37,7 @@ export function NewPostForm() {
       toast.error('The web address must be between 2 and 140 characters.')
       return
     }
+    submittingRef.current = true
     setBusy(true)
     try {
       const res = await csrfFetch('/api/cms/posts', {
@@ -42,13 +50,26 @@ export function NewPostForm() {
         return
       }
       if (!res.ok) {
-        toast.error("We couldn't create that draft. Try again in a moment.")
+        // Surface the REAL reason from the server's error code instead of the
+        // generic retry copy — a reserved or malformed slug is the operator's
+        // to fix, not a transient fault. Mirrors how the editor's permalink
+        // save maps guard codes to precise messages. Unknown codes still fall
+        // back to the generic "try again" line.
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        const msg =
+          j.error === 'slug_reserved'
+            ? 'That web address is reserved by the system. Pick a different one.'
+            : j.error === 'slug_invalid_format'
+              ? 'The web address can only use lowercase letters, numbers, and single hyphens — no spaces.'
+              : "We couldn't create that draft. Try again in a moment."
+        toast.error(msg)
         return
       }
       const { id } = (await res.json()) as { id: number }
       toast.success('Draft created.')
       router.push(`/admin/blog/${id}`)
     } finally {
+      submittingRef.current = false
       setBusy(false)
     }
   }

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ExternalLink } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
@@ -112,6 +112,15 @@ export function Editor({
   >(post.published_at)
   const [version, setVersion] = useState(post.version)
   const [busy, setBusy] = useState(false)
+  // Synchronous in-flight guard. `busy` is React state, so the button's
+  // `disabled={busy}` only takes effect after a re-render — a rapid double
+  // click (or autosave racing a manual Save) can fire a SECOND request before
+  // the DOM disables. The second request re-uses the same single-use CSRF
+  // token the first already consumed → a 403. A ref flips synchronously inside
+  // the handler so the racing duplicate is dropped before it ever hits the
+  // network. (Covers manual Save, Cmd+S flush, and autosave — they all funnel
+  // through persist().)
+  const savingRef = useRef(false)
   const [pendingDelete, setPendingDelete] = useState(false)
 
   // Taxonomy chip state. `categoryOptions` / `tagOptions` are mutable so an
@@ -242,10 +251,15 @@ export function Editor({
 
   const persist = async (): Promise<{ ok: boolean }> => {
     if (readonly) return { ok: false }
+    // Drop a re-entrant call synchronously (double-click Save, or an autosave
+    // tick landing on top of a manual Save) before it consumes a fresh CSRF
+    // token the in-flight request is already using → avoids the 403 race.
+    if (savingRef.current) return { ok: false }
     if (slugInvalid) {
       toast.error(slugInvalid)
       return { ok: false }
     }
+    savingRef.current = true
     setBusy(true)
     const patch = buildPatch()
     try {
@@ -307,6 +321,7 @@ export function Editor({
       })
       return { ok: true }
     } finally {
+      savingRef.current = false
       setBusy(false)
     }
   }

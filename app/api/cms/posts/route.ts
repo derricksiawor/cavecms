@@ -58,7 +58,27 @@ export const POST = withError(async (req) => {
   await requireCsrf(req, { jti: ctx.jti, userId: ctx.userId })
   checkMutationRate(ctx.userId)
 
-  const body = CreateBody.parse(await readJsonBody(req))
+  // Parse with safeParse so the slug-specific refine/regex failures surface as
+  // PRECISE error codes the client can map to an actionable message. withError
+  // flattens every raw ZodError to the generic `invalid_request` (which the
+  // form would render as "try again in a moment" — implying a transient fault),
+  // so a reserved/malformed slug would otherwise look retryable. Throwing a
+  // typed HttpError with the refine's own code keeps the message honest while
+  // still letting genuinely-unexpected shape errors fall through to the generic
+  // 400. Mirrors the precise `slug_taken` 409 the duplicate-key path already
+  // returns.
+  const parsed = CreateBody.safeParse(await readJsonBody(req))
+  if (!parsed.success) {
+    const slugIssue = parsed.error.issues.find((i) => i.path[0] === 'slug')
+    if (slugIssue?.message === 'slug_reserved') {
+      throw new HttpError(400, 'slug_reserved')
+    }
+    if (slugIssue?.message === 'slug_invalid_format') {
+      throw new HttpError(400, 'slug_invalid_format')
+    }
+    throw parsed.error
+  }
+  const body = parsed.data
   const meta = auditMetaFromRequest(req)
 
   try {

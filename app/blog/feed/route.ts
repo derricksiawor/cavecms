@@ -27,9 +27,12 @@ import { isMissingTable } from '@/lib/db/errors'
 //     well-formedness or inject markup into the feed.
 //   - Absolute item links are built from postUrl (segment + structure aware)
 //     prefixed with the operator's site origin (Settings -> General). When the
-//     origin is unset the link/guid fall back to the relative path — a feed
-//     reader on the same origin still resolves it, and we never emit a wrong
-//     absolute URL.
+//     operator hasn't configured a Site URL yet (fresh install, dev), we DERIVE
+//     the origin from the request's forwarded Host + proto headers instead of
+//     emitting relative paths — RSS readers fetch the feed out-of-context and a
+//     relative <link>/<guid> is non-dereferenceable for them. The derived
+//     origin is the host the request actually came in on (same as robots.ts /
+//     sitemap.ts read), so it's correct for whatever address the reader used.
 //
 // CACHING
 //   The post save/publish/delete paths already bust the `posts-index` tag
@@ -76,13 +79,35 @@ interface FeedRow {
   published_at: Date | string | null
 }
 
-export async function GET(): Promise<Response> {
+// Derive the request's own origin from the forwarded Host + proto headers —
+// the same headers robots.ts / sitemap.ts / the middleware redirects read.
+// Behind a reverse proxy `Host` carries the public hostname and
+// `x-forwarded-proto` the public scheme; on a direct localhost/LAN hit Host is
+// the listener address and there's no XFP (so we default http). Returns null
+// when there's no usable Host so callers keep their relative-path fallback
+// rather than emit a malformed `://path` origin.
+function originFromRequest(req: Request): string | null {
+  const host = req.headers.get('host')
+  if (!host) return null
+  const proto = req.headers.get('x-forwarded-proto') ?? 'http'
+  // XFP can be a comma list ("https, http") behind chained proxies — take the
+  // first, trimmed, and only honour the two valid schemes.
+  const scheme = proto.split(',')[0]!.trim()
+  const safeScheme = scheme === 'https' || scheme === 'http' ? scheme : 'http'
+  return `${safeScheme}://${host}`
+}
+
+export async function GET(req: Request): Promise<Response> {
   // Resolve the configured permalink segments + site identity once.
-  const [segments, siteOrigin, siteName] = await Promise.all([
+  const [segments, configuredOrigin, siteName] = await Promise.all([
     resolveSegments(),
     getSiteOrigin(),
     getSiteName(),
   ])
+  // Prefer the operator's configured Site URL; when unset, fall back to the
+  // origin the request came in on so every <link>/<guid> is still ABSOLUTE
+  // (RSS readers need absolute URLs — see CONTRACT above).
+  const siteOrigin = configuredOrigin ?? originFromRequest(req)
   const blog = await getSetting('blog_settings')
 
   // Bounded by the registry (feedItemCount is Zod-clamped 1..50); the extra

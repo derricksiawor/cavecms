@@ -284,11 +284,16 @@ export function AdminTable<Row>(props: AdminTableProps<Row>) {
       setPageState(1)
       clearSelection()
       if (mode === 'server') {
+        // Server mode: emit ONLY onSortChange. The parent owns the page reset
+        // inside that same single push (PostsClient pushes sort+dir with
+        // page dropped). A second onPageChange(1) here would route through a
+        // separate pushParams that closes over the PRE-change searchParams and
+        // clobber the sort just written — the double-push race. One push per
+        // action. (Client mode keeps its own URL writer effect; unaffected.)
         onSortChange?.(next)
-        onPageChange?.(1)
       }
     },
-    [sort, mode, onSortChange, onPageChange, clearSelection],
+    [sort, mode, onSortChange, clearSelection],
   )
 
   const setPage = useCallback(
@@ -306,11 +311,14 @@ export function AdminTable<Row>(props: AdminTableProps<Row>) {
       setPageState(1)
       clearSelection()
       if (mode === 'server') {
+        // Server mode: emit ONLY onPageSizeChange. The parent resets the page
+        // in that same single push (PostsClient pushes per + page:null). A
+        // second onPageChange(1) would clobber the new page-size via the
+        // stale-searchParams double-push race. One push per action.
         onPageSizeChange?.(next)
-        onPageChange?.(1)
       }
     },
-    [mode, onPageSizeChange, onPageChange, clearSelection],
+    [mode, onPageSizeChange, clearSelection],
   )
 
   // Resolve the active sort accessor once. Depending on `columns`
@@ -465,11 +473,13 @@ export function AdminTable<Row>(props: AdminTableProps<Row>) {
       setPageState(1)
       clearSelection()
       if (mode === 'server') {
+        // Same single-push contract as cycleSort (see its note): emit only
+        // onSortChange; the parent's push drops page. Avoids the double-push
+        // clobber that reverted the mobile sort selection.
         onSortChange?.(next)
-        onPageChange?.(1)
       }
     },
-    [mode, onSortChange, onPageChange, clearSelection],
+    [mode, onSortChange, clearSelection],
   )
 
   // ───────────────────────────── empty state
