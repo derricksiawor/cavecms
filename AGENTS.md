@@ -376,6 +376,54 @@ it grants no license to modify the *engine* — Rule #1 still holds.
 
 ---
 
+## Publishing a local build to production — `cavecms push`
+
+If the operator builds on a **local or staging** CaveCMS install and wants
+those changes live on their **production** site, you can promote the whole
+content snapshot in one command — no copy-paste, no manual re-entry. The
+same credential that lets you build also lets you ship. This is the
+`cavecms` CLI (shipped as the `create-cavecms` npm package), which wraps the
+`/api/cms/sync/*` routes.
+
+**It is a promote-snapshot, not a merge.** `push` REPLACES the target's
+pages, posts, projects, settings, navigation, and referenced media with the
+source's — production becomes a copy of the source, verbatim. Treat it like
+deploying a build. So ALWAYS dry-run first, and never run a real push
+without the operator's explicit go.
+
+```
+# one-time: save a profile (site URL + an ADMIN API token) per site
+cavecms login --url=https://their-site.com --token=cave_… --site=prod
+
+# validate against production WITHOUT writing anything
+cavecms push --from=http://localhost:3000 --to=https://their-site.com \
+  --from-token=cave_LOCAL --token=cave_PROD --dry-run
+
+# promote for real — atomic, drift-guarded, backed up first
+cavecms push --from=http://localhost:3000 --to=https://their-site.com \
+  --from-token=cave_LOCAL --token=cave_PROD --yes
+```
+
+Safety the server enforces for you:
+
+- **Admin token required.** The stage + cutover routes are admin-only; an
+  editor token can read and build, but cannot publish a snapshot.
+- **Drift guard.** If production changed since the snapshot's baseline, the
+  push is refused (`drift_detected`) so you never silently clobber a live
+  edit. Re-pull, or pass `--force` ONLY if the operator explicitly accepts
+  overwriting those changes.
+- **Atomic cutover.** The swap is one transaction — all of it lands or none
+  of it does; a visitor never sees a half-published site.
+- **Automatic pre-cutover backup.** The server snapshots current production
+  content before the swap, so a bad push is one restore away.
+
+Because `push` overwrites production, this is the one place where "when in
+doubt, ask" (Rule #3) is absolute: confirm the operator wants their local
+content to become production, run the `--dry-run` so they can see the
+counts, then push.
+
+---
+
 ## #3 RULE — WHEN IN DOUBT, ASK BEFORE ACTING.
 
 If the operator says "add a Pricing page", you have a clear path:
