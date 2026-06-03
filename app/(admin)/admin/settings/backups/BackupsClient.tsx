@@ -500,7 +500,13 @@ export function BackupsClient({
 
         <ul className="mt-5 space-y-3">
           <li className="flex items-center justify-between rounded-xl border border-warm-stone/20 bg-white/40 px-4 py-3">
-            <span className="font-medium text-near-black">This server (always on)</span>
+            <span className="flex items-center gap-2.5">
+              <span className="font-medium text-near-black">This server</span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                Always on
+              </span>
+            </span>
             <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-warm-stone/70">
               Local
             </span>
@@ -784,14 +790,19 @@ export function BackupsClient({
           <p className="mt-1 text-sm text-warm-stone">
             Saves all your content and media to a dated archive.
           </p>
-          <label className="mt-3 flex items-center gap-2 text-sm text-warm-stone">
+          <label className="mt-3 flex items-start gap-2.5 text-sm text-near-black">
             <input
               type="checkbox"
               checked={includeEnv}
               onChange={(e) => setIncludeEnv(e.target.checked)}
-              className="h-4 w-4 rounded border-warm-stone/40 text-copper-600"
+              className="mt-0.5 h-4 w-4 rounded border-warm-stone/40 text-copper-600"
             />
-            Include secrets (for full disaster recovery)
+            <span>
+              Include secrets
+              <span className="block text-xs text-warm-stone">
+                Bundles your site’s keys for full disaster recovery.
+              </span>
+            </span>
           </label>
           <div className="mt-4">
             <Button type="button" onClick={startBackup}>

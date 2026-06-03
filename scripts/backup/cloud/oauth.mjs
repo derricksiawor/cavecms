@@ -24,7 +24,10 @@ export const PROVIDERS = {
     tokenUrl: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
     revokeUrl: null, // Microsoft has no token-revoke endpoint; clearing local state suffices.
     userInfoUrl: 'https://graph.microsoft.com/v1.0/me',
-    scope: 'offline_access Files.ReadWrite.AppFolder',
+    // User.Read so the /me lookup can read the connected account's email;
+    // offline_access for the refresh token; AppFolder is the least-privilege
+    // backup scope.
+    scope: 'offline_access Files.ReadWrite.AppFolder User.Read',
     deviceGrant: 'urn:ietf:params:oauth:grant-type:device_code',
   },
 }
