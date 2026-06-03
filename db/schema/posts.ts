@@ -41,7 +41,7 @@ export const posts = mysqlTable(
     seoTitle: varchar('seo_title', { length: 180 }),
     seoDescription: varchar('seo_description', { length: 320 }),
     ogImageId: int('og_image_id'),
-    // ─── SEO suite (migration 0032) ───
+    // ─── SEO suite (migration 0034) ───
     focusKeyphrase: varchar('focus_keyphrase', { length: 160 }),
     robotsNoindex: boolean('robots_noindex').notNull().default(false),
     robotsNofollow: boolean('robots_nofollow').notNull().default(false),

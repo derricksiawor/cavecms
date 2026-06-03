@@ -148,6 +148,7 @@ next-env.d.ts
 !/scripts/systemd/**
 !/scripts/cavecms-update.sh
 !/scripts/cavecms-updates-check.sh
+!/scripts/cavecms-backup-run.sh
 # The watchdog + shared helpers ship in the customer release zip and
 # are sourced by cavecms-update.sh; both must be tracked + bundled.
 !/scripts/cavecms-watchdog.sh

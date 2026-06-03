@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { SeoMetaSchema } from '@/lib/cms/seoEditorFields'
 
-// Shared persistence helper for the SEO editor fields (migration 0032)
+// Shared persistence helper for the SEO editor fields (migration 0034)
 // across the pages / posts / projects PATCH routes. ONE place that knows
 // how each SEO column is mapped (camelCase → snake_case) and serialized
 // (booleans → TINYINT 0/1, seoMeta → JSON string, scores → INT|null) so

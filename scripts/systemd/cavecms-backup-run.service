@@ -1,0 +1,31 @@
+[Unit]
+Description=CaveCMS scheduled backup tick
+After=network-online.target cavecms.service
+Wants=network-online.target
+OnFailure=cavecms-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=5min
+User=cavecms
+Group=cavecms
+EnvironmentFile=/etc/cavecms/env.production
+WorkingDirectory=-/opt/cavecms/current
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=32
+ExecCondition=/usr/bin/test -x /opt/cavecms/current/scripts/cavecms-backup-run.sh
+ExecStart=/opt/cavecms/current/scripts/cavecms-backup-run.sh

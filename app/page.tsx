@@ -194,7 +194,8 @@ async function renderHome(
 
   let hydrated: Awaited<ReturnType<typeof hydratePage>> | null = null
   try {
-    hydrated = await hydratePage(page.id)
+    // Editor → DRAFT view, public → PUBLISHED view (Phase 0: neutral).
+    hydrated = await hydratePage(page.id, { draft: editable })
   } catch (e) {
     console.error(
       JSON.stringify({

@@ -84,6 +84,23 @@ export async function POST(req: Request): Promise<Response> {
       requestId: null,
     })
 
+    // On a terminal BACKUP state, reconcile cloud bookkeeping: persist any
+    // rotated refresh token / folder id the engine wrote, and — if this run was
+    // scheduler-initiated — record the REAL outcome (completion, not spawn).
+    if (action === 'backup_completed' || action === 'backup_failed') {
+      try {
+        const { reconcileBackupCloudCredsOut, recordScheduledBackupOutcome } = await import(
+          '@/lib/backups/cloud/credsFile'
+        )
+        await reconcileBackupCloudCredsOut()
+        await recordScheduledBackupOutcome(action === 'backup_completed', error ?? null)
+      } catch (err) {
+        logEvent('warn', 'cloud_reconcile_failed', {
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+
     logEvent('info', 'recorded', { action, resourceId })
     return jsonInternal({ ok: true }, 200)
   } catch (err) {

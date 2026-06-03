@@ -334,10 +334,12 @@ export function OutlinePanel({
   // `storage` event only fires CROSS-tab, so the custom event handles
   // same-tab coordination (admin-bar click → outline re-mounts).
   //
-  // SSR-safe default: visible (false). On client mount the saved
-  // value is read; flipping mid-session via the admin-bar toggle
-  // re-renders the panel.
-  const [dismissed, setDismissed] = useState(false)
+  // Default HIDDEN: the outline no longer auto-opens every time you
+  // enter edit mode. It's brought up on demand via the admin-bar
+  // Outline pill, and a saved 'false' (operator explicitly showed it)
+  // wins on reload. SSR also renders hidden so there's no flash of the
+  // panel before the saved preference resolves.
+  const [dismissed, setDismissed] = useState(true)
   // `hasMounted` powers the entrance animation. SSR renders the panel
   // off-screen + opacity 0 (matching the dismissed-state styling); the
   // useEffect below flips it true after first paint, which kicks off
@@ -347,14 +349,15 @@ export function OutlinePanel({
   const [hasMounted, setHasMounted] = useState(false)
   useEffect(() => {
     if (typeof window === 'undefined') return
-    setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
+    // Default hidden unless the operator explicitly chose to show it.
+    setDismissed(safeStorage.get('cavecms:outline-dismissed') !== 'false')
     setHasMounted(true)
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent<{ dismissed?: boolean }>).detail
       if (detail && typeof detail.dismissed === 'boolean') {
         setDismissed(detail.dismissed)
       } else {
-        setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
+        setDismissed(safeStorage.get('cavecms:outline-dismissed') !== 'false')
       }
     }
     window.addEventListener('cavecms:outline-visibility', onChange)

@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic'
 //     /projects /blog listing route (a listing whose children are all
 //     suppressed is itself a dead crawl signal).
 //   • excludeNoindex — default true. Entities carrying robots_noindex=1
-//     (migration 0032) are filtered out of the sitemap at the SQL layer.
+//     (migration 0034) are filtered out of the sitemap at the SQL layer.
 //     A noindexed URL that nonetheless appears in the sitemap is a
 //     contradictory crawl signal ("index this" vs "don't index this");
 //     excluding it keeps the two channels consistent.
@@ -181,7 +181,7 @@ async function buildEntries(): Promise<Entry[] | null> {
 
   // `excludeNoindex` (default true): keep only entities whose
   // robots_noindex is 0/NULL. The `IS NULL` arm covers rows created
-  // before migration 0032 backfilled the column on some engines.
+  // before migration 0034 backfilled the column on some engines.
   const noindexClause = cfg.excludeNoindex
     ? sql` AND (robots_noindex = 0 OR robots_noindex IS NULL)`
     : sql``

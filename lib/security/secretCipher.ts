@@ -56,6 +56,15 @@ export const AAD_AI_CONFIG_API_KEY = 'ai_config:apiKey' as const
 // discipline as the AI key — ciphertext is bound to this exact field so
 // it can't be copy-pasted into another secret-decrypting setting.
 export const AAD_SEO_INDEXING_API = 'seo_indexing_api:serviceAccountJson' as const
+// Cloud backup destinations. Each encrypted-at-rest secret binds to its
+// storage location via a dedicated AAD so a refresh token can't be replayed
+// into a different field. The connect (encrypt) + poll/disconnect/engine
+// (decrypt) sites import the SAME constant — drift would silently break
+// restore.
+export const AAD_BACKUP_GDRIVE_REFRESH = 'backups:gdrive:refreshToken' as const
+export const AAD_BACKUP_ONEDRIVE_REFRESH = 'backups:onedrive:refreshToken' as const
+export const AAD_BACKUP_PENDING_DEVICE_CODE = 'backups:pending:deviceCode' as const
+export const AAD_BACKUP_PASSPHRASE = 'backups:encryption:passphrase' as const
 
 const ENVELOPE_VERSION = 1 as const
 const ALG = 'aes-256-gcm' as const

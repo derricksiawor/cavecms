@@ -12,14 +12,17 @@ import {
   type RefCallback,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { useRouter } from 'next/navigation'
 import clsx from 'clsx'
 import {
+  Check,
   ChevronDown,
   FilePlus,
   FileText,
   FolderPlus,
   Layers,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Menu as MenuIcon,
   Pencil,
@@ -27,7 +30,9 @@ import {
   Redo2,
   Undo2,
   Upload,
+  UploadCloud,
   UserPlus,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/auth/requireRole'
@@ -330,7 +335,7 @@ function BarInner({
           </BarLink>
         )}
         {editMode && <OutlineTogglePill />}
-        {editMode && <UndoRedoPills />}
+        {editMode && <DraftBar />}
         <div className="ml-auto flex items-center gap-3">
           <Identity email={email} role={role} />
           <PillButton
@@ -403,24 +408,24 @@ function BarInner({
 function OutlineTogglePill() {
   const [dismissed, setDismissed] = useState<boolean | null>(null)
   useEffect(() => {
-    setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
+    setDismissed(safeStorage.get('cavecms:outline-dismissed') !== 'false')
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent<{ dismissed?: boolean }>).detail
       if (detail && typeof detail.dismissed === 'boolean') {
         setDismissed(detail.dismissed)
       } else {
-        setDismissed(safeStorage.get('cavecms:outline-dismissed') === 'true')
+        setDismissed(safeStorage.get('cavecms:outline-dismissed') !== 'false')
       }
     }
     window.addEventListener('cavecms:outline-visibility', onChange)
     return () =>
       window.removeEventListener('cavecms:outline-visibility', onChange)
   }, [])
-  // SSR + first-render: render the pill in a stable state (treats
-  // unknown as "visible" → label "Hide outline"). After mount the
-  // saved value resolves and the label updates. The pill remains
-  // clickable throughout — no flash of disabled state.
-  const isDismissed = dismissed === true
+  // SSR + first-render: render the pill in the default-HIDDEN state
+  // (unknown → "Show outline"), matching the panel which now defaults to
+  // hidden. After mount the saved value resolves and the label updates.
+  // The pill remains clickable throughout — no flash of disabled state.
+  const isDismissed = dismissed !== false
   const toggle = () => {
     if (typeof window === 'undefined') return
     const next = !isDismissed
@@ -457,38 +462,161 @@ function OutlineTogglePill() {
 // broadcasts the enabled state, keeping these buttons in lockstep with
 // the stack cursor (and with ⌘Z / ⇧⌘Z, which route through the same
 // runUndo / runRedo). Disabled when there's nothing to undo / redo.
-function UndoRedoPills() {
-  const [state, setState] = useState<{ canUndo: boolean; canRedo: boolean }>({
-    canUndo: false,
-    canRedo: false,
-  })
+// DraftBar — the global Draft → Publish surface for the inline editor:
+// Undo / Redo (server-side draft revisions), the "N unpublished" status, and
+// Publish / Discard. The admin bar renders in the root layout, OUTSIDE the
+// page's React tree, so it discovers the current page id from the
+// `data-page-id` attribute the editor's <main> exposes and talks to the page
+// draft endpoints directly — every action is a plain HTTP call (fully
+// programmable; the same endpoints back the API):
+//   GET  /api/cms/pages/[id]/draft-status   → { changeCount, canUndo, canRedo }
+//   POST /api/cms/pages/[id]/undo | redo     → restore a draft revision
+//   POST /api/cms/pages/[id]/publish         → materialise draft → live
+//   POST /api/cms/pages/[id]/discard-draft    → throw the draft away
+// draft-status is polled (cheap) so the bar stays in lockstep as the operator
+// edits. ⌘Z / ⇧⌘Z dispatch cavecms:undo / cavecms:redo (from UndoRedoController)
+// which this component handles, so keyboard + buttons share one path.
+function DraftBar() {
+  const router = useRouter()
+  const toast = useToast()
+  const [pageId, setPageId] = useState<number | null>(null)
+  const [st, setSt] = useState<{
+    changeCount: number
+    canUndo: boolean
+    canRedo: boolean
+  }>({ changeCount: 0, canUndo: false, canRedo: false })
+  const [busy, setBusy] = useState<string | null>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  // Latest values for the window-event (⌘Z) handlers without re-binding.
+  const liveRef = useRef({ pageId: null as number | null, busy: false, st })
+  liveRef.current = { pageId, busy: busy !== null, st }
+
+  // Discover the page id from the editor's <main data-page-id>.
   useEffect(() => {
-    const onState = (e: Event) => {
-      const d = (e as CustomEvent<{ canUndo?: boolean; canRedo?: boolean }>)
-        .detail
-      if (d && typeof d.canUndo === 'boolean' && typeof d.canRedo === 'boolean') {
-        setState({ canUndo: d.canUndo, canRedo: d.canRedo })
-      }
+    const read = () => {
+      const raw = document
+        .querySelector('[data-page-id]')
+        ?.getAttribute('data-page-id')
+      const n = raw ? Number(raw) : NaN
+      setPageId(Number.isInteger(n) && n > 0 ? n : null)
     }
-    window.addEventListener('cavecms:undo-state', onState)
-    // Pull the current state in case the controller mounted first.
-    window.dispatchEvent(new Event('cavecms:undo-state-request'))
-    return () => window.removeEventListener('cavecms:undo-state', onState)
+    read()
+    const t = setInterval(read, 2000)
+    return () => clearInterval(t)
   }, [])
-  const fire = (name: 'cavecms:undo' | 'cavecms:redo') => {
-    if (typeof window === 'undefined') return
-    window.dispatchEvent(new Event(name))
-  }
+
+  const refetch = useCallback(async (id: number) => {
+    try {
+      const r = await fetch(`/api/cms/pages/${id}/draft-status`, {
+        headers: { accept: 'application/json' },
+      })
+      if (r.ok) {
+        const j = (await r.json()) as Partial<{
+          changeCount: number
+          canUndo: boolean
+          canRedo: boolean
+        }>
+        setSt({
+          changeCount: typeof j.changeCount === 'number' ? j.changeCount : 0,
+          canUndo: j.canUndo === true,
+          canRedo: j.canRedo === true,
+        })
+      }
+    } catch {
+      /* transient — keep the last-known state */
+    }
+  }, [])
+
+  // Poll draft status (snappy enough that undo/redo + count track edits).
+  useEffect(() => {
+    if (!pageId) {
+      setSt({ changeCount: 0, canUndo: false, canRedo: false })
+      return
+    }
+    void refetch(pageId)
+    const t = setInterval(() => void refetch(pageId), 2500)
+    return () => clearInterval(t)
+  }, [pageId, refetch])
+
+  // POST an action endpoint, then refresh the editor + refetch status.
+  const run = useCallback(
+    async (
+      key: string,
+      path: string,
+      opts?: { success?: string; onError?: (code?: string) => string },
+    ) => {
+      const id = liveRef.current.pageId
+      if (!id || liveRef.current.busy) return
+      setBusy(key)
+      try {
+        const res = await csrfFetch(`/api/cms/pages/${id}/${path}`, {
+          method: 'POST',
+        })
+        if (res.ok) {
+          if (opts?.success) toast.success(opts.success)
+          router.refresh()
+          // give the server a beat, then resync the bar
+          setTimeout(() => void refetch(id), 400)
+        } else {
+          const j = (await res.json().catch(() => ({}))) as { error?: string }
+          toast.error(
+            opts?.onError?.(j.error) ?? "Couldn't do that. Try again in a moment.",
+          )
+        }
+      } catch {
+        toast.error("We can't reach the server right now.")
+      } finally {
+        setBusy(null)
+        setConfirmDiscard(false)
+      }
+    },
+    [router, toast, refetch],
+  )
+
+  const undo = useCallback(() => run('undo', 'undo'), [run])
+  const redo = useCallback(() => run('redo', 'redo'), [run])
+  const publish = () =>
+    run('publish', 'publish', {
+      success: 'Published — your changes are now live.',
+      onError: (code) =>
+        code === 'html_id_collision'
+          ? 'Two blocks share the same HTML id — fix one, then publish.'
+          : "Couldn't publish. Try again in a moment.",
+    })
+  const discard = () =>
+    run('discard', 'discard-draft', {
+      success: 'Draft discarded — back to the published version.',
+    })
+
+  // ⌘Z / ⇧⌘Z bridge — UndoRedoController dispatches these so keyboard + the
+  // buttons run the exact same server undo/redo. Guards on canUndo/canRedo.
+  useEffect(() => {
+    const onUndo = () => {
+      if (liveRef.current.st.canUndo) void undo()
+    }
+    const onRedo = () => {
+      if (liveRef.current.st.canRedo) void redo()
+    }
+    window.addEventListener('cavecms:undo', onUndo)
+    window.addEventListener('cavecms:redo', onRedo)
+    return () => {
+      window.removeEventListener('cavecms:undo', onUndo)
+      window.removeEventListener('cavecms:redo', onRedo)
+    }
+  }, [undo, redo])
+
+  if (!pageId) return null
+
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <PillButton
         variant="bar"
         size="bar"
         ariaLabel="Undo"
         title="Undo (⌘Z)"
         className="px-2.5"
-        disabled={!state.canUndo}
-        onClick={() => fire('cavecms:undo')}
+        disabled={!st.canUndo || busy !== null}
+        onClick={undo}
       >
         <Undo2 size={14} strokeWidth={1.8} aria-hidden />
       </PillButton>
@@ -498,11 +626,71 @@ function UndoRedoPills() {
         ariaLabel="Redo"
         title="Redo (⇧⌘Z)"
         className="px-2.5"
-        disabled={!state.canRedo}
-        onClick={() => fire('cavecms:redo')}
+        disabled={!st.canRedo || busy !== null}
+        onClick={redo}
       >
         <Redo2 size={14} strokeWidth={1.8} aria-hidden />
       </PillButton>
+      <span aria-hidden className="mx-0.5 h-4 w-px bg-cream-50/15" />
+      {st.changeCount === 0 ? (
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-cream-50/40">
+          <Check size={12} strokeWidth={2.2} aria-hidden />
+          All changes published
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-2">
+          <span
+            className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-copper-300"
+            title={`${st.changeCount} unpublished draft change${st.changeCount === 1 ? '' : 's'}`}
+          >
+            <span className="inline-flex h-2 w-2 rounded-full bg-copper-400" />
+            {st.changeCount} unpublished
+          </span>
+          <button
+            type="button"
+            onClick={publish}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 rounded-full bg-champagne px-3.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-obsidian transition-colors hover:bg-antique-gold hover:text-cream-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy === 'publish' ? (
+              <Loader2 size={12} strokeWidth={2.4} className="animate-spin" aria-hidden />
+            ) : (
+              <UploadCloud size={12} strokeWidth={2.2} aria-hidden />
+            )}
+            Publish
+          </button>
+          {confirmDiscard ? (
+            <span className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={discard}
+                disabled={busy !== null}
+                className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-red-300 transition-colors hover:bg-red-500/15 disabled:opacity-50"
+              >
+                {busy === 'discard' ? 'Discarding…' : 'Confirm discard'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDiscard(false)}
+                disabled={busy !== null}
+                aria-label="Keep editing"
+                className="rounded-full p-1 text-cream-50/50 transition-colors hover:bg-cream-50/10 hover:text-cream-50"
+              >
+                <X size={12} strokeWidth={2.2} aria-hidden />
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDiscard(true)}
+              disabled={busy !== null}
+              className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream-50/55 transition-colors hover:bg-cream-50/10 hover:text-cream-50 disabled:opacity-50"
+            >
+              Discard
+            </button>
+          )}
+        </span>
+      )}
     </span>
   )
 }
