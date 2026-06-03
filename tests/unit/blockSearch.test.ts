@@ -40,20 +40,22 @@ describe('searchBlocks — empty + whitespace queries', () => {
     // empty-query slice; assert the prefix instead of exact length.
     expect(hits.length).toBeGreaterThanOrEqual(7)
     expect(hits.length).toBeLessThanOrEqual(8)
-    // Curated order: Heading > Text > Eyebrow > Action > Figure >
-    // Image pair > Cover image. lx_rule was removed in the luxury
-    // redesign (no borders/border lines per ~/.claude/CLAUDE.md).
-    // Image pair + Cover image were added alongside Figure as
+    // Curated order: Heading > Text > Rich text > Eyebrow > Action >
+    // Figure > Image pair > Cover image. lx_rule was removed in the
+    // luxury redesign (no borders/border lines per ~/.claude/CLAUDE.md).
+    // Rich text (the long-form markdown / post-body block) sits right
+    // after Text as a core text primitive — added in the blog-system
+    // worktree. Image pair + Cover image were added alongside Figure as
     // embedded-media primitives — operators reach for all three in
-    // the same composition step. Map and Space follow at indices 7-8.
+    // the same composition step. Map and Space follow at later indices.
     expect(hits.slice(0, 7).map((h) => h.item.label)).toEqual([
       'Heading',
       'Text',
+      'Rich text',
       'Eyebrow',
       'Action',
       'Figure',
       'Image pair',
-      'Cover image',
     ])
   })
 

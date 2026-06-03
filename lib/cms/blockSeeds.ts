@@ -62,6 +62,7 @@ import {
   Anchor,
   Share,
   Newspaper,
+  Pilcrow,
   Code as CodeIcon,
   MonitorPlay,
   Megaphone,
@@ -123,6 +124,7 @@ export type SeedBlockType =
   | 'lx_toc'
   | 'lx_share'
   | 'lx_posts'
+  | 'lx_richtext'
   | 'lx_embed'
   | 'lx_code'
   | 'lx_marquee'
@@ -189,6 +191,7 @@ export const CATEGORY_BY_TYPE: Record<SeedBlockType, BlockCategory> = {
   // Text
   lx_heading: 'text',
   lx_text: 'text',
+  lx_richtext: 'text',
   lx_eyebrow: 'text',
   lx_quote: 'text',
   lx_animated_headline: 'text',
@@ -280,6 +283,15 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     icon: Type,
     aliases: ['paragraph', 'p', 'prose', 'body'],
     keywords: ['copy', 'editorial', 'inter', 'sans'],
+  },
+  {
+    type: 'lx_richtext',
+    label: 'Rich text',
+    description:
+      'Long-form markdown — headings, lists, quotes, code, images. The post-body block.',
+    icon: Pilcrow,
+    aliases: ['markdown', 'md', 'article', 'post body', 'long form'],
+    keywords: ['blog', 'body', 'prose', 'editorial', 'writeup'],
   },
   {
     type: 'lx_eyebrow',
@@ -986,6 +998,10 @@ export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
   // lx_posts — no required fields; the grid auto-renders the latest
   // published posts (limit/layout/columns fall to defaults).
   lx_posts: {},
+  // lx_richtext — markdown can be empty (operator fills it via the
+  // EditDrawer markdown field, or the migration seeds it from body_md).
+  // tone/maxWidth/animation fall to schema defaults.
+  lx_richtext: { markdown: '' },
   // lx_embed — embedUrl must pass isAllowedEmbedUrl; title required.
   // Neutral public-domain YouTube short (same reference lx_video uses).
   lx_embed: {

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ExternalLink } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -302,9 +303,43 @@ export function Editor({
           </label>
 
           <div>
-            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warm-stone">
-              Body
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warm-stone">
+                Body
+              </span>
+              {/* Edit-content affordance — opens the post's PUBLIC page in
+                  Wix-style edit mode (`?edit=1`), where the SAME inline-edit
+                  drawer that pages use edits the body blocks in place. Shown
+                  only for admin/editor (readonly = viewer hides it), matching
+                  the page editor's "Edit on public page" gating. Uses the
+                  PERSISTED slug (pristine.slug) — the public URL only resolves
+                  the saved slug, so an unsaved rename can't produce a dead
+                  link. */}
+              {!readonly && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-fit gap-2"
+                  onClick={() =>
+                    window.open(
+                      `/blog/${pristine.slug}?edit=1`,
+                      '_blank',
+                      'noopener',
+                    )
+                  }
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  Edit content
+                </Button>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-warm-stone">
+              Use <span className="font-semibold">Edit content</span> to lay out
+              the body with the visual editor — headings, images, galleries and
+              more — directly on the live page. The box below is the original
+              markdown body, kept as a fallback.
+            </p>
             <div className="mt-1.5">
               <MarkdownEditor
                 value={bodyMd}

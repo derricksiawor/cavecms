@@ -48,6 +48,9 @@ export default async function AdminPages({
       LEFT JOIN users u ON u.id = p.updated_by
       WHERE p.deleted_at IS NOT NULL
         AND p.deleted_at > NOW(3) - INTERVAL 30 DAY
+        -- Hidden post-body pages (kind='post_body') are edited via the
+        -- post editor, never the generic Pages surface (spec §4.4).
+        AND p.kind = 'page'
         -- Same exclusion as the active list: project body pages are
         -- managed under /admin/projects, never the generic Pages surface.
         AND NOT EXISTS (
@@ -99,6 +102,11 @@ export default async function AdminPages({
     FROM pages p
     LEFT JOIN users u ON u.id = p.updated_by
     WHERE p.deleted_at IS NULL
+      -- Hide hidden post-body pages (kind='post_body'): they back a
+      -- post's body and are edited via the post editor, never here
+      -- (spec §4.4 — surfacing them would let an operator delete a post
+      -- body out from under it).
+      AND p.kind = 'page'
       -- Hide project body pages (a page row whose slug matches a
       -- project). Those are the block trees backing /projects/[slug];
       -- they are edited on the live page via the inline editor and
@@ -112,9 +120,15 @@ export default async function AdminPages({
   `)) as unknown as [PageListRow[]]
 
   const [trashedCountRows] = (await db.execute(sql`
-    SELECT COUNT(*) AS n FROM pages
+    SELECT COUNT(*) AS n FROM pages p
     WHERE deleted_at IS NOT NULL
       AND deleted_at > NOW(3) - INTERVAL 30 DAY
+      -- Match the trashed-list filter: hidden body pages + project body
+      -- pages are not part of the operator's Pages trash count (§4.4).
+      AND p.kind = 'page'
+      AND NOT EXISTS (
+        SELECT 1 FROM projects pr WHERE pr.slug = p.slug
+      )
   `)) as unknown as [Array<{ n: number | string }>]
   const trashedCount = Number(trashedCountRows[0]?.n ?? 0)
 

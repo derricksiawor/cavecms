@@ -4,6 +4,7 @@ import { ContactForm } from './ContactForm/render'
 // ─── Luxury redesign — lx_* widget primitives ───────────────────────
 import { LxHeading } from './LxHeading/render'
 import { LxText } from './LxText/render'
+import { LxRichtext } from './LxRichtext/render'
 import { LxEyebrow } from './LxEyebrow/render'
 import { LxAction } from './LxAction/render'
 import { LxCoverImage } from './LxCoverImage/render'
@@ -196,6 +197,13 @@ const BLOCK_RENDERERS = defineRenderers({
   ),
   lx_text: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_text'>>) => (
     <LxText data={data} inlineEdit={inlineEdit} outerClass={outerClass} />
+  ),
+  // lx_richtext renders its markdown via renderMarkdownSync (synchronous,
+  // client-bundle-safe) — no inlineEdit (the markdown is edited via the
+  // EditDrawer textarea field, not inline). outerClass threads the
+  // spacing-toolbar override like every other renderer.
+  lx_richtext: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_richtext'>>) => (
+    <LxRichtext data={data} outerClass={outerClass} />
   ),
   lx_eyebrow: ({ data, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_eyebrow'>>) => (
     <LxEyebrow data={data} inlineEdit={inlineEdit} outerClass={outerClass} />

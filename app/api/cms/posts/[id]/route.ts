@@ -533,10 +533,12 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
 
   const txResult = await db.transaction(async (tx) => {
     const [rows] = (await tx.execute(sql`
-      SELECT id, slug FROM posts
+      SELECT id, slug, body_page_id FROM posts
       WHERE id = ${id} AND deleted_at IS NULL
       FOR UPDATE
-    `)) as unknown as [Array<{ id: number; slug: string }>]
+    `)) as unknown as [
+      Array<{ id: number; slug: string; body_page_id: number | null }>,
+    ]
     const row = rows[0]
     if (!row) throw new HttpError(404, 'not_found')
 
@@ -546,6 +548,26 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
           updated_by = ${ctx.userId}
       WHERE id = ${id}
     `)
+
+    // Couple the hidden body page's lifecycle to the post (spec §4.5):
+    // soft-delete it too so its block tree can't be edited while the post
+    // sits in trash (the block-CRUD routes filter pages.deleted_at IS
+    // NULL). The body page is already unreachable everywhere, but
+    // coupling keeps the lifecycle consistent + safe. Scoped to
+    // kind='post_body' as defence in depth so this can only ever touch a
+    // body page, never a normal page. preview_epoch bump invalidates any
+    // (theoretical) leaked preview token, mirroring the page DELETE path.
+    if (row.body_page_id !== null) {
+      await tx.execute(sql`
+        UPDATE pages
+        SET deleted_at = NOW(3),
+            preview_epoch = preview_epoch + 1,
+            updated_by = ${ctx.userId}
+        WHERE id = ${row.body_page_id}
+          AND kind = 'post_body'
+          AND deleted_at IS NULL
+      `)
+    }
 
     // Clean any slug_redirects pointing AT this post so a renamed-
     // then-deleted post doesn't leave dangling 308→404 cascades for

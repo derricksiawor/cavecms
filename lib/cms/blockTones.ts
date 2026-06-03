@@ -23,6 +23,10 @@ export const BLOCK_TONE_ENUMS = {
   // Luxury primitives.
   lx_heading: ['obsidian', 'ivory', 'champagne'],
   lx_text: ['obsidian', 'ivory', 'warm-stone'],
+  // lx_richtext — a full markdown post body. Same tone set as lx_text
+  // (the body-copy register): dark default, light for dark sections,
+  // warm-stone for a muted variant.
+  lx_richtext: ['obsidian', 'ivory', 'warm-stone'],
   // lx_eyebrow defaults to champagne (gold) — neutral, reads on both
   // dark and light surfaces. Listed here so future dynamic adapters
   // can see its full enum, but the resolver below treats champagne as

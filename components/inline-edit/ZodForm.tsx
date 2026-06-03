@@ -1535,6 +1535,49 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
     },
   ],
 
+  lx_richtext: [
+    // Markdown SOURCE — a plain-text multiline textarea, NOT the
+    // `richtext` inline-HTML editor. The renderer transforms this through
+    // renderMarkdownSync's sanitize pipeline at render time, so the
+    // operator writes markdown (## heading, - list, > quote, `code`,
+    // ![alt](/uploads/...)) and sees it rendered on the page.
+    {
+      kind: 'string',
+      key: 'markdown',
+      label: 'Body (markdown)',
+      maxLength: TEXT_MAX.bodyMarkdown,
+      multiline: true,
+      placeholder: '## Section heading\n\nWrite your post body in markdown…',
+      help: 'Supports headings, lists, quotes, code, links and /uploads images. Rendered + sanitized server-side.',
+    },
+    {
+      kind: 'color',
+      key: 'tone',
+      label: 'Tone',
+      tokens: ['obsidian', 'ivory', 'warm-stone'],
+      allowCustom: true,
+      allowAlpha: false,
+    },
+    {
+      kind: 'select', key: 'maxWidth', label: 'Editorial measure',
+      options: [
+        { value: 'narrow', label: 'Narrow (45ch)' },
+        { value: 'medium', label: 'Medium (60ch)' },
+        { value: 'wide', label: 'Wide (72ch)' },
+        { value: 'full', label: 'Full (no max)' },
+      ],
+      help: 'Web typography research suggests 45–75 characters per line for editorial body.',
+    },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
   lx_eyebrow: [
     { kind: 'string', key: 'text', label: 'Kicker text', maxLength: TEXT_MAX.caption, placeholder: 'KICKER LABEL' },
     {

@@ -902,3 +902,124 @@
     pointer-events: auto;
   }
 }
+
+/* lx_richtext block — editorial styling for a markdown post body
+   rendered via renderMarkdownSync. Deliberately NOT the Tailwind
+   `prose` plugin: prose injects underlined links + blockquote/hr
+   borders that violate the global "no borders / no underlines"
+   design rules. We style the emitted markdown tags (h2-h4, p, ul/ol/
+   li, blockquote, code, pre, img, hr, strong, em, a) directly to the
+   luxury register. `color` is inherited from the block's tone (set
+   inline on the wrapper), so these rules touch spacing + weight +
+   structure only, never the base text colour. */
+@layer base {
+  .cms-richtext > :first-child {
+    margin-top: 0;
+  }
+  .cms-richtext > :last-child {
+    margin-bottom: 0;
+  }
+  .cms-richtext p {
+    margin-block: 1em;
+  }
+  .cms-richtext h2 {
+    font-family: var(--font-display, inherit);
+    font-weight: 700;
+    font-size: 1.6em;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin-block: 1.6em 0.6em;
+  }
+  .cms-richtext h3 {
+    font-family: var(--font-display, inherit);
+    font-weight: 700;
+    font-size: 1.3em;
+    line-height: 1.25;
+    margin-block: 1.4em 0.5em;
+  }
+  .cms-richtext h4 {
+    font-weight: 600;
+    font-size: 1.1em;
+    margin-block: 1.2em 0.5em;
+  }
+  .cms-richtext ul,
+  .cms-richtext ol {
+    margin-block: 1em;
+    padding-inline-start: 1.4em;
+  }
+  .cms-richtext ul {
+    list-style: disc;
+  }
+  .cms-richtext ol {
+    list-style: decimal;
+  }
+  .cms-richtext li {
+    margin-block: 0.35em;
+  }
+  /* No border on the blockquote — the global "no borders" rule. The
+     quote reads via a soft tinted surface + italic instead. */
+  .cms-richtext blockquote {
+    margin-block: 1.2em;
+    padding: 0.75em 1.1em;
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, currentColor 6%, transparent);
+    font-style: italic;
+  }
+  .cms-richtext blockquote p {
+    margin-block: 0.4em;
+  }
+  .cms-richtext a {
+    color: var(--color-copper-600, currentColor);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .cms-richtext a:hover {
+    text-decoration: underline;
+  }
+  .cms-richtext strong {
+    font-weight: 700;
+  }
+  .cms-richtext em {
+    font-style: italic;
+  }
+  .cms-richtext code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.875em;
+    padding: 0.12em 0.4em;
+    border-radius: 0.375rem;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+  }
+  .cms-richtext pre {
+    margin-block: 1.2em;
+    padding: 1em 1.25em;
+    border-radius: 0.75rem;
+    overflow-x: auto;
+    background: #121212;
+    color: #dbd7ca;
+  }
+  .cms-richtext pre code {
+    padding: 0;
+    background: transparent;
+    font-size: 0.875em;
+  }
+  .cms-richtext img {
+    margin-block: 1.4em;
+    border-radius: 1rem;
+    max-width: 100%;
+    height: auto;
+  }
+  /* hr — the markdown rule. The global rule bans hairlines; render it
+     as generous vertical whitespace with a centered fleuron dot
+     instead of a visible line. */
+  .cms-richtext hr {
+    border: 0;
+    margin-block: 2.2em;
+    text-align: center;
+  }
+  .cms-richtext hr::before {
+    content: "•";
+    color: color-mix(in srgb, currentColor 45%, transparent);
+    font-size: 1.2em;
+    letter-spacing: 0.6em;
+  }
+}

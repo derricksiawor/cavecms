@@ -70,6 +70,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         SELECT url_path, is_home, updated_at
         FROM pages
         WHERE published = 1 AND deleted_at IS NULL
+          -- Exclude hidden post-body pages (kind='post_body'); they are
+          -- never routable URLs (spec §4.4 guard checklist).
+          AND kind = 'page'
         ORDER BY is_home DESC, updated_at DESC
         LIMIT ${SITEMAP_PAGE_CAP + 1}
       `)) as unknown as [

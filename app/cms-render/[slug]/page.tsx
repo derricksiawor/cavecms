@@ -75,6 +75,9 @@ export async function generateMetadata({ params }: { params: Params }) {
       AND deleted_at IS NULL
       AND is_home = 0
       AND published = 1
+      -- A bare-slug hit on a hidden post-body page must NOT leak its
+      -- metadata (spec §4.4); kind='page' excludes them.
+      AND kind = 'page'
     LIMIT 1
   `)) as unknown as [
     Array<{
@@ -175,6 +178,10 @@ export default async function PageRoute({
     WHERE slug = ${slug}
       AND deleted_at IS NULL
       AND is_home = 0
+      -- A bare-slug hit on a hidden post-body page (its internal
+      -- __post-body-<id> slug, or a forged guess) must 404, never render
+      -- the body tree at a public URL (spec §4.4).
+      AND kind = 'page'
     LIMIT 1
   `)) as unknown as [PageRawRow[]]
   const page = rows[0]
@@ -229,6 +236,9 @@ export default async function PageRoute({
       WHERE slug = ${redirect.new_slug}
         AND deleted_at IS NULL
         AND published = 1
+        -- A redirect can never legitimately target a hidden body page
+        -- (its slug is the internal sentinel); exclude defensively.
+        AND kind = 'page'
       LIMIT 1
     `)) as unknown as [Array<{ url_path: string | null }>]
     const target = targetRows[0]

@@ -60,10 +60,13 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
   // for a trashed page can't render anywhere); the deleted_at filter
   // catches that. Unpublished pages CAN — that's the whole point of
   // preview.
+  // kind='page' so a hidden post-body page can NOT mint a standalone-page
+  // preview token (spec §4.4) — a body page is never previewed as a page
+  // (it has no routable URL). Resolves 404, no oracle.
   const [rows] = (await db.execute(sql`
     SELECT id, slug, is_home, preview_epoch
     FROM pages
-    WHERE id = ${id} AND deleted_at IS NULL
+    WHERE id = ${id} AND deleted_at IS NULL AND kind = 'page'
   `)) as unknown as [
     Array<{
       id: number

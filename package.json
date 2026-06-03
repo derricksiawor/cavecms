@@ -36,6 +36,7 @@
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "db:seed": "node --conditions=react-server --env-file=.env.local --import tsx db/seed.ts",
     "migrate:projects-to-blocks": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate-projects-to-blocks.ts",
+    "migrate:posts-to-blocks": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate-posts-to-blocks.ts",
     "release:build-template-media": "node --conditions=react-server --dns-result-order=ipv4first --env-file-if-exists=.env.local --import tsx scripts/release/build-template-media.ts",
     "template-media:hydrate": "node --dns-result-order=ipv4first --env-file-if-exists=.env.local --import tsx scripts/release/hydrate-template-media.ts",
     "release:build": "node scripts/release/build-zip.mjs"

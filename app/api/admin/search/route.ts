@@ -60,6 +60,9 @@ export const GET = withError(async (req: Request) => {
             SELECT 'page' AS type, id, seo_title AS title, slug, 1 AS published
             FROM pages
             WHERE deleted_at IS NULL
+              -- Hidden post-body pages must never surface in the Cmd+K
+              -- palette (spec §4.4).
+              AND kind = 'page'
               AND (seo_title LIKE ${needle} OR slug LIKE ${needle})
             ORDER BY updated_at DESC
             LIMIT ${SEARCH_LIMIT}
@@ -86,6 +89,9 @@ export const GET = withError(async (req: Request) => {
           SELECT 'page' AS type, id, seo_title AS title, slug, 1 AS published
           FROM pages
           WHERE deleted_at IS NULL
+            -- Hidden post-body pages must never surface in the Cmd+K
+            -- palette (spec §4.4).
+            AND kind = 'page'
           ORDER BY slug
           LIMIT ${DEFAULT_LIMIT}
         `),

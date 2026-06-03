@@ -14,6 +14,10 @@ export const TEXT_MAX = {
   richtextShort: 4000,
   /** lx_text.body_richtext */
   richtextLong: 8000,
+  /** lx_richtext.markdown — a full post body authored in markdown. Sized
+   *  to the posts PATCH route's BODY_MD_MAX (180_000) so a migrated post
+   *  body never truncates when its markdown moves onto the block engine. */
+  bodyMarkdown: 180_000,
   /** lx_eyebrow.text, lx_channel_card.label / value, lx_stat.label,
    *  lx_quote.attribution / attribution_title */
   caption: 120,

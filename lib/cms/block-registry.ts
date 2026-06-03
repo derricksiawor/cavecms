@@ -1254,6 +1254,37 @@ export const blockSchemas = {
     filename: safeText(TEXT_MAX.caption).optional(),
   }),
 
+  // Rich text (markdown). The home of a full post body on the block
+  // engine (spec §4.6): `markdown` is the markdown SOURCE, stored as
+  // PLAIN TEXT — deliberately NOT in parse.ts RICHTEXT_FIELDS, exactly
+  // like `lx_code.code`. It is rendered server-side AND in the editor
+  // canvas via `renderMarkdownSync` (lib/cms/markdown-shared.ts), whose
+  // rehype-sanitize allowlist is the SOLE XSS trust boundary. That
+  // allowlist permits the full block-level set markdown produces
+  // (h2-h4, ul/ol/li, blockquote, pre/code, img, hr, p, strong, em, a)
+  // — which a single `lx_text` block CANNOT hold, because the lx_text
+  // `body_richtext` DOMPurify allowlist (sanitize-shared.ts) is
+  // inline+lists only (p/br/strong/em/a/ul/ol/li, NO headings /
+  // blockquote / pre / img / hr). So migrating a markdown post body
+  // into one lx_text block would silently strip headings, code blocks,
+  // blockquotes, images and rules — data loss. lx_richtext preserves
+  // them. `safeText` applies the bidi/zero-width gate (display-spoof
+  // defence) but no HTML stripping — the markdown is plain text until
+  // the renderer transforms it. Reusable on pages too, not just posts.
+  lx_richtext: z.object({
+    // Long-form markdown SOURCE — length-capped only, NOT display-gated
+    // (no bidi/ZWS refine). Post bodies legitimately contain ZWJ emoji
+    // (e.g. 👨‍👩‍👧 = U+200D) and bidi-embedded RTL text; the render-time
+    // sanitizer (renderMarkdownSync) is the trust boundary, matching how
+    // body_md is validated at the posts write boundary (length cap only). A
+    // display-gate here would permanently strand i18n/emoji posts on the
+    // legacy fallback during backfill.
+    markdown: z.string().max(TEXT_MAX.bodyMarkdown),
+    tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_richtext).default('obsidian'),
+    maxWidth: z.enum(['narrow', 'medium', 'wide', 'full']).default('wide'),
+    animation: z.enum(['none', 'fade-in', 'slide-up']).default('none'),
+  }),
+
   // ── Stretch wave ("even better than Elementor") ─────────────────
 
   // Marquee — logo / text ticker. Pure-CSS scroll, reduced-motion safe.

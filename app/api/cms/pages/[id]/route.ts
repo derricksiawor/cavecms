@@ -72,8 +72,14 @@ export const GET = withError<RouteCtx>(async (req, { params }) => {
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   checkReadRate(ctx.userId)
 
+  // kind='page' so a hidden post-body page id resolves as 404 — a body
+  // page can NOT be loaded / edited as a standalone page outside the post
+  // editor (spec §4.4). Body editing happens via the block-CRUD routes
+  // (/api/cms/blocks/*), which are page_id-keyed and intentionally
+  // kind-agnostic. The 404 is indistinguishable from a non-existent
+  // page — no oracle that a body page exists at this id.
   const [pageRows] = (await db.execute(sql`
-    SELECT * FROM pages WHERE id = ${id}
+    SELECT * FROM pages WHERE id = ${id} AND kind = 'page'
   `)) as unknown as [PageRawRow[]]
   const page = pageRows[0]
   if (!page) throw new HttpError(404, 'not_found')
@@ -190,10 +196,11 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
 
   try {
     const txResult = await db.transaction(async (tx) => {
-      // Step 1: lock the row.
+      // Step 1: lock the row. kind='page' so a hidden post-body page can
+      // NOT be PATCHed as a standalone page (spec §4.4) — resolves 404.
       const [rows] = (await tx.execute(sql`
         SELECT * FROM pages
-        WHERE id = ${id} AND deleted_at IS NULL
+        WHERE id = ${id} AND deleted_at IS NULL AND kind = 'page'
         FOR UPDATE
       `)) as unknown as [PageRawRow[]]
       const row = rows[0]
@@ -685,12 +692,15 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     const [rows] = (await tx.execute(sql`
       SELECT id, slug, title, is_home
       FROM pages
-      WHERE id = ${id} AND deleted_at IS NULL
+      WHERE id = ${id} AND deleted_at IS NULL AND kind = 'page'
       FOR UPDATE
     `)) as unknown as [
       Array<{ id: number; slug: string; title: string; is_home: number }>,
     ]
     const row = rows[0]
+    // kind='page' above → a hidden post-body page can NOT be deleted as a
+    // standalone page (spec §4.4); the post DELETE handler owns body-page
+    // lifecycle. Resolves 404, no oracle.
     if (!row) throw new HttpError(404, 'not_found')
     const wasHome = row.is_home === 1
     const wasSlug = row.slug

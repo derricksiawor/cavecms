@@ -400,6 +400,9 @@ export const GET = withError(async (req) => {
           LEFT JOIN users u ON u.id = p.updated_by
           WHERE p.deleted_at IS NOT NULL
             AND p.deleted_at > NOW(3) - INTERVAL 30 DAY
+            -- Hidden post-body pages (kind='post_body') never appear in the
+            -- generic Pages admin list (spec §4.4).
+            AND p.kind = 'page'
           ORDER BY p.deleted_at DESC, p.id DESC
           LIMIT 50
         `
@@ -410,6 +413,7 @@ export const GET = withError(async (req) => {
           FROM pages p
           LEFT JOIN users u ON u.id = p.updated_by
           WHERE p.deleted_at IS NULL
+            AND p.kind = 'page'
           ORDER BY p.is_home DESC, p.updated_at DESC, p.id DESC
           LIMIT 50
         `,

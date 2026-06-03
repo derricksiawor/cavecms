@@ -297,6 +297,7 @@ export async function buildBundleContent(): Promise<BundleContent> {
            seo_title, seo_description, og_image_id, hero_image_id
     FROM pages
     WHERE deleted_at IS NULL
+      AND kind = 'page'
     ORDER BY slug
   `)) as unknown as [
     Array<{

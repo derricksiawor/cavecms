@@ -15,6 +15,7 @@ import { tagsForPostCreate } from '@/lib/cache/tags'
 import { enqueueRevalidate, drainRevalidate } from '@/lib/cache/durableRevalidate'
 
 import { SLUG_RE, SLUG_MAX } from '@/lib/cms/slug'
+import { insertPostBodyPage } from '@/lib/cms/postBodyPage'
 
 const CreateBody = z
   .object({
@@ -59,6 +60,21 @@ export const POST = withError(async (req) => {
       `)) as unknown as [InsertResult]
       const postId = Number(insertArr.insertId)
 
+      // Create the hidden body page (kind='post_body') + seed one empty
+      // lx_richtext block, then link posts.body_page_id — all in THIS TX
+      // so a post and its body page land atomically (spec §4.1). The
+      // body is edited via the existing block engine pointed at this
+      // body page id; body_md stays '' as the deprecated fallback until
+      // a later release drops it.
+      const bodyPageId = await insertPostBodyPage(tx, {
+        postId,
+        title: body.title,
+        markdown: '',
+      })
+      await tx.execute(sql`
+        UPDATE posts SET body_page_id = ${bodyPageId} WHERE id = ${postId}
+      `)
+
       await tx.insert(auditLog).values({
         userId: ctx.userId,
         action: 'create',
@@ -66,7 +82,7 @@ export const POST = withError(async (req) => {
         resourceId: String(postId),
         diff: {
           kind: AUDIT_KIND.create,
-          data: { slug: body.slug, title: body.title },
+          data: { slug: body.slug, title: body.title, body_page_id: bodyPageId },
         } as unknown as object,
         ip: meta.ip,
         userAgent: meta.userAgent,

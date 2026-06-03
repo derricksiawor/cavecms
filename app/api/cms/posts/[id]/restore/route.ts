@@ -46,11 +46,18 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
 
   const txResult = await db.transaction(async (tx) => {
     const [rows] = (await tx.execute(sql`
-      SELECT id, slug, version
+      SELECT id, slug, version, body_page_id
       FROM posts
       WHERE id = ${id} AND deleted_at IS NOT NULL
       FOR UPDATE
-    `)) as unknown as [Array<{ id: number; slug: string; version: number }>]
+    `)) as unknown as [
+      Array<{
+        id: number
+        slug: string
+        version: number
+        body_page_id: number | null
+      }>,
+    ]
     const row = rows[0]
     if (!row) throw new HttpError(404, 'not_found')
 
@@ -77,6 +84,21 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
           updated_by = ${ctx.userId}
       WHERE id = ${id}
     `)
+
+    // Restore the hidden body page in lockstep (spec §4.5) so its block
+    // tree becomes editable again the moment the post is restored. Scoped
+    // to kind='post_body' as defence in depth. preview_epoch bump keeps
+    // the body page's epoch monotonic across the trash→restore cycle.
+    if (row.body_page_id !== null) {
+      await tx.execute(sql`
+        UPDATE pages
+        SET deleted_at = NULL,
+            preview_epoch = preview_epoch + 1,
+            updated_by = ${ctx.userId}
+        WHERE id = ${row.body_page_id}
+          AND kind = 'post_body'
+      `)
+    }
 
     await tx.insert(auditLog).values({
       userId: ctx.userId,

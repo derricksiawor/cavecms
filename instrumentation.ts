@@ -315,6 +315,38 @@ export async function register(): Promise<void> {
     })()
   }
 
+  // ─── One-time posts → CMS-blocks backfill (customer auto-migration) ──
+  // Symmetric with the projects backfill above (spec §12). After an
+  // update restarts the app, move any post whose body has not yet landed
+  // on the block engine (body_page_id IS NULL) onto it — a hidden body
+  // page + one lx_richtext block per post — via the SAME validated engine
+  // the dev CLI uses (parseAndSanitize on the seed block, one TX per
+  // post). FIRE-AND-FORGET so it never blocks boot: posts render via the
+  // body_md fallback until their body page lands, each migrating in its
+  // own transaction, so a visitor mid-backfill always sees the old render
+  // OR the new one. Production-only — contributors migrate by hand (pnpm
+  // migrate:posts-to-blocks). Idempotent + cheap-guarded (a single COUNT
+  // short-circuits the all-migrated no-op), so it costs ~one query on
+  // every normal restart after the first successful pass.
+  if (env.NODE_ENV === 'production') {
+    void (async () => {
+      try {
+        const { runPostsBackfillOnce } = await import(
+          '@/lib/cms/runPostsBackfillOnce'
+        )
+        await runPostsBackfillOnce()
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            msg: 'posts_backfill_failed',
+            err: e instanceof Error ? e.message : String(e),
+          }),
+        )
+      }
+    })()
+  }
+
   // Crash handlers were installed at the top of register() — see the
   // module-scope definitions of isInboundHttpAbort + crash above.
   // Documenting the inbound-HTTP-abort filter here so the rationale

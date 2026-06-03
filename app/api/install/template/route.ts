@@ -164,15 +164,28 @@ async function wipeNonLegalPagesAndBlocks(tx: Tx): Promise<void> {
   // deleting pages would cascade-delete content_blocks. We DELETE
   // content_blocks first anyway as belt-and-braces — also leaves
   // the FK invariant satisfied for the page DELETE that follows.
+  //
+  // Scope BOTH deletes to kind='page' so HIDDEN post-body pages
+  // (kind='post_body') and their content_blocks SURVIVE the template
+  // wipe (spec §4.4): a body page is owned by a post via
+  // posts.body_page_id, not part of the operator's page set, and
+  // wiping it would orphan the post's body. The legal-page keep-list
+  // is unaffected (those are all kind='page'). The content_blocks
+  // delete scopes via the page's kind so it never touches a body
+  // page's block tree even though body-page ids aren't in the keep-set.
   const idList = sql.join(
     keepIds.map((id) => sql`${id}`),
     sql`, `,
   )
   await tx.execute(sql`
-    DELETE FROM content_blocks WHERE page_id NOT IN (${idList})
+    DELETE cb FROM content_blocks cb
+    JOIN pages p ON p.id = cb.page_id
+    WHERE cb.page_id NOT IN (${idList})
+      AND p.kind = 'page'
   `)
   await tx.execute(sql`
     DELETE FROM pages WHERE id NOT IN (${idList})
+      AND kind = 'page'
   `)
 }
 

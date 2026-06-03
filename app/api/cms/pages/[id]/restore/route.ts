@@ -60,11 +60,15 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
         WHERE id = ${id}
           AND deleted_at IS NOT NULL
           AND deleted_at > NOW(3) - INTERVAL 30 DAY
+          AND kind = 'page'
         FOR UPDATE
       `)) as unknown as [
         Array<{ id: number; slug: string; version: number; is_home: number }>,
       ]
       const row = rows[0]
+      // kind='page' above → a hidden post-body page can NOT be restored as
+      // a standalone page (spec §4.4); post restore owns body-page
+      // lifecycle. Resolves 404, no oracle.
       if (!row) throw new HttpError(404, 'not_found')
 
       const originalSlug = row.slug

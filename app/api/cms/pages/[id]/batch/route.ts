@@ -235,9 +235,14 @@ export const POST = withError<RouteCtx>(async (req, { params }) => {
     //    as saveBlock: pages → content_blocks). One optional whole-batch
     //    optimistic-lock check, then we bump pages.version exactly ONCE
     //    at the end for the entire batch.
+    // kind='page' so a hidden post-body page can NOT be driven through the
+    // page-level batch fast-lane as a standalone page (spec §4.4). Body
+    // editing flows through the per-block /api/cms/blocks/* routes, which
+    // are page_id-keyed and intentionally kind-agnostic. Resolves
+    // page_not_found, no oracle that a body page exists at this id.
     const [pageRows] = (await tx.execute(sql`
       SELECT id, slug, version FROM pages
-      WHERE id = ${pageId} AND deleted_at IS NULL
+      WHERE id = ${pageId} AND deleted_at IS NULL AND kind = 'page'
       FOR UPDATE
     `)) as unknown as [Array<{ id: number; slug: string; version: number }>]
     const pageRow = pageRows[0]

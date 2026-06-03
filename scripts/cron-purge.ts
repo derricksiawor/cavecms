@@ -201,6 +201,31 @@ async function purgeSoftDeletedRows(): Promise<void> {
   )
   logInfo('posts_purged', { affected: (rPosts as { affectedRows?: number }).affectedRows ?? 0 })
 
+  // Orphaned post-body pages (spec §4.5). A post's body lives on a hidden
+  // page (kind='post_body') linked by posts.body_page_id with the FK ON
+  // DELETE SET NULL — so hard-purging a post does NOT cascade-delete its
+  // body page. The normal lifecycle soft-deletes the body page alongside
+  // the post (post DELETE handler), so it gets caught by the pages purge
+  // below in the same retention window. This sweep is the explicit
+  // backstop for any body page that is no longer referenced by ANY post
+  // (post hard-purged, or a pre-coupling/hand-edited row): hard-delete
+  // it so a body tree can never linger forever. content_blocks cascade
+  // via the page FK ON DELETE CASCADE; media_references become orphans
+  // the weekly reconciler sweeps. RETURNING surfaces the count.
+  const orphanBodyPagesResult = (await db.execute(sql`
+    DELETE FROM pages
+    WHERE kind = 'post_body'
+      AND NOT EXISTS (
+        SELECT 1 FROM posts p WHERE p.body_page_id = pages.id
+      )
+  `)) as unknown as { affectedRows?: number } | [unknown, { affectedRows?: number }]
+  const orphanBodyPagesAffected = Array.isArray(orphanBodyPagesResult)
+    ? (orphanBodyPagesResult[0] as { affectedRows?: number })?.affectedRows ??
+      (orphanBodyPagesResult as unknown as { affectedRows?: number }).affectedRows ??
+      0
+    : (orphanBodyPagesResult.affectedRows ?? 0)
+  logInfo('orphan_body_pages_purged', { affected: orphanBodyPagesAffected })
+
   const [rProjects] = await db.execute(
     sql`DELETE FROM projects
         WHERE deleted_at IS NOT NULL
