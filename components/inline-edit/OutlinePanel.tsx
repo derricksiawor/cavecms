@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import {
   DndContext,
@@ -1138,16 +1139,27 @@ export function OutlinePanel({
                 </ol>
               </SortableContext>
               {/* Drag preview clone following the cursor, rendered at the
-                 projected depth + tinted red when the drop is blocked. */}
-              <DragOverlay dropAnimation={null}>
-                {activeNode ? (
-                  <DragOverlayRow
-                    item={activeNode}
-                    depth={projection ? projection.depth : 0}
-                    invalid={projection ? !projection.valid : false}
-                  />
-                ) : null}
-              </DragOverlay>
+                 projected depth + tinted red when the drop is blocked.
+                 PORTALED to <body>: the outline <aside> has backdrop-filter,
+                 which makes it the containing block for the overlay's
+                 fixed/translate positioning — leaving it INSIDE the aside
+                 offsets dnd-kit's viewport coordinates and renders the clone
+                 off-screen (the "can't see the drag" bug). At <body> there is
+                 no transformed/filtered ancestor, so the clone tracks the
+                 cursor correctly and isn't clipped by the panel's overflow. */}
+              {typeof document !== 'undefined' &&
+                createPortal(
+                  <DragOverlay dropAnimation={null}>
+                    {activeNode ? (
+                      <DragOverlayRow
+                        item={activeNode}
+                        depth={projection ? projection.depth : 0}
+                        invalid={projection ? !projection.valid : false}
+                      />
+                    ) : null}
+                  </DragOverlay>,
+                  document.body,
+                )}
             </DndContext>
           )}
           {/* Widget picker extracted to a separate left-pinned floating
