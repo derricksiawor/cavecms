@@ -131,11 +131,29 @@ export async function pushToCloud({ archivePath, env = process.env, createDest =
       },
     })
 
+    // App-private metadata stamped on the archive so the restore UI's list()
+    // reads it back in ONE call (no per-backup sidecar download). gdrive only —
+    // createDestination drops `opts` for OneDrive, which can't store it; the
+    // sidecar (written below) remains the source of truth for restore + the
+    // OneDrive / older-backup list fallback. All-string values, all tiny.
+    const appProperties = {
+      cavecmsVersion: String(manifest.cavecms?.version ?? '0.0.0'),
+      cavecmsCreatedAt: String(manifest.createdAt ?? ''),
+      cavecmsEncrypted: enc !== null ? '1' : '0',
+      cavecmsIncludeEnv: manifest.env?.included === true ? '1' : '0',
+      cavecmsMigratorEncoding: String(manifest.database?.migratorEncoding ?? 'unknown'),
+    }
+
     await dest.ensureFolder()
-    await dest.upload(blobPath, remoteName, (sent, total) => {
-      const pct = total ? Math.min(100, Math.floor((sent / total) * 100)) : 0
-      status(`Uploading to ${label}… ${pct}%`)
-    })
+    await dest.upload(
+      blobPath,
+      remoteName,
+      (sent, total) => {
+        const pct = total ? Math.min(100, Math.floor((sent / total) * 100)) : 0
+        status(`Uploading to ${label}… ${pct}%`)
+      },
+      { appProperties },
+    )
 
     // Cleartext sidecar for cheap listing + compat badges.
     const sidecar = {

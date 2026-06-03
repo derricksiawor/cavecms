@@ -34,6 +34,23 @@ const limitReads = rateLimit('cms:read:user', {
   limit: 120,
   windowSec: 60,
 })
+// Status-poll bucket — for the backup/restore progress modals + the
+// updates banner, which poll a status endpoint continuously for the
+// duration of a known long-running operation (a backup/restore can run
+// for minutes; the modal polls every 1–2 s, and React StrictMode double-
+// mounts the poller in dev). These polls return ONLY progress state
+// ({state, step, …}) — no table data, no PII — so they don't belong in
+// the general 120/min `cms:read` bucket they would otherwise exhaust,
+// starving that bucket's media-grid / list reads AND tripping the modal
+// into its faster error-cadence (a 429 feedback loop: a 429 is read as a
+// network error, which speeds the poll up, which causes more 429s). A
+// dedicated, generous ceiling keeps polling smooth while still capping a
+// stolen cookie: 240/min is ~4× the busiest prod poll rate (1/s) and ~2×
+// the dev-doubled rate, yet bounds abuse of an endpoint that leaks nothing.
+const limitStatusPoll = rateLimit('cms:status-poll:user', {
+  limit: 240,
+  windowSec: 60,
+})
 // CSV export bucket — much tighter because each call buffers a
 // keyset-batched stream over up to LEADS_EXPORT_MAX_ROWS rows and
 // holds a DB connection for the duration. Five exports per minute
@@ -79,6 +96,12 @@ export function checkUploadRate(userId: number): void {
 
 export function checkReadRate(userId: number): void {
   if (!limitReads(String(userId))) {
+    throw new HttpError(429, 'rate_limited')
+  }
+}
+
+export function checkStatusPollRate(userId: number): void {
+  if (!limitStatusPoll(String(userId))) {
     throw new HttpError(429, 'rate_limited')
   }
 }

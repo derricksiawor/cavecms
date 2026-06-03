@@ -51,10 +51,19 @@ export async function ensureFolder(ctx) {
   return j.id
 }
 
-// Resumable upload. Returns { remoteId }.
-export async function upload(ctx, localPath, remoteName, onProgress) {
+// Resumable upload. Returns { remoteId }. `opts.appProperties` (string→string)
+// is stamped onto the Drive file as app-private metadata so the restore UI's
+// list() can read it back in a SINGLE files.list call — no per-backup sidecar
+// download. Keys/values are tiny (version, flags) — well under Drive's 124-byte
+// per-property limit.
+export async function upload(ctx, localPath, remoteName, onProgress, opts) {
   const folderId = await ensureFolder(ctx)
   const total = statSync(localPath).size
+
+  const initBody = { name: remoteName, parents: [folderId] }
+  if (opts && opts.appProperties && Object.keys(opts.appProperties).length > 0) {
+    initBody.appProperties = opts.appProperties
+  }
 
   // 1. Initiate the resumable session.
   const init = await fetchRetry(UPLOAD, {
@@ -65,7 +74,7 @@ export async function upload(ctx, localPath, remoteName, onProgress) {
       'x-upload-content-type': 'application/octet-stream',
       'x-upload-content-length': String(total),
     },
-    body: JSON.stringify({ name: remoteName, parents: [folderId] }),
+    body: JSON.stringify(initBody),
   })
   if (!init.ok) throw new Error(`gdrive_session_failed:${init.status}`)
   const sessionUri = init.headers.get('location')
@@ -132,10 +141,25 @@ export async function upload(ctx, localPath, remoteName, onProgress) {
 // List ALL backup archives in the folder, following nextPageToken so the result
 // is complete regardless of folder size (retention + the restore UI both rely
 // on a complete list). Returns [{ remoteId, name, sizeBytes, createdAt }].
+// Parse the app-private metadata stamped at upload time (see upload()) back into
+// the shape remoteList needs. Returns undefined for files without it (older
+// backups uploaded before this fast-path existed) so the caller falls back to
+// downloading the sidecar.
+function metaFromAppProps(ap) {
+  if (!ap || typeof ap.cavecmsVersion !== 'string') return undefined
+  return {
+    version: ap.cavecmsVersion,
+    createdAt: ap.cavecmsCreatedAt || null,
+    encrypted: ap.cavecmsEncrypted === '1',
+    includeEnv: ap.cavecmsIncludeEnv === '1',
+    migratorEncoding: ap.cavecmsMigratorEncoding || 'unknown',
+  }
+}
+
 export async function list(ctx) {
   const folderId = await ensureFolder(ctx)
   const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`)
-  const fields = encodeURIComponent('nextPageToken,files(id,name,size,createdTime)')
+  const fields = encodeURIComponent('nextPageToken,files(id,name,size,createdTime,appProperties)')
   const out = []
   let pageToken = ''
   do {
@@ -146,12 +170,15 @@ export async function list(ctx) {
     if (!res.ok) throw new Error(`gdrive_list_failed:${res.status}`)
     const j = await res.json()
     for (const f of j.files || []) {
-      out.push({
+      const entry = {
         remoteId: f.id,
         name: f.name,
         sizeBytes: f.size ? Number(f.size) : 0,
         createdAt: f.createdTime || null,
-      })
+      }
+      const meta = metaFromAppProps(f.appProperties)
+      if (meta) entry.meta = meta
+      out.push(entry)
     }
     pageToken = j.nextPageToken || ''
   } while (pageToken)

@@ -21,6 +21,21 @@ import { pathToFileURL } from 'node:url'
 import { createDestination, sha256FileStream } from './cloud/destination.mjs'
 import { decryptFile } from './cloud/passphraseCipher.mjs'
 
+// Distinct exit codes so cavecms-restore.sh can show an ACCURATE failure
+// message instead of collapsing every failure into "couldn't download". A
+// wrong passphrase and a network failure need different operator actions.
+const EXIT = {
+  GENERIC: 1, // download / auth / not-found / unreadable
+  CANNOT_DECRYPT: 22, // wrong passphrase or altered ciphertext (GCM auth fail)
+  CORRUPT: 23, // sha256 mismatch — tampered or truncated download
+  NEED_PASSPHRASE: 24, // archive is encrypted but no passphrase is configured
+}
+function pullError(exitCode, message) {
+  const err = new Error(message)
+  err.exitCode = exitCode
+  return err
+}
+
 const PROVIDER_LABEL = { gdrive: 'Google Drive', onedrive: 'OneDrive' }
 // Archive blob name shape — the downloaded filename is constrained to this so a
 // compromised cloud account can't supply a traversal path as the blob "name".
@@ -130,28 +145,46 @@ export async function pullFromCloud({ env = process.env, createDest = createDest
     const sha = await sha256FileStream(blobPath)
     if (sha !== sidecar.sha256) {
       safeUnlink(blobPath)
-      throw new Error('cloud-pull: checksum mismatch — the downloaded backup is corrupt')
+      throw pullError(
+        EXIT.CORRUPT,
+        'cloud-pull: checksum mismatch — the downloaded backup is corrupt',
+      )
     }
 
     // Decrypt if the blob was passphrase-encrypted.
     let archivePath = blobPath
     if (sidecar.encrypted) {
       if (!creds.passphrase) {
-        throw new Error('cloud-pull: this backup is encrypted — a passphrase is required')
+        throw pullError(
+          EXIT.NEED_PASSPHRASE,
+          'cloud-pull: this backup is encrypted — a passphrase is required',
+        )
       }
       if (!sidecar.enc || sidecar.enc.scheme !== 'aesgcm-scrypt') {
-        throw new Error('cloud-pull: unknown encryption scheme')
+        throw pullError(EXIT.CANNOT_DECRYPT, 'cloud-pull: unknown encryption scheme')
       }
       status(`Decrypting your backup…`)
       const plainPath = blobPath.replace(/\.enc$/, '')
-      await decryptFile({
-        srcPath: blobPath,
-        destPath: plainPath,
-        passphrase: creds.passphrase,
-        saltB64: sidecar.enc.saltB64,
-        ivB64: sidecar.enc.ivB64,
-        tagB64: sidecar.enc.tagB64,
-      })
+      try {
+        await decryptFile({
+          srcPath: blobPath,
+          destPath: plainPath,
+          passphrase: creds.passphrase,
+          saltB64: sidecar.enc.saltB64,
+          ivB64: sidecar.enc.ivB64,
+          tagB64: sidecar.enc.tagB64,
+        })
+      } catch {
+        // AES-GCM auth-tag failure ("unable to authenticate data") = the
+        // passphrase that derived the key is wrong (or the ciphertext was
+        // altered). Surface it as a passphrase problem, NOT a download problem
+        // — the operator needs to check their passphrase, not their network.
+        safeUnlink(plainPath)
+        throw pullError(
+          EXIT.CANNOT_DECRYPT,
+          'cloud-pull: could not unlock the backup — wrong passphrase or altered archive',
+        )
+      }
       safeUnlink(blobPath)
       archivePath = plainPath
     }
@@ -174,6 +207,7 @@ if (invokedDirectly) {
     process.stderr.write(
       `cloud-pull failed: ${err instanceof Error ? err.message : String(err)}\n`,
     )
-    process.exit(1)
+    const code = err && typeof err.exitCode === 'number' ? err.exitCode : EXIT.GENERIC
+    process.exit(code)
   })
 }

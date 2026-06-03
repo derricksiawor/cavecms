@@ -107,6 +107,10 @@ export const POST = withError(async (req: Request) => {
     }),
     ctx.userId,
   )
+  // Fresh connection (possibly a different account than before) → drop any
+  // access token cached for this provider so the new refresh token is used.
+  const { clearAccessTokenCache } = await import('@/lib/backups/cloud/destClient')
+  clearAccessTokenCache(provider)
   await clearPending(provider, ctx.userId)
 
   // Create + persist the cloud folder NOW (best-effort) so every backup/list

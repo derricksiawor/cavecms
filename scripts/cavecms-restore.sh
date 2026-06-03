@@ -285,8 +285,22 @@ if [ "${CAVECMS_RESTORE_SOURCE:-file}" = "cloud" ]; then
   # just fails the restore cleanly with nothing changed.
   PULL_TIMEOUT=""
   command -v timeout >/dev/null 2>&1 && PULL_TIMEOUT="timeout --signal=TERM 10800"
-  if ! CAVECMS_RESTORE_DOWNLOAD_DIR="$PULL_DIR" CAVECMS_RESTORE_PULL_OUT="$PULL_OUT" $PULL_TIMEOUT "$NODE_BIN" "$CLOUD_PULL"; then
-    rstatus failed 1 "Restore failed" "We couldn't download the backup from the cloud. Nothing was changed."
+  # Capture cloud-pull's exit code so the failure message matches the actual
+  # cause. cloud-pull.mjs exits 22 (wrong passphrase / altered ciphertext),
+  # 23 (checksum mismatch — corrupt/tampered), 24 (encrypted but no passphrase
+  # set), or 1 (download/auth/not-found); `timeout` exits 124. Each needs a
+  # different operator action, so don't collapse them into one message.
+  PULL_RC=0
+  CAVECMS_RESTORE_DOWNLOAD_DIR="$PULL_DIR" CAVECMS_RESTORE_PULL_OUT="$PULL_OUT" $PULL_TIMEOUT "$NODE_BIN" "$CLOUD_PULL" || PULL_RC=$?
+  if [ "$PULL_RC" -ne 0 ]; then
+    case "$PULL_RC" in
+      22) PULL_MSG="We couldn't unlock this backup. Check that the passphrase matches the one used when the backup was made." ;;
+      23) PULL_MSG="This backup looks corrupted or was altered, so we stopped before changing anything." ;;
+      24) PULL_MSG="This backup is encrypted. Turn on “Encrypt cloud backups” under Backup settings and enter its passphrase, then try again." ;;
+      124) PULL_MSG="The download from the cloud took too long and was stopped. Nothing was changed." ;;
+      *) PULL_MSG="We couldn't download the backup from the cloud. Nothing was changed." ;;
+    esac
+    rstatus failed 1 "Restore failed" "$PULL_MSG"
     exit 1
   fi
   ARCHIVE="$(cat "$PULL_OUT" 2>/dev/null || true)"

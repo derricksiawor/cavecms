@@ -186,3 +186,78 @@ describe('pullFromCloud', () => {
     expect(readFileSync(r.archivePath).equals(plaintext)).toBe(true)
   })
 })
+
+// The restore orchestrator (cavecms-restore.sh) maps cloud-pull's exit code to
+// the operator-facing failure message — a wrong passphrase, a corrupt download,
+// and a missing-passphrase config each need a DIFFERENT message + action. These
+// lock in the distinct exit codes so a refactor can't silently collapse them
+// back into one "couldn't download" message.
+describe('pullFromCloud — failure classification (distinct exit codes)', () => {
+  function envFor(credsFile: string) {
+    return {
+      CAVECMS_RESTORE_PROVIDER: 'gdrive',
+      CAVECMS_RESTORE_REMOTE_ID: 'BLOB',
+      CAVECMS_BACKUP_CLOUD_CREDS_FILE: credsFile,
+      CAVECMS_RESTORE_DOWNLOAD_DIR: dir,
+    }
+  }
+
+  it('checksum mismatch → exitCode 23 (corrupt / tampered)', async () => {
+    const archive = join(dir, 'cavecms-backup-c.tar.gz')
+    writeFileSync(archive, Buffer.from('bytes'))
+    const sidecar = join(dir, 'sidecar.json')
+    writeFileSync(sidecar, JSON.stringify({ sha256: 'a'.repeat(64), encrypted: false }))
+    const err = await pullFromCloud({
+      env: envFor(writeCreds()),
+      createDest: fakeDestFactory({ BLOB: archive, SIDE: sidecar }, [
+        { remoteId: 'BLOB', name: 'cavecms-backup-c.tar.gz' },
+        { remoteId: 'SIDE', name: 'cavecms-backup-c.tar.gz.meta.json' },
+      ]),
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.exitCode).toBe(23)
+  })
+
+  it('wrong passphrase → exitCode 22 (cannot unlock), NOT a download failure', async () => {
+    const original = join(dir, 'cavecms-backup-w.tar.gz')
+    writeFileSync(original, Buffer.from('the-real-archive-contents'))
+    const encBlob = join(dir, 'cavecms-backup-w.tar.gz.enc')
+    const meta = await encryptFile({ srcPath: original, destPath: encBlob, passphrase: 'right-pass-1234' })
+    const sidecar = join(dir, 'sidecar.json')
+    writeFileSync(
+      sidecar,
+      JSON.stringify({ sha256: sha256(encBlob), encrypted: true, enc: { scheme: 'aesgcm-scrypt', ...meta } }),
+    )
+    const err = await pullFromCloud({
+      env: envFor(writeCreds({ passphrase: 'WRONG-pass-9999' })),
+      createDest: fakeDestFactory({ BLOB: encBlob, SIDE: sidecar }, [
+        { remoteId: 'BLOB', name: 'cavecms-backup-w.tar.gz.enc' },
+        { remoteId: 'SIDE', name: 'cavecms-backup-w.tar.gz.enc.meta.json' },
+      ]),
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.exitCode).toBe(22)
+    expect(String(err.message)).toMatch(/unlock|passphrase/i)
+  })
+
+  it('encrypted archive but no passphrase configured → exitCode 24', async () => {
+    const original = join(dir, 'cavecms-backup-n.tar.gz')
+    writeFileSync(original, Buffer.from('contents'))
+    const encBlob = join(dir, 'cavecms-backup-n.tar.gz.enc')
+    const meta = await encryptFile({ srcPath: original, destPath: encBlob, passphrase: 'pw' })
+    const sidecar = join(dir, 'sidecar.json')
+    writeFileSync(
+      sidecar,
+      JSON.stringify({ sha256: sha256(encBlob), encrypted: true, enc: { scheme: 'aesgcm-scrypt', ...meta } }),
+    )
+    const err = await pullFromCloud({
+      env: envFor(writeCreds()), // creds carry no passphrase
+      createDest: fakeDestFactory({ BLOB: encBlob, SIDE: sidecar }, [
+        { remoteId: 'BLOB', name: 'cavecms-backup-n.tar.gz.enc' },
+        { remoteId: 'SIDE', name: 'cavecms-backup-n.tar.gz.enc.meta.json' },
+      ]),
+    }).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.exitCode).toBe(24)
+  })
+})

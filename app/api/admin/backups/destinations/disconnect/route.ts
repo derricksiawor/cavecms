@@ -15,6 +15,7 @@ import {
   AAD_BACKUP_ONEDRIVE_REFRESH,
 } from '@/lib/security/secretCipher'
 import { revokeToken } from '@/lib/backups/cloud/oauthClient'
+import { clearAccessTokenCache } from '@/lib/backups/cloud/destClient'
 
 // POST /api/admin/backups/destinations/disconnect — revoke the provider token
 // (best-effort) and wipe the stored connection. If the active destination was
@@ -55,6 +56,11 @@ export const POST = withError(async (req: Request) => {
     },
     ctx.userId,
   )
+
+  // Drop any cached access token for this provider so a later re-connect (which
+  // may be a DIFFERENT account) can't be served the old account's token until it
+  // expires.
+  clearAccessTokenCache(provider)
 
   const meta = auditMetaFromRequest(req)
   try {

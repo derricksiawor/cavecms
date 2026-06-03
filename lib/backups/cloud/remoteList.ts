@@ -125,34 +125,79 @@ export async function listRemoteBackups(provider: CloudProvider): Promise<Remote
   const byName = new Map(entries.map((e) => [e.name, e]))
   const blobs = entries.filter((e) => ARCHIVE_RE.test(e.name))
 
-  const scratch = mkdtempSync(join(tmpdir(), 'cavecms-remote-list-'))
   const rows: RemoteBackupRow[] = []
+
+  // FAST PATH: backups whose display metadata is stamped on the blob itself (the
+  // gdrive `appProperties` returned inline by list()) need NO extra round-trip —
+  // build the row straight from `blob.meta`. This is what makes "Show backups"
+  // sub-second: a single list() call covers the whole folder.
+  const needSidecar: typeof blobs = []
+  for (const blob of blobs) {
+    if (blob.meta) {
+      const compat = compatFor({
+        version: blob.meta.version ?? '0.0.0',
+        migratorEncoding: blob.meta.migratorEncoding ?? 'unknown',
+      })
+      rows.push({
+        remoteId: blob.remoteId,
+        name: blob.name,
+        sizeBytes: blob.sizeBytes,
+        createdAt: blob.meta.createdAt ?? blob.createdAt,
+        version: blob.meta.version ?? '0.0.0',
+        encrypted: blob.meta.encrypted === true,
+        includeEnv: blob.meta.includeEnv === true,
+        compatible: compat.compatible,
+        compatNote: compat.note,
+      })
+    } else {
+      needSidecar.push(blob)
+    }
+  }
+
+  // SLOW PATH (older gdrive backups predating the inline metadata, AND every
+  // OneDrive backup — Graph has no app-private property we can read back from a
+  // children listing): fall back to the cleartext sidecar (.meta.json). The
+  // access token is already cached by ensureFolder()+list(), so these downloads
+  // run CONCURRENTLY (bounded) — one round-trip deep instead of N sequential.
+  const withSidecar = needSidecar
+    .map((blob) => ({ blob, sidecar: byName.get(`${blob.name}.meta.json`) }))
+    .filter((x): x is { blob: (typeof blobs)[number]; sidecar: (typeof entries)[number] } =>
+      Boolean(x.sidecar),
+    ) // drop orphan blobs with no metadata
+
+  const scratch = mkdtempSync(join(tmpdir(), 'cavecms-remote-list-'))
+  const SIDECAR_CONCURRENCY = 8
   try {
-    for (const blob of blobs) {
-      const sidecarEntry = byName.get(`${blob.name}.meta.json`)
-      if (!sidecarEntry) continue // orphan blob without metadata — skip
-      const p = join(scratch, `${blob.remoteId}.json`)
-      try {
-        await dest.download(sidecarEntry.remoteId, p, () => {})
-        const sc = JSON.parse(readFileSync(p, 'utf8'))
-        const compat = compatFor({
-          version: sc.version ?? '0.0.0',
-          migratorEncoding: sc.migratorEncoding ?? 'unknown',
-        })
-        rows.push({
-          remoteId: blob.remoteId,
-          name: blob.name,
-          sizeBytes: blob.sizeBytes,
-          createdAt: sc.createdAt ?? blob.createdAt,
-          version: sc.version ?? '0.0.0',
-          encrypted: sc.encrypted === true,
-          includeEnv: sc.includeEnv === true,
-          compatible: compat.compatible,
-          compatNote: compat.note,
-        })
-      } catch {
-        // Unreadable sidecar — skip this row rather than fail the whole list.
-      }
+    for (let i = 0; i < withSidecar.length; i += SIDECAR_CONCURRENCY) {
+      const batch = withSidecar.slice(i, i + SIDECAR_CONCURRENCY)
+      const batchRows = await Promise.all(
+        batch.map(async ({ blob, sidecar }): Promise<RemoteBackupRow | null> => {
+          const p = join(scratch, `${blob.remoteId}.json`)
+          try {
+            await dest.download(sidecar.remoteId, p, () => {})
+            const sc = JSON.parse(readFileSync(p, 'utf8'))
+            const compat = compatFor({
+              version: sc.version ?? '0.0.0',
+              migratorEncoding: sc.migratorEncoding ?? 'unknown',
+            })
+            return {
+              remoteId: blob.remoteId,
+              name: blob.name,
+              sizeBytes: blob.sizeBytes,
+              createdAt: sc.createdAt ?? blob.createdAt,
+              version: sc.version ?? '0.0.0',
+              encrypted: sc.encrypted === true,
+              includeEnv: sc.includeEnv === true,
+              compatible: compat.compatible,
+              compatNote: compat.note,
+            }
+          } catch {
+            // Unreadable sidecar — skip this row rather than fail the whole list.
+            return null
+          }
+        }),
+      )
+      for (const r of batchRows) if (r) rows.push(r)
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true })
