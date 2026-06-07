@@ -192,3 +192,4 @@ next-env.d.ts
 # box configured to exercise the updater). Pure runtime artifacts — including
 # multi-MB cached release tarballs — that must NEVER be committed.
 /.cavecms-state/
+.source-uploads/
