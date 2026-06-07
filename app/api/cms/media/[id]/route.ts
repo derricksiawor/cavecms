@@ -46,10 +46,15 @@ export const GET = withError<RouteCtx>(async (_req, { params }) => {
   // endpoint's normalisation).
   const item = {
     ...row,
-    variants:
-      typeof row['variants'] === 'string'
-        ? JSON.parse(row['variants'] as string)
-        : row['variants'],
+    // Defensive parse — a corrupt variants cell degrades to null, not a 500.
+    variants: ((v: unknown) => {
+      if (typeof v !== 'string') return v
+      try {
+        return JSON.parse(v)
+      } catch {
+        return null
+      }
+    })(row['variants']),
   }
   return new Response(JSON.stringify(item), {
     status: 200,

@@ -483,22 +483,54 @@ export function useUndoStack(): UndoStackState {
 export function useRecordCommand(): (cmd: Command) => void {
   const { dispatch } = useUndoCtx()
   return useCallback(
-    (cmd) => dispatch({ type: 'record', command: cmd }),
+    (cmd) => {
+      dispatch({ type: 'record', command: cmd })
+      // Every inline mutation funnels through recordCommand, so this is the
+      // single place to tell the AdminBar DraftBar "a draft op just happened —
+      // refetch your status NOW" instead of waiting up to 2.5s for the poll.
+      // Keeps the Undo/Redo BUTTONS' enabled state + the "N unpublished" count
+      // in lockstep with edits (the toast Undo + ⌘Z already refetch on use).
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('cavecms:draft-changed'))
+      }
+    },
     [dispatch],
   )
 }
 
-/** Returns the centralised runUndo / runRedo functions. Used by:
- *   - UndoRedoController (⌘Z / ⇧⌘Z keyboard handler)
- *   - Every inline-Undo toast button (so the cursor moves consistently)
+/** Returns runUndo / runRedo for the inline-Undo toast buttons.
  *
- *  Both functions are cursor-aware: they target whichever command is
- *  at the cursor at INVOCATION time, not at recordCommand time. This
- *  matches Gmail's "Undo send" semantics — the snackbar's Undo button
- *  reverses the most recent action, same as ⌘Z. */
+ *  UNIFIED CURSOR: these route through the SERVER draft-revision path — the
+ *  exact same `cavecms:undo` / `cavecms:redo` window events that ⌘Z / ⇧⌘Z
+ *  fire (via UndoRedoController), consumed by the AdminBar DraftBar →
+ *  POST /api/cms/pages/[id]/undo|redo. The toasts therefore share the ONE
+ *  server cursor with the keyboard, matching Gmail's "Undo send" snackbar
+ *  semantics (reverse the most recent action).
+ *
+ *  Why not the provider's client `runUndo`/`runRedo`: that HTTP-inverse
+ *  replay stack was written for the pre-draft live-write model and diverged
+ *  from the current server draft model — delete→/restore 409'd
+ *  'already_restored' (draft-delete never stamps deleted_at), reorder
+ *  replayed frozen versions, and the two independent cursors (client stack
+ *  vs server revisions) corrupted each other under interleaved edits. The
+ *  stack still RECORDS (cheap; surfaces canUndo/peek) but is no longer
+ *  REPLAYED for undo/redo. */
 export function useUndoActions() {
-  const { runUndo, runRedo } = useUndoCtx()
-  return useMemo(() => ({ runUndo, runRedo }), [runUndo, runRedo])
+  return useMemo(
+    () => ({
+      runUndo: async () => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('cavecms:undo'))
+        }
+      },
+      runRedo: async () => {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('cavecms:redo'))
+        }
+      },
+    }),
+    [],
+  )
 }
 
 /** Cursor-only operations. Reset clears the stack on navigation away. */

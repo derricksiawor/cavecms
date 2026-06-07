@@ -155,7 +155,16 @@ export function Popover({
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.stopPropagation()
+        // CAPTURE phase + stopImmediatePropagation so Esc closes ONLY this
+        // popover, not the EditDrawer behind it. The drawer ALSO has a
+        // window-level Esc→close listener; both are window listeners, and
+        // plain stopPropagation does NOT stop a sibling listener on the
+        // same target — so the old code closed the whole drawer when the
+        // operator only meant to dismiss the colour/font/token popover.
+        // Capture fires before the drawer's bubble-phase listener;
+        // stopImmediatePropagation then prevents it from running at all.
+        e.stopImmediatePropagation()
+        e.preventDefault()
         onClose()
       }
     }
@@ -167,10 +176,10 @@ export function Popover({
       if (triggerRef.current?.contains(target)) return
       onClose()
     }
-    window.addEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
     document.addEventListener('pointerdown', onDoc, true)
     return () => {
-      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onKey, true)
       document.removeEventListener('pointerdown', onDoc, true)
     }
   }, [open, onClose, triggerRef])
@@ -229,8 +238,13 @@ export function Popover({
         visibility: pos ? 'visible' : 'hidden',
       }}
       className={
+        // z-[90] keeps drawer-launched popovers (colour/tone picker, the
+        // Globe token binder, font pickers) ABOVE the EditDrawer, which
+        // portals to <body> at z-[85]. At the old z-[60] the popover
+        // painted BEHIND the opaque drawer panel and read as "nothing
+        // happens when I click the swatch". Stays below toasts (z-[100]).
         surfaceClassName ??
-        'z-[60] rounded-2xl border border-cream-50/15 bg-near-black/95 backdrop-blur-md p-4 shadow-[0_24px_60px_-12px_rgba(5,5,5,0.65)] text-cream-50 animate-cavecms-fade-in motion-reduce:animate-none'
+        'z-[90] rounded-2xl border border-cream-50/15 bg-near-black/95 backdrop-blur-md p-4 shadow-[0_24px_60px_-12px_rgba(5,5,5,0.65)] text-cream-50 animate-cavecms-fade-in motion-reduce:animate-none'
       }
     >
       {children}

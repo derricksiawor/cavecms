@@ -491,8 +491,15 @@ function DraftBar() {
   const liveRef = useRef({ pageId: null as number | null, busy: false, st })
   liveRef.current = { pageId, busy: busy !== null, st }
 
-  // Discover the page id from the editor's <main data-page-id>.
+  // Discover the page id from the editor's <main data-page-id>. A
+  // MutationObserver detects the <main> swap (soft nav) or a data-page-id
+  // change in the SAME frame instead of waiting up to 2s for a poll tick, so
+  // the DraftBar tracks the active page near-instantly (the prior 2s interval
+  // left a visible lag between entering edit mode / navigating and the
+  // Publish/Undo chrome appearing). rAF-debounced so a burst of edit-time DOM
+  // mutations triggers at most one read per frame; setPageId bails on no-op.
   useEffect(() => {
+    let raf = 0
     const read = () => {
       const raw = document
         .querySelector('[data-page-id]')
@@ -500,12 +507,30 @@ function DraftBar() {
       const n = raw ? Number(raw) : NaN
       setPageId(Number.isInteger(n) && n > 0 ? n : null)
     }
+    const schedule = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        read()
+      })
+    }
     read()
-    const t = setInterval(read, 2000)
-    return () => clearInterval(t)
+    const obs = new MutationObserver(schedule)
+    obs.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-page-id'],
+    })
+    return () => {
+      obs.disconnect()
+      if (raf) cancelAnimationFrame(raf)
+    }
   }, [])
 
-  const refetch = useCallback(async (id: number) => {
+  const refetch = useCallback(async (
+    id: number,
+  ): Promise<{ changeCount: number; canUndo: boolean; canRedo: boolean } | null> => {
     try {
       const r = await fetch(`/api/cms/pages/${id}/draft-status`, {
         headers: { accept: 'application/json' },
@@ -516,15 +541,18 @@ function DraftBar() {
           canUndo: boolean
           canRedo: boolean
         }>
-        setSt({
+        const next = {
           changeCount: typeof j.changeCount === 'number' ? j.changeCount : 0,
           canUndo: j.canUndo === true,
           canRedo: j.canRedo === true,
-        })
+        }
+        setSt(next)
+        return next
       }
     } catch {
       /* transient — keep the last-known state */
     }
+    return null
   }, [])
 
   // Poll draft status (snappy enough that undo/redo + count track edits).
@@ -536,6 +564,17 @@ function DraftBar() {
     void refetch(pageId)
     const t = setInterval(() => void refetch(pageId), 2500)
     return () => clearInterval(t)
+  }, [pageId, refetch])
+
+  // Refetch IMMEDIATELY when any inline mutation fires (recordCommand
+  // dispatches cavecms:draft-changed) so the Undo/Redo buttons' enabled state
+  // + the "N unpublished" count track edits without the up-to-2.5s poll lag —
+  // e.g. the DraftBar Undo button is clickable the instant a block is deleted.
+  useEffect(() => {
+    if (!pageId) return
+    const onChanged = () => void refetch(pageId)
+    window.addEventListener('cavecms:draft-changed', onChanged)
+    return () => window.removeEventListener('cavecms:draft-changed', onChanged)
   }, [pageId, refetch])
 
   // POST an action endpoint, then refresh the editor + refetch status.
@@ -591,11 +630,26 @@ function DraftBar() {
   // ⌘Z / ⇧⌘Z bridge — UndoRedoController dispatches these so keyboard + the
   // buttons run the exact same server undo/redo. Guards on canUndo/canRedo.
   useEffect(() => {
+    // A user undo/redo gesture (toast "Undo" button OR ⌘Z) must NOT be gated
+    // by the up-to-2.5s-stale POLLED canUndo/canRedo. The delete/insert/edit
+    // that created the undoable revision happens OUTSIDE this bar, so the poll
+    // hasn't caught up when the operator immediately hits undo — the gesture
+    // would silently no-op (the exact rapid-undo failure). Refetch the
+    // authoritative draft-status first, then act on the FRESH flag. run() still
+    // guards re-entry via `busy`, so a mash of clicks can't double-apply.
     const onUndo = () => {
-      if (liveRef.current.st.canUndo) void undo()
+      const id = liveRef.current.pageId
+      if (!id) return
+      void refetch(id).then((fresh) => {
+        if ((fresh ?? liveRef.current.st).canUndo) void undo()
+      })
     }
     const onRedo = () => {
-      if (liveRef.current.st.canRedo) void redo()
+      const id = liveRef.current.pageId
+      if (!id) return
+      void refetch(id).then((fresh) => {
+        if ((fresh ?? liveRef.current.st).canRedo) void redo()
+      })
     }
     window.addEventListener('cavecms:undo', onUndo)
     window.addEventListener('cavecms:redo', onRedo)
@@ -603,7 +657,7 @@ function DraftBar() {
       window.removeEventListener('cavecms:undo', onUndo)
       window.removeEventListener('cavecms:redo', onRedo)
     }
-  }, [undo, redo])
+  }, [undo, redo, refetch])
 
   if (!pageId) return null
 

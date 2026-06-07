@@ -12,7 +12,7 @@ import {
 import { useState } from 'react'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { useMediaPicker } from './MediaPickerProvider'
-import { useInsertBlock } from './InlineEditContext'
+import { useInsertBlock, useInlineEditState } from './InlineEditContext'
 import { useSectionTemplateGallery } from './SectionTemplateGalleryHost'
 import { SEED_DATA } from '@/lib/cms/blockSeeds'
 
@@ -74,8 +74,18 @@ export function EditModeEmptyState({ pageId }: Props) {
   const mediaPicker = useMediaPicker()
   const insertBlock = useInsertBlock()
   const templateGallery = useSectionTemplateGallery()
+  // Live optimistic block count (NOT the server prop) — drives the gate below.
+  const blocks = useInlineEditState().blocks
   const [busyType, setBusyType] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+
+  // Self-gate on the LIVE count so the card appears the instant the last block
+  // is optimistically deleted (no blank-page flash before the next
+  // router.refresh) and vanishes the instant one is added. EditableMain mounts
+  // this whenever edit mode is on + the empty state is allowed; the count gate
+  // that used to live there (read off the STALE `blocks` prop, so a deleted
+  // last block left a blank page until refresh) moved here onto the context.
+  if (blocks.length > 0) return null
 
   // Chunk I — POST + refresh routed through useInsertBlock. The empty-
   // state card owns: busy-type state, inline error banner, MediaPicker

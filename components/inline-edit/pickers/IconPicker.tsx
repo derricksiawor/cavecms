@@ -297,7 +297,12 @@ export function IconPickerModal({
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.stopPropagation()
+        // Capture + stopImmediatePropagation so Esc closes ONLY the icon
+        // picker, not the EditDrawer behind it (the drawer also has a
+        // window-level Esc→close listener; sibling window listeners aren't
+        // stopped by plain stopPropagation).
+        e.stopImmediatePropagation()
+        e.preventDefault()
         onClose()
         return
       }
@@ -350,8 +355,8 @@ export function IconPickerModal({
         setSelection(list[next])
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [open, selection, visibleIcons, onClose, commit])
 
   // Body scroll lock on open — counter-based via lib/client/bodyScrollLock
@@ -402,7 +407,11 @@ export function IconPickerModal({
 
   const modal = (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-0 sm:p-6"
+      // z-[90]: above the EditDrawer (portaled to <body> at z-[85]) so a
+      // picker launched from a drawer icon field isn't painted behind the
+      // opaque drawer panel (which hid the grid + made tiles unclickable).
+      // Below toasts (z-[100]).
+      className="fixed inset-0 z-[90] flex items-center justify-center p-0 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Icon picker"

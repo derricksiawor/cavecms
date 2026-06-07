@@ -225,10 +225,20 @@ export default async function BlogPost({
   // mysql2 may return the JSON column as either a parsed object or a
   // raw string depending on driver config — match the projects list
   // page's defensive parse.
-  const heroVariants: { lg?: string } | null =
-    typeof post.hero_variants === 'string'
-      ? (JSON.parse(post.hero_variants) as { lg?: string })
-      : (post.hero_variants as { lg?: string } | null)
+  // Defensive parse — a corrupt media.variants cell must degrade to "no
+  // hero", not 500 the whole post page (this route deliberately has no
+  // try/catch, so a bare JSON.parse SyntaxError would crash it). Matches the
+  // try/catch shape used everywhere else media variants are parsed.
+  let heroVariants: { lg?: string } | null = null
+  if (typeof post.hero_variants === 'string') {
+    try {
+      heroVariants = JSON.parse(post.hero_variants) as { lg?: string }
+    } catch {
+      heroVariants = null
+    }
+  } else {
+    heroVariants = post.hero_variants as { lg?: string } | null
+  }
 
   // published_at is non-null on every published row because the
   // PATCH route stamps it on first publish; the COALESCE check here
@@ -297,6 +307,9 @@ export default async function BlogPost({
     heroImage: heroVariants?.lg ?? null,
     author: post.author_name ?? 'CaveCMS',
     siteOrigin,
+    // segment + permalink-structure aware path so mainEntityOfPage matches the
+    // page's own canonical on custom blog segments / date-based permalinks.
+    urlPath: postUrl(post.slug, segments, post.published_at ?? null),
   })
   // Per-page structured data (SEO Suite, main) — ADDITIONS-ONLY on top of the
   // legacy blogPostingLd PRIMARY emitted above. This emits ONLY (a) the

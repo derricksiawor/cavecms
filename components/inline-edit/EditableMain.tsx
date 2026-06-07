@@ -113,6 +113,12 @@ const SectionTemplateGalleryHost = nextDynamic(() =>
   ),
 )
 
+// #10 — deep-link target handler for the admin "Edit inline" `#block-<id>`
+// hash. Editor-only; dynamic-imported so anonymous visitors never ship it.
+const EditHashTarget = nextDynamic(() =>
+  import('./EditHashTarget').then((m) => m.EditHashTarget),
+)
+
 interface Props {
   pageId: number
   pageVersion: number
@@ -208,9 +214,14 @@ export async function EditableMain(p: Props) {
 
   const overlays = (
     <>
-      {p.editable && showEmpty && p.blocks.length === 0 && (
-        <EditModeEmptyState pageId={p.pageId} />
-      )}
+      {/* EditModeEmptyState self-gates on the LIVE optimistic block count
+          (useInlineEditState) — it's mounted whenever edit mode is on + the
+          empty state is allowed, and renders null when any block exists. The
+          count check used to live HERE off the stale `p.blocks` prop, which
+          left a blank page after deleting the last block until router.refresh.
+          (Mounted inside the InlineEditProvider via `overlays`, so the hook
+          resolves; the non-editable branch never renders it — `p.editable`.) */}
+      {p.editable && showEmpty && <EditModeEmptyState pageId={p.pageId} />}
       {isEditor && <EditModePill on={p.editable} />}
       {p.editable && <SaveStatusIndicator />}
       {p.editable && (
@@ -288,6 +299,11 @@ export async function EditableMain(p: Props) {
               every mutation surface (toolbar verbs, drawer save, DnD)
               reads the same selection api via useSelection(). */}
           <SelectionProvider pageId={p.pageId}>
+            {/* #10 — honour the `#block-<id>` deep-link from the admin
+                "Edit inline" link: select + scroll that block into view so
+                the operator lands on it. Inside SelectionProvider so it can
+                drive the selection cursor. */}
+            <EditHashTarget />
             {/* Chunk J — undo stack provider. Sits ABOVE the slash + dnd
                 + context-menu providers so every mutation surface can
                 record its inverse via useRecordCommand. Sits INSIDE

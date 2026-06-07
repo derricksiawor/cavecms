@@ -18,8 +18,6 @@ import {
   Plus,
   ArrowLeft,
   ArrowRight,
-  Image as ImageIcon,
-  X,
   type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -28,8 +26,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { csrfFetch } from '@/lib/client/csrf'
 import { mapServerError } from '@/lib/cms/errorCopy'
 import type { SectionBackground } from '@/lib/cms/blockMeta'
-import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { EditDrawer, type TabKey } from './EditDrawer'
+import { InsertWidgetPopover } from './InsertBlockHere'
 import { useContextMenu } from './ContextMenuProvider'
 import {
   ColumnWidgetsSortable,
@@ -38,18 +36,11 @@ import {
 import { SpacingToolbar } from './SpacingToolbar'
 import { useToast } from './Toast'
 import { useRecordCommand, useUndoActions } from './UndoStackProvider'
-import { useMediaPicker } from './MediaPickerProvider'
 import {
   useEffectiveVersions,
-  useInsertBlock,
   useInlineEditDispatch,
   useInlineEditState,
 } from './InlineEditContext'
-import {
-  SEED_ENTRIES,
-  isPaletteVisible,
-  type SeedBlockType,
-} from '@/lib/cms/blockSeeds'
 import { useSelection } from './SelectionContext'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 
@@ -500,7 +491,18 @@ export function EditableColumn(p: Props) {
     setOptimisticallyDeleted(false)
   }, [p.blockId])
 
+  // SSR hydration guard for selection — mirrors EditableSection /
+  // EditableBlock. Selection loads from sessionStorage only AFTER mount, so
+  // the server always renders unselected. Driving `data-edit-selected` + the
+  // ring off the raw value on the first client paint mismatches the SSR HTML
+  // and (per React 19) detaches this column's toolbar handlers until the next
+  // full re-render — a dead column toolbar after any router.refresh while the
+  // column was the persisted selection. `isSelected` (raw) still gates the
+  // keyboard shortcuts; `showSelected` (mount-gated) drives the render only.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
   const isSelected = selection.isSelected(p.blockId)
+  const showSelected = mounted && isSelected
 
   // Keyboard shortcuts. Columns get the same delete + move pair the
   // toolbar surfaces; duplicate is omitted because column duplication
@@ -528,7 +530,7 @@ export function EditableColumn(p: Props) {
       data-edit-column-id={p.blockId}
       data-edit-column-version={versions.blockVersion}
       data-edit-column-page-id={p.pageId}
-      data-edit-selected={isSelected ? 'true' : undefined}
+      data-edit-selected={showSelected ? 'true' : undefined}
       // While this column's edit drawer is open, suppress its floating
       // chrome (see globals.css `[data-editing]`).
       data-editing={open ? 'true' : undefined}
@@ -554,7 +556,7 @@ export function EditableColumn(p: Props) {
       <div
         className={clsx(
           'relative rounded-xl outline outline-2 outline-transparent transition-[outline-color,box-shadow] duration-quick ease-standard group-hover/column:outline-copper-300/50 focus-within:outline-copper-300 motion-reduce:transition-none',
-          isSelected && '!outline-copper-300',
+          showSelected && '!outline-copper-300',
         )}
       >
         {p.hasWidgets ? (
@@ -692,6 +694,7 @@ function EmptyColumnSlot({
 }) {
   const dark = sectionBackground === 'near-black'
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
   return (
     <div
       className={clsx(
@@ -701,271 +704,62 @@ function EmptyColumnSlot({
           : 'border-warm-stone/30 bg-cream/50 hover:border-copper-400 hover:bg-cream',
       )}
     >
-      {open ? (
-        <ColumnInlinePicker
-          pageId={pageId}
-          columnId={columnId}
-          dark={dark}
-          onClose={() => setOpen(false)}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Add widget to this column"
-          aria-haspopup="menu"
-          // Chunk H — stable selector for the context menu's column
-          // "Add widget" verb. Mirrors the data-add-widget-target on
-          // InsertBlockHere pills for non-empty columns so the handler
-          // finds whichever entry point is currently mounted.
-          data-add-widget-target={columnId}
-          className="flex h-full w-full min-h-[140px] flex-col items-center justify-center gap-2 rounded-[10px] px-4 py-6 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Add widget to this column"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        // Chunk H — stable selector for the context menu's column
+        // "Add widget" verb. Mirrors the data-add-widget-target on
+        // InsertBlockHere pills for non-empty columns so the handler
+        // finds whichever entry point is currently mounted.
+        data-add-widget-target={columnId}
+        className="flex h-full w-full min-h-[140px] flex-col items-center justify-center gap-2 rounded-[10px] px-4 py-6 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400 focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+      >
+        <span
+          aria-hidden="true"
+          className={clsx(
+            'inline-flex h-9 w-9 items-center justify-center rounded-full',
+            dark
+              ? 'bg-copper-500/25 text-copper-300'
+              : 'bg-copper-500/15 text-copper-500',
+          )}
         >
-          <span
-            aria-hidden="true"
-            className={clsx(
-              'inline-flex h-9 w-9 items-center justify-center rounded-full',
-              dark
-                ? 'bg-copper-500/25 text-copper-300'
-                : 'bg-copper-500/15 text-copper-500',
-            )}
-          >
-            <Plus size={15} strokeWidth={2.4} />
-          </span>
-          <p
-            className={clsx(
-              'text-[11px] font-semibold uppercase tracking-[0.18em]',
-              dark ? 'text-cream-50/80' : 'text-warm-stone',
-            )}
-          >
-            Empty column
-          </p>
-          <p
-            className={clsx(
-              'text-[10px]',
-              // contrast bumped from /70 → full warm-stone so axe
-              // color-contrast passes on cream surfaces (was 3.5:1)
-              dark ? 'text-cream-50/80' : 'text-warm-stone',
-            )}
-          >
-            Click to add a widget
-          </p>
-        </button>
-      )}
-    </div>
-  )
-}
-
-// Inline picker that fills the empty-column surface when the operator
-// clicks. Same shape as InsertBlockHere's popover but renders in-flow
-// (not as a floating popover) because there's already nothing else in
-// the column to compete for the space. Mirrors the same seed types +
-// the image-via-MediaPicker flow so the operator's mental model is
-// identical regardless of entry point (between-blocks pill vs.
-// empty-column click).
-
-// Seed list + payloads come from the shared registry — see
-// `lib/cms/blockSeeds.ts`. Identical entry shape to InsertBlockHere
-// + OutlinePanel.AddBlockMenu + EditModeEmptyState.
-
-function ColumnInlinePicker({
-  pageId,
-  columnId,
-  dark,
-  onClose,
-}: {
-  pageId: number
-  columnId: number
-  dark: boolean
-  onClose: () => void
-}) {
-  const toast = useToast()
-  const mediaPicker = useMediaPicker()
-  const insertBlock = useInsertBlock()
-  const [busy, setBusy] = useState<string | null>(null)
-  // Synchronous in-flight guard against rapid double-clicks. See the
-  // matching comment in InsertBlockHere.tsx for full rationale.
-  const inFlightRef = useRef(false)
-
-  // Chunk I — POST + refresh routed through useInsertBlock. The picker
-  // owns: open/close, in-flight guard, busy-key disambiguation, toast
-  // mapping. The hook owns: body shape, default seed lookup,
-  // router.refresh.
-  const add = async (
-    blockType: SeedBlockType,
-    data?: Record<string, unknown>,
-    busyKey?: string,
-  ) => {
-    if (inFlightRef.current) return
-    inFlightRef.current = true
-    setBusy(busyKey ?? blockType)
-    try {
-      const res = await insertBlock(blockType, {
-        pageId,
-        data,
-        parentId: columnId,
-      })
-      if (!res.ok) {
-        toast.error(mapInsertBlockError(res.error).copy)
-        return
-      }
-    } finally {
-      setBusy(null)
-      inFlightRef.current = false
-    }
-  }
-
-  const addImage = () => {
-    if (busy) return
-    mediaPicker.open(undefined, (m) => {
-      void add(
-        'lx_figure',
-        { image: { media_id: m.media_id, alt: m.alt ?? '' } },
-        'image',
-      )
-    })
-  }
-
-  return (
-    <div
-      role="menu"
-      aria-label="Pick a widget to add to this column"
-      className={clsx(
-        'relative p-3 animate-cavecms-fade-in',
-        dark ? 'text-cream-50' : 'text-near-black',
-      )}
-    >
-      <div className="mb-2 flex items-center justify-between px-1">
+          <Plus size={15} strokeWidth={2.4} />
+        </span>
         <p
           className={clsx(
-            'text-[9px] font-semibold uppercase tracking-[0.22em]',
-            dark ? 'text-cream-50/70' : 'text-warm-stone',
+            'text-[11px] font-semibold uppercase tracking-[0.18em]',
+            dark ? 'text-cream-50/80' : 'text-warm-stone',
           )}
         >
-          Add to this column
+          Empty column
         </p>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close picker"
+        <p
           className={clsx(
-            'inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors',
-            dark
-              ? 'text-cream-50/70 hover:bg-cream-50/10 hover:text-cream-50'
-              : 'text-warm-stone hover:bg-warm-stone/10 hover:text-near-black',
+            'text-[10px]',
+            // contrast bumped from /70 → full warm-stone so axe
+            // color-contrast passes on cream surfaces (was 3.5:1)
+            dark ? 'text-cream-50/80' : 'text-warm-stone',
           )}
         >
-          <X size={12} strokeWidth={2.2} />
-        </button>
-      </div>
-      <ul className="space-y-1">
-        {SEED_ENTRIES.filter(isPaletteVisible).map((entry) => {
-          const Icon = entry.icon
-          // `busy` keyed by entry.label so two entries (Counter +
-          // Stats Row) sharing a blockType spin independently.
-          // isPaletteVisible gates legacy widget types per the
-          // luxury-redesign migration (see blockSeeds.ts).
-          const isBusy = busy === entry.label
-          return (
-            <li key={entry.label}>
-              <button
-                type="button"
-                role="menuitem"
-                aria-busy={isBusy}
-                disabled={busy !== null}
-                onClick={() => void add(entry.type, entry.data, entry.label)}
-                className={clsx(
-                  'flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50',
-                  dark
-                    ? 'hover:bg-cream-50/10 focus-visible:bg-cream-50/10'
-                    : 'hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8',
-                )}
-              >
-                <span
-                  className={clsx(
-                    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1',
-                    dark
-                      ? 'bg-copper-500/25 text-copper-300 ring-copper-400/40'
-                      : 'bg-copper-500/15 text-copper-500 ring-copper-400/30',
-                  )}
-                >
-                  {isBusy ? (
-                    <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-                  ) : (
-                    <Icon size={12} strokeWidth={2.4} />
-                  )}
-                </span>
-                <span className="flex flex-col">
-                  <span
-                    className={clsx(
-                      'text-sm font-semibold',
-                      dark ? 'text-cream-50' : 'text-near-black',
-                    )}
-                  >
-                    {entry.label}
-                  </span>
-                  <span
-                    className={clsx(
-                      'text-[11px]',
-                      dark ? 'text-cream-50/60' : 'text-warm-stone',
-                    )}
-                  >
-                    {entry.description}
-                  </span>
-                </span>
-              </button>
-            </li>
-          )
-        })}
-        <li>
-          <button
-            type="button"
-            role="menuitem"
-            aria-busy={busy === 'image'}
-            disabled={busy !== null}
-            onClick={addImage}
-            className={clsx(
-              'flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50',
-              dark
-                ? 'hover:bg-cream-50/10 focus-visible:bg-cream-50/10'
-                : 'hover:bg-warm-stone/8 focus-visible:bg-warm-stone/8',
-            )}
-          >
-            <span
-              className={clsx(
-                'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1',
-                dark
-                  ? 'bg-copper-500/25 text-copper-300 ring-copper-400/40'
-                  : 'bg-copper-500/15 text-copper-500 ring-copper-400/30',
-              )}
-            >
-              {busy === 'image' ? (
-                <Loader2 size={12} strokeWidth={2.4} className="animate-spin" />
-              ) : (
-                <ImageIcon size={12} strokeWidth={2.4} />
-              )}
-            </span>
-            <span className="flex flex-col">
-              <span
-                className={clsx(
-                  'text-sm font-semibold',
-                  dark ? 'text-cream-50' : 'text-near-black',
-                )}
-              >
-                Picture
-              </span>
-              <span
-                className={clsx(
-                  'text-[11px]',
-                  dark ? 'text-cream-50/60' : 'text-warm-stone',
-                )}
-              >
-                Pick from the media library or upload a new one.
-              </span>
-            </span>
-          </button>
-        </li>
-      </ul>
+          Click to add a widget
+        </p>
+      </button>
+      {open && (
+        // #9 — the empty-column insert now opens the SAME premium floating
+        // panel as the between-blocks "Add block here" affordance (was the
+        // old in-flow ColumnInlinePicker that grew tall + pushed the page
+        // down). `parentId` routes the insert INTO this column.
+        <InsertWidgetPopover
+          triggerRef={triggerRef}
+          onClose={() => setOpen(false)}
+          pageId={pageId}
+          parentId={columnId}
+        />
+      )}
     </div>
   )
 }

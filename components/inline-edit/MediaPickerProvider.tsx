@@ -15,7 +15,11 @@ export interface MediaRef {
 }
 
 interface PickerCtx {
-  open: (current: MediaRef | undefined, onPick: (m: MediaRef) => void) => void
+  open: (
+    current: MediaRef | undefined,
+    onPick: (m: MediaRef) => void,
+    onClose?: () => void,
+  ) => void
   /** Cached thumbnail URL for a previously-loaded media id, or null. */
   resolveThumb: (id: number) => string | null
   /** Async variant: returns the cached thumb when present, otherwise
@@ -68,14 +72,18 @@ export function MediaPickerProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{
     current?: MediaRef
     onPick: (m: MediaRef) => void
+    // Fired when the picker closes WITHOUT a pick (backdrop / X / Esc) so a
+    // caller that set up a pending state (e.g. a media-first insert busy
+    // flag) can roll it back. Not fired on a successful pick.
+    onClose?: () => void
   } | null>(null)
 
   // Cache lookups read through the module-scope LRU above so a fresh
   // provider mount (preview iframe, route transition that remounts
   // the tree) doesn't have to re-fetch every thumb.
 
-  const open = useCallback<PickerCtx['open']>((current, onPick) => {
-    setState({ current, onPick })
+  const open = useCallback<PickerCtx['open']>((current, onPick, onClose) => {
+    setState({ current, onPick, onClose })
   }, [])
 
   const resolveThumb = useCallback((id: number): string | null => {
@@ -144,7 +152,10 @@ export function MediaPickerProvider({ children }: { children: ReactNode }) {
             state.onPick(m)
             setState(null)
           }}
-          onClose={() => setState(null)}
+          onClose={() => {
+            state.onClose?.()
+            setState(null)
+          }}
         />
       )}
     </Ctx.Provider>

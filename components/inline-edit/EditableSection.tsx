@@ -736,15 +736,18 @@ export function EditableSection(p: Props) {
         />
       </div>
 
-      {/* Block-type pill — top-left while hovered. */}
+      {/* Block-type pill. data-edit-chrome (like the toolbar + drag handle)
+          so it reveals via the central [data-edit-chrome] "deepest element
+          wins" rules — i.e. ONLY when the section itself is hovered/focused/
+          selected, never when a child column/widget is hovered, and hidden
+          while the section's drawer is open. The prior group-hover/section
+          reveal bled the pill onto every child hover and lingered over the
+          dimmed canvas while editing. pointer-events-none keeps it
+          click-through even in the revealed state. */}
       <span
+        data-edit-chrome
         aria-hidden="true"
-        className={clsx(
-          'pointer-events-none absolute -top-4 left-6 z-30 rounded-full bg-copper-500 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-cream-50 shadow-sm transition-opacity duration-quick ease-standard motion-reduce:transition-none',
-          isSelected
-            ? 'opacity-100'
-            : 'opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100',
-        )}
+        className="pointer-events-none absolute -top-4 left-6 z-30 rounded-full bg-copper-500 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-cream-50 shadow-sm transition-opacity duration-quick ease-standard motion-reduce:transition-none"
       >
         Section · {p.columnCount} col
       </span>

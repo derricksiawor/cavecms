@@ -159,14 +159,16 @@ export async function renderCmsPage(
 
   // Also pull `version` so EditableBlock can supply the page-side
   // optimistic-lock token to the dual-axis saveBlock TX (spec §3.5).
-  // Filter on deleted_at IS NULL AND published = 1 so a soft-deleted
-  // or unpublished system row stops rendering publicly — closes the
-  // PR-2 cmsPage.tsx published-filter gap the rev-7 notes called out.
+  // Filter on deleted_at IS NULL so a soft-deleted system row stops
+  // rendering. The `published = 1` filter is GATED on `editable`: a public
+  // visitor only ever sees a published page, but an authed admin/editor in
+  // edit mode (cookie or ?edit=1) can load an unpublished/draft system page
+  // to inline-edit it — same gate as app/projects/[slug] + app/blog/[slug].
   const [pageRows] = (await db.execute(sql`
     SELECT id, title, version FROM pages
     WHERE slug = ${slug}
       AND deleted_at IS NULL
-      AND published = 1
+      ${editable ? sql`` : sql`AND published = 1`}
   `)) as unknown as [Array<{ id: number; title: string; version: number }>]
   const row = pageRows[0]
   if (!row) return null

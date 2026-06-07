@@ -1,7 +1,7 @@
 import 'server-only'
 import { headers, cookies } from 'next/headers'
 import { env } from '@/lib/env'
-import { getSession } from '@/lib/auth/getSession'
+import { getSession, canEdit } from '@/lib/auth/getSession'
 import { shouldRenderAdminBar } from '@/lib/admin-bar/shouldRender'
 import { resolveEditTarget } from '@/lib/admin-bar/resolveEditTarget'
 import { canEditTarget } from '@/lib/admin-bar/roleAllowlist'
@@ -60,6 +60,7 @@ export async function AdminBar() {
       initialPathname={pathname}
       initialEditTarget={initialEditTarget}
       editMode={editMode}
+      canEdit={canEdit(session)}
     />
   )
 }

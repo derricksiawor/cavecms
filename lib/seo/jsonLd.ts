@@ -145,6 +145,11 @@ export function blogPostingLd(p: {
   /** Operator's site URL from Settings → General. Omits
    *  `mainEntityOfPage` when null. */
   siteOrigin?: string | null
+  /** The post's resolved canonical path (blog-segment + permalink-structure
+   *  aware, e.g. `/news/<slug>` or a date-based permalink). Falls back to
+   *  `/blog/<slug>` for callers that don't pass it, so mainEntityOfPage no
+   *  longer contradicts the page's own canonical on non-default configs. */
+  urlPath?: string
 }): Record<string, unknown> {
   const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -164,7 +169,7 @@ export function blogPostingLd(p: {
     author: { '@type': 'Person', name: p.author },
   }
   if (p.siteOrigin) {
-    ld.mainEntityOfPage = `${p.siteOrigin}/blog/${p.slug}`
+    ld.mainEntityOfPage = `${p.siteOrigin}${p.urlPath ?? `/blog/${p.slug}`}`
   }
   return ld
 }

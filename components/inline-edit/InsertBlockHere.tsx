@@ -101,7 +101,10 @@ export function InsertBlockHere({
   )
 }
 
-function InsertWidgetPopover({
+// Exported so the empty-column slot (EditableColumn) opens the SAME
+// premium floating panel as the between-blocks "Add block here" pill —
+// column inserts no longer fall back to the old in-flow list picker.
+export function InsertWidgetPopover({
   triggerRef,
   onClose,
   pageId,

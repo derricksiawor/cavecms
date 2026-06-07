@@ -61,13 +61,26 @@ export type FieldShape =
     }
   | { kind: 'richtext'; key: string; label: string; maxLength?: number; placeholder?: string; help?: string }
   | { kind: 'media'; key: string; label: string; accept?: 'image' | 'pdf'; help?: string }
-  | { kind: 'cta'; key: string; label: string }
+  | {
+      kind: 'cta'
+      key: string
+      label: string
+      // Which sub-key holds the button text. Default 'text' (the legacy
+      // CTA shape); 'label' for blocks whose CTA object is
+      // { label, href, openInNew } — e.g. lx_cta_banner's primary/secondary.
+      labelKey?: 'text' | 'label'
+      // When true, an empty CTA (no text AND no href) persists as
+      // `undefined` so an `.optional()` schema field omits it cleanly
+      // instead of failing the required-label check on an empty object.
+      optional?: boolean
+      help?: string
+    }
   // Same shape as 'cta' minus the `text` field — for blocks whose link
   // wraps a different visual (e.g. IconBox's whole-box click target).
   // The value is { href, openInNew } | undefined; a cleared href maps
   // to undefined so the optional schema accepts no-link state.
   | { kind: 'link'; key: string; label: string; help?: string }
-  | { kind: 'media_array'; key: string; label: string; help?: string }
+  | { kind: 'media_array'; key: string; label: string; help?: string; noCaption?: boolean }
   | { kind: 'string_array'; key: string; label: string; placeholder?: string; maxItems?: number; help?: string }
   | { kind: 'number'; key: string; label: string; min?: number; max?: number; step?: number; help?: string }
   | { kind: 'boolean'; key: string; label: string; help?: string }
@@ -394,7 +407,16 @@ function FieldRenderer({
       )
 
     case 'cta':
-      return <CtaField label={shape.label} value={value as CtaValue | undefined} onChange={onChange} />
+      return (
+        <CtaField
+          label={shape.label}
+          help={shape.help}
+          labelKey={shape.labelKey ?? 'text'}
+          optional={shape.optional ?? false}
+          value={value as CtaValue | undefined}
+          onChange={onChange}
+        />
+      )
 
     case 'link':
       return (
@@ -1128,25 +1150,51 @@ function ItemControls({
 }
 
 interface CtaValue {
-  text: string
+  // Button text lives under EITHER `text` (legacy default) or `label`
+  // (lx_cta_banner-shape CTAs) — selected per-field via the 'cta'
+  // FieldShape's `labelKey`. Both optional so a fresh/optional CTA can
+  // start empty.
+  text?: string
+  label?: string
   href: string
   openInNew?: boolean
 }
 function CtaField({
   label,
+  help,
+  labelKey = 'text',
+  optional = false,
   value,
   onChange,
 }: {
   label: string
+  help?: string
+  labelKey?: 'text' | 'label'
+  optional?: boolean
   value: CtaValue | undefined
   onChange: (v: unknown) => void
 }) {
-  const v: CtaValue = value ?? { text: '', href: '', openInNew: false }
+  const v: CtaValue = value ?? { href: '', openInNew: false }
+  const textValue = (labelKey === 'label' ? v.label : v.text) ?? ''
+  // Optional CTA: when both the text and the link are empty, persist
+  // `undefined` so the schema's `.optional()` field is omitted rather
+  // than saved as an empty object that fails the required-label check.
+  const emit = (next: CtaValue) => {
+    if (optional) {
+      const t = (labelKey === 'label' ? next.label : next.text) ?? ''
+      if (t.trim() === '' && next.href.trim() === '') {
+        onChange(undefined)
+        return
+      }
+    }
+    onChange(next)
+  }
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
       <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
         <FieldLabel>{label}</FieldLabel>
       </legend>
+      {help && <FieldHelp>{help}</FieldHelp>}
       <label className="block">
         <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-warm-stone">
           Button text
@@ -1155,8 +1203,8 @@ function CtaField({
           className="mt-1.5"
           placeholder="e.g. Schedule a tour"
           maxLength={TEXT_MAX.ctaText}
-          value={v.text}
-          onChange={(e) => onChange({ ...v, text: e.target.value })}
+          value={textValue}
+          onChange={(e) => emit({ ...v, [labelKey]: e.target.value })}
         />
       </label>
       <label className="block">
@@ -1168,12 +1216,12 @@ function CtaField({
           placeholder="/contact  or  https://…"
           maxLength={TEXT_MAX.url}
           value={v.href}
-          onChange={(e) => onChange({ ...v, href: e.target.value })}
+          onChange={(e) => emit({ ...v, href: e.target.value })}
         />
       </label>
       <Switch
         checked={!!v.openInNew}
-        onChange={(checked) => onChange({ ...v, openInNew: checked })}
+        onChange={(checked) => emit({ ...v, openInNew: checked })}
         label="Open in a new tab"
         help="Recommended for external links."
       />
@@ -1294,22 +1342,24 @@ function MediaArrayField({
                     onChange(next)
                   }}
                 />
-                <label className="mt-2 block">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-warm-stone">
-                    Caption (optional)
-                  </span>
-                  <Input
-                    className="mt-1.5"
-                    placeholder="A short caption"
-                    maxLength={TEXT_MAX.short}
-                    value={item.caption ?? ''}
-                    onChange={(e) => {
-                      const next = [...arr]
-                      next[i] = { ...next[i]!, caption: e.target.value }
-                      onChange(next)
-                    }}
-                  />
-                </label>
+                {!shape.noCaption && (
+                  <label className="mt-2 block">
+                    <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-warm-stone">
+                      Caption (optional)
+                    </span>
+                    <Input
+                      className="mt-1.5"
+                      placeholder="A short caption"
+                      maxLength={TEXT_MAX.short}
+                      value={item.caption ?? ''}
+                      onChange={(e) => {
+                        const next = [...arr]
+                        next[i] = { ...next[i]!, caption: e.target.value }
+                        onChange(next)
+                      }}
+                    />
+                  </label>
+                )}
               </div>
               <ItemControls
                 isFirst={helpers.isFirst}
@@ -2601,7 +2651,9 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       ],
     },
     { kind: 'string', key: 'text', label: 'Text', maxLength: TEXT_MAX.title, placeholder: 'Trusted by teams everywhere' },
-    { kind: 'media_array', key: 'logos', label: 'Logos', help: 'Used when Mode is Logo strip.' },
+    // noCaption: the lx_marquee.logos schema is MediaRef (media_id + alt) with
+    // no caption field, so a caption input here would be silently discarded.
+    { kind: 'media_array', key: 'logos', label: 'Logos', help: 'Used when Mode is Logo strip.', noCaption: true },
     {
       kind: 'select', key: 'speed', label: 'Speed',
       options: [
@@ -3377,6 +3429,218 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
         { value: 'slide-up', label: 'Slide up' },
       ],
     },
+  ],
+
+  // ── Edit forms for the previously form-less blocks ──────────────────
+  // These block types render + insert fine but had no BASE_SHAPES entry,
+  // so the EditDrawer fell through to "This block type can't be edited
+  // here yet." Each form below mirrors the block's Zod schema exactly
+  // (lib/cms/block-registry.ts) — every key + enum value matches so a
+  // save round-trips cleanly. Tone token sets mirror BLOCK_TONE_ENUMS.
+  lx_video: [
+    {
+      kind: 'string', key: 'url', label: 'Video URL', maxLength: TEXT_MAX.url,
+      placeholder: 'https://youtube.com/watch?v=…  or  https://vimeo.com/…',
+      help: 'YouTube or Vimeo share URL. Other hosts are rejected on save.',
+    },
+    { kind: 'media', key: 'poster', label: 'Poster image (optional)', accept: 'image', help: 'Still frame shown before play. Falls back to the provider’s own poster.' },
+    {
+      kind: 'select', key: 'ratio', label: 'Aspect ratio',
+      options: [
+        { value: '21:9', label: '21:9 (cinematic)' },
+        { value: '16:9', label: '16:9 (standard)' },
+        { value: '4:5', label: '4:5 (portrait)' },
+        { value: '1:1', label: '1:1 (square)' },
+      ],
+    },
+    { kind: 'string', key: 'caption', label: 'Caption (optional)', maxLength: TEXT_MAX.short },
+    { kind: 'boolean', key: 'autoplay', label: 'Autoplay', help: 'Disabled automatically for visitors who prefer reduced motion.' },
+    { kind: 'boolean', key: 'muted', label: 'Muted', help: 'Most browsers require muted for autoplay to start.' },
+    { kind: 'boolean', key: 'loop', label: 'Loop' },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_accordion: [
+    {
+      kind: 'object_array', key: 'items', label: 'Items', addLabel: 'Add item', itemNoun: 'item', maxItems: 20,
+      itemFields: [
+        { kind: 'string', key: 'title', label: 'Title', maxLength: TEXT_MAX.caption },
+        { kind: 'richtext', key: 'body_richtext', label: 'Body', maxLength: TEXT_MAX.richtextShort },
+      ],
+    },
+    { kind: 'number', key: 'defaultOpen', label: 'Open by default (item #)', min: -1, max: 19, step: 1, help: '0 = first item open; -1 = every item closed.' },
+    {
+      kind: 'select', key: 'variant', label: 'Style',
+      options: [
+        { value: 'accordion', label: 'Accordion (click to expand)' },
+        { value: 'list', label: 'List (all expanded)' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_tabs: [
+    {
+      kind: 'object_array', key: 'tabs', label: 'Tabs', addLabel: 'Add tab', itemNoun: 'tab', maxItems: 6,
+      itemFields: [
+        { kind: 'string', key: 'label', label: 'Tab label', maxLength: TEXT_MAX.caption },
+        { kind: 'richtext', key: 'body_richtext', label: 'Body', maxLength: TEXT_MAX.richtextShort },
+      ],
+    },
+    { kind: 'number', key: 'defaultIndex', label: 'Active tab on load (#)', min: 0, max: 5, step: 1, help: '0 = first tab. Needs at least two tabs.' },
+    {
+      kind: 'select', key: 'alignment', label: 'Tab alignment',
+      options: [
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  lx_testimonial: [
+    { kind: 'string', key: 'quote', label: 'Quote', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'string', key: 'attribution', label: 'Name', maxLength: TEXT_MAX.caption },
+    { kind: 'string', key: 'attribution_title', label: 'Role / title (optional)', maxLength: TEXT_MAX.caption },
+    { kind: 'media', key: 'portrait', label: 'Portrait (optional)', accept: 'image' },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    { kind: 'font_family', key: 'family', label: 'Font family' },
+    { kind: 'font_weight', key: 'weight', label: 'Font weight', familyKey: 'family' },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+        { value: 'line-reveal', label: 'Line reveal (signature)' },
+      ],
+    },
+  ],
+
+  lx_cta_banner: [
+    { kind: 'string', key: 'eyebrow', label: 'Eyebrow (optional)', maxLength: TEXT_MAX.caption, placeholder: 'Small kicker above the title' },
+    { kind: 'string', key: 'title', label: 'Title', maxLength: TEXT_MAX.title },
+    { kind: 'string', key: 'body', label: 'Body (optional)', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'cta', key: 'primaryCta', label: 'Primary button', labelKey: 'label' },
+    { kind: 'cta', key: 'secondaryCta', label: 'Secondary button (optional)', labelKey: 'label', optional: true, help: 'Leave the text + link empty to hide the second button.' },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+        { value: 'slide-up', label: 'Slide up on scroll' },
+      ],
+    },
+  ],
+
+  // #0.59: platform is shown as a readable brand NAME select (Instagram,
+  // Facebook…) — these are unambiguous brand names, not cryptic library
+  // identifiers; the row also previews the brand glyph. Mirrors the
+  // codebase's existing SocialLinkRow editing pattern. Keys + the 16
+  // platform values match lib/cms/block-registry.ts lx_social_icons.
+  lx_social_icons: [
+    {
+      kind: 'object_array', key: 'items', label: 'Social links', addLabel: 'Add link', itemNoun: 'link', maxItems: 8,
+      itemFields: [
+        {
+          kind: 'select', key: 'platform', label: 'Platform',
+          options: [
+            { value: 'instagram', label: 'Instagram' },
+            { value: 'facebook', label: 'Facebook' },
+            { value: 'linkedin', label: 'LinkedIn' },
+            { value: 'twitter', label: 'X (Twitter)' },
+            { value: 'youtube', label: 'YouTube' },
+            { value: 'tiktok', label: 'TikTok' },
+            { value: 'whatsapp', label: 'WhatsApp' },
+            { value: 'github', label: 'GitHub' },
+            { value: 'dribbble', label: 'Dribbble' },
+            { value: 'behance', label: 'Behance' },
+            { value: 'pinterest', label: 'Pinterest' },
+            { value: 'vimeo', label: 'Vimeo' },
+            { value: 'spotify', label: 'Spotify' },
+            { value: 'apple-music', label: 'Apple Music' },
+            { value: 'soundcloud', label: 'SoundCloud' },
+            { value: 'threads', label: 'Threads' },
+          ],
+        },
+        { kind: 'string', key: 'href', label: 'Profile URL', maxLength: TEXT_MAX.url, placeholder: 'https://instagram.com/yourhandle' },
+      ],
+    },
+    {
+      kind: 'select', key: 'size', label: 'Icon size',
+      options: [
+        { value: 'sm', label: 'Small' },
+        { value: 'md', label: 'Medium' },
+        { value: 'lg', label: 'Large' },
+      ],
+    },
+    {
+      kind: 'select', key: 'alignment', label: 'Alignment',
+      options: [
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+        { value: 'right', label: 'Right' },
+      ],
+    },
+    { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory', 'warm-stone'], allowCustom: true },
+    {
+      kind: 'select', key: 'animation', label: 'Animation',
+      options: [
+        { value: 'none', label: 'None (static)' },
+        { value: 'fade-in', label: 'Fade in on scroll' },
+      ],
+    },
+  ],
+
+  // contact_form is a fixed slot on the Contact system page (edited
+  // inline there). When inserted on ANY OTHER page from the palette it
+  // had no drawer form. These are the operator-facing copy fields; the
+  // optional crmDestinations routing stays out of the basic form.
+  contact_form: [
+    { kind: 'string', key: 'heading', label: 'Heading', maxLength: TEXT_MAX.title },
+    { kind: 'string', key: 'intro', label: 'Intro (optional)', maxLength: TEXT_MAX.body, multiline: true },
+    { kind: 'string', key: 'submit_label', label: 'Submit button label', maxLength: TEXT_MAX.ctaText, placeholder: 'Send message' },
+    { kind: 'string', key: 'success_headline', label: 'Success headline (optional)', maxLength: TEXT_MAX.title },
+    { kind: 'string', key: 'success_body', label: 'Success message (optional)', maxLength: TEXT_MAX.body, multiline: true },
   ],
 }
 

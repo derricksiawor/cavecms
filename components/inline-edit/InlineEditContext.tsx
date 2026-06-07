@@ -963,6 +963,39 @@ function resolveAncestorSectionMeta(
   return null
 }
 
+// Resolve once the block with `blockId` is in the DOM (it paints after the
+// post-insert router.refresh, which is async). Bounded by a timeout so a
+// never-painting id can't hang an insert spinner forever. SSR-safe no-op.
+function waitForBlockPaint(blockId: number, timeoutMs = 2500): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') {
+      resolve()
+      return
+    }
+    const sel =
+      `[data-edit-block-id="${blockId}"],` +
+      `[data-edit-section-id="${blockId}"],` +
+      `[data-edit-column-id="${blockId}"]`
+    if (document.querySelector(sel)) {
+      resolve()
+      return
+    }
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      obs.disconnect()
+      clearTimeout(timer)
+      resolve()
+    }
+    const obs = new MutationObserver(() => {
+      if (document.querySelector(sel)) finish()
+    })
+    obs.observe(document.body, { childList: true, subtree: true })
+    const timer = setTimeout(finish, timeoutMs)
+  })
+}
+
 /**
  * Hook returning the centralised insertBlock function. Stable
  * reference across renders so dep-array-conscious callers (memoised
@@ -1343,6 +1376,12 @@ export function useInsertBlock(): InsertBlockFn {
         }
 
         router.refresh()
+        // Hold until the new block actually paints (the insert is POST +
+        // router.refresh, NOT optimistic). Without this, callers cleared their
+        // busy spinner + closed their picker the instant this resolved — a
+        // flash of "nothing happened" in the gap before the refresh painted
+        // the block. Bounded so a missed id never hangs the spinner.
+        if (newId !== undefined) await waitForBlockPaint(newId)
         return { ok: true, blockId: newId }
       } catch (e) {
         // Same rollback as the !res.ok branch — a network drop between

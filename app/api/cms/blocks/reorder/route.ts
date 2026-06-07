@@ -10,6 +10,7 @@ import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
 import { MAX_SECTION_COLUMNS, type BlockKind } from '@/lib/cms/blockMeta'
+import { ensureDraftBaseline, recordDraftRevision } from '@/lib/cms/draft'
 
 // Draft → Publish: reorder writes the DRAFT overlay, never the live
 // position/parent_id. Each affected row gets draft_position (and
@@ -443,6 +444,16 @@ export const POST = withError(async (req) => {
       return currentById.get(b.id)!.parent_id === newParent
     })
 
+    // Snapshot the PRE-reorder state as the draft baseline so the server undo
+    // (⌘Z + the toast "Undo", sharing the one cursor) can revert the reorder.
+    // Inline reorder previously recorded NO revision → it was un-undoable via
+    // the server cursor. Guarded on a real change; no-op once a draft exists.
+    const reorderChanged =
+      positionOnlyBlocks.length > 0 || movedBlocks.length > 0
+    if (reorderChanged) {
+      await ensureDraftBaseline(tx, body.pageId, ctx.userId)
+    }
+
     const draftStateCase = sql.raw(
       "CASE WHEN draft_state = 'added' THEN 'added' ELSE 'modified' END",
     )
@@ -513,6 +524,12 @@ export const POST = withError(async (req) => {
     `)
     // Echo back the CURRENT (unchanged) published version.
     const newPageVersion = pageRows[0]?.version ?? 0
+
+    // Record the POST-reorder draft snapshot so this reorder is ONE undo step
+    // on the server cursor — undo reverts the order, redo re-applies it.
+    if (reorderChanged) {
+      await recordDraftRevision(tx, body.pageId, ctx.userId, 'Reorder blocks')
+    }
 
     // Step 9: audit. ONE row per reorder gesture, capturing the
     // per-parent groups so a forensic replay can reconstruct both

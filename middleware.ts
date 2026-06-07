@@ -313,7 +313,7 @@ function generateNonce(): string {
 const isProd = process.env.NODE_ENV === 'production'
 
 function adminPath(p: string): boolean {
-  return p === '/admin' || p.startsWith('/admin/') || p.startsWith('/api/admin/') || p.startsWith('/api/cms/')
+  return p === '/admin' || p.startsWith('/admin/') || p.startsWith('/api/admin/') || p.startsWith('/api/admin-bar/') || p.startsWith('/api/cms/')
 }
 
 // Public read of the navigation menus. `/api/cms/nav` matches adminPath

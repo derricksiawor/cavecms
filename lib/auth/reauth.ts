@@ -27,11 +27,13 @@ const MAX_REAUTH_COOKIE_LEN = 128
 // reliable layer because logout might not run (process kill,
 // browser tab close without sign-out click).
 //
-// Why not HMAC: in production the cookie is __Host- + Secure +
-// HttpOnly + SameSite=Strict, so the cookie cannot be written by
-// any party other than the server itself. The jti binding alone
-// closes the same-browser-tenant-swap gap that HMAC would protect
-// against in dev/non-prod where __Host- is dropped.
+// Why not HMAC: the cookie is HttpOnly + Secure (on HTTPS), so client
+// JS can neither read nor write it — only the server sets it. (The name
+// is PLAIN, not __Host-, and SameSite is Lax, NOT Strict — a deliberate
+// choice for HTTP-localhost installs + OAuth top-level GETs; see
+// cookie-names.ts / cookieFlags.) The jti binding — not __Host-/Strict —
+// is what closes the same-browser-tenant-swap gap HMAC would protect
+// against.
 
 // Reuses the canonical cookie-flags helper rather than duplicating the
 // (httpOnly + secure + sameSite + path) shape. Drift between the two
@@ -84,11 +86,10 @@ export async function requireFreshReauth(jti: string): Promise<void> {
   const c = await cookies()
   const raw = c.get(REAUTH_COOKIE_NAME)?.value
   if (!raw) throw new HttpError(401, 'reauth_required')
-  // Length cap: in prod the cookie is __Host- + HttpOnly so it cannot
-  // be set by anything other than the server. Capping here is defense
-  // in depth (a non-prod env without __Host- could theoretically
-  // accept a huge cookie via dev tooling, and we don't want indexOf /
-  // slice traversing arbitrary lengths).
+  // Length cap: the cookie is HttpOnly (+ Secure on HTTPS) so client JS
+  // can't set it. Capping here is defense in depth (a misbehaving client
+  // or dev tooling could theoretically present a huge cookie, and we
+  // don't want indexOf / slice traversing arbitrary lengths).
   if (raw.length > MAX_REAUTH_COOKIE_LEN) {
     throw new HttpError(401, 'reauth_required')
   }

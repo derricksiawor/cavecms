@@ -78,7 +78,14 @@ export const POST = withError(async (req: Request) => {
 
   const message = items.map((it) => `${it.label}: ${it.value}`).join('\n').slice(0, 4000)
   const name = (body._name || items.find((i) => /name/i.test(i.label))?.value || 'Form submission').slice(0, 180)
-  const normEmail = body._email ? normalizeEmail(body._email) : ''
+  // Only store a syntactically-valid email. The generic form's `_email` is
+  // intentionally NOT .email()-validated at the schema (so a typo doesn't
+  // reject + drop the whole lead) — but a garbage value must not pollute
+  // leads.email. Invalid → '' (lead still captured; just no reply-to).
+  const normEmail =
+    body._email && z.string().email().safeParse(body._email.trim()).success
+      ? normalizeEmail(body._email)
+      : ''
   // leads.phone is varchar(40) — cap to the column width to avoid a
   // truncation error / silent data loss on INSERT.
   const phone = (body._phone || '').slice(0, 40) || null

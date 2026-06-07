@@ -37,18 +37,35 @@ export function AdminBarShell({
   initialPathname,
   initialEditTarget,
   editMode,
+  canEdit,
 }: {
   email: string
   role: Role
   initialPathname: string
   initialEditTarget: EditTarget | null
   editMode: boolean
+  canEdit: boolean
 }) {
   const pathname = usePathname() ?? initialPathname
   const allowed = shouldRenderAdminBar(pathname)
   const [editTarget, setEditTarget] = useState<EditTarget | null>(
     initialEditTarget,
   )
+
+  // `?edit=1` URL override (the inline-edit deep-link from /admin/pages →
+  // PageEditor's "Edit inline") makes the canvas editable via
+  // resolveEditableMode, but the cookie-derived `editMode` stays false — so
+  // the DraftBar (Publish / Undo / Redo / "N unpublished") never mounted and
+  // the operator landed on a fully-editable page with NO way to publish. Mirror
+  // the canvas's editability here so the inline-edit entry gets the full chrome.
+  // Read from window.location rather than useSearchParams (which would opt the
+  // whole public route into client rendering); `canEdit` (admin/editor) gates
+  // it so appending ?edit=1 as a non-editor can never surface the publish UI.
+  const [urlEdit, setUrlEdit] = useState(false)
+  useEffect(() => {
+    setUrlEdit(new URLSearchParams(window.location.search).get('edit') === '1')
+  }, [pathname])
+  const effectiveEditMode = editMode || (urlEdit && canEdit)
 
   // Refetch editTarget on every pathname change (post-mount). The
   // first render uses the server-resolved value so there's no flash
@@ -117,7 +134,7 @@ export function AdminBarShell({
           email={email}
           role={role}
           editTarget={editTarget}
-          editMode={editMode}
+          editMode={effectiveEditMode}
           canNewProject={canNewProject}
           canNewPost={canNewPost}
           canNewPage={canNewPage}

@@ -854,13 +854,15 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
           mapServerError(j.error, "We couldn't save the new order. Refresh and try again."),
         )
       }
-      // The reorder endpoint bumps every row's version by 1 and reassigns
-      // positions at 1000, 2000, …. Mirror that locally so the next
-      // reorder/save doesn't 409 against the now-stale versions.
+      // The draft-overlay reorder is last-write-wins — it does NOT bump
+      // per-block versions (the response echoes them unchanged). Mirror only
+      // the new positions locally; keep each version as-is. The prior
+      // `version + 1` fabricated a value one ahead of the server, which would
+      // 409 a follow-up save if the router.refresh below hadn't already
+      // re-hydrated blockList from server props.
       setBlockList(
         newOrder.map((b, i) => ({
           ...b,
-          version: b.version + 1,
           position: (i + 1) * 1000,
         })),
       )

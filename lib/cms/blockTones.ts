@@ -79,7 +79,13 @@ export const BLOCK_TONE_ENUMS = {
   lx_share: ['obsidian', 'ivory', 'warm-stone'],
   lx_marquee: ['obsidian', 'ivory'],
   lx_before_after: ['obsidian', 'ivory'],
-  lx_comparison_table: ['obsidian', 'ivory'],
+  // 'champagne' is REQUIRED here: the lx_comparison_table `accent` field
+  // (the ✓-check / highlighted-column colour) defaults to 'champagne'. The
+  // token set is shared by `tone` + `accent`, so without champagne the
+  // accent default failed colorTokenOrHex → every insert 400'd
+  // (invalid_request / accent: invalid_hex_color) and the block could not
+  // be added at all.
+  lx_comparison_table: ['obsidian', 'ivory', 'champagne'],
   lx_timeline: ['obsidian', 'ivory'],
 } as const satisfies Record<string, readonly [string, ...string[]]>
 

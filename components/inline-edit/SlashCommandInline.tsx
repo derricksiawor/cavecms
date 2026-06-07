@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
+import { blockSeedNeedsMedia } from '@/lib/cms/blockSeeds'
 import type { SearchableItem } from '@/lib/cms/blockSearch'
 import { useInsertBlock } from './InlineEditContext'
 import {
@@ -80,6 +81,21 @@ export function SlashCommandInline({ anchor }: Props) {
             // contenteditable + breaks the popover's anchor invariant.
             // Operator uses ⌘K palette → Picture instead.
             toast.error('Use ⌘K to add a picture.')
+            close()
+            return
+          }
+          if (
+            item.kind === 'seed' &&
+            item.blockType &&
+            blockSeedNeedsMedia(item.blockType)
+          ) {
+            // A media block (figure/image-pair/cover/gallery…) can't use the
+            // inline / popover — the MediaPicker round-trip pulls focus from
+            // the contenteditable + breaks the popover anchor (same reason
+            // the dedicated image command is blocked). Steer to ⌘K, which has
+            // the media-first flow, instead of inserting a placeholder that
+            // 404s media_missing.
+            toast.error('Use ⌘K to add an image block.')
             close()
             return
           }

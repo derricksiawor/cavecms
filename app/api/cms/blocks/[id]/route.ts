@@ -15,7 +15,12 @@ import {
 // the route echoes the caller's blockVersion/pageVersion back unchanged (the
 // draft never bumps them) so the existing client keeps working untouched, plus
 // a draftVersion for the advisory concurrency signal.
-import { saveDraftBlockData, saveDraftBlockMeta } from '@/lib/cms/draft'
+import {
+  saveDraftBlockData,
+  saveDraftBlockMeta,
+  ensureDraftBaseline,
+  recordDraftRevision,
+} from '@/lib/cms/draft'
 import { withError, getRequestId } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
@@ -390,6 +395,13 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
       // empty-array branch is unreachable.
       if (deletedIds.length === 0) deletedIds = [id]
     }
+    // Snapshot the PRE-delete state as the draft baseline so the server undo
+    // (⌘Z AND the toast "Undo", which now share the one server cursor) can
+    // restore the deleted block(s). Inline delete previously recorded NO
+    // revision, so it was un-undoable via the server cursor — the only
+    // delete-undo was the client HTTP-inverse /restore, which 409'd.
+    // ensureDraftBaseline is a no-op once a draft already exists.
+    await ensureDraftBaseline(tx, row.page_id, ctx.userId)
     // Bump version + stamp deleted_at in ONE batched UPDATE so every
     // row carries the same NOW(3) timestamp (restore's cascade filter
     // depends on the uniform deleted_at across the gesture).
@@ -398,6 +410,17 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     // until publish, the editor's draft view excludes them). No version bump
     // and no deleted_at stamp — the draft layer is unlocked + invisible to the
     // public until Publish.
+    // Capture EVERY row's version BEFORE the destructive ops so the response
+    // can report the hard-deleted (draft_state='added') rows too. The post-op
+    // SELECT-back below can't see them once they're gone, which left the
+    // inline editor with a phantom / stale-cursor entry for a block that was
+    // added then deleted in the SAME draft, until the next router.refresh.
+    const [preRows] = (await tx.execute(sql`
+      SELECT id, version FROM content_blocks
+      WHERE id IN (${sql.join(deletedIds, sql.raw(','))})
+    `)) as unknown as [Array<{ id: number; version: number }>]
+    const versionById = new Map(preRows.map((r) => [r.id, r.version]))
+
     await tx.execute(sql`
       DELETE FROM content_blocks
       WHERE id IN (${sql.join(deletedIds, sql.raw(','))}) AND draft_state = 'added'
@@ -466,6 +489,10 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
     `)
     const newPageVersion = pageLock.version
 
+    // Record the POST-delete draft snapshot so this delete is ONE undo step on
+    // the server cursor — undo restores the block(s), redo re-deletes.
+    await recordDraftRevision(tx, row.page_id, ctx.userId, `Delete ${row.kind}`)
+
     // Read back the bumped versions + uniform deleted_at + position +
     // parent_id for every soft-deleted row. Client uses the per-row
     // version to advance per-block optimistic-lock cursors AND uses
@@ -487,7 +514,7 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
 
     // Draft delete does NOT change the public render → no revalidation
     // (that happens on Publish).
-    return { newPageVersion, deletedRows }
+    return { newPageVersion, deletedRows, deletedIds, versionById }
   })
 
   // 200 + JSON body so the FE can advance optimistic-lock cursors
@@ -498,13 +525,23 @@ export const DELETE = withError<RouteCtx>(async (req, { params }) => {
   // the client keeps them hidden in the editor; the draft-view re-hydrate on
   // router.refresh is authoritative.
   const removedAt = new Date().toISOString()
-  const responseBlocks = txResult.deletedRows.map((r) => ({
-    id: r.id,
-    version: r.version,
-    deletedAt: removedAt,
-    parentId: r.parent_id,
-    position: r.position,
-  }))
+  const removedRowById = new Map(txResult.deletedRows.map((r) => [r.id, r]))
+  // Report EVERY id in the gesture — including hard-deleted draft-added rows
+  // the post-op SELECT-back can't see — so the inline editor advances/drops
+  // them all instead of leaving a phantom + stale cursor for a block added
+  // then deleted in the same draft. Soft-removed rows carry parent_id/position
+  // from the SELECT-back; hard-deleted rows are gone → null/0 (the client only
+  // needs id + version + deletedAt to reconcile).
+  const responseBlocks = txResult.deletedIds.map((delId) => {
+    const sr = removedRowById.get(delId)
+    return {
+      id: delId,
+      version: txResult.versionById.get(delId) ?? sr?.version ?? 0,
+      deletedAt: removedAt,
+      parentId: sr?.parent_id ?? null,
+      position: sr?.position ?? 0,
+    }
+  })
   return new Response(
     JSON.stringify({
       pageVersion: txResult.newPageVersion,

@@ -204,7 +204,12 @@ export default async function ProjectPage({
     // SimilarProjects rail rendered AFTER the EditableMain shell,
     // and (c) the bare slug union in cmsPage.tsx doesn't include
     // arbitrary project slugs.
-    const hydratedPage = await hydratePage(pageRow.id)
+    // `draft: editable` so an editor in edit mode renders the DRAFT tree
+    // (COALESCE(draft_*, live), includes draft-added, excludes draft-removed)
+    // — matching every other render path (home / cms-render / cmsPage).
+    // Without it, editors saw the PUBLISHED tree while editing and the inline
+    // drawer computed optimistic-lock deltas against the wrong base.
+    const hydratedPage = await hydratePage(pageRow.id, { draft: editable })
     if (!hydratedPage) notFound()
     const { blocks, media, projects, posts, postsLoop, postCardsByBlock, themeMode } = hydratedPage
     const csrf = await mintPublicPreCsrfForBlocks(blocks, slug)

@@ -37,6 +37,13 @@ export function RichTextEditor({
     ol: false,
     link: false,
   })
+  // Inline link editor — replaces the project-banned window.prompt().
+  // `savedRange` preserves the operator's text selection across focusing the
+  // URL input (focusing it collapses the live selection that createLink needs).
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkValue, setLinkValue] = useState('')
+  const [linkError, setLinkError] = useState(false)
+  const savedRangeRef = useRef<Range | null>(null)
 
   // Sync prop value -> editor only when it's genuinely different. Without
   // this guard, every keystroke would reset the caret to position 0 on
@@ -76,46 +83,60 @@ export function RichTextEditor({
   const handleInput = () => {
     const el = editorRef.current
     if (!el) return
-    let html = el.innerHTML
-    if (maxLength && html.length > maxLength) {
-      // Soft-cap by truncating from the end. Better than blocking
-      // entirely (causing seemingly-broken keystrokes).
-      html = html.slice(0, maxLength)
-      el.innerHTML = html
-    }
-    onChange(html)
+    // NO mid-string innerHTML truncation — slicing raw HTML at an arbitrary
+    // character index can sever a tag or entity (`<stro`) and corrupt the
+    // editor DOM, which the downstream sanitiser then mangles further. The
+    // length limit is surfaced by the live counter below and enforced by the
+    // field's Zod schema on save; the operator self-corrects from the counter.
+    onChange(el.innerHTML)
   }
 
-  const insertLink = () => {
+  const openLinkEditor = () => {
     if (disabled) return
     const sel = document.getSelection()
     if (!sel || sel.rangeCount === 0) return
+    // Snapshot the live selection — focusing the URL input collapses it, and
+    // createLink needs the original range to wrap.
+    savedRangeRef.current = sel.getRangeAt(0).cloneRange()
     const existing = (sel.anchorNode?.parentElement?.closest('a') as HTMLAnchorElement | null)?.href ?? ''
-    const href = window.prompt('Paste a link (https://… or /page-name)', existing)
-    if (href === null) return
+    setLinkValue(existing)
+    setLinkError(false)
+    setLinkOpen(true)
+  }
+
+  const closeLinkEditor = () => {
+    setLinkOpen(false)
+    setLinkError(false)
+  }
+
+  const applyLink = () => {
+    const href = linkValue.trim()
+    // Restore the saved selection before running the command.
+    const sel = document.getSelection()
+    const range = savedRangeRef.current
+    editorRef.current?.focus()
+    if (sel && range) {
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
     if (href === '') {
       exec('unlink')
+      closeLinkEditor()
       return
     }
-    // URL protocol whitelist — operator-self-XSS hardening. Without
-    // this, a copy-pasted `javascript:fetch(...)` URL would land in
-    // the href and fire on click. Allow https://, http://, mailto:,
-    // tel:, and any same-origin relative path (starts with / or #).
-    // Silent reject + console.warn (no custom modal needed — the
-    // operator's button click won't apply the link, they can retry;
-    // alert/prompt/confirm are project-banned per #design preferences).
-    const trimmed = href.trim()
+    // URL protocol whitelist — operator-self-XSS hardening. Allow https://,
+    // http://, mailto:, tel:, and same-origin relative paths (/ or #); reject
+    // javascript:/vbscript:/data:text/html. Invalid → inline red state, no
+    // banned alert/prompt/confirm.
     const safe =
-      /^(?:https?:|mailto:|tel:|\/|#)/i.test(trimmed) &&
-      !/^[\s\t\n\r]*(?:javascript|vbscript|data:text\/html)/i.test(trimmed)
+      /^(?:https?:|mailto:|tel:|\/|#)/i.test(href) &&
+      !/^[\s\t\n\r]*(?:javascript|vbscript|data:text\/html)/i.test(href)
     if (!safe) {
-      console.warn(
-        '[RichTextEditor] insertLink: rejected unsafe URL protocol — only https/http/mailto/tel/relative allowed.',
-      )
+      setLinkError(true)
       return
     }
-    exec('createLink', trimmed)
-    // Force any newly created link to open in a new tab when external.
+    exec('createLink', href)
+    // Force any newly created external link to open in a new tab.
     const el = editorRef.current
     if (el) {
       el.querySelectorAll('a').forEach((a) => {
@@ -126,6 +147,7 @@ export function RichTextEditor({
       })
       handleInput()
     }
+    closeLinkEditor()
   }
 
   const stripFormatting = () => exec('removeFormat')
@@ -196,7 +218,7 @@ export function RichTextEditor({
           <ListIcon variant="ol" />
         </TbBtn>
         <span className="mx-1 h-5 w-px bg-warm-stone/20" />
-        <TbBtn active={active.link} onClick={insertLink} title="Insert link">
+        <TbBtn active={active.link} onClick={openLinkEditor} title="Insert link">
           <LinkIcon />
         </TbBtn>
         <TbBtn active={false} onClick={stripFormatting} title="Clear formatting">
@@ -211,6 +233,59 @@ export function RichTextEditor({
           </span>
         )}
       </div>
+      {linkOpen && (
+        <div
+          className="flex items-center gap-2 border-b border-warm-stone/15 bg-cream-50/80 px-2 py-1.5"
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <input
+            autoFocus
+            value={linkValue}
+            onChange={(e) => {
+              setLinkValue(e.target.value)
+              setLinkError(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                applyLink()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                closeLinkEditor()
+              }
+            }}
+            placeholder="https://… or /page-name"
+            aria-label="Link URL"
+            aria-invalid={linkError || undefined}
+            className={clsx(
+              'min-w-0 flex-1 rounded-lg border bg-white px-2.5 py-1 text-xs text-near-black placeholder:text-warm-stone/60 focus:outline-none',
+              linkError
+                ? 'border-red-400 ring-1 ring-red-300'
+                : 'border-warm-stone/30 focus:border-copper-400',
+            )}
+          />
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              applyLink()
+            }}
+            className="rounded-lg bg-copper-500 px-2.5 py-1 text-[11px] font-semibold text-cream-50 transition-colors hover:bg-copper-600"
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              closeLinkEditor()
+            }}
+            className="rounded-lg px-2 py-1 text-[11px] font-medium text-warm-stone transition-colors hover:bg-cream-100"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       <div
         ref={editorRef}
         contentEditable={!disabled}

@@ -468,9 +468,13 @@ export async function duplicateBlock(args: {
       // bypassing the uniqueness gate. The operator can set a new
       // htmlId on the duplicate via the Advanced tab.
       const dedupedMetaJson = stripHtmlIdFromMetaJson(row.meta)
+      // draft_state='added' — a duplicate is a DRAFT addition (invisible on
+      // the published site until Publish), matching POST /api/cms/blocks.
+      // Without it the row defaulted to 'live' and the duplicate appeared on
+      // the public site immediately, violating the draft/publish contract.
       const [insertResult] = (await tx.execute(sql`
         INSERT INTO content_blocks
-          (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by)
+          (page_id, parent_id, kind, block_type, position, data, meta, version, updated_by, draft_state)
         VALUES (
           ${args.pageId},
           ${newParentId},
@@ -480,7 +484,8 @@ export async function duplicateBlock(args: {
           ${dataJson},
           ${dedupedMetaJson},
           0,
-          ${args.userId}
+          ${args.userId},
+          'added'
         )
       `)) as unknown as [InsertResult]
       const newId = Number(insertResult.insertId)

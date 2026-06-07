@@ -109,6 +109,11 @@ const Env = z.object({
   // Optional bearer for /healthz verbose mode. Without it, verbose mode is
   // disabled in production. Generate with: openssl rand -hex 32
   HEALTHZ_TOKEN: z.string().min(32).optional(),
+  // One-shot install-window bootstrap token (CLI-generated). Optional/legacy
+  // — it only exists during the pre-install window. Routing it through the
+  // schema gives it the same min-32 validation + boot duplicate-secret gate as
+  // the other secrets (requireInstallToken still timing-safe-compares it).
+  INSTALL_BOOTSTRAP_TOKEN: z.string().min(32).optional(),
   // Used by healthz for build-info exposure. Set in deploy script.
   CAVECMS_COMMIT: z.string().default('unknown'),
   // Lockout tunables. Three tiers: failures-in-window → minutes-locked.

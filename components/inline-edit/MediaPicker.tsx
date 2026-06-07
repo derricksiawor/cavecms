@@ -253,7 +253,17 @@ export function MediaPicker({
                 <Input
                   ref={altInputRef}
                   value={altDraft}
-                  onChange={(e) => setAltDraft(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setAltDraft(v)
+                    // Commit on every keystroke (not only onBlur) so closing
+                    // the drawer (Done / Esc) without blurring this input never
+                    // drops the alt text — the drawer's close-save reads
+                    // `data`, which must already carry the latest alt. Trim is
+                    // deferred to onBlur (commitAlt) so a trailing space isn't
+                    // eaten mid-typing.
+                    if (value) onChange({ ...value, alt: v.slice(0, 320) })
+                  }}
                   onBlur={commitAlt}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {

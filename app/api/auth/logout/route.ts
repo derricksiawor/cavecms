@@ -42,9 +42,9 @@ export const POST = withError(async (req: Request) => {
   `)
   invalidateUser(ctx.userId)
 
-  // Clear cookies with the SAME attributes used at set-time. __Host- cookies
-  // require the deletion Set-Cookie to also carry Path=/ and Secure;
-  // otherwise the browser ignores the deletion.
+  // Clear cookies with the SAME attributes used at set-time — the deletion
+  // Set-Cookie must carry the matching Path (and Secure on HTTPS) or the
+  // browser ignores the deletion.
   const secure = isSecureRequest(req)
   c.set(SESSION_COOKIE, '', cookieFlags(0, secure))
   c.set(CSRF_COOKIE, '', csrfCookieFlags(0, secure))

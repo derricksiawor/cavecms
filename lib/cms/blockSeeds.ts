@@ -1110,3 +1110,89 @@ export function isLegacyBlockType(_type: string): boolean {
 export function isPaletteVisible(_entry: SeedEntry): boolean {
   return true
 }
+
+// ── Media-first insert helpers ──────────────────────────────────────
+// The image-bearing seeds (lx_figure, lx_image_pair, lx_cover_image,
+// lx_carousel, lx_hotspot, lx_before_after, lx_gallery…) carry the
+// placeholder media_id=1 ONLY to satisfy the SEED_DATA round-trip test —
+// it is never a real media row. Inserting that placeholder via the +Add
+// palette POSTs straight to /api/cms/blocks, whose `mediaCheck` guard
+// rejects the unknown id with 404 `media_missing` (→ the generic
+// "We couldn't add that" toast). So the palette must open the MediaPicker
+// FIRST and substitute a real picked id before inserting — the same
+// media-first flow the empty-state / slash / between-blocks affordances
+// already use for lx_figure.
+
+function seedHasPlaceholderMedia(v: unknown): boolean {
+  if (Array.isArray(v)) return v.some(seedHasPlaceholderMedia)
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    if (o.media_id === 1) return true
+    return Object.values(o).some(seedHasPlaceholderMedia)
+  }
+  return false
+}
+
+/** True when a block's default seed references the placeholder media_id (1)
+ *  — i.e. it needs a real image picked before insert, else the server's
+ *  `media_missing` guard rejects it. Drives the palette's media-first
+ *  branch. */
+export function blockSeedNeedsMedia(type: SeedBlockType): boolean {
+  return seedHasPlaceholderMedia(SEED_DATA[type])
+}
+
+/** Deep-clone a block's seed and replace EVERY placeholder media_id (1)
+ *  with a real picked media id + alt. For multi-image blocks (e.g.
+ *  lx_image_pair) both sides start from the one picked image; the operator
+ *  refines the rest in the edit drawer. */
+export function seedWithPickedMedia(
+  type: SeedBlockType,
+  mediaId: number,
+  alt: string,
+): Record<string, unknown> {
+  const clone = JSON.parse(JSON.stringify(SEED_DATA[type] ?? {})) as unknown
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      v.forEach(walk)
+      return
+    }
+    if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>
+      if (o.media_id === 1) {
+        o.media_id = mediaId
+        o.alt = alt
+      }
+      Object.values(o).forEach(walk)
+    }
+  }
+  walk(clone)
+  return clone as Record<string, unknown>
+}
+
+/** Shared media-first insert orchestration for EVERY +Add entry point
+ *  (palette pills, drag-drop, ⌘K slash palette, empty-state). When the
+ *  block's seed needs a real image AND the caller passed no explicit data,
+ *  open the MediaPicker first and run `insert` with the picked media
+ *  substituted into the seed; otherwise run `insert` with the caller's data
+ *  directly. Keeps the MediaPicker round-trip OUT of useInsertBlock (a pure
+ *  data hook) while guaranteeing no entry point ever POSTs the placeholder
+ *  media_id → 404 media_missing. */
+export function runMediaFirstInsert(
+  blockType: SeedBlockType,
+  explicitData: Record<string, unknown> | undefined,
+  mediaPicker: {
+    open: (
+      current: undefined,
+      onPick: (m: { media_id: number; alt?: string | null }) => void,
+    ) => void
+  },
+  insert: (finalData: Record<string, unknown> | undefined) => void,
+): void {
+  if (explicitData === undefined && blockSeedNeedsMedia(blockType)) {
+    mediaPicker.open(undefined, (m) =>
+      insert(seedWithPickedMedia(blockType, m.media_id, m.alt ?? '')),
+    )
+    return
+  }
+  insert(explicitData)
+}

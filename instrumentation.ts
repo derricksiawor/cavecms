@@ -164,11 +164,14 @@ export async function register(): Promise<void> {
     env.BROCHURE_SECRET,
     env.INTERNAL_REVALIDATE_SECRET,
     env.SECRETS_ENCRYPTION_KEY,
-  ]
+    // Optional/legacy — only present in the pre-install window. Filtered so an
+    // absent token doesn't register `undefined` as a "seen" secret.
+    env.INSTALL_BOOTSTRAP_TOKEN,
+  ].filter((s): s is string => typeof s === 'string')
   const seen = new Set<string>()
   for (const s of secrets) {
     if (seen.has(s)) {
-      console.error('boot: refusing — duplicate secret detected (JWT/CSRF/PREVIEW/BROCHURE/INTERNAL_REVALIDATE/SECRETS_ENCRYPTION_KEY must be distinct)')
+      console.error('boot: refusing — duplicate secret detected (JWT/CSRF/PREVIEW/BROCHURE/INTERNAL_REVALIDATE/SECRETS_ENCRYPTION_KEY/INSTALL_BOOTSTRAP_TOKEN must be distinct)')
       process.exit(1)
     }
     seen.add(s)

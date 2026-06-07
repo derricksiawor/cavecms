@@ -912,13 +912,21 @@
   pointer-events: auto;
 }
 
-/* Touch / no-hover: pin the SELECTED block's chrome open so operators
-   can reach the buttons after a tap (there is no hover to reveal them). */
-@media (hover: none) {
-  [data-edit-selected="true"] > [data-edit-chrome] {
-    opacity: 1;
-    pointer-events: auto;
-  }
+/* Pin the SELECTED block's chrome open regardless of input modality.
+   On touch there is no hover to reveal the toolbar after a tap. On desktop
+   this ALSO makes blocks that cannot be hovered editable — notably the
+   zero-size lx_menu_anchor (an invisible in-page jump target rendered
+   h-0 w-0). Without this, selecting menu_anchor in the OutlinePanel
+   highlighted it but surfaced no Edit affordance on desktop (no hover
+   target, no focusable content), leaving its anchorId uneditable. Now:
+   select the row → the canvas scrolls to the block → its toolbar appears →
+   Edit opens the drawer. Only one block is selected at a time, so at most
+   one toolbar is pinned — matching every mainstream visual editor
+   (Figma / Webflow / Framer). `:not([data-editing])` keeps the chrome
+   hidden while its own drawer is open, mirroring the hover rules above. */
+[data-edit-selected="true"]:not([data-editing]) > [data-edit-chrome] {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* lx_richtext block — editorial styling for a markdown post body

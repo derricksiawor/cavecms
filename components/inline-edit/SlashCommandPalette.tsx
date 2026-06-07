@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Search, X, Command } from 'lucide-react'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
+import { runMediaFirstInsert } from '@/lib/cms/blockSeeds'
 import type { SearchableItem } from '@/lib/cms/blockSearch'
 import { useInsertBlock } from './InlineEditContext'
 import { useMediaPicker } from './MediaPickerProvider'
@@ -117,18 +118,18 @@ export function SlashCommandPalette() {
             return
           }
           if (item.kind === 'seed' && item.blockType) {
-            // Page-end insertion — parentId omitted so the server
-            // appends to the tail of the top-level bucket. Operator
-            // can drag the new block into a column via OutlinePanel.
-            const res = await insertBlock(item.blockType, {
-              pageId,
-              data: item.data,
+            // Page-end insertion — parentId omitted so the server appends to
+            // the tail of the top-level bucket. Media-first: figure / image-
+            // pair / cover / gallery etc. open the MediaPicker so a REAL
+            // image is picked before insert (else the placeholder media_id
+            // 404s media_missing). Non-media blocks insert directly.
+            const bt = item.blockType
+            runMediaFirstInsert(bt, item.data, mediaPicker, (data) => {
+              void insertBlock(bt, { pageId, data }).then((res) => {
+                if (!res.ok) toast.error(mapInsertBlockError(res.error).copy)
+                else close()
+              })
             })
-            if (!res.ok) {
-              toast.error(mapInsertBlockError(res.error).copy)
-              return
-            }
-            close()
           }
         } finally {
           firingRef.current = false

@@ -449,6 +449,13 @@ export function EditDrawer({
     return initialTabFor(shapes)
   })
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  // True when the last autosave was rejected because the draft is
+  // structurally INCOMPLETE (server 400 invalid_request) — e.g. a blank
+  // required field in a just-added repeater item, or a cleared required
+  // number. Drives a gentle "finish required fields" footer instead of a
+  // scary "refresh and try again" toast + a stuck "Saving draft…". Cleared
+  // on the next successful save.
+  const [draftIncomplete, setDraftIncomplete] = useState(false)
   const eyebrow = eyebrowFor(blockType)
   const kindNoun = blockType === 'section'
     ? 'Section'
@@ -682,6 +689,15 @@ export function EditDrawer({
               "We couldn't save those changes — your last saved values are restored.",
             ),
           )
+        } else if (j.error === 'invalid_request') {
+          // The draft is structurally INCOMPLETE, not a server failure —
+          // e.g. a freshly-added repeater item with an empty required field,
+          // or a cleared required number. The autosave just can't persist
+          // yet. Keep the operator's in-progress data (do NOT roll back or
+          // tell them to "refresh" — that would discard the row they're
+          // mid-way through filling) and surface a gentle footer hint. The
+          // next change that makes the draft valid autosaves normally.
+          setDraftIncomplete(true)
         } else {
           toast.error(
             mapServerError(
@@ -692,6 +708,9 @@ export function EditDrawer({
         }
         return
       }
+      // Reaching here means the save COMMITTED (200). Clear any "draft
+      // incomplete" state set by an earlier invalid autosave.
+      setDraftIncomplete(false)
       // Success but the body parse may still fail (proxy/gzip mid-
       // stream truncation, CDN interstitial). The save HAS COMMITTED
       // server-side; falling into the outer catch would re-save the
@@ -1217,6 +1236,11 @@ export function EditDrawer({
             <span className="inline-flex items-center gap-1.5 text-copper-300">
               <Loader2 size={11} strokeWidth={2.4} className="animate-spin" />
               Saving…
+            </span>
+          ) : draftIncomplete ? (
+            <span className="inline-flex items-center gap-1.5 text-amber-300/90">
+              <span className="inline-flex h-2 w-2 rounded-full bg-amber-400" />
+              Finish required fields
             </span>
           ) : dirty ? (
             <span className="inline-flex items-center gap-1.5 text-cream-50/55">

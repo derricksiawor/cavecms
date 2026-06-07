@@ -160,9 +160,13 @@ export const POST = withError(async (req) => {
         const tmpPdf = `${tmpDir}/upload.pdf`
         await writeFile(tmpPdf, buf, { mode: 0o640 })
         await writeFinal(tmpPdf, `${PATHS.brochures}/${uuid}.pdf`)
+        // PDFs are served ONLY via the lead-gated /api/brochure/[token]
+        // route (file lives at PATHS.brochures/<uuid>.pdf). Store a non-URL
+        // marker — NOT a /api/brochure/by-uuid/<uuid> URL, which points at an
+        // endpoint that does not exist and would 404 if ever dereferenced.
         await db.execute(sql`
           UPDATE media
-          SET variants = ${JSON.stringify({ pdf: `/api/brochure/by-uuid/${uuid}` })}
+          SET variants = ${JSON.stringify({ kind: 'pdf' })}
           WHERE id = ${insertId}
         `)
       } else {
@@ -294,10 +298,16 @@ export const GET = withError(async (req) => {
     ...r,
     // mysql2 hands JSON columns back as strings on raw SQL; parse the
     // variants column so consumers don't have to.
-    variants:
-      typeof r['variants'] === 'string'
-        ? JSON.parse(r['variants'] as string)
-        : r['variants'],
+    // Defensive parse — a single corrupt variants cell must degrade that
+    // ONE row to null, not 500 the whole media-library list.
+    variants: ((v: unknown) => {
+      if (typeof v !== 'string') return v
+      try {
+        return JSON.parse(v)
+      } catch {
+        return null
+      }
+    })(r['variants']),
   }))
   const last = items[items.length - 1] as { id?: number } | undefined
   const nextCursor =

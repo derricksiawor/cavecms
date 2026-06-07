@@ -362,20 +362,24 @@ export async function deleteDraftBlock(args: {
     // children so the set is just the row itself.
     let subtreeIds = [args.blockId]
     if (row.kind !== 'widget') {
+      // Recursive descent over the EFFECTIVE draft parentage
+      // (COALESCE(draft_parent_id, parent_id)) so a column/widget that was
+      // draft-reparented INTO this subtree is still collected at any depth.
+      // The prior fixed 2-level subquery only followed live parent_id one
+      // level deep, so a draft-reparented descendant survived a section
+      // delete — left orphaned (still visible + publishable) in the draft.
       const [kids] = (await tx.execute(sql`
-        SELECT id FROM content_blocks
-        WHERE page_id = ${args.pageId} AND deleted_at IS NULL
-          AND (id = ${args.blockId}
-               OR parent_id = ${args.blockId}
-               OR draft_parent_id = ${args.blockId}
-               OR parent_id IN (SELECT id FROM (
-                    SELECT id FROM content_blocks
-                    WHERE page_id = ${args.pageId} AND parent_id = ${args.blockId}
-                  ) AS cols)
-               OR draft_parent_id IN (SELECT id FROM (
-                    SELECT id FROM content_blocks
-                    WHERE page_id = ${args.pageId} AND parent_id = ${args.blockId}
-                  ) AS cols2))
+        WITH RECURSIVE subtree AS (
+          SELECT id FROM content_blocks
+          WHERE id = ${args.blockId} AND page_id = ${args.pageId}
+            AND deleted_at IS NULL
+          UNION ALL
+          SELECT cb.id FROM content_blocks cb
+          INNER JOIN subtree s
+            ON COALESCE(cb.draft_parent_id, cb.parent_id) = s.id
+          WHERE cb.page_id = ${args.pageId} AND cb.deleted_at IS NULL
+        )
+        SELECT id FROM subtree
       `)) as unknown as [Array<{ id: number }>]
       subtreeIds = [...new Set([args.blockId, ...kids.map((k) => k.id)])]
     }

@@ -9,12 +9,15 @@ import {
   isPaletteVisible,
   BLOCK_CATEGORIES,
   categoryForEntry,
+  blockSeedNeedsMedia,
+  seedWithPickedMedia,
   type SeedBlockType,
   type SeedEntry,
 } from '@/lib/cms/blockSeeds'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { useSectionTemplateGallery } from './SectionTemplateGalleryHost'
-import { useInsertBlock } from './InlineEditContext'
+import { useInsertBlock, useInlineEditState } from './InlineEditContext'
+import { useMediaPicker } from './MediaPickerProvider'
 import { safeStorage } from '@/lib/client/safeStorage'
 import { SavedBlocksPanel } from './SavedBlocksPanel'
 
@@ -98,7 +101,12 @@ export function WidgetPickerBody({
 }) {
   const insertBlock = useInsertBlock()
   const templateGallery = useSectionTemplateGallery()
+  const mediaPicker = useMediaPicker()
+  const liveBlocks = useInlineEditState().blocks
   const inFlightRef = useRef(false)
+  // Separate guard for the media-first OPEN (runInsert's inFlightRef only
+  // guards AFTER the pick) so a rapid double-click can't re-open the picker.
+  const mediaFirstPendingRef = useRef(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -109,9 +117,23 @@ export function WidgetPickerBody({
     if (autoFocusSearch) searchInputRef.current?.focus()
   }, [autoFocusSearch])
 
+  // Hide single-slot template blocks the page ALREADY has so the palette never
+  // offers an insert the server will 409. contact_form is the contact page's
+  // reserved fixed slot (FIXED_BLOCK_KEYS_PER_PAGE) — offering it there
+  // produced a "We couldn't add that"-class failure. Gating on the live tree
+  // (not the page slug) also hides it once an operator adds one to any other
+  // page; liveBlocks is the optimistic count, so the pill disappears the
+  // instant a contact_form lands.
+  const hasContactForm = useMemo(
+    () => liveBlocks.some((b) => b.blockType === 'contact_form'),
+    [liveBlocks],
+  )
   const visibleEntries = useMemo(
-    () => SEED_ENTRIES.filter(isPaletteVisible),
-    [],
+    () =>
+      SEED_ENTRIES.filter(isPaletteVisible).filter(
+        (e) => e.type !== 'contact_form' || !hasContactForm,
+      ),
+    [hasContactForm],
   )
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -133,9 +155,9 @@ export function WidgetPickerBody({
     setFocusIndex(0)
   }, [query])
 
-  const add = async (
+  const runInsert = async (
     blockType: SeedBlockType,
-    data?: Record<string, unknown>,
+    data: Record<string, unknown> | undefined,
     busyKey?: string,
   ) => {
     if (inFlightRef.current) return
@@ -159,6 +181,47 @@ export function WidgetPickerBody({
       setBusy(null)
       inFlightRef.current = false
     }
+  }
+
+  const add = async (
+    blockType: SeedBlockType,
+    data?: Record<string, unknown>,
+    busyKey?: string,
+  ) => {
+    // Media-first blocks (figure, image pair, cover image, carousel,
+    // hotspot, before/after, gallery): their default seed carries the
+    // placeholder media_id=1, which the server's mediaCheck guard rejects
+    // with 404 `media_missing` (→ "We couldn't add that"). Open the
+    // MediaPicker FIRST and insert with a real picked id — the same
+    // media-first flow the empty-state / slash / between-blocks affordances
+    // use. Skipped when the caller already passed explicit data (a saved
+    // block, a drag carrying seed data, etc.).
+    if (data === undefined && blockSeedNeedsMedia(blockType)) {
+      // Guard the media-first OPEN (runInsert's inFlightRef only guards AFTER
+      // the pick) so a rapid double-click can't re-open the picker / stack a
+      // second callback. Show busy immediately; reset on pick (runInsert then
+      // owns the busy state) or on cancel (the picker's onClose).
+      if (mediaFirstPendingRef.current || inFlightRef.current) return
+      mediaFirstPendingRef.current = true
+      setBusy(busyKey ?? blockType)
+      mediaPicker.open(
+        undefined,
+        (m) => {
+          mediaFirstPendingRef.current = false
+          void runInsert(
+            blockType,
+            seedWithPickedMedia(blockType, m.media_id, m.alt ?? ''),
+            busyKey,
+          )
+        },
+        () => {
+          mediaFirstPendingRef.current = false
+          setBusy(null)
+        },
+      )
+      return
+    }
+    await runInsert(blockType, data, busyKey)
   }
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

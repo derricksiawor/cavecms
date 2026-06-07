@@ -1,9 +1,9 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useId } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { compileGradient, type Gradient, type GradientStop } from '@/lib/cms/gradient'
-import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
+import { ColorPickerField } from './pickers/ColorPicker'
 
 // Visual gradient picker — the builder counterpart to MCP/REST's
 // structured `gradient` value. Edits a { kind, angle, stops[] } descriptor
@@ -17,16 +17,13 @@ import { HEX_COLOR_RE } from '@/lib/cms/designTokens'
 const MAX_STOPS = 6
 const MIN_STOPS = 2
 
+// Brand-palette default (copper). Tailwind blue/violet (#3b82f6 → #8b5cf6)
+// is banned by the design system — gradients start from the warm copper
+// scale so toggling one on never produces an off-brand blue/purple wash.
 const DEFAULT_GRADIENT: Gradient = {
   kind: 'linear',
   angle: 180,
-  stops: [{ color: '#3b82f6' }, { color: '#8b5cf6' }],
-}
-
-// Normalize a 6-digit hex from the native color input. The native
-// <input type="color"> always yields #rrggbb, so this is belt-and-braces.
-function clampHex(v: string): string {
-  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : '#000000'
+  stops: [{ color: '#ECC8AB' }, { color: '#B87333' }],
 }
 
 export function GradientPickerField({
@@ -138,18 +135,20 @@ export function GradientPickerField({
           <div className="space-y-2">
             {g.stops.map((stop, i) => (
               <div key={`${baseId}-stop-${i}`} className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={clampHex(stop.color)}
-                  onChange={(e) => setStop(i, { color: clampHex(e.target.value) })}
-                  className="h-8 w-10 shrink-0 cursor-pointer rounded border border-warm-stone/30 bg-white p-0.5"
-                  aria-label={`Stop ${i + 1} color`}
-                />
-                <StopHexInput
-                  color={stop.color}
-                  label={`Stop ${i + 1} hex`}
-                  onCommit={(hex) => setStop(i, { color: hex })}
-                />
+                <div className="min-w-0 flex-1">
+                  {/* On-brand picker (token swatches + react-colorful + hex)
+                      in hexOnly mode — replaces the native OS <input
+                      type="color"> that clashed with the dark drawer + bypassed
+                      the brand palette. allowAlpha=false: gradient stops are
+                      6-digit hex. */}
+                  <ColorPickerField
+                    label={`Stop ${i + 1}`}
+                    value={stop.color}
+                    onChange={(v) => setStop(i, { color: v ?? stop.color })}
+                    hexOnly
+                    allowAlpha={false}
+                  />
+                </div>
                 <label className="flex items-center gap-1">
                   <input
                     type="number"
@@ -194,43 +193,5 @@ export function GradientPickerField({
 
       {help && <span className="mt-1 block text-[11px] text-warm-stone/80">{help}</span>}
     </div>
-  )
-}
-
-// Hex text field for a gradient stop. Keeps a local draft so the operator can
-// type mid-value, but only COMMITS to the gradient when the draft is a valid
-// hex (HEX_COLOR_RE — the same regex the server Zod schema enforces). Without
-// this gate a partial/invalid string ('#', '#12') reaches the stored gradient
-// and hard-fails the write boundary (422) or is silently dropped. Mirrors the
-// commit-on-valid behaviour of the main ColorPicker hex input.
-function StopHexInput({
-  color,
-  label,
-  onCommit,
-}: {
-  color: string
-  label: string
-  onCommit: (hex: string) => void
-}) {
-  const [draft, setDraft] = useState<string | null>(null)
-  const shown = draft ?? color
-  const valid = HEX_COLOR_RE.test(shown)
-  return (
-    <input
-      type="text"
-      value={shown}
-      onChange={(e) => {
-        const v = e.target.value
-        setDraft(v)
-        if (HEX_COLOR_RE.test(v)) onCommit(v.toLowerCase())
-      }}
-      onBlur={() => setDraft(null)}
-      spellCheck={false}
-      aria-invalid={!valid}
-      className={`w-24 rounded-lg border bg-white px-2 py-1 font-mono text-[11px] text-near-black focus:outline-none ${
-        valid ? 'border-warm-stone/25 focus:border-copper-400' : 'border-red-400 focus:border-red-500'
-      }`}
-      aria-label={label}
-    />
   )
 }

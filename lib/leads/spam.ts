@@ -60,7 +60,13 @@ export async function checkLeadRecaptcha(
       score: r.score,
     }
   }
-  if (r.reason === 'verify_failed') {
+  // verify_failed AND verify_timeout both fail OPEN (degraded): a Google
+  // siteverify outage or 4s-timeout is an infra blip, not a bot signal, and
+  // silently dropping real enquiries during it is lost business (the
+  // fail-open decision matrix above). `verify_timeout` was added to the
+  // verifier AFTER this consumer, so it previously fell through to pass:false
+  // and discarded every lead during a siteverify slowdown.
+  if (r.reason === 'verify_failed' || r.reason === 'verify_timeout') {
     return { pass: true, degraded: true, reason: r.reason, score: r.score }
   }
   return { pass: false, degraded: false, reason: r.reason, score: r.score }

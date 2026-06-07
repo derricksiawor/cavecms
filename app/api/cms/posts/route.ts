@@ -7,7 +7,7 @@ import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
 import { adminPolicy } from '@/lib/auth/adminPolicy'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
-import { checkCmsMutationRate } from '@/lib/auth/cmsRateLimit'
+import { checkCmsMutationRate, checkReadRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
 import { AUDIT_KIND } from '@/lib/cms/auditKinds'
@@ -186,6 +186,7 @@ interface PostListRow {
 export const GET = withError(async (req) => {
   const ctx = await requireRole(['admin', 'editor', 'viewer'])
   requireScope(ctx, 'posts', 'read')
+  checkReadRate(ctx.userId)
   const url = new URL(req.url)
   const showArchived = url.searchParams.get('archived') === '1'
 

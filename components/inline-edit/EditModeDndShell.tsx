@@ -34,6 +34,8 @@ import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { mapServerError } from '@/lib/cms/errorCopy'
 import { useToast } from './Toast'
 import { useRecordCommand } from './UndoStackProvider'
+import { useMediaPicker } from './MediaPickerProvider'
+import { runMediaFirstInsert } from '@/lib/cms/blockSeeds'
 import {
   useInlineEditDispatch,
   useInlineEditState,
@@ -117,6 +119,7 @@ export function EditModeDndShell({ pageId, children }: Props) {
   const dispatch = useInlineEditDispatch()
   const state = useInlineEditState()
   const insertBlock = useInsertBlock()
+  const mediaPicker = useMediaPicker()
   // SSR-stable DndContext id (paired with the DndContext below) so
   // @dnd-kit's `aria-describedby` annotations match across the
   // hydration boundary. Audit finding E2 (Chunk K).
@@ -333,27 +336,42 @@ export function EditModeDndShell({ pageId, children }: Props) {
           }
         }
 
-        setBusy(true)
-        try {
-          const res = await insertBlock(paletteData.blockType, {
+        // Media-first: a figure/image-pair/cover/gallery/etc. dropped from
+        // the palette carries no seedData, so insert with a REAL picked
+        // image (else the placeholder media_id 404s media_missing — the
+        // same bug the click path had). Non-media blocks insert straight
+        // through. parentId/before/after are already resolved above; capture
+        // them for the (possibly MediaPicker-deferred) insert.
+        const bt = paletteData.blockType as InsertableBlockType
+        const pId = parentId
+        const bId = beforeBlockId
+        const aId = afterBlockId
+        const doDrop = (data: Record<string, unknown> | undefined) => {
+          setBusy(true)
+          insertBlock(bt, {
             pageId,
-            parentId: parentId ?? undefined,
-            beforeBlockId: beforeBlockId ?? undefined,
-            afterBlockId: afterBlockId ?? undefined,
-            data: paletteData.seedData,
+            parentId: pId ?? undefined,
+            beforeBlockId: bId ?? undefined,
+            afterBlockId: aId ?? undefined,
+            data,
           })
-          if (!mountedRef.current) return
-          if (!res.ok) {
-            toast.error(mapInsertBlockError(res.error).copy)
-          }
-        } catch (e) {
-          if (!mountedRef.current) return
-          toast.error(
-            e instanceof Error ? e.message : 'Network error — try again.',
-          )
-        } finally {
-          if (mountedRef.current) setBusy(false)
+            .then((res) => {
+              if (mountedRef.current && !res.ok) {
+                toast.error(mapInsertBlockError(res.error).copy)
+              }
+            })
+            .catch((e) => {
+              if (mountedRef.current) {
+                toast.error(
+                  e instanceof Error ? e.message : 'Network error — try again.',
+                )
+              }
+            })
+            .finally(() => {
+              if (mountedRef.current) setBusy(false)
+            })
         }
+        runMediaFirstInsert(bt, paletteData.seedData, mediaPicker, doDrop)
         return
       }
 
@@ -772,7 +790,7 @@ export function EditModeDndShell({ pageId, children }: Props) {
         if (mountedRef.current) setBusy(false)
       }
     },
-    [busy, dispatch, insertBlock, pageId, recordCommand, router, toast],
+    [busy, dispatch, insertBlock, mediaPicker, pageId, recordCommand, router, toast],
   )
 
   const onDragCancel = useCallback(() => {

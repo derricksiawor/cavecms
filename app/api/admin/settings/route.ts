@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { sql } from 'drizzle-orm'
-import { db } from '@/db/client'
+import { db, type Tx } from '@/db/client'
 import { auditLog } from '@/db/schema'
+import { assertMediaAvailable } from '@/lib/cms/mediaCheck'
 import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { requireRole, HttpError, requireScope } from '@/lib/auth/requireRole'
@@ -39,6 +40,64 @@ interface SettingRow {
   value: unknown
   version: number
   updated_at: Date
+}
+
+// Settings keys whose value embeds a media_id (header/footer logo, favicon,
+// OG image). Each must keep a media_references('settings', 0, '<field>') row
+// so the bound asset can't be hard-deleted or cron-purged out from under the
+// live setting. The install routes already do this; the operator-facing PATCH
+// did NOT — dangling the logo/favicon/OG image and letting the nightly purge
+// permanently destroy the file (referent_id is the sentinel 0 — the settings
+// table is keyed by string, not int).
+const SETTINGS_MEDIA_FIELDS: Record<
+  string,
+  ReadonlyArray<{ field: string; mediaId: (v: unknown) => number | null }>
+> = {
+  site_header: [{ field: 'site_header.logo', mediaId: (v) => subMediaId(v, 'logo') }],
+  footer: [{ field: 'footer.logo', mediaId: (v) => subMediaId(v, 'logo') }],
+  default_seo: [
+    { field: 'default_seo.ogImage', mediaId: (v) => subMediaId(v, 'ogImage') },
+    { field: 'default_seo.favicon', mediaId: (v) => subMediaId(v, 'favicon') },
+  ],
+}
+
+function subMediaId(value: unknown, sub: string): number | null {
+  const node = (value as Record<string, unknown> | null | undefined)?.[sub]
+  const id = (node as { media_id?: unknown } | null | undefined)?.media_id
+  return typeof id === 'number' && Number.isInteger(id) && id > 0 ? id : null
+}
+
+// Reconcile media_references for a settings key against its previous value,
+// inside the PATCH TX. INSERT IGNORE the current binding (idempotent — also
+// heals a legacy row whose ref was never created) and DELETE a ref the
+// operator just replaced/cleared. assertMediaAvailable on a genuinely-new
+// binding closes the pick-then-concurrent-delete race (the FOR SHARE guard
+// saveBlock uses).
+async function reconcileSettingsMediaRefs(
+  tx: Tx,
+  key: string,
+  prevValue: unknown,
+  newValue: unknown,
+): Promise<void> {
+  const fields = SETTINGS_MEDIA_FIELDS[key]
+  if (!fields) return
+  for (const { field, mediaId } of fields) {
+    const oldId = mediaId(prevValue)
+    const newId = mediaId(newValue)
+    if (newId !== null) {
+      if (newId !== oldId) await assertMediaAvailable(tx, [newId])
+      await tx.execute(sql`
+        INSERT IGNORE INTO media_references (media_id, referent_type, referent_id, field)
+        VALUES (${newId}, 'settings', 0, ${field})
+      `)
+    }
+    if (oldId !== null && oldId !== newId) {
+      await tx.execute(sql`
+        DELETE FROM media_references
+        WHERE media_id = ${oldId} AND referent_type = 'settings' AND field = ${field}
+      `)
+    }
+  }
 }
 
 function jsonGuardFail(err: SecurityGuardFailure): Response {
@@ -760,11 +819,17 @@ export const PATCH = withError(async (req: Request) => {
         userAgent: meta.userAgent,
         requestId: meta.requestId,
       })
+      await reconcileSettingsMediaRefs(tx, body.key, prevValueForGuards, parsed)
       return true
     }
     if (rows[0].version !== body.version) {
       throw new HttpError(409, 'version_conflict')
     }
+    // Reconcile media_references BEFORE the no-op early-return so even an
+    // unchanged re-save heals a legacy row whose logo/favicon/OG ref was
+    // never created; on a real change it swaps old→new. In-TX → atomic with
+    // the value write.
+    await reconcileSettingsMediaRefs(tx, body.key, prevValueForGuards, parsed)
     // Comparison: stringify the row's parsed value with the same
     // serializer we'll write. JSON column comes back parsed via
     // mysql2 → drizzle. Object key order is deterministic for

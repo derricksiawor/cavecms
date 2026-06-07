@@ -212,7 +212,23 @@ export default async function PageRoute({
     // Snake_case + numeric comparison — raw mysql2 returns TINYINT(1)
     // as `0|1`, NOT `true|false`. Matches lib/cms/hydrate.ts:327
     // codebase convention.
-    if (page.published !== 1) notFound()
+    if (page.published !== 1) {
+      // Draft page. A new page is created as a draft (published=0) and the
+      // operator inline-edits it BEFORE publishing — so an authed admin/
+      // editor in edit mode must be able to load it (else "Edit inline"
+      // 404s on the very page they just created). resolveEditableMode gates
+      // on canEdit(session) AND (edit-mode cookie OR ?edit=1), so a public
+      // visitor can never reach a draft even by guessing the slug. getSession
+      // is request-cached, so the re-resolve inside renderResolvedPage is free.
+      let draftSession: Awaited<ReturnType<typeof getSession>> = null
+      try {
+        draftSession = await getSession()
+      } catch {
+        /* bad cookie → treat as anonymous → 404 below */
+      }
+      const dc = await cookies()
+      if (!resolveEditableMode(draftSession, dc, search)) notFound()
+    }
     return renderResolvedPage(page, { preview: false, search })
   }
 
