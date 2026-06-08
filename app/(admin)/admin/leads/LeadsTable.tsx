@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Trash2, Mail, Phone, ExternalLink, Undo2, FolderOpen } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { Drawer } from '@/components/ui/Drawer'
+import type { SubmissionField } from '@/lib/leads/submission'
 import { useToast } from '@/components/inline-edit/Toast'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
 import { RowActionsMenu } from '@/components/admin/RowActionsMenu'
@@ -60,6 +61,7 @@ const SOURCE_LABELS: Record<string, string> = {
   contact: 'Contact form',
   brochure: 'Brochure request',
   inquiry: 'Project inquiry',
+  form: 'Form submission',
 }
 
 const STATUS_TONES: Record<string, StatusTone> = {
@@ -102,6 +104,10 @@ export function LeadsTable({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [active, setActive] = useState<Lead | null>(null)
+  // The opened lead's structured submission — fetched lazily from the [id]
+  // detail route when the drawer opens, so payload never rides the 1000-row
+  // list drain (it's detail-only data shown one lead at a time).
+  const [activePayload, setActivePayload] = useState<SubmissionField[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Lead | null>(null)
   // Flips true when loadAll fills to FETCH_TOTAL_CAP and the server
@@ -176,6 +182,30 @@ export function LeadsTable({
   useEffect(() => {
     void loadAll()
   }, [loadAll])
+
+  // Lazy-load the opened lead's submission from the admin/editor-only [id]
+  // detail route. Aborts on close / re-open so a slow fetch can't land on the
+  // wrong lead. Failure leaves activePayload null → the drawer falls back to
+  // the flattened `message`.
+  useEffect(() => {
+    const id = active?.id
+    if (id == null) {
+      setActivePayload(null)
+      return
+    }
+    const ctrl = new AbortController()
+    setActivePayload(null)
+    fetch(`/api/admin/leads/${id}`, { credentials: 'include', signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j && Array.isArray(j.payload)) setActivePayload(j.payload as SubmissionField[])
+      })
+      .catch(() => {})
+    return () => ctrl.abort()
+    // Keyed on the lead's IDENTITY, not the whole object: payload is immutable
+    // for a given lead, so an in-drawer status edit (which makes a new same-id
+    // `active`) must not blank + refetch the Submission list.
+  }, [active?.id])
 
   async function changeStatusOne(id: number, status: string): Promise<void> {
     const r = await csrfFetch(`/api/admin/leads/${id}`, {
@@ -634,7 +664,25 @@ export function LeadsTable({
                 </dd>
               </div>
             </dl>
-            {active.message && (
+            {activePayload && activePayload.length > 0 ? (
+              <div className="mt-6">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-warm-stone">
+                  Submission
+                </p>
+                <dl className="mt-2 space-y-2">
+                  {activePayload.map((f, i) => (
+                    <div key={i}>
+                      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-warm-stone">
+                        {f.label}
+                      </dt>
+                      <dd className="mt-0.5 whitespace-pre-wrap text-sm text-near-black">
+                        {f.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : active.message ? (
               <div className="mt-6">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-warm-stone">
                   Message
@@ -643,7 +691,7 @@ export function LeadsTable({
                   {active.message}
                 </p>
               </div>
-            )}
+            ) : null}
             {role !== 'viewer' && (
               <div className="mt-8">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-warm-stone">

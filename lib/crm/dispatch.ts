@@ -38,8 +38,13 @@ export interface LeadPayload {
   source: LeadSource
   /** Raw CaveCMS field values keyed by names operator maps against. */
   cavecmsFields: Record<string, string | null | undefined>
-  /** When the lead came from a contact_form block, the block id. */
+  /** When the lead came from a contact_form / lx_form block, the block id. */
   blockId?: number
+  /** Pre-parsed `block.data.crmDestinations` when the caller already read the
+   *  block row (the lx_form lead route does — avoids a redundant SELECT).
+   *  `null` = block read, no per-instance destinations; `undefined` = not
+   *  provided, so dispatch loads the row itself by blockId. */
+  blockCrmDestinations?: unknown
   /** HubSpot visitor-attribution cookie. */
   hutk?: string
   pageUri?: string
@@ -245,11 +250,18 @@ async function resolveDestinations(
   hubspot: HubspotSetting,
   zoho: ZohoSetting,
 ): Promise<ResolvedDest[]> {
-  // 1. Per-instance: block.data.crmDestinations (contact_form only).
-  if (payload.blockId && payload.source === 'contact') {
-    const perInstance = await loadBlockCrmDestinations(payload.blockId)
+  // 1. Per-instance: block.data.crmDestinations (contact_form + lx_form). Prefer
+  //    the caller's pre-parsed destinations (the lx_form route already read the
+  //    row) to avoid a redundant SELECT; else load the row by id.
+  if (payload.source === 'contact' || payload.source === 'form') {
+    let perInstance: BlockDest[] | null = null
+    if (payload.blockCrmDestinations !== undefined) {
+      perInstance = validateBlockDestinations(payload.blockCrmDestinations, payload.blockId)
+    } else if (payload.blockId) {
+      perInstance = await loadBlockCrmDestinations(payload.blockId)
+    }
     if (perInstance && perInstance.length > 0) {
-      return perInstance.map((d) => enrichBlockDest(d, zoho))
+      return perInstance.map((d) => enrichBlockDest(d, zoho, payload.source))
     }
   }
   // 2. Fallback: integrations_*.formSourceMap[source]
@@ -277,20 +289,43 @@ async function resolveDestinations(
 // omits webformAuthToken to keep the token out of operator-readable
 // block.data — the token only lives in settings, which is gated by
 // step-up reauth + server-side redaction.
-function enrichBlockDest(d: BlockDest, zoho: ZohoSetting): ResolvedDest {
+function enrichBlockDest(d: BlockDest, zoho: ZohoSetting, source: LeadPayload['source']): ResolvedDest {
   if (d.provider === 'hubspot') return d
   if (d.mode !== 'webform') return d
-  // Pull the per-source webform token from the integrations setting
-  // for THIS contact_form block's source ('contact'). Webform tokens
-  // are intentionally NOT persisted on block.data — that would bypass
-  // the step-up reauth gate on integrations settings. If the operator
-  // didn't configure a contact-source token, the dispatch helper
-  // short-circuits (no token → null dispatch with structured log).
-  const sourceDest = zoho.formSourceMap?.['contact']
+  // Pull the per-source webform token from the integrations setting for THIS
+  // block's source ('contact' for contact_form, 'form' for lx_form). Webform
+  // tokens are intentionally NOT persisted on block.data — that would bypass
+  // the step-up reauth gate on integrations settings. If the operator didn't
+  // configure a token for this source, the dispatch helper short-circuits
+  // (no token → null dispatch with structured log).
+  const sourceDest = zoho.formSourceMap?.[source]
   if (sourceDest?.mode === 'webform' && sourceDest.webformAuthToken) {
     return { ...d, webformAuthToken: sourceDest.webformAuthToken }
   }
   return d
+}
+
+// Validate a block's raw `crmDestinations` array via the registry schema.
+// .strict() on each branch strips unknown keys (defence in depth against a
+// hand-edited row / restored backup carrying a stale `webformAuthToken` or a
+// future-schema field). safeParse — never throw; on failure log + return null
+// so the caller falls back to site defaults.
+function validateBlockDestinations(
+  dests: unknown,
+  blockId?: number,
+): BlockDest[] | null {
+  if (!Array.isArray(dests)) return null
+  const result = contactFormCrmDestinationsSchema.safeParse(dests)
+  if (!result.success) {
+    console.error(JSON.stringify({
+      level: 'error',
+      msg: 'block_crm_destinations_invalid',
+      blockId,
+      issue: result.error.issues[0]?.message ?? 'unknown',
+    }))
+    return null
+  }
+  return result.data as BlockDest[]
 }
 
 async function loadBlockCrmDestinations(blockId: number): Promise<BlockDest[] | null> {
@@ -302,25 +337,10 @@ async function loadBlockCrmDestinations(blockId: number): Promise<BlockDest[] | 
     const raw = rows[0].data
     const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!parsed || typeof parsed !== 'object') return null
-    const dests = (parsed as { crmDestinations?: unknown }).crmDestinations
-    if (!Array.isArray(dests)) return null
-    // STRICT re-validation via the registry schema. .strict() on each
-    // branch strips unknown keys (defence in depth against any path
-    // that could surface a hand-edited row / restored backup carrying
-    // a stale `webformAuthToken` or future-schema field we don't
-    // recognise). safeParse — never throw; on failure, log + ignore
-    // the per-instance config and fall back to site defaults.
-    const result = contactFormCrmDestinationsSchema.safeParse(dests)
-    if (!result.success) {
-      console.error(JSON.stringify({
-        level: 'error',
-        msg: 'block_crm_destinations_invalid',
-        blockId,
-        issue: result.error.issues[0]?.message ?? 'unknown',
-      }))
-      return null
-    }
-    return result.data as BlockDest[]
+    return validateBlockDestinations(
+      (parsed as { crmDestinations?: unknown }).crmDestinations,
+      blockId,
+    )
   } catch {
     return null
   }

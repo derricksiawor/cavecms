@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   mediumtext,
+  json,
   timestamp,
   index,
   uniqueIndex,
@@ -29,12 +30,17 @@ export const leads = mysqlTable(
     id: int('id').primaryKey().autoincrement(),
     source: varchar('source', {
       length: 16,
-      enum: ['contact', 'brochure', 'inquiry'],
+      enum: ['contact', 'brochure', 'inquiry', 'form'],
     }).notNull(),
     name: varchar('name', { length: 180 }),
     email: varchar('email', { length: 180 }),
     phone: varchar('phone', { length: 40 }),
     message: text('message'),
+    // Structured submission for lx_form (source='form'): the raw
+    // [{label,value}] of every submitted field, so the admin lead drawer can
+    // render a clean key:value list instead of only the flattened `message`.
+    // NULL for legacy contact/brochure/inquiry/newsletter rows.
+    payload: json('payload'),
     enquiryType: varchar('enquiry_type', {
       length: 20,
       enum: ['tour', 'brochure', 'enquiry'],

@@ -516,9 +516,9 @@ export function ProjectEditor({
             onChange={(m) => setHero(m ?? null)}
           />
           <MediaPicker
-            label="Brochure (PDF)"
+            label="Downloadable file"
             accept="pdf"
-            help="Visitors download this PDF after sharing their email on the brochure card."
+            help="The PDF visitors receive after submitting the download form on this project — a brochure, spec sheet, price list, or any gated PDF."
             value={brochure ?? undefined}
             onChange={(m) => setBrochure(m ?? null)}
           />

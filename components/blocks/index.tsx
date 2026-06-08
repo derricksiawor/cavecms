@@ -294,8 +294,8 @@ const BLOCK_RENDERERS = defineRenderers({
   lx_icon: ({ data, outerClass }: BlockRendererArgs<BlockData<'lx_icon'>>) => (
     <LxIcon data={data} outerClass={outerClass} />
   ),
-  lx_form: ({ data, csrf, inlineEdit, outerClass, sectionMeta }: BlockRendererArgs<BlockData<'lx_form'>>) => (
-    <LxForm data={data} csrf={csrf} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} />
+  lx_form: ({ data, csrf, inlineEdit, outerClass, sectionMeta, blockId }: BlockRendererArgs<BlockData<'lx_form'>>) => (
+    <LxForm data={data} csrf={csrf} inlineEdit={inlineEdit} outerClass={outerClass} sectionMeta={sectionMeta} blockId={blockId} />
   ),
   lx_figure: ({ data, media, inlineEdit, outerClass }: BlockRendererArgs<BlockData<'lx_figure'>>) => (
     <LxFigure data={data} media={media} inlineEdit={inlineEdit} outerClass={outerClass} />

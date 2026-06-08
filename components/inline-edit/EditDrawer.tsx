@@ -198,6 +198,7 @@ const ADVANCED_KEYS = new Set([
 ])
 
 function tabForShape(shape: FieldShape): TabKey {
+  if (shape.key === 'actions') return 'aftersubmit'
   if (STYLE_KEYS.has(shape.key)) return 'style'
   if (ADVANCED_KEYS.has(shape.key)) return 'advanced'
   return 'content'
@@ -1013,6 +1014,7 @@ export function EditDrawer({
   const tabShapes = useMemo(() => {
     const buckets: Record<TabKey, FieldShape[]> = {
       content: [],
+      aftersubmit: [],
       style: [],
       advanced: [],
       crm: [],
@@ -1027,7 +1029,17 @@ export function EditDrawer({
   // crmDestinations in its block-registry schema; extending CRM
   // dispatch to a future form widget = (1) add the field to that
   // block's Zod schema and (2) add its type to this set.
-  const widgetHasCrm = blockType === 'contact_form'
+  const widgetHasCrm = blockType === 'contact_form' || blockType === 'lx_form'
+
+  // CRM field-map left column. contact_form uses the fixed 'contact' set;
+  // lx_form uses its OWN operator-defined field names.
+  const crmCavecmsFields = useMemo(() => {
+    if (blockType !== 'lx_form') return undefined
+    const fields = (data as { fields?: Array<{ name?: unknown }> })?.fields
+    return Array.isArray(fields)
+      ? fields.map((f) => String(f.name ?? '')).filter(Boolean)
+      : []
+  }, [blockType, data])
 
   // crmDestinations array — read from data; falls back to [] when
   // the block has never been configured. Updates flow through
@@ -1041,9 +1053,22 @@ export function EditDrawer({
     [data],
   )
 
+  // Number of configured after-submit actions — shown as the tab count,
+  // like the CRM tab shows its destination count.
+  const afterSubmitCount = useMemo(
+    () =>
+      Array.isArray((data as Record<string, unknown>)?.actions)
+        ? ((data as Record<string, unknown>).actions as unknown[]).length
+        : 0,
+    [data],
+  )
+
   const visibleTabs = useMemo(() => {
     const tabs: Array<{ key: TabKey; label: string; count: number }> = []
     tabs.push({ key: 'content', label: 'Content', count: tabShapes.content.length })
+    if (tabShapes.aftersubmit.length > 0) {
+      tabs.push({ key: 'aftersubmit', label: 'After submit', count: afterSubmitCount })
+    }
     if (tabShapes.style.length > 0) {
       tabs.push({ key: 'style', label: 'Style', count: tabShapes.style.length })
     }
@@ -1058,7 +1083,7 @@ export function EditDrawer({
       tabs.push({ key: 'crm', label: 'CRM', count: crmDestinations.length })
     }
     return tabs
-  }, [tabShapes, widgetHasCrm, crmDestinations.length])
+  }, [tabShapes, widgetHasCrm, crmDestinations.length, afterSubmitCount])
 
   const activeShapes = tabShapes[activeTab]
 
@@ -1169,6 +1194,7 @@ export function EditDrawer({
             </div>
           ) : activeTab === 'crm' && widgetHasCrm ? (
             <CrmDestinationsPanel
+              cavecmsFieldsOverride={crmCavecmsFields}
               destinations={crmDestinations as never}
               onChange={(next) => handleSetData({ ...(data as Record<string, unknown>), crmDestinations: next })}
             />

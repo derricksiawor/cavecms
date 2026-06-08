@@ -94,6 +94,10 @@ export type FieldShape =
       label: string
       itemFields: FieldShape[]
       itemTitle?: (item: Record<string, unknown>, i: number) => string
+      // Fixed fields merged into every NEW item's blank (e.g. a discriminator
+      // `kind` that isn't an editable itemField). Lets a discriminated-union
+      // repeater seed the right variant on Add.
+      defaults?: Record<string, unknown>
       // Used in the "Add your first {itemNoun}" empty-state copy.
       // Operator-facing — required for fluent English (the prior
       // heuristic produced "amenity lis"). Singular form, lowercase.
@@ -986,7 +990,7 @@ function ObjectArrayField({
     // fills ABSENT keys. So text-like kinds get '', selects get their first
     // valid option, booleans false, arrays [], and every other kind is OMITTED
     // entirely — letting the schema's `.default()`/`.optional()` apply on save.
-    const b: Record<string, unknown> = { __id: cryptoId() }
+    const b: Record<string, unknown> = { __id: cryptoId(), ...shape.defaults }
     for (const f of shape.itemFields) {
       switch (f.kind) {
         case 'string':
@@ -1016,7 +1020,7 @@ function ObjectArrayField({
       }
     }
     return b
-  }, [shape.itemFields])
+  }, [shape.itemFields, shape.defaults])
   const canAdd = shape.maxItems === undefined || arr.length < shape.maxItems
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
@@ -2794,11 +2798,37 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
           options: [
             { value: 'text', label: 'Text' }, { value: 'email', label: 'Email' }, { value: 'tel', label: 'Phone' },
             { value: 'textarea', label: 'Long text' }, { value: 'select', label: 'Dropdown' }, { value: 'checkbox', label: 'Checkbox' },
+            { value: 'hidden', label: 'Hidden (fixed value)' },
           ],
         },
         { kind: 'boolean', key: 'required', label: 'Required' },
         { kind: 'string', key: 'placeholder', label: 'Placeholder', maxLength: 120 },
-        { kind: 'string_array', key: 'options', label: 'Dropdown options', placeholder: 'Add an option, press Enter', maxItems: 20 },
+        {
+          kind: 'object_array', key: 'options', label: 'Dropdown options',
+          addLabel: 'Add option', itemNoun: 'option', maxItems: 30,
+          itemTitle: (o) => String(o.label || o.value || 'Option'),
+          itemFields: [
+            { kind: 'string', key: 'label', label: 'Label (shown)', maxLength: 80 },
+            { kind: 'string', key: 'value', label: 'Value (submitted)', maxLength: 80, help: 'The id/tag sent on submit + mapped to CRM. Leave blank to use the label.' },
+          ],
+        },
+        {
+          kind: 'select', key: 'optionsSource', label: 'Dropdown options source',
+          options: [
+            { value: 'static', label: 'The list above' },
+            { value: 'tags', label: 'My tags (live)' },
+            { value: 'categories', label: 'My categories (live)' },
+          ],
+          help: 'For a Dropdown field, pull options live from your tags or categories instead of the fixed list. The submitted value is the term’s slug.',
+        },
+        {
+          kind: 'select', key: 'width', label: 'Field width',
+          options: [
+            { value: 'full', label: 'Full width' },
+            { value: 'half', label: 'Half (side by side)' },
+            { value: 'third', label: 'Third' },
+          ],
+        },
         {
           kind: 'select', key: 'role', label: 'Map to lead field',
           options: [
@@ -2807,12 +2837,41 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
           ],
           help: 'Maps this field to the lead row’s name/email/phone column.',
         },
+        { kind: 'string', key: 'defaultValue', label: 'Hidden value', maxLength: 200, help: 'For a Hidden field: the fixed value submitted (a CRM tag id, a campaign/source code, a project id). Ignored for visible fields.' },
       ],
     },
     { kind: 'string', key: 'submitLabel', label: 'Submit button label', maxLength: TEXT_MAX.ctaText },
     { kind: 'string', key: 'successHeadline', label: 'Success headline', maxLength: TEXT_MAX.title },
     { kind: 'string', key: 'successBody', label: 'Success message', maxLength: TEXT_MAX.body, multiline: true },
     { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
+    {
+      kind: 'object_array', key: 'actions', label: 'After submit',
+      addLabel: 'Add a delivery step', itemNoun: 'after-submit step', maxItems: 8,
+      defaults: { kind: 'deliver_file' },
+      help: 'Deliver a file (a PDF lead magnet) when this form is submitted — emailed as a secure link, shown as an instant download, or left for your team to send.',
+      itemTitle: (item) => {
+        const mode = String(item.mode ?? 'email')
+        return mode === 'instant'
+          ? 'Deliver a file · instant download'
+          : mode === 'manual'
+            ? 'Deliver a file · team sends it'
+            : 'Deliver a file · emailed link'
+      },
+      itemFields: [
+        { kind: 'media', key: 'file', label: 'File to deliver', accept: 'pdf', help: 'The PDF a visitor receives after submitting — a brochure, price list, guide, etc.' },
+        {
+          kind: 'select', key: 'mode', label: 'How it’s delivered',
+          options: [
+            { value: 'email', label: 'Email a secure download link' },
+            { value: 'instant', label: 'Show a download button on success' },
+            { value: 'manual', label: 'Don’t auto-send — my team will' },
+          ],
+          help: 'An emailed link proves the address is real; instant hands the file over straight away.',
+        },
+        { kind: 'string', key: 'emailSubject', label: 'Email subject (optional)', maxLength: 160, placeholder: 'Your download is ready' },
+        { kind: 'string', key: 'emailBody', label: 'Email message (optional)', maxLength: TEXT_MAX.body, multiline: true },
+      ],
+    },
   ],
 
   lx_icon: [

@@ -25,7 +25,7 @@ import { structuralEqual } from '@/lib/structuralEqual'
 // → form posts null and the server PATCH explicitly removes it.
 
 const ZOHO_REGIONS = ['com', 'eu', 'in', 'com.au', 'jp'] as const
-const HUBSPOT_LEAD_SOURCES = ['contact', 'newsletter', 'brochure', 'inquiry'] as const
+const HUBSPOT_LEAD_SOURCES = ['contact', 'newsletter', 'brochure', 'inquiry', 'form'] as const
 const ZOHO_MODULES = ['Leads', 'Contacts', 'Deals'] as const
 
 // CaveCMS field shapes per lead source. Used to seed the left column of
@@ -37,6 +37,10 @@ const SOURCE_FIELDS: Record<(typeof HUBSPOT_LEAD_SOURCES)[number], string[]> = {
   newsletter: ['email', 'name'],
   brochure: ['name', 'email', 'phone', 'brochure_project'],
   inquiry: ['name', 'email', 'phone', 'message'],
+  // Generic lx_form site-wide default. A form's field names are operator-defined
+  // and vary per form, so this fixed left column is just the role-mapped basics;
+  // the per-form CRM tab (block.data.crmDestinations) is the richer exact path.
+  form: ['name', 'email', 'phone'],
 }
 
 // ─────────────────────────── Value shapes ───────────────────────────

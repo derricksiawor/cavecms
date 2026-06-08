@@ -45,12 +45,22 @@ interface Props {
   /** Source key — for contact_form blocks this is 'contact'. Drives
    *  the left column of the field-map UI. */
   cavecmsSource?: string
+  /** Explicit left-column field names — used by lx_form, whose fields are
+   *  operator-defined (overrides cavecmsSource's fixed list). */
+  cavecmsFieldsOverride?: string[]
   destinations: Destination[]
   onChange: (next: Destination[]) => void
 }
 
-export function CrmDestinationsPanel({ cavecmsSource = 'contact', destinations, onChange }: Props) {
-  const cavecmsFields = CAVECMS_FIELDS_BY_SOURCE[cavecmsSource] ?? CAVECMS_FIELDS_BY_SOURCE.contact ?? []
+export function CrmDestinationsPanel({ cavecmsSource = 'contact', cavecmsFieldsOverride, destinations, onChange }: Props) {
+  // An lx_form passes its OWN field names as the override (possibly an empty
+  // array mid-edit before any field is named). Honour ANY provided array so an
+  // empty lx_form yields an empty column rather than contact_form's 8 fixed
+  // fields; the CAVECMS_FIELDS_BY_SOURCE fallback is only for contact_form,
+  // which passes `undefined`.
+  const cavecmsFields = Array.isArray(cavecmsFieldsOverride)
+    ? cavecmsFieldsOverride
+    : (CAVECMS_FIELDS_BY_SOURCE[cavecmsSource] ?? CAVECMS_FIELDS_BY_SOURCE.contact ?? [])
 
   // Fetch operator's HubSpot forms once on mount. Empty list means
   // either HubSpot isn't connected OR the operator has no forms —

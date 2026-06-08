@@ -267,6 +267,13 @@
 			"when": 1780420600000,
 			"tag": "0039_blog_system_page",
 			"breakpoints": true
+		},
+		{
+			"idx": 40,
+			"version": "5",
+			"when": 1780876800000,
+			"tag": "0040_lead_payload",
+			"breakpoints": true
 		}
 	]
 }

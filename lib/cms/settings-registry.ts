@@ -620,8 +620,9 @@ const integrationsZohoSalesIq = z
 
 // HubSpot lead source → form destination map. Keys constrained to the
 // known submit-handler sources (matches leads.source enum + extra
-// 'newsletter' which lives in its own subscriber table).
-const leadSource = z.enum(['contact', 'newsletter', 'brochure', 'inquiry'])
+// 'newsletter' which lives in its own subscriber table). 'form' = the
+// generic lx_form intake.
+const leadSource = z.enum(['contact', 'newsletter', 'brochure', 'inquiry', 'form'])
 
 const hubspotDestination = z.object({
   formId: hubspotFormId,

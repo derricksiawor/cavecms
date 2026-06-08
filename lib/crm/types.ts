@@ -95,7 +95,7 @@ export const RETRY_REAP_THRESHOLD_MS = 10 * 60_000
 // Lead source labels match the lead routes (`/api/leads/{source}`).
 // Newsletter rows live in newsletter_subscribers (not leads), so a
 // newsletter dispatch row has `lead_id IS NULL` + `source='newsletter'`.
-export const LEAD_SOURCES = ['contact', 'newsletter', 'brochure', 'inquiry'] as const
+export const LEAD_SOURCES = ['contact', 'newsletter', 'brochure', 'inquiry', 'form'] as const
 export type LeadSource = (typeof LEAD_SOURCES)[number]
 
 // Zoho CRM modules we target. Extending: add to the literal here AND

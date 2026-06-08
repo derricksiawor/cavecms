@@ -272,6 +272,57 @@ export const contactFormCrmDestinationsSchema = z
   )
   .max(4)
 
+// Form select option — { label (shown), value (submitted = the "meta"/tag id) }.
+// A bare string is accepted (legacy string[] options) and normalised to
+// { label, value:same }; a blank value falls back to the label.
+const formSelectOption = z
+  .union([
+    safeText(80),
+    z.object({ label: safeText(80), value: safeText(80).optional() }),
+  ])
+  .transform((o) =>
+    typeof o === 'string'
+      ? { label: o, value: o }
+      : {
+          label: o.label,
+          value: o.value && o.value.length > 0 ? o.value : o.label,
+        },
+  )
+
+// ─── Form after-submit actions (Elementor "Actions After Submit" parity) ──
+// On a successful lx_form submit the lead is ALWAYS saved + the team notified;
+// `actions[]` are the EXTRA, operator-configured steps. Discriminated on `kind`
+// so new action types (redirect, crm) slot in later without migrating rows.
+const deliverFileAction = z
+  .object({
+    kind: z.literal('deliver_file'),
+    // The gated file (a media row — typically a PDF lead magnet). Reuses
+    // MediaRef so the MediaPicker drawer field + media_references bookkeeping
+    // work unchanged; the alt doubles as the file's human label.
+    file: MediaRef,
+    // email   → a signed, expiring download link is emailed to the submitter.
+    // instant → the success screen shows a Download button (same signed link).
+    // manual  → no auto-delivery; lead saved + team notified (the legacy
+    //           brochure flow), now an explicit operator choice, not the only path.
+    mode: z.enum(['email', 'instant', 'manual']).default('email'),
+    emailSubject: safeText(160).optional(),
+    emailBody: safeText(TEXT_MAX.body).optional(),
+  })
+// NOT .strict(): the drawer's object_array repeater tags each action with a
+// client-only `__id` (React/reorder key) that rides along in the save payload.
+// Every other block schema strips unknown keys via Zod's default — a .strict()
+// here uniquely 400'd the PATCH (err_kind:zod) so the action never persisted.
+// Strip-don't-reject matches the codebase and keeps the saved action clean.
+const formAction = z.discriminatedUnion('kind', [deliverFileAction])
+// Max after-submit actions per form — shared so the writer (the lx_form
+// `actions` field) and the read-path re-validator below can't drift.
+const MAX_FORM_ACTIONS = 8
+// Exported so the lead route can re-validate a form's after-submit actions
+// loaded from content_blocks (defence in depth — re-parses the SAME non-strict
+// shape, see the note above for why it's intentionally NOT strict, and re-applies
+// the .max() bound the writer enforces so a hand-edited row can't be unbounded).
+export const lxFormActionsSchema = z.array(formAction).max(MAX_FORM_ACTIONS)
+
 export const blockSchemas = {
   // Contact form widget. Submission goes to /api/leads/contact unchanged
   // (honeypot + reCAPTCHA + neutral-200 pipeline). The block carries only
@@ -459,12 +510,24 @@ export const blockSchemas = {
         z.object({
           name: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
           label: safeRequiredText(1, TEXT_MAX.caption),
-          type: z.enum(['text', 'email', 'tel', 'textarea', 'select', 'checkbox']).default('text'),
+          type: z.enum(['text', 'email', 'tel', 'textarea', 'select', 'checkbox', 'hidden']).default('text'),
           required: z.boolean().default(false),
           placeholder: safeText(120).optional(),
-          options: z.array(safeText(80)).max(20).optional(),
+          // Dropdown options — each a { label (shown), value (submitted = the
+          // "meta"/tag id) } pair. Bare strings accepted for back-compat.
+          options: z.array(formSelectOption).max(30).optional(),
+          // Column width on the rendered form — lets fields sit side-by-side.
+          width: z.enum(['full', 'half', 'third']).default('full'),
+          // For a `select` field: where options come from. 'static' = the
+          // operator's `options`; 'tags' / 'categories' = pulled live from the
+          // taxonomy (label = term name, value = slug). Ignored by non-selects.
+          optionsSource: z.enum(['static', 'tags', 'categories']).default('static'),
           // Map this field to the lead's name / email / phone column.
           role: z.enum(['none', 'name', 'email', 'phone']).default('none'),
+          // For a `hidden` field: the fixed value submitted with the form (a
+          // CRM tag id, a campaign/source code, a project id). Never shown to
+          // the visitor; flows into the lead + CRM map like any other field.
+          defaultValue: safeText(200).optional(),
         }),
       )
       .min(1)
@@ -499,6 +562,13 @@ export const blockSchemas = {
     successHeadline: safeText(TEXT_MAX.title).optional(),
     successBody: safeText(TEXT_MAX.body).optional(),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_text).default('obsidian'),
+    // After-submit pipeline (see formAction above). Empty for legacy lx_form
+    // instances; default [] keeps them parsing unchanged.
+    actions: z.array(formAction).max(MAX_FORM_ACTIONS).default([]),
+    // Per-instance CRM routing — reuses the contact_form destinations shape.
+    // Surfaced in the drawer's CRM tab; dispatched by /api/leads/form with the
+    // field-map keyed by THIS form's own field names.
+    crmDestinations: contactFormCrmDestinationsSchema.optional(),
   }),
 
   // Standalone icon (Elementor Icon widget parity) — a single lucide glyph

@@ -8,6 +8,7 @@ import { requireRole, HttpError } from '@/lib/auth/requireRole'
 import { requireCsrf } from '@/lib/auth/requireCsrf'
 import { checkReadRate, checkMutationRate } from '@/lib/auth/cmsRateLimit'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
+import { parseSubmission } from '@/lib/leads/submission'
 
 const IdParam = z.coerce.number().int().positive().max(2 ** 31 - 1)
 
@@ -38,6 +39,7 @@ interface LeadDetailRow {
   email: string | null
   phone: string | null
   message: string | null
+  payload: unknown
   status: string
   notes: string | null
   project_id: number | null
@@ -65,7 +67,7 @@ export const GET = withError(
     // archived slug/name. Without the filter, /admin/leads showed `—`
     // for archived projects but /admin/leads/[id] would expose them.
     const [rows] = (await db.execute(sql`
-      SELECT l.id, l.source, l.name, l.email, l.phone, l.message,
+      SELECT l.id, l.source, l.name, l.email, l.phone, l.message, l.payload,
              l.status, l.notes, l.project_id, l.ip, l.user_agent,
              l.status_changed_at, l.status_changed_by, l.created_at,
              p.slug AS project_slug, p.name AS project_name
@@ -76,7 +78,11 @@ export const GET = withError(
       LIMIT 1
     `)) as unknown as [LeadDetailRow[]]
     if (!rows[0]) throw new HttpError(404, 'not_found')
-    return new Response(JSON.stringify(rows[0]), {
+    // Parse the lx_form submission payload server-side. This route is
+    // admin/editor-only (no viewer → no masking needed), and the drawer fetches
+    // it lazily on open, keeping the 1000-row list response light.
+    const detail = { ...rows[0], payload: parseSubmission(rows[0].payload) }
+    return new Response(JSON.stringify(detail), {
       status: 200,
       headers: {
         'content-type': 'application/json',

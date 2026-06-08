@@ -10,6 +10,8 @@ import { enqueueEmail } from '@/lib/email/queue'
 import { neutralResponse } from '@/lib/leads/neutralResponse'
 import { normalizeEmail } from '@/lib/leads/normalizeEmail'
 import { logEnqueueFailure } from '@/lib/leads/logEnqueueFailure'
+import { signFileDeliveryToken } from '@/lib/auth/fileDeliveryToken'
+import { lxFormActionsSchema } from '@/lib/cms/block-registry'
 
 // Generic composable-form intake (lx_form / E21). Reuses the lead pipeline:
 // rate-limit → honeypot → preCsrf → reCAPTCHA → INSERT lead (source='form')
@@ -28,6 +30,12 @@ const Body = z.object({
   _email: z.string().max(180).optional(),
   _phone: z.string().max(40).optional(),
   _formName: z.string().max(120).optional(),
+  // The lx_form block instance id — lets the route load the form's after-submit
+  // actions (deliver_file) server-side. Optional / back-compat.
+  _blockId: z.string().max(20).optional(),
+  // JSON map of fieldName → value, for CRM field-mapping keyed by the form's
+  // own slug names. Optional / back-compat.
+  _fields: z.string().max(20000).optional(),
   // JSON array of { label, value } — every submitted field for the message.
   _payload: z.string().max(20000),
 })
@@ -92,10 +100,168 @@ export const POST = withError(async (req: Request) => {
   const userAgent = (headerObj['user-agent'] ?? '').slice(0, 255)
   const formName = (body._formName || 'Form').slice(0, 120)
 
-  await db.execute(sql`
-    INSERT INTO leads (source, name, email, phone, message, enquiry_type, ip, user_agent)
-    VALUES ('form', ${name}, ${normEmail || null}, ${phone}, ${message}, 'enquiry', ${ip}, ${userAgent})
-  `)
+  const [insertRes] = (await db.execute(sql`
+    INSERT INTO leads (source, name, email, phone, message, payload, enquiry_type, ip, user_agent)
+    VALUES ('form', ${name}, ${normEmail || null}, ${phone}, ${message}, ${JSON.stringify(items)}, 'enquiry', ${ip}, ${userAgent})
+  `)) as unknown as [{ insertId: number }]
+  const leadId = Number(insertRes.insertId)
+
+  // ── deliver_file after-submit actions ────────────────────────────────
+  // Load the form block's actions SERVER-SIDE (never trust a client-supplied
+  // media id), then run any deliver_file action: sign a download token and
+  // either email the link (email mode) or hand it back for an on-screen
+  // download (instant). manual mode delivers nothing here — the lead is saved
+  // + the team notified below, exactly as before.
+  // Load the lx_form block ONCE — its `data` JSON carries BOTH the deliver_file
+  // actions AND the per-instance crmDestinations, so the delivery step here and
+  // the CRM dispatch below share this single read.
+  //
+  // SECURITY NOTE: `_blockId` is client-supplied and validated only as a real
+  // lx_form id — it is NOT bound to the form actually submitted. So a deliver_file
+  // lead magnet is gated on "any valid lead submission" (a lead row is always
+  // created first), NOT on "this specific form": a submitter could pass another
+  // lx_form's id and receive that form's instant download link. This is intended
+  // for the lead-magnet threat model (the operator trades the file for an email,
+  // and an email/lead is still captured); the signed token unforgeably binds
+  // lead_id+media_id, so no arbitrary media is reachable. To enforce a strict
+  // per-form gate, bake the block id into the server-issued preCsrf token.
+  let blockData: Record<string, unknown> | null = null
+  const blockId = body._blockId ? Number(body._blockId) : NaN
+  if (Number.isInteger(blockId) && blockId > 0 && Number.isInteger(leadId) && leadId > 0) {
+    try {
+      const [brows] = (await db.execute(sql`
+        SELECT data FROM content_blocks
+        WHERE id = ${blockId} AND block_type = 'lx_form' AND deleted_at IS NULL
+      `)) as unknown as [Array<{ data: unknown }>]
+      const braw = brows[0]?.data
+      if (braw != null) {
+        const parsed = typeof braw === 'string' ? JSON.parse(braw) : braw
+        if (parsed && typeof parsed === 'object') {
+          blockData = parsed as Record<string, unknown>
+        }
+      }
+    } catch {
+      // best-effort; the lead is already saved
+    }
+  }
+
+  const downloads: Array<{ url: string; name: string }> = []
+  let emailedFile = false
+  if (blockData) {
+    try {
+      const actions = lxFormActionsSchema.safeParse(
+        (blockData as { actions?: unknown }).actions ?? [],
+      )
+      const deliverActions = actions.success
+        ? actions.data.filter((a) => a.kind === 'deliver_file' && a.mode !== 'manual')
+        : []
+      if (deliverActions.length > 0) {
+        // getSiteOrigin + the SMTP probe are ONLY needed for email-mode actions —
+        // gate them so an instant-only form can never lose its download to a
+        // settings read throwing. SMTP is operator-configured (Settings → Email)
+        // and absent on a fresh install; there an emailed link enqueues but never
+        // sends, so email mode must fall back to the on-screen download.
+        const hasEmail = deliverActions.some((a) => a.mode === 'email')
+        const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
+        const { getActiveSmtpConfig } = await import('@/lib/email/transport')
+        const siteOrigin = hasEmail ? await getSiteOrigin() : null
+        const smtpReady = hasEmail
+          ? (await getActiveSmtpConfig().catch(() => null)) !== null
+          : false
+        for (const action of deliverActions) {
+          // Per-action isolation — one malformed action can't drop the others.
+          try {
+            const token = signFileDeliveryToken({
+              lead_id: leadId,
+              media_id: action.file.media_id,
+            })
+            const rel = `/api/files/deliver/${token}`
+            const name = action.file.alt || 'Your download'
+            if (action.mode === 'email' && normEmail && siteOrigin && smtpReady) {
+              const sent = await enqueueEmail({
+                to: normEmail,
+                subject: action.emailSubject || `Your download: ${name}`,
+                html:
+                  `<p>${escapeHtml(action.emailBody || 'Thanks — here is your download.')}</p>` +
+                  `<p><a href="${siteOrigin}${rel}">Download ${escapeHtml(name)}</a></p>` +
+                  `<p style="color:#888;font-size:12px;">This link works for 7 days.</p>`,
+                text: `${action.emailBody || 'Here is your download.'}\n\n${siteOrigin}${rel}\n\nThis link works for 7 days.`,
+              })
+                .then(() => true)
+                .catch((e) => {
+                  void logEnqueueFailure('form:deliver', normEmail || 'unknown', e)
+                  return false
+                })
+              // Only claim "check your inbox" when the email actually queued;
+              // a failed enqueue degrades to the on-screen download below.
+              if (sent) emailedFile = true
+              else downloads.push({ url: rel, name })
+            } else {
+              // instant mode, OR email mode with no valid email / site URL /
+              // configured SMTP → hand back an on-screen download so the file is
+              // NEVER lost (the feature's invariant).
+              downloads.push({ url: rel, name })
+            }
+          } catch (e) {
+            console.error(JSON.stringify({
+              level: 'error',
+              msg: 'deliver_file_action_failed',
+              leadId,
+              blockId,
+              err: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
+            }))
+          }
+        }
+      }
+    } catch (e) {
+      // Delivery is best-effort; the lead is already saved — but LOG so a broken
+      // delivery is discoverable (it's the feature's whole point; every sibling
+      // best-effort path logs too).
+      console.error(JSON.stringify({
+        level: 'error',
+        msg: 'deliver_file_failed',
+        leadId,
+        blockId,
+        err: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
+      }))
+    }
+  }
+
+  // CRM dispatch — best-effort, keyed by the form's own field names. Per-instance
+  // crmDestinations on the lx_form block (resolved server-side), else the site
+  // formSourceMap['form'] default. Never blocks the lead.
+  try {
+    const cavecmsFields: Record<string, string> = {}
+    try {
+      const fj = JSON.parse(body._fields || '{}') as unknown
+      if (fj && typeof fj === 'object') {
+        for (const [k, v] of Object.entries(fj as Record<string, unknown>)) {
+          if (typeof v === 'string') cavecmsFields[k] = v
+        }
+      }
+    } catch {
+      // ignore a malformed _fields map
+    }
+    if (name) cavecmsFields.name ??= name
+    if (normEmail) cavecmsFields.email ??= normEmail
+    if (phone) cavecmsFields.phone ??= phone
+    const { dispatchLeadToCrms } = await import('@/lib/crm/dispatch')
+    await dispatchLeadToCrms({
+      leadId,
+      source: 'form',
+      blockId: Number.isInteger(blockId) && blockId > 0 ? blockId : undefined,
+      // Reuse the single block read above — pass the already-parsed
+      // crmDestinations so dispatch doesn't re-SELECT the same row. `null` =
+      // "block read, no per-instance destinations"; `undefined` = "no block read".
+      blockCrmDestinations: blockData ? (blockData.crmDestinations ?? null) : undefined,
+      cavecmsFields,
+      hutk: headerObj['cookie']?.match(/(?:^|;\s*)hubspotutk=([^;]+)/)?.[1],
+      pageUri: headerObj['referer'],
+      ipAddress: ip,
+    })
+  } catch {
+    // CRM dispatch is fire-and-forget; never block the lead.
+  }
 
   // Notify the configured recipient. Best-effort — the lead is already saved.
   try {
@@ -116,5 +282,5 @@ export const POST = withError(async (req: Request) => {
     await logEnqueueFailure('form', normEmail || 'unknown', e)
   }
 
-  return Response.json({ ok: true })
+  return Response.json({ ok: true, downloads, emailed: emailedFile })
 })

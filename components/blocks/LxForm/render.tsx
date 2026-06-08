@@ -13,12 +13,14 @@ export function LxForm({
   inlineEdit,
   outerClass,
   sectionMeta,
+  blockId,
 }: {
   data: BlockData<'lx_form'>
   csrf?: string
   inlineEdit?: InlineEditContext
   outerClass?: string
   sectionMeta?: SectionMeta
+  blockId?: number
 }) {
   const tone = adaptToneForSurface(data.tone, sectionMeta)
   const onDark = tone === 'ivory'
@@ -65,6 +67,7 @@ export function LxForm({
               successBody={data.successBody}
               formName={data.heading || 'Form'}
               csrf={csrf}
+              blockId={blockId}
               onDark={onDark}
             />
           ) : (
