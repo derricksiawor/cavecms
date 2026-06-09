@@ -58,6 +58,7 @@ export function PhaseProgressModal({
   copy,
   successStates,
   failStates,
+  awaitFresh,
 }: {
   open: boolean
   onClose: () => void
@@ -67,6 +68,16 @@ export function PhaseProgressModal({
   copy: PhaseCopy
   successStates: ReadonlySet<string>
   failStates: ReadonlySet<string>
+  /**
+   * Set when the modal opens OPTIMISTICALLY (before the create route has
+   * confirmed the run started). The status file still holds the PREVIOUS
+   * run's terminal snapshot at that moment — without this flag the first
+   * poll would adopt it and flash "complete"/"failed" for a run that hasn't
+   * begun. With it, polls ignore an UNCHANGED terminal snapshot and render
+   * the step-0 "getting ready" state until a fresh status appears (the
+   * create route seeds one before returning, so this window is sub-second).
+   */
+  awaitFresh?: boolean
 }) {
   const [status, setStatus] = useState<PhaseStatus | null>(null)
   const [networkErrorCount, setNetworkErrorCount] = useState(0)
@@ -74,6 +85,8 @@ export function PhaseProgressModal({
   const errorCountRef = useRef(0)
   const terminalRef = useRef(false)
   const completedFiredRef = useRef(false)
+  const staleBaselineRef = useRef<string | null>(null)
+  const sawFreshRef = useRef(false)
 
   const TERMINAL = new Set<string>([...successStates, ...failStates, 'idle'])
 
@@ -90,6 +103,8 @@ export function PhaseProgressModal({
     let timer: ReturnType<typeof setTimeout> | null = null
     terminalRef.current = false
     completedFiredRef.current = false
+    staleBaselineRef.current = null
+    sawFreshRef.current = false
 
     async function tick() {
       if (cancelled || terminalRef.current) return
@@ -102,6 +117,19 @@ export function PhaseProgressModal({
         if (cancelled) return
         if (!r.ok) throw new Error(`status_${r.status}`)
         const j = (await r.json()) as PhaseStatus
+        if (awaitFresh && !sawFreshRef.current) {
+          // Identity of a status snapshot — string compare, no clock math
+          // (server timestamps vs client clock can skew).
+          const key = `${j.state}|${j.startedAt}|${j.updatedAt}`
+          if (staleBaselineRef.current === null) staleBaselineRef.current = key
+          if (TERMINAL.has(j.state) && key === staleBaselineRef.current) {
+            // Still the previous run's terminal snapshot — keep showing the
+            // step-0 "getting ready" state and poll fast for the seed write.
+            timer = setTimeout(tick, BACKUP_POLL_FAST_MS)
+            return
+          }
+          sawFreshRef.current = true
+        }
         setStatus(j)
         statusRef.current = j
         if (errorCountRef.current !== 0) {

@@ -1862,18 +1862,21 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# then asks you to restart the process. Hosted surfaces restart`,
     `# automatically. When unset (legacy installs) the updater defaults to pm2.`,
     `CAVECMS_RESTART_MODE=${restartMode}`,
-    // Laptop installs start via bare `node --env-file=env.production` with NO
-    // service manager (systemd unit / pm2 ecosystem) to inject the
-    // installer-pinned vars. On VPS/PM2 those configs set CAVECMS_ENV_FILE +
-    // CAVECMS_REPO_DIR; the laptop surface has nowhere else to put them, so
+    // Laptop + cPanel installs run with NO service manager (systemd unit /
+    // pm2 ecosystem) to inject the installer-pinned vars — laptop is bare
+    // `node --env-file=env.production`, cPanel is the host's Node runner
+    // require()ing app.js. On VPS/PM2 those configs set CAVECMS_ENV_FILE +
+    // CAVECMS_REPO_DIR; these two surfaces have nowhere else to put them, so
     // they live here. Without CAVECMS_ENV_FILE the in-app updater's migrate +
     // env-stamp steps fall back to /etc/cavecms/env.production (the bare-metal
-    // default), which doesn't exist on a laptop install → step 3 fails +
-    // rolls back. (On VPS/PM2 we deliberately DON'T add these — the service
-    // config is authoritative there.)
-    ...(surface === 'laptop'
+    // default), which doesn't exist on these installs → step 3 fails + rolls
+    // back — and the login-path env sync (lib/security/syncLoginPathEnv.ts)
+    // couldn't find the sealed env to keep LOGIN_PATH consistent on cPanel.
+    // (On VPS/PM2 we deliberately DON'T add these — the service config is
+    // authoritative there.)
+    ...(surface === 'laptop' || surface === 'cpanel'
       ? [
-          `# Installer-pinned paths (laptop surface has no service manager to inject them).`,
+          `# Installer-pinned paths (no service manager on this surface to inject them).`,
           `CAVECMS_ENV_FILE=${envPath}`,
           `CAVECMS_REPO_DIR=${targetDir}`,
         ]

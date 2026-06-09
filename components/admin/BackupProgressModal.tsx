@@ -45,6 +45,12 @@ export function BackupProgressModal({
       copy={COPY}
       successStates={SUCCESS}
       failStates={FAIL}
+      // The backups page opens this modal the instant "Back up now" is
+      // clicked (immediate feedback), BEFORE the create route confirms —
+      // so the first poll(s) may still see the previous run's terminal
+      // status. awaitFresh keeps the "getting ready" state until the new
+      // run's seeded status replaces it.
+      awaitFresh
     />
   )
 }

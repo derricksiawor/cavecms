@@ -54,6 +54,30 @@ export function UpdatesProgressModal({
 }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [networkErrorCount, setNetworkErrorCount] = useState(0)
+  // "Show technical details" expander on the failed panel — log tails
+  // fetched once on first open from /api/admin/updates/logs.
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logs, setLogs] = useState<Array<{ name: string; tail: string }> | null>(null)
+
+  async function toggleLogs() {
+    if (logsOpen) {
+      setLogsOpen(false)
+      return
+    }
+    setLogsOpen(true)
+    if (logs !== null) return
+    setLogsLoading(true)
+    try {
+      const r = await fetch('/api/admin/updates/logs', { credentials: 'include', cache: 'no-store' })
+      const j = r.ok ? ((await r.json()) as { logs: Array<{ name: string; tail: string }> }) : null
+      setLogs(j?.logs ?? [])
+    } catch {
+      setLogs([])
+    } finally {
+      setLogsLoading(false)
+    }
+  }
 
   // Refs mirror the latest values so the setTimeout chain (which
   // captures its initial closure) can read live state. Without these,
@@ -160,6 +184,9 @@ export function UpdatesProgressModal({
       errorCountRef.current = 0
       terminalRef.current = false
       completedFiredRef.current = false
+      setLogsOpen(false)
+      setLogsLoading(false)
+      setLogs(null)
     }
   }, [open])
 
@@ -466,6 +493,34 @@ export function UpdatesProgressModal({
                   ? 'You can try the update again, or check the audit log for the failed step.'
                   : 'Try again, or check the audit log to see exactly which step failed.'}
               </p>
+              {/* Technical details — tails of the orchestrator's log files,
+                  fetched on demand. Before this, a failed update gave the
+                  operator a one-line error and no way to see WHY without
+                  shell access to the server (which cPanel operators often
+                  don't have). */}
+              <button
+                type="button"
+                onClick={() => void toggleLogs()}
+                className="mt-2 w-fit cursor-pointer text-xs font-semibold text-amber-800 underline-offset-2 transition-colors hover:underline"
+              >
+                {logsOpen ? 'Hide technical details' : 'Show technical details'}
+              </button>
+              {logsOpen && (
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-warm-stone/20 bg-near-black/90 p-3 font-mono text-[11px] leading-relaxed text-cream-50/90">
+                  {logsLoading ? (
+                    <p>Loading…</p>
+                  ) : logs && logs.length > 0 ? (
+                    logs.map((l) => (
+                      <div key={l.name} className="mb-3 last:mb-0">
+                        <p className="mb-1 font-semibold text-copper-300">{l.name}</p>
+                        <pre className="break-words whitespace-pre-wrap">{l.tail}</pre>
+                      </div>
+                    ))
+                  ) : (
+                    <p>No log files were found for this update.</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

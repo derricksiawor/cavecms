@@ -20,18 +20,36 @@ import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
 import { resolveBackupDir } from '@/lib/backups/store'
 
-// POST /api/admin/backups/upload-restore (multipart) — upload an archive +
-// restore from it (disaster recovery onto a fresh box). The uploaded file is
-// streamed to `<backupDir>/.incoming/` with a hard byte cap, then handed to the
-// restore orchestrator. The orchestrator does the FULL validation (manifest +
-// checksum + zip-slip + inner-tar symlink check + compat gate) at its step 1,
-// BEFORE any mutation — so we do NOT run a synchronous validator on the request
-// path (that would block the event loop + buffer GB payloads). The orchestrator
-// deletes the uploaded archive on its terminal state (CAVECMS_RESTORE_CLEANUP_ARCHIVE).
+// POST /api/admin/backups/upload-restore (raw body) — upload an archive +
+// restore from it (disaster recovery onto a fresh box). The archive arrives as
+// the RAW request body (content-type application/gzip), NOT multipart:
+// `req.formData()` materialises every file part IN MEMORY before handing it
+// over, so a multi-GB archive ballooned the Node worker — and on shared hosts
+// (cPanel/CloudLinux LVE memory caps) the kernel killed the worker mid-upload,
+// which the operator saw as the upload silently stopping partway. Raw body →
+// `req.body` web stream → disk is constant-memory end to end.
+//
+// Validation here is deliberately thin + streaming-safe:
+//   - gzip magic bytes (0x1f 0x8b) on the first chunk — rejects .age uploads,
+//     renamed junk, and anything that isn't a gzip archive before a byte of it
+//     is interpreted (the friendly "encrypted .age" hint comes from sniffing
+//     the age header bytes).
+//   - hard byte cap while streaming (a lying Content-Length can't fill disk).
+// The restore orchestrator does the FULL validation (manifest + checksum +
+// zip-slip + inner-tar symlink check + compat gate) at its step 1, BEFORE any
+// mutation — running that synchronously on the request path would block the
+// event loop on GB payloads. The orchestrator deletes the uploaded archive on
+// its terminal state (CAVECMS_RESTORE_CLEANUP_ARCHIVE).
 
 export const dynamic = 'force-dynamic'
 
 const MAX_BYTES = 4 * 1024 * 1024 * 1024 // 4 GB ceiling
+
+// Binary age archives open with this ASCII header; armored ones with
+// "-----BEGIN AGE". Sniffed only to give the operator the SPECIFIC
+// "encrypted archives can't be uploaded" message instead of a generic one.
+const AGE_BINARY_HEADER = Buffer.from('age-encryption.org/')
+const AGE_ARMOR_HEADER = Buffer.from('-----BEGIN AGE')
 
 export const POST = withError(async (req: Request) => {
   const ctx = await requireRole(['admin'])
@@ -47,39 +65,67 @@ export const POST = withError(async (req: Request) => {
     return new Response(JSON.stringify({ error: 'restore_in_progress' }), { status: 409, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
   }
 
-  const form = await req.formData()
-  const file = form.get('archive')
-  if (!(file instanceof File)) throw new HttpError(400, 'no_file')
-  // .age uploads can't be validated/decrypted without an identity — restore an
-  // encrypted archive from the box that holds the key, via the CLI.
-  if (file.name.endsWith('.age')) throw new HttpError(400, 'encrypted_upload_unsupported')
-  // Trust the advertised size as an early reject, but ALSO enforce the cap on
-  // the bytes actually streamed (chunked uploads can lie about file.size).
-  if (typeof file.size === 'number' && file.size > MAX_BYTES) throw new HttpError(413, 'too_large')
+  if (!req.body) throw new HttpError(400, 'no_file')
+  // Early reject on the advertised size; the streaming cap below is the
+  // authoritative enforcement (chunked uploads can lie here).
+  const advertised = Number(req.headers.get('content-length') ?? '0')
+  if (Number.isFinite(advertised) && advertised > MAX_BYTES) throw new HttpError(413, 'too_large')
 
   const incoming = join(resolveBackupDir(), '.incoming')
   mkdirSync(incoming, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.TZ-]/g, '').slice(0, 14)
   const dest = join(incoming, `upload-${stamp}-${process.pid}.tar.gz`)
 
-  // Stream to disk with a hard byte cap (destroys the stream + cleans up on
-  // overflow) so a lying/streaming upload can't fill the disk.
+  // Stream to disk with (a) a gzip magic-byte gate on the leading bytes and
+  // (b) a hard byte cap — both destroy the stream + clean up on violation, so
+  // a non-archive or a lying/streaming upload never lands on disk in full.
   let written = 0
+  let headerChecked = false
+  let headerBuf = Buffer.alloc(0)
   const cap = new Transform({
-    transform(chunk, _enc, cb) {
+    transform(chunk: Buffer, _enc, cb) {
       written += chunk.length
       if (written > MAX_BYTES) {
         cb(new Error('too_large'))
         return
       }
+      if (!headerChecked) {
+        headerBuf = Buffer.concat([headerBuf, chunk])
+        if (headerBuf.length < 2) {
+          cb() // hold until we can see the magic bytes
+          return
+        }
+        headerChecked = true
+        if (headerBuf[0] !== 0x1f || headerBuf[1] !== 0x8b) {
+          const isAge =
+            headerBuf.subarray(0, AGE_BINARY_HEADER.length).equals(AGE_BINARY_HEADER) ||
+            headerBuf.subarray(0, AGE_ARMOR_HEADER.length).equals(AGE_ARMOR_HEADER)
+          cb(new Error(isAge ? 'encrypted_upload_unsupported' : 'not_gzip'))
+          return
+        }
+        cb(null, headerBuf)
+        return
+      }
       cb(null, chunk)
+    },
+    flush(cb) {
+      // Sub-2-byte upload — never passed the header gate.
+      if (!headerChecked) {
+        cb(new Error('not_gzip'))
+        return
+      }
+      cb()
     },
   })
   try {
-    await pipeline(Readable.fromWeb(file.stream() as never), cap, createWriteStream(dest, { mode: 0o600 }))
+    await pipeline(Readable.fromWeb(req.body as never), cap, createWriteStream(dest, { mode: 0o600 }))
   } catch (err) {
     rmSync(dest, { force: true })
     if (err instanceof Error && err.message === 'too_large') throw new HttpError(413, 'too_large')
+    if (err instanceof Error && err.message === 'encrypted_upload_unsupported') {
+      throw new HttpError(400, 'encrypted_upload_unsupported')
+    }
+    if (err instanceof Error && err.message === 'not_gzip') throw new HttpError(400, 'not_gzip')
     throw new HttpError(400, 'upload_failed')
   }
 

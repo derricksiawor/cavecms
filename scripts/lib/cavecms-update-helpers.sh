@@ -375,7 +375,13 @@ internal_base_url() {
   if [ -n "${CAVECMS_INTERNAL_URL:-}" ]; then
     candidate="${CAVECMS_INTERNAL_URL%/}"
   else
-    candidate="${HEALTHZ_URL%/healthz}"
+    # ${HEALTHZ_URL:-} — the backup/restore engines source this file WITHOUT
+    # HEALTHZ_URL in their env (only the updater sets it). Under `set -u` a
+    # bare expansion aborts the calling subshell, which silently killed EVERY
+    # audit-terminal post from the backup engine: completed/failed backups
+    # left no audit row, making engine failures untraceable from the UI.
+    candidate="${HEALTHZ_URL:-}"
+    candidate="${candidate%/healthz}"
     candidate="${candidate%/}"
   fi
   [ -z "$candidate" ] && candidate="http://127.0.0.1:3040"

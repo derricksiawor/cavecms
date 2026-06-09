@@ -23,6 +23,7 @@ import {
   guardPermalink,
   SecurityGuardFailure,
 } from '@/lib/security/patchGuards'
+import { syncLoginPathEnv } from '@/lib/security/syncLoginPathEnv'
 // blog-system worktree (Phase 5): register old→new redirects on a segment change.
 import { registerSegmentChangeRedirects } from '@/lib/blog/permalinkRedirects'
 import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
@@ -901,6 +902,15 @@ export const PATCH = withError(async (req: Request) => {
     // a rotation event.
     if (aiKeyChanged) {
       resetActiveAiClientCache()
+    }
+    // Keep the env bootstrap LOGIN_PATH in lockstep with the DB value just
+    // committed. Critical on cPanel, where the middleware can't reach the
+    // loopback config and routes on the env value alone — without this the
+    // new path 404s, the operator can never confirm it, and the 10-minute
+    // auto-revert kicks in every time. On cPanel this also touches
+    // tmp/restart.txt so the change is live for the confirm visit.
+    if (body.key === 'security_login_path') {
+      syncLoginPathEnv((parsed as { path: string }).path)
     }
   }
 

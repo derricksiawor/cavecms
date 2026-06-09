@@ -312,8 +312,16 @@ AGE_SCHEME="none"; AGE_RECIP=""
 # plain-tar manifest, so we must NOT age-wrap the archive here (an .age blob
 # isn't a gzip stream and would break the cloud manifest read).
 if [ -n "${CAVECMS_BACKUP_AGE_RECIPIENT:-}" ] \
-   && [ "${CAVECMS_BACKUP_DESTINATION:-local}" = "local" ] \
-   && command -v age >/dev/null 2>&1; then
+   && [ "${CAVECMS_BACKUP_DESTINATION:-local}" = "local" ]; then
+  if ! command -v age >/dev/null 2>&1; then
+    # The operator configured encryption — delivering a PLAINTEXT archive
+    # (possibly with env.production secrets inside) because the binary went
+    # missing would be a silent downgrade they'd only discover at restore
+    # time. Fail loud instead.
+    bstatus failed 4 "Backup failed" "This backup is set to be encrypted, but the encryption tool (age) isn't installed on this server. Install it, or turn off backup encryption, then try again."
+    post_backup_audit_terminal backup_failed unknown "age recipient configured but age binary missing"
+    exit 1
+  fi
   AGE_SCHEME="age"; AGE_RECIP="$CAVECMS_BACKUP_AGE_RECIPIENT"
 fi
 

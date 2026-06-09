@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Archive, DatabaseBackup, Upload, Download, Trash2, RotateCcw, ShieldCheck, Clock, Cloud } from 'lucide-react'
-import { csrfFetch } from '@/lib/client/csrf'
+import { Archive, DatabaseBackup, Upload, Download, Trash2, RotateCcw, ShieldCheck, Clock, Cloud, Loader2 } from 'lucide-react'
+import { csrfFetch, readCsrf, refreshCsrf } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/inline-edit/Toast'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
@@ -73,6 +73,9 @@ export function BackupsClient({
   const [confirmRestore, setConfirmRestore] = useState<BackupRow | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<BackupRow | null>(null)
   const [busy, setBusy] = useState(false)
+  // Upload progress for restore-from-file (0-100 while an archive is going
+  // up, null otherwise). Driven by XHR upload events — see onUploadFile.
+  const [uploadPct, setUploadPct] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // ── Cloud destinations (device-flow connect/disconnect) ──
@@ -371,22 +374,40 @@ export function BackupsClient({
   }, [])
 
   const startBackup = useCallback(async () => {
+    // Open the modal optimistically in its "Getting ready" state — the
+    // operator gets immediate feedback the instant they click, instead of a
+    // silent dead button while the route acquires locks + spawns the engine.
+    // On a refused start we close it again and explain why.
+    setBackupModalOpen(true)
     try {
       const r = await csrfFetch('/api/admin/backups/create', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ includeEnv }),
       })
+      if (r.ok) return
+      setBackupModalOpen(false)
       if (r.status === 409) {
         toast.error('A backup or restore is already running.')
         return
       }
-      if (!r.ok) {
-        toast.error("Couldn't start the backup — try again.")
+      const j = (await r.json().catch(() => null)) as { error?: string } | null
+      // Each refusal explains itself + what to do — a generic "try again"
+      // sends the operator in circles (they retried this exact loop on a
+      // live install before this copy existed).
+      if (j?.error === 'passphrase_required_for_secrets') {
+        toast.error(
+          'Including your secret keys in a cloud backup needs an encryption passphrase. Turn on "Encrypt cloud backups" below and set one, then back up again.',
+        )
         return
       }
-      setBackupModalOpen(true)
+      if (j?.error === 'destination_not_connected') {
+        toast.error('Your cloud account is no longer connected — reconnect it below, then back up again.')
+        return
+      }
+      toast.error("Couldn't start the backup — try again.")
     } catch {
+      setBackupModalOpen(false)
       toast.error("Couldn't start the backup — try again.")
     }
   }, [includeEnv, toast])
@@ -440,28 +461,79 @@ export function BackupsClient({
 
   const onUploadFile = useCallback(
     async (file: File) => {
+      // Instant client-side gates — friendly message before a single byte
+      // leaves the browser.
+      if (file.name.endsWith('.age')) {
+        toast.error(
+          'That backup is encrypted. Restore it with the CaveCMS command line on the server that holds the key.',
+        )
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        return
+      }
+      if (!/\.(tar\.gz|tgz|gz)$/i.test(file.name)) {
+        toast.error('Choose a CaveCMS backup archive — a .tar.gz file.')
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        return
+      }
+      if (file.size > 4 * 1024 * 1024 * 1024) {
+        toast.error('That file is larger than the 4 GB upload limit.')
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        return
+      }
       setBusy(true)
+      setUploadPct(0)
       try {
-        const fd = new FormData()
-        fd.append('archive', file)
-        const r = await csrfFetch('/api/admin/backups/upload-restore', { method: 'POST', body: fd })
-        if (r.status === 409) {
+        // XMLHttpRequest, not fetch: fetch has no upload-progress events, and
+        // a multi-GB archive with ZERO feedback reads as "the upload stopped".
+        // The file goes up as the RAW body (the route streams it to disk) —
+        // multipart form encoding made the server buffer the whole archive in
+        // memory, which shared hosts' memory caps killed mid-upload.
+        const token = readCsrf() || (await refreshCsrf())
+        const status = await new Promise<{ code: number; body: string }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('POST', '/api/admin/backups/upload-restore')
+          xhr.withCredentials = true
+          xhr.setRequestHeader('x-csrf-token', token)
+          xhr.setRequestHeader('content-type', 'application/gzip')
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100))
+          }
+          xhr.onload = () => resolve({ code: xhr.status, body: xhr.responseText })
+          xhr.onerror = () => reject(new Error('network'))
+          xhr.onabort = () => reject(new Error('aborted'))
+          xhr.send(file)
+        })
+        if (status.code === 409) {
           toast.error('A backup or restore is already running.')
           return
         }
-        if (r.status === 400) {
-          toast.error("That file isn't a valid CaveCMS backup.")
-          return
-        }
-        if (!r.ok) {
-          toast.error("Couldn't start the restore from that file.")
+        if (!(status.code >= 200 && status.code < 300)) {
+          const err = (() => {
+            try {
+              return (JSON.parse(status.body) as { error?: string }).error
+            } catch {
+              return undefined
+            }
+          })()
+          if (err === 'encrypted_upload_unsupported') {
+            toast.error(
+              'That backup is encrypted. Restore it with the CaveCMS command line on the server that holds the key.',
+            )
+          } else if (err === 'not_gzip') {
+            toast.error("That file isn't a CaveCMS backup archive (.tar.gz).")
+          } else if (status.code === 413) {
+            toast.error('That file is larger than the 4 GB upload limit.')
+          } else {
+            toast.error("Couldn't start the restore from that file.")
+          }
           return
         }
         setRestoreModalOpen(true)
       } catch {
-        toast.error("Couldn't upload that file.")
+        toast.error("The upload didn't finish — check your connection and try again.")
       } finally {
         setBusy(false)
+        setUploadPct(null)
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
     },
@@ -724,9 +796,14 @@ export function BackupsClient({
                   disabled={loadingRemote}
                   onClick={() => void loadRemote(p)}
                 >
-                  {loadingRemote && remoteProvider === p
-                    ? 'Loading…'
-                    : `Show ${PROVIDER_LABEL[p]} backups`}
+                  {/* Keep the label constant and add a spinner while loading —
+                      swapping the text to "Loading…" snapped the pill to a
+                      different width mid-transition, which read as two
+                      overlapping buttons during the state change. */}
+                  {loadingRemote && remoteProvider === p && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  Show {PROVIDER_LABEL[p]} backups
                 </Button>
               ))}
           </div>
@@ -840,6 +917,24 @@ export function BackupsClient({
               <Upload className="h-4 w-4" />
               {busy ? 'Uploading…' : 'Upload & restore'}
             </Button>
+            {/* Live upload progress — a multi-GB archive with no feedback
+                reads as "the upload stopped". Bar + percent while the bytes
+                go up; the restore modal takes over once the server has it. */}
+            {uploadPct !== null && (
+              <div className="mt-4">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-warm-stone/15">
+                  <div
+                    className="h-full bg-copper-500 transition-all duration-200 ease-out"
+                    style={{ width: `${uploadPct}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-warm-stone">
+                  {uploadPct < 100
+                    ? `Uploading your backup — ${uploadPct}%`
+                    : 'Upload received — checking the archive…'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>

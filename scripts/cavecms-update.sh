@@ -144,6 +144,31 @@ else
 fi
 LOCK_PATH="${STATUS_PATH}.lock"
 
+# cPanel/Passenger healthz routing. The host runs the app on a private Unix
+# socket — there is NO TCP loopback listener, so the default
+# 127.0.0.1:$PORT probe can never answer on this surface and every update
+# failed at step 1. The apply route hands us the install's PUBLIC healthz
+# URL instead; we curl it pinned to 127.0.0.1 (--resolve) so the request
+# goes straight to the local web server (LiteSpeed/Apache) — no DNS, no
+# CDN bot-wall in the path — which proxies it onto the app's socket.
+# -k: the connection target is literally 127.0.0.1, so TLS here only has
+# to carry the bearer across loopback; a box with an incomplete AutoSSL
+# cert must not be unable to update because of it.
+HEALTHZ_RESOLVE_ARGS=()
+if [ "$RESTART_MODE" = "cpanel" ] && [ -n "${CAVECMS_PUBLIC_HEALTHZ_URL:-}" ]; then
+  HEALTHZ_URL="$CAVECMS_PUBLIC_HEALTHZ_URL"
+  _hz_hostport=$(printf '%s' "$HEALTHZ_URL" | awk -F/ '{print $3}')
+  _hz_host="${_hz_hostport%%:*}"
+  _hz_port="${_hz_hostport#*:}"
+  if [ "$_hz_port" = "$_hz_hostport" ]; then
+    case "$HEALTHZ_URL" in
+      https://*) _hz_port=443 ;;
+      *) _hz_port=80 ;;
+    esac
+  fi
+  HEALTHZ_RESOLVE_ARGS=(--resolve "${_hz_host}:${_hz_port}:127.0.0.1" -k)
+fi
+
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
 # operator points STATUS_PATH at /etc/cron.d/* or similar. CAVECMS_STATE_DIR
 # (per-install runtime-state directory) is also accepted when set.
@@ -998,9 +1023,11 @@ if ! curl -fsS --max-time 10 -o /dev/null "$RELEASE_PROBE_URL"; then
 fi
 
 # DB: healthz reports db_ping=ok before we touch anything.
-healthz_args=()
+# Seeded with the cpanel loopback-resolve args (empty elsewhere) so every
+# later probe — restart verify, step-6 verify loop — inherits them too.
+healthz_args=(${HEALTHZ_RESOLVE_ARGS[@]+"${HEALTHZ_RESOLVE_ARGS[@]}"})
 if [ -n "$HEALTHZ_TOKEN" ]; then
-  healthz_args=(-H "Authorization: Bearer $HEALTHZ_TOKEN")
+  healthz_args+=(-H "Authorization: Bearer $HEALTHZ_TOKEN")
 fi
 healthz_response=$(curl -fsS --max-time 10 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>/dev/null || echo "")
 if [ -z "$healthz_response" ] || ! echo "$healthz_response" | grep -q '"status":"ok"'; then

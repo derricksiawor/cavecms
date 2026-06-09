@@ -5,6 +5,7 @@ import { env } from '@/lib/env'
 import { getSetting } from '@/lib/cms/getSettings'
 import { safeRevalidate } from '@/lib/cache/revalidate'
 import { tag } from '@/lib/cache/tags'
+import { syncLoginPathEnv } from '@/lib/security/syncLoginPathEnv'
 
 // Resolution order (highest priority first):
 //
@@ -97,6 +98,11 @@ async function readAndMaybeRevertPending(): Promise<string | null> {
     // Bust settings cache so middleware + dynamic route see the
     // reverted value on next read.
     safeRevalidate([tag.settings]).catch(() => undefined)
+    // The change path synced the (unconfirmed) new value into
+    // env.production — sync the revert back so the env bootstrap and the
+    // DB agree again (and cPanel's middleware, which can only see the env
+    // value, returns to routing the restored path).
+    syncLoginPathEnv(revertedTo)
   }
   return revertedTo
 }

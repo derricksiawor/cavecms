@@ -247,7 +247,13 @@ const SCRIPT_ENV_ALLOWLIST: readonly string[] = [
 function buildScriptEnv(
   target: string,
   fromSha: string,
-  opts: { force: boolean; downloadUrl: string; sha256: string; signature: string },
+  opts: {
+    force: boolean
+    downloadUrl: string
+    sha256: string
+    signature: string
+    publicHealthzUrl?: string
+  },
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const k of SCRIPT_ENV_ALLOWLIST) {
@@ -266,6 +272,17 @@ function buildScriptEnv(
   if (!out.CAVECMS_HEALTHZ_URL) {
     const port = process.env.PORT ?? '3040'
     out.CAVECMS_HEALTHZ_URL = `http://127.0.0.1:${port}/healthz`
+  }
+  // cPanel/Passenger runs the app on a private Unix socket — there is NO
+  // TCP loopback listener, so the 127.0.0.1:$PORT probe above can never
+  // answer there and every update died at step 1 ("Your site isn't
+  // responding properly"). Hand the orchestrator the install's PUBLIC
+  // healthz URL (derived from this very request's forwarded host — the
+  // operator just reached the dashboard through it, so it provably serves
+  // this app); the orchestrator curls it pinned to 127.0.0.1 via
+  // --resolve, keeping the probe on-box (no DNS, no CDN bot-wall).
+  if (opts.publicHealthzUrl) {
+    out.CAVECMS_PUBLIC_HEALTHZ_URL = opts.publicHealthzUrl
   }
   // Force the orchestrator's LOG_DIR to the same writable dir the spawn log
   // uses. Without this, a CLI install whose env.production predates
@@ -664,11 +681,24 @@ export const POST = withError(async (req: Request) => {
 
     // (2) Build a NARROW env for the child — secrets stay in the
     //     parent. (3) Open the spawn log with O_NOFOLLOW + 0600.
+    // Public healthz URL for the cpanel surface (see buildScriptEnv). Built
+    // from the request's forwarded host — same derivation the middleware's
+    // proxy-safe redirects use — never from req.nextUrl (which carries the
+    // bound listener address, not the public hostname).
+    const fwdHost = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+    const fwdProto = req.headers.get('x-forwarded-proto') ?? 'https'
+    const firstProto = (fwdProto.split(',')[0] ?? 'https').trim()
+    const firstHost = (fwdHost?.split(',')[0] ?? '').trim()
+    const publicHealthzUrl =
+      process.env.CAVECMS_RESTART_MODE === 'cpanel' && firstHost
+        ? `${firstProto}://${firstHost}/healthz`
+        : undefined
     const scriptEnv = buildScriptEnv(target, current.sha, {
       force,
       downloadUrl,
       sha256,
       signature,
+      publicHealthzUrl,
     })
     // (4) Choose the strongest detach mechanism the host supports.
     //     systemd-run-user (cgroup escape) → setsid-nohup (session

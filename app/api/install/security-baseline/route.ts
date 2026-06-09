@@ -11,6 +11,7 @@ import {
   upsertSetting,
   okJson,
 } from '@/lib/install/installEndpointHelpers'
+import { syncLoginPathEnv } from '@/lib/security/syncLoginPathEnv'
 
 // POST /api/install/security-baseline — wizard security baseline step
 // (OPTIONAL).
@@ -48,6 +49,14 @@ export const POST = withError(async (req: Request) => {
   const body = Body.parse(await readJsonBody(req))
 
   await upsertSetting('security_login_path', { path: body.loginPath })
+
+  // Keep the env bootstrap fallback in lockstep with the DB. On cPanel the
+  // middleware can only see the env value (its loopback config fetch can't
+  // cross Passenger's Unix socket), so without this the custom path 404s AND
+  // the original path fails the DB check — a full login lockout right after
+  // install. Also touches tmp/restart.txt there so the change goes live on
+  // the next request, hands-off.
+  syncLoginPathEnv(body.loginPath)
 
   return okJson({ ok: true, loginPath: body.loginPath })
 })
