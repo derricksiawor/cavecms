@@ -976,41 +976,95 @@ function isCpanelStubAppJs(appJsPath) {
   return src.includes('createServer') && /it works/i.test(src)
 }
 
-// cPanel self-heal: transparently clear the known Node.js-Selector stub so the
-// operator never has to (dangerously) rm -rf their app root by hand. Returns
-// true (having cleared) ONLY when the directory contains NOTHING but a subset of
-// the exact stub set AND, if app.js is present, it is the stock placeholder. On
-// ANY deviation — a real file, a stray dotfile, a non-stub app.js — it returns
-// false, leaving the caller to raise the normal hard "directory not empty"
-// error. A real prior install or any user data is therefore never touched.
-function tryClearCpanelStub(targetDir) {
-  // FULL listing — dotfiles INCLUDED. Any entry outside the allowlist (a real
-  // file, a stray .git, an unexpected .htaccess) must block the auto-clear.
+// CaveCMS-specific markers: their presence proves the directory holds a CaveCMS
+// install — or its leftovers from a failed/partial run — and NOT a foreign Node
+// app or the operator's own data. A cPanel "Application Root" is dedicated to one
+// app, so once we recognise our own footprint it is safe to clear it on reinstall
+// (the operator re-ran the installer here on purpose). The classic trap this
+// solves: `rm -rf *` leaves the dotfiles `.next/` and `.cavecms-state/` behind
+// (the glob skips dotfiles), which `ls` also hides — so a reinstall mysteriously
+// fails on "directory not empty".
+function looksLikeCavecmsInstall(targetDir, entries) {
+  if (entries.includes('.cavecms-state')) return true
+  if (existsSync(join(targetDir, '.next', 'standalone', 'server.js'))) return true
+  if (entries.includes('package.json')) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(targetDir, 'package.json'), 'utf8'))
+      if (pkg && pkg.name === 'cavecms') return true
+    } catch {
+      /* unreadable / not JSON → not our marker */
+    }
+  }
+  if (entries.includes('app.js')) {
+    try {
+      const a = readFileSync(join(targetDir, 'app.js'), 'utf8')
+      if (a.includes('CaveCMS') && a.includes('standalone/server.js')) return true
+    } catch {
+      /* unreadable */
+    }
+  }
+  if (entries.includes('cavecms')) {
+    try {
+      const head = readFileSync(join(targetDir, 'cavecms'), 'utf8').slice(0, 600)
+      if (head.includes('cavecms') && /update|rollback/.test(head)) return true
+    } catch {
+      /* not readable */
+    }
+  }
+  return false
+}
+
+// Irreplaceable data we must NEVER auto-destroy: the sealed env.production (holds
+// the secrets-encryption key + DB pointer) and any uploaded media. If either is
+// present this is a live install — refuse, and let the operator remove it
+// deliberately or run `cavecms update` instead.
+function hasIrreplaceableData(targetDir, entries) {
+  if (entries.includes('env.production')) return true
+  if (entries.includes('uploads')) {
+    try {
+      if (readdirSync(join(targetDir, 'uploads')).length > 0) return true
+    } catch {
+      /* unreadable → treat as empty */
+    }
+  }
+  return false
+}
+
+// cPanel self-heal: make the (dedicated) app root ready to install into without
+// the operator hand-clearing leftovers. Clears the directory when it is EITHER
+// the cPanel "Setup Node.js App" stub OR a data-free CaveCMS install/leftover.
+// REFUSES (returns false → hard error) when the directory holds irreplaceable
+// data (a sealed env.production or non-empty uploads/) OR any foreign content we
+// don't recognise — so a live install or the operator's own files are never
+// silently destroyed.
+function tryClearCpanelTarget(targetDir) {
   let entries
   try {
-    entries = readdirSync(targetDir)
+    entries = readdirSync(targetDir) // FULL listing — dotfiles included
   } catch {
     return false
   }
   if (entries.length === 0) return false // caller already saw it non-empty
-  for (const name of entries) {
-    if (!CPANEL_STUB_ENTRIES.has(name)) return false
-  }
-  // If app.js is present it MUST be the stock "It works!" placeholder — never a
-  // real CaveCMS launcher or a real custom app. When app.js is ABSENT, whatever
-  // remains is a subset of {public, tmp, stderr.log}: cPanel-managed throwaway
-  // scaffolding (empty public/tmp dirs + the stderr log) that the Node.js
-  // Selector keeps recreating — e.g. after a failed run the operator is often
-  // left with just `tmp/`. Clearing those is always safe, so don't require
-  // app.js to be present.
-  if (entries.includes('app.js') && !isCpanelStubAppJs(join(targetDir, 'app.js'))) {
+
+  // 1. Never auto-destroy a live install's secrets or uploaded media.
+  if (hasIrreplaceableData(targetDir, entries)) return false
+
+  // 2. Everything here must be ours: either the cPanel stub, or a recognised
+  //    CaveCMS install/leftover. Anything else is foreign content → refuse.
+  const isStubOnly = entries.every((n) => CPANEL_STUB_ENTRIES.has(n))
+  const isCavecms = looksLikeCavecmsInstall(targetDir, entries)
+  if (!isStubOnly && !isCavecms) return false
+
+  // 3. A pure-stub dir with NO CaveCMS markers: a present app.js must be the
+  //    stock "It works!" placeholder, never a foreign app that happens to be
+  //    named app.js. (When it IS our shim, isCavecms is already true above.)
+  if (isStubOnly && !isCavecms && entries.includes('app.js') && !isCpanelStubAppJs(join(targetDir, 'app.js'))) {
     return false
   }
 
-  // Safe to clear. Label dirs with a trailing slash for the transparency
-  // line BEFORE removing, then delete exactly the stub entries (the allowlist
-  // check above guarantees there is nothing else). rmSync on a symlink (cPanel
-  // sometimes symlinks `public`) removes only the link, never its target.
+  // 4. Clear everything (data was ruled out in step 1). Label dirs with a
+  //    trailing slash for the transparency line BEFORE removing. rmSync on a
+  //    symlink (cPanel sometimes symlinks `public`) removes only the link.
   const cleared = []
   for (const name of entries) {
     const full = join(targetDir, name)
@@ -1023,7 +1077,7 @@ function tryClearCpanelStub(targetDir) {
     cleared.push(isDir ? name + '/' : name)
     rmSync(full, { recursive: true, force: true })
   }
-  log.info(`Cleared cPanel starter files: ${cleared.join(', ')}`)
+  log.info(`Cleared cPanel scaffolding / prior-install leftovers: ${cleared.join(', ')}`)
   return true
 }
 
@@ -1033,19 +1087,28 @@ function preflightTargetDir(targetDir, surface) {
   // directories. Pre-existing empty dirs are left alone.
   let createdByUs = false
   if (existsSync(targetDir)) {
-    const contents = readdirSync(targetDir).filter((n) => !n.startsWith('.'))
-    if (contents.length > 0) {
-      // cPanel self-heal: the Node.js Selector seeds the app root with stub
-      // scaffolding (app.js / public/ / tmp/ / stderr.log) the moment the
-      // operator clicks "Create Application", so an otherwise-correct install
-      // would die here. ONLY on the cPanel surface, and ONLY when the directory
-      // is EXACTLY that stub, clear it and continue. Every other surface — and
-      // any non-stub content on cPanel — keeps the hard refusal below.
-      if (!(surface === 'cpanel' && tryClearCpanelStub(targetDir))) {
-        die(
-          `Target directory is not empty: ${targetDir}\n` +
-            `  Either remove it (mv ${targetDir} ${targetDir}.bak) or pass a different --dir.`,
-        )
+    const all = readdirSync(targetDir)
+    const visible = all.filter((n) => !n.startsWith('.'))
+    // On cPanel, ANY leftover triggers the self-heal — including dotfiles like
+    // `.next/` and `.cavecms-state/` that `rm -rf *` skips (and `ls` hides). On
+    // every other surface, keep the historical behaviour where a directory of
+    // only dotfiles counts as empty.
+    const nonEmpty = surface === 'cpanel' ? all.length > 0 : visible.length > 0
+    if (nonEmpty) {
+      // cPanel self-heal: the app root is dedicated to one app, so clear the
+      // "Setup Node.js App" stub AND any data-free CaveCMS install/leftover and
+      // continue. Anything with real data (env.production / uploads) or foreign
+      // content keeps the hard refusal below — never silently destroyed.
+      if (!(surface === 'cpanel' && tryClearCpanelTarget(targetDir))) {
+        const listed = all.length ? `\n  Contains: ${all.slice().sort().join(', ')}` : ''
+        const hint =
+          surface === 'cpanel'
+            ? `\n  An existing install with data (env.production / uploads) or files CaveCMS didn't create are here.\n` +
+              `  To reinstall fresh, clear it first — this includes hidden files:\n` +
+              `      find ${targetDir} -mindepth 1 -delete\n` +
+              `  Or run \`cavecms update\` to update in place.`
+            : `\n  Either remove it (mv ${targetDir} ${targetDir}.bak) or pass a different --dir.`
+        die(`Target directory is not empty: ${targetDir}${listed}${hint}`)
       }
     }
   } else {
