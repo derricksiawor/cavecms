@@ -7,6 +7,14 @@ import { csrfFetch } from '@/lib/client/csrf'
 import { humaniseRelease, type HumanRelease } from '@/lib/updates/humaniseRelease'
 import { ReleaseNotesMarkdown } from '@/components/admin/ReleaseNotesMarkdown'
 
+// Fades the clipped tail of the notes preview by masking the content itself to
+// transparent — a mask blends into the translucent card + the dashboard's warm
+// page-gradient behind it. The old solid-colour gradient overlay (from-cream-50)
+// painted a mismatched grey band because the card is bg-cream-50/80 over that
+// gradient, not solid cream. Same technique as WhatsNewCard.
+const NOTES_FADE_MASK =
+  'linear-gradient(to bottom, #000 0%, #000 calc(100% - 48px), transparent 100%)'
+
 // Dashboard hero card — renders when an update is available. Lives at
 // the top of /admin so an operator who never visits Settings → Updates
 // still sees the prompt the first time they log in.
@@ -39,6 +47,7 @@ export function UpdateAvailableCard({
 }) {
   const [release, setRelease] = useState<HumanRelease | null>(null)
   const [hide, setHide] = useState(false)
+  const [notesOverflow, setNotesOverflow] = useState(false)
 
   useEffect(() => {
     if (currentSha === 'dev') {
@@ -69,6 +78,14 @@ export function UpdateAvailableCard({
   if (hide || !release) return null
 
   const security = release.isSecurity
+
+  // Only fade the preview tail when the notes actually overflow the cap — a
+  // short release renders in full with no misleading "there's more" fade.
+  // Callback ref (not useEffect): measured here so the hook rules aren't
+  // violated by running after the early `return null` above.
+  function measureNotes(el: HTMLDivElement | null) {
+    if (el) setNotesOverflow(el.scrollHeight > el.clientHeight + 4)
+  }
 
   return (
     <motion.article
@@ -129,14 +146,19 @@ export function UpdateAvailableCard({
         </Link>
       </header>
       {release.body.trim() && (
-        <div className="relative mt-5 max-h-32 overflow-hidden">
+        // Fade the clipped tail via a mask on the content itself (blends into
+        // the translucent card + page gradient) — the full notes live on the
+        // updates page. See NOTES_FADE_MASK above.
+        <div
+          ref={measureNotes}
+          className="mt-5 max-h-32 overflow-hidden"
+          style={
+            notesOverflow
+              ? { maskImage: NOTES_FADE_MASK, WebkitMaskImage: NOTES_FADE_MASK }
+              : undefined
+          }
+        >
           <ReleaseNotesMarkdown>{release.body}</ReleaseNotesMarkdown>
-          {/* Fade the clipped tail — the full notes live on the updates page. */}
-          <div
-            className={`pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent ${
-              security ? 'from-red-50' : 'from-cream-50'
-            }`}
-          />
         </div>
       )}
     </motion.article>
