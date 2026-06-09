@@ -40,6 +40,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   statSync,
   writeFileSync,
   chmodSync,
@@ -986,7 +987,10 @@ function isCpanelStubAppJs(appJsPath) {
 // fails on "directory not empty".
 function looksLikeCavecmsInstall(targetDir, entries) {
   if (entries.includes('.cavecms-state')) return true
-  if (existsSync(join(targetDir, '.next', 'standalone', 'server.js'))) return true
+  // NOTE: a bare `.next/standalone/server.js` is deliberately NOT a marker — any
+  // foreign `next build --output=standalone` app has one. We require a
+  // CaveCMS-SPECIFIC fingerprint below (our package.json name, our app.js shim,
+  // or the cavecms recovery shim) so a foreign app is never mistaken for ours.
   if (entries.includes('package.json')) {
     try {
       const pkg = JSON.parse(readFileSync(join(targetDir, 'package.json'), 'utf8'))
@@ -995,10 +999,13 @@ function looksLikeCavecmsInstall(targetDir, entries) {
       /* unreadable / not JSON → not our marker */
     }
   }
-  if (entries.includes('app.js')) {
+  // Our startup shim — app.cjs (current) or app.js (old ESM shim, for upgrades
+  // off a prior broken install). Both reference the standalone server.
+  for (const shimName of ['app.cjs', 'app.js']) {
+    if (!entries.includes(shimName)) continue
     try {
-      const a = readFileSync(join(targetDir, 'app.js'), 'utf8')
-      if (a.includes('CaveCMS') && a.includes('standalone/server.js')) return true
+      const a = readFileSync(join(targetDir, shimName), 'utf8')
+      if ((a.includes('CaveCMS') || a.includes('cavecms')) && a.includes('standalone/server.js')) return true
     } catch {
       /* unreadable */
     }
@@ -1030,13 +1037,106 @@ function hasIrreplaceableData(targetDir, entries) {
   return false
 }
 
+// Directory names that are cPanel system / web-root folders. We NEVER auto-touch
+// these even if they superficially look clearable — a mistaken install pointed at
+// one (e.g. ~/public_html) must fail safe, not move the operator's live site,
+// mailbox, or home folder.
+const PROTECTED_BASENAMES = new Set([
+  'public_html', 'www', 'htdocs', 'public_ftp', 'cgi-bin',
+  'mail', 'etc', 'ssl', 'logs', '.cpanel', '.ssh', '.well-known',
+])
+
+function isProtectedInstallRoot(targetDir) {
+  // Resolve symlinks too: a dir like ~/mysite that links to ~/public_html must
+  // be caught. realpathSync needs the path to exist (it does — the caller is in
+  // the existsSync branch); fall back to a plain resolve otherwise.
+  let r
+  try {
+    r = realpathSync(resolve(targetDir))
+  } catch {
+    r = resolve(targetDir)
+  }
+  let home
+  try {
+    home = realpathSync(homedir())
+  } catch {
+    home = resolve(homedir())
+  }
+  if (r === home || r === resolve(homedir())) return true // the home dir itself
+  const parts = r.split('/').filter(Boolean)
+  if (parts.length <= 1) return true // fs root or a single top-level segment
+  // ANY path component being a reserved web-root / system name protects the
+  // path — so `~/public_html`, `~/public_html/example.com`, `~/mail/cur`, a
+  // symlink resolving into one, etc. all match (not just the final segment).
+  return parts.some((p) => PROTECTED_BASENAMES.has(p))
+}
+
+// Move (never delete) the directory's contents aside to a timestamped sibling so
+// a mistaken — or wrongly-detected — run is FULLY recoverable. Returns the backup
+// path, or null on failure (the caller then refuses rather than risk destruction).
+// Renames are atomic + free on the same filesystem, so nothing is copied and a
+// failure mid-move is rolled back. Prior data-free auto-backups are pruned first
+// so repeated retries don't accumulate on a quota'd shared host.
+function backupDirContents(targetDir, entries) {
+  const parent = dirname(resolve(targetDir))
+  const base = resolve(targetDir).split('/').pop()
+  const prefix = `${base}.preinstall-bak-`
+  // Prune ONLY dirs matching the EXACT name shape this function produces — never
+  // a loose prefix — so a hand-made operator dir (e.g. `<site>.preinstall-bak-mycopy`)
+  // is never deleted. This anchored match is the real guard on the one rmSync in
+  // this whole flow; the data-check below is belt-and-suspenders.
+  const escBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const bakRe = new RegExp(`^${escBase}\\.preinstall-bak-\\d{14}-[0-9a-f]{12}$`)
+  try {
+    for (const n of readdirSync(parent)) {
+      if (!bakRe.test(n)) continue
+      const p = join(parent, n)
+      try {
+        if (!hasIrreplaceableData(p, readdirSync(p))) rmSync(p, { recursive: true, force: true })
+      } catch {
+        /* leave anything we can't verify */
+      }
+    }
+  } catch {
+    /* parent unreadable — skip prune */
+  }
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+  const backupDir = join(parent, `${prefix}${stamp}-${randomBytes(6).toString('hex')}`)
+  const moved = []
+  try {
+    mkdirSync(backupDir, { recursive: true })
+    for (const name of entries) {
+      renameSync(join(targetDir, name), join(backupDir, name))
+      moved.push(name)
+    }
+  } catch {
+    // Roll back: return everything we moved, drop the (now partial) backup dir.
+    for (const name of moved) {
+      try {
+        renameSync(join(backupDir, name), join(targetDir, name))
+      } catch {
+        /* best-effort */
+      }
+    }
+    try {
+      rmSync(backupDir, { recursive: true, force: true })
+    } catch {
+      /* best-effort */
+    }
+    return null
+  }
+  return backupDir
+}
+
 // cPanel self-heal: make the (dedicated) app root ready to install into without
-// the operator hand-clearing leftovers. Clears the directory when it is EITHER
-// the cPanel "Setup Node.js App" stub OR a data-free CaveCMS install/leftover.
-// REFUSES (returns false → hard error) when the directory holds irreplaceable
-// data (a sealed env.production or non-empty uploads/) OR any foreign content we
-// don't recognise — so a live install or the operator's own files are never
-// silently destroyed.
+// the operator hand-clearing leftovers. When the directory is EITHER the cPanel
+// "Setup Node.js App" stub OR a data-free CaveCMS install/leftover, it MOVES the
+// contents aside to a recoverable backup (NEVER deletes) and returns true.
+// REFUSES (returns false → hard error, nothing touched) when: the path is a
+// protected web-root/system folder, OR it holds irreplaceable data (a sealed
+// env.production or non-empty uploads/), OR it contains any foreign content we
+// don't recognise. So a live site, the operator's own files, or a wrong target
+// are never destroyed — and even what we DO move is fully restorable.
 function tryClearCpanelTarget(targetDir) {
   let entries
   try {
@@ -1046,7 +1146,10 @@ function tryClearCpanelTarget(targetDir) {
   }
   if (entries.length === 0) return false // caller already saw it non-empty
 
-  // 1. Never auto-destroy a live install's secrets or uploaded media.
+  // 0. NEVER touch a protected web-root / system / home directory.
+  if (isProtectedInstallRoot(targetDir)) return false
+
+  // 1. Never auto-move a live install's secrets or uploaded media.
   if (hasIrreplaceableData(targetDir, entries)) return false
 
   // 2. Everything here must be ours: either the cPanel stub, or a recognised
@@ -1062,22 +1165,23 @@ function tryClearCpanelTarget(targetDir) {
     return false
   }
 
-  // 4. Clear everything (data was ruled out in step 1). Label dirs with a
-  //    trailing slash for the transparency line BEFORE removing. rmSync on a
-  //    symlink (cPanel sometimes symlinks `public`) removes only the link.
-  const cleared = []
-  for (const name of entries) {
-    const full = join(targetDir, name)
-    let isDir = false
-    try {
-      isDir = statSync(full).isDirectory()
-    } catch {
-      /* removed/unreadable — fall back to the bare name */
-    }
-    cleared.push(isDir ? name + '/' : name)
-    rmSync(full, { recursive: true, force: true })
+  // 4. Move aside (recoverable) rather than delete. If the backup can't be made,
+  //    refuse — never fall back to a destructive clear.
+  const backupDir = backupDirContents(targetDir, entries)
+  if (!backupDir) {
+    // We passed every safety gate (ours to clear, no data, not protected) but the
+    // move itself failed (cross-filesystem / permissions). Never fall back to a
+    // destructive clear — give an accurate manual path, not the generic message.
+    die(
+      `Could not move the existing files in ${targetDir} aside to a backup ` +
+        `(cross-filesystem or permission issue).\n` +
+        `  Clear it manually — this includes hidden files — then re-run:\n` +
+        `      find ${targetDir} -mindepth 1 -delete`,
+    )
   }
-  log.info(`Cleared cPanel scaffolding / prior-install leftovers: ${cleared.join(', ')}`)
+  log.info('Moved existing cPanel scaffolding / prior-install leftovers aside (nothing deleted):')
+  log.gray(`  ${backupDir}`)
+  log.gray('  Delete it once your site works, or restore from it if anything was needed.')
   return true
 }
 
@@ -1100,10 +1204,20 @@ function preflightTargetDir(targetDir, surface) {
       // continue. Anything with real data (env.production / uploads) or foreign
       // content keeps the hard refusal below — never silently destroyed.
       if (!(surface === 'cpanel' && tryClearCpanelTarget(targetDir))) {
+        // A protected web-root / system / home dir gets SAFE guidance — never a
+        // `find ... -delete` that would wipe a live site.
+        if (surface === 'cpanel' && isProtectedInstallRoot(targetDir)) {
+          die(
+            `Refusing to install into ${targetDir} — that looks like a web root, mailbox, or your home folder.\n` +
+              `  Install into a dedicated directory instead, e.g.:\n` +
+              `      npx create-cavecms@latest cavecms --surface=cpanel\n` +
+              `  which installs into ~/cavecms (point your cPanel Node app's Application Root there).`,
+          )
+        }
         const listed = all.length ? `\n  Contains: ${all.slice().sort().join(', ')}` : ''
         const hint =
           surface === 'cpanel'
-            ? `\n  An existing install with data (env.production / uploads) or files CaveCMS didn't create are here.\n` +
+            ? `\n  This holds a live install's data (env.production / uploads) or files CaveCMS didn't create.\n` +
               `  To reinstall fresh, clear it first — this includes hidden files:\n` +
               `      find ${targetDir} -mindepth 1 -delete\n` +
               `  Or run \`cavecms update\` to update in place.`
@@ -1498,11 +1612,15 @@ async function gatherConfig({ surface, siteName, port, yes }) {
         },
       })
     }
-    const newPortStr = await ask(rl, 'App listen port', {
-      defaultValue: String(config.port),
-      validate: (v) => (/^\d+$/.test(v) && Number(v) > 0 && Number(v) < 65536 ? null : 'Port must be 1-65535.'),
-    })
-    config.port = Number(newPortStr)
+    // cPanel runs the app under Passenger, which assigns the listen
+    // port/socket itself and ignores PORT in env.production — so don't ask.
+    if (surface !== 'cpanel') {
+      const newPortStr = await ask(rl, 'App listen port', {
+        defaultValue: String(config.port),
+        validate: (v) => (/^\d+$/.test(v) && Number(v) > 0 && Number(v) < 65536 ? null : 'Port must be 1-65535.'),
+      })
+      config.port = Number(newPortStr)
+    }
   })
 
   return config
@@ -2491,30 +2609,31 @@ function printPm2NginxGuidance({ siteUrl, port, slug, runUser, pm2Home }) {
 }
 
 function startCpanel({ targetDir }) {
-  // cPanel uses Passenger via the "Setup Node.js App" interface. The operator
-  // points the (already-created) app at the app.js startup file we write here.
-  // The operator-facing "finish in cPanel" steps are printed ONCE, in the
-  // post-install banner in main(); this function only writes the shim — and
-  // does it silently — so there is never a second, contradictory cPanel list.
-  // Inline env-file parser — `node:dotenv` does NOT exist (the real module is
-  // the third-party `dotenv` package which isn't bundled), and cPanel's
-  // Passenger doesn't accept --env-file flags. So the shim parses env.production
-  // into process.env itself, then starts the standalone server.
+  // cPanel runs the app under a Node host (LiteSpeed's lsnode, or Passenger)
+  // that loads the startup file with require(). The operator points it at the
+  // app.cjs we write here. The "finish in cPanel" steps are printed ONCE, in the
+  // post-install banner in main(); this function only writes the shim, silently.
   //
-  // CRITICAL: the unpacked release ships a package.json with "type": "module",
-  // so this app.js is loaded as an ES MODULE. It MUST use import + top-level
-  // await — `require`/`__dirname` are undefined in ESM scope and crash the app
-  // on every Passenger boot ("ReferenceError: require is not defined"). The
-  // standalone server.js is CommonJS; `await import()` loads it via Node's
-  // CJS/ESM interop and runs its top-level listen().
-  const shim = `// CaveCMS Passenger shim — cPanel "Setup Node.js App" invokes this.
-// The unpacked install's package.json is "type": "module", so this .js file
-// runs as an ES module: use import + top-level await, never require().
-// Loads env.production into process.env, then starts the standalone server.
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-const envPath = join(dirname(fileURLToPath(import.meta.url)), 'env.production')
+  // CRITICAL — why .cjs and NOT app.js:
+  //  - The unpacked release ships package.json with "type": "module", so any
+  //    `.js` file at the install root is treated as an ES module.
+  //  - The host loads the startup file with require(). require() of an ES module
+  //    that uses top-level await throws ERR_REQUIRE_ASYNC_MODULE; an ESM file
+  //    using `require` internally throws "require is not defined". Either way the
+  //    app 503s on every boot.
+  //  - A `.cjs` file is CommonJS REGARDLESS of "type":"module", so require()
+  //    loads it cleanly. The standalone server.js is itself CommonJS, so a plain
+  //    `require('./.next/standalone/server.js')` starts it. No ESM, no TLA.
+  // `node:dotenv` doesn't exist and the host doesn't pass --env-file, so the
+  // shim parses env.production into process.env itself first.
+  const shim = `// CaveCMS startup file — cPanel "Setup Node.js App" require()s this.
+// A .cjs file is CommonJS regardless of the install's "type":"module", so the
+// host's require()-based Node loader (lsnode / Passenger) loads it with no ESM
+// or top-level-await error. Loads env.production into process.env, then starts
+// the standalone server.
+const { readFileSync } = require('node:fs')
+const { join } = require('node:path')
+const envPath = join(__dirname, 'env.production')
 try {
   const text = readFileSync(envPath, 'utf8')
   for (const raw of text.split(/\\r?\\n/)) {
@@ -2530,9 +2649,16 @@ try {
   console.error('[cavecms] failed to read env.production:', err && err.message)
   process.exit(1)
 }
-await import('./.next/standalone/server.js')
+require('./.next/standalone/server.js')
 `
-  writeFileSync(join(targetDir, 'app.js'), shim)
+  writeFileSync(join(targetDir, 'app.cjs'), shim)
+  // Remove a stale app.js (old shim, or the cPanel "It works!" stub) so the only
+  // startup file present is the working app.cjs and nothing points at the broken one.
+  try {
+    rmSync(join(targetDir, 'app.js'), { force: true })
+  } catch {
+    /* best-effort */
+  }
 }
 
 function startLaptop({ targetDir, envPath, config }) {
@@ -2708,7 +2834,8 @@ function detectInstallSurface(dir, env) {
     (typeof env.UPLOADS_ROOT === 'string' && env.UPLOADS_ROOT.startsWith('/opt/cavecms')) ||
     (typeof env.CAVECMS_STATE_DIR === 'string' && env.CAVECMS_STATE_DIR.startsWith('/opt/cavecms'))
   ) return 'vps'
-  if (existsSync(join(dir, 'app.js'))) return 'cpanel'
+  // The cPanel startup shim is app.cjs (current) or app.js (old installs).
+  if (existsSync(join(dir, 'app.cjs')) || existsSync(join(dir, 'app.js'))) return 'cpanel'
   return 'laptop'
 }
 
@@ -4157,7 +4284,10 @@ async function main(argv) {
   // can't bind. The default 3040 from DEFAULT_PORT may already be in
   // use on a server with other Node apps.
   const portToProbe = args.port ?? Number(envOr('CAVECMS_PORT', String(DEFAULT_PORT)))
-  preflightPort(portToProbe)
+  // cPanel runs under Passenger, which assigns the listen port/socket itself and
+  // ignores PORT in env.production — so a bound 3040 on the shared host is
+  // irrelevant and must NOT abort the install.
+  if (surface !== 'cpanel') preflightPort(portToProbe)
   // VPS-only safety: refuse to overwrite an existing cavecms.service
   // and refuse if the operator's chosen ServerName already appears in
   // an nginx / Apache vhost on this box.
@@ -4238,14 +4368,14 @@ async function main(argv) {
     if (surface === 'cpanel') {
       // cPanel's "Setup Node.js App → Create Application" ALREADY ran — it is
       // what produced the venv this installer ran inside. So there is nothing
-      // to create: point the EXISTING app at the app.js we just wrote, restart
+      // to create: point the EXISTING app at the app.cjs we just wrote, restart
       // it, then finish in the browser. Printed ONCE here; startCpanel writes
       // the shim silently so there is no second, contradictory cPanel list.
       console.log(c('gray', '  Finish in cPanel — in this order:'))
       console.log(c('gray', '  1. Your cavecms app already exists') + c('gray', ' — do NOT create it again (creating it is what gave you the venv you ran this in).'))
-      console.log(c('gray', '  2. cPanel → Setup Node.js App → open your cavecms app → set ') + c('bold', 'Application startup file: app.js') + c('gray', ', then Save. (The installer just wrote it for you.)'))
+      console.log(c('gray', '  2. cPanel → Setup Node.js App → open your cavecms app → set ') + c('bold', 'Application startup file: app.cjs') + c('gray', ', then Save. (The installer just wrote it for you.)'))
       console.log(c('gray', '  3. Do NOT click ') + c('bold', 'Run NPM Install') + c('gray', ' — the dependencies are already bundled in the release.'))
-      console.log(c('gray', '  4. Click ') + c('bold', 'Restart') + c('gray', '. (No port to set — Passenger assigns one; the PORT in env.production is ignored.)'))
+      console.log(c('gray', '  4. Click ') + c('bold', 'Restart') + c('gray', '. (No port to set — the host assigns one; the PORT in env.production is ignored.)'))
       console.log(c('gray', '  5. Open ') + c('bold', installUrl) + c('gray', ' and walk the wizard: admin account → site identity → branding → contact → SMTP → security.'))
       console.log(c('gray', '  6. Sign in at ') + c('bold', `${config.siteUrl}/${secrets.LOGIN_PATH}`))
     } else {
