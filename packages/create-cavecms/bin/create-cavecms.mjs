@@ -942,7 +942,85 @@ function defaultInstallDir(surface, siteName) {
   return resolve(process.cwd(), siteName || 'cavecms')
 }
 
-function preflightTargetDir(targetDir) {
+// The exact scaffolding cPanel's "Setup Node.js App → Create Application"
+// seeds into the app root BEFORE the installer ever runs. Without this,
+// a fresh, correct cPanel install dies on "target directory is not empty".
+// EVERY name here is a file/dir create-cavecms is willing to DELETE, so this
+// is a security boundary — only add an entry you have CONFIRMED cPanel itself
+// writes on a real host. (A `.htaccess` is sometimes mentioned, but the
+// standard Node.js Selector puts Passenger's `.htaccess` in the *document*
+// root, not the app root we install into — left out until verified on a real
+// host. Adding it here is a one-line change.)
+const CPANEL_STUB_ENTRIES = new Set(['app.js', 'public', 'tmp', 'stderr.log'])
+
+// Does this app.js look like cPanel's stock "It works!" placeholder — and
+// definitively NOT a real CaveCMS Passenger shim (the app.js we write at
+// install time, see startCpanel())? This is the load-bearing safety gate:
+// alongside the strict allowlist, a positive match here is the ONLY thing that
+// authorises deleting the file. It must POSITIVELY identify the throwaway stub
+// AND explicitly refuse our own shim, so a re-run over a real install can never
+// mistake CaveCMS's launcher for a placeholder.
+function isCpanelStubAppJs(appJsPath) {
+  let src
+  try {
+    if (!statSync(appJsPath).isFile()) return false
+    src = readFileSync(appJsPath, 'utf8')
+  } catch {
+    return false
+  }
+  // Never treat a real CaveCMS install's launcher as a stub.
+  if (src.includes('CaveCMS') || src.includes('standalone/server.js')) return false
+  // cPanel's placeholder is a bare http server that answers "It works!".
+  // Require BOTH the http server construction AND the placeholder body — no
+  // real application server responds literally "It works!".
+  return src.includes('createServer') && /it works/i.test(src)
+}
+
+// cPanel self-heal: transparently clear the known Node.js-Selector stub so the
+// operator never has to (dangerously) rm -rf their app root by hand. Returns
+// true (having cleared) ONLY when the directory contains NOTHING but the exact
+// stub set AND app.js is the stock placeholder. On ANY deviation — a real file,
+// a stray dotfile, a non-stub app.js — it returns false, leaving the caller to
+// raise the normal hard "directory not empty" error. A real prior install or
+// any user data is therefore never touched.
+function tryClearCpanelStub(targetDir) {
+  // FULL listing — dotfiles INCLUDED. Any entry outside the allowlist (a real
+  // file, a stray .git, an unexpected .htaccess) must block the auto-clear.
+  let entries
+  try {
+    entries = readdirSync(targetDir)
+  } catch {
+    return false
+  }
+  if (entries.length === 0) return false // caller already saw it non-empty
+  for (const name of entries) {
+    if (!CPANEL_STUB_ENTRIES.has(name)) return false
+  }
+  // The stub MUST include app.js, and it must be the stock placeholder.
+  if (!entries.includes('app.js')) return false
+  if (!isCpanelStubAppJs(join(targetDir, 'app.js'))) return false
+
+  // Safe to clear. Label dirs with a trailing slash for the transparency
+  // line BEFORE removing, then delete exactly the stub entries (the allowlist
+  // check above guarantees there is nothing else). rmSync on a symlink (cPanel
+  // sometimes symlinks `public`) removes only the link, never its target.
+  const cleared = []
+  for (const name of entries) {
+    const full = join(targetDir, name)
+    let isDir = false
+    try {
+      isDir = statSync(full).isDirectory()
+    } catch {
+      /* removed/unreadable — fall back to the bare name */
+    }
+    cleared.push(isDir ? name + '/' : name)
+    rmSync(full, { recursive: true, force: true })
+  }
+  log.info(`Cleared cPanel starter files: ${cleared.join(', ')}`)
+  return true
+}
+
+function preflightTargetDir(targetDir, surface) {
   // Returns true if the CLI created the dir itself, so the main()
   // wrapper can rm it on failure without clobbering operator-owned
   // directories. Pre-existing empty dirs are left alone.
@@ -950,10 +1028,18 @@ function preflightTargetDir(targetDir) {
   if (existsSync(targetDir)) {
     const contents = readdirSync(targetDir).filter((n) => !n.startsWith('.'))
     if (contents.length > 0) {
-      die(
-        `Target directory is not empty: ${targetDir}\n` +
-          `  Either remove it (mv ${targetDir} ${targetDir}.bak) or pass a different --dir.`,
-      )
+      // cPanel self-heal: the Node.js Selector seeds the app root with stub
+      // scaffolding (app.js / public/ / tmp/ / stderr.log) the moment the
+      // operator clicks "Create Application", so an otherwise-correct install
+      // would die here. ONLY on the cPanel surface, and ONLY when the directory
+      // is EXACTLY that stub, clear it and continue. Every other surface — and
+      // any non-stub content on cPanel — keeps the hard refusal below.
+      if (!(surface === 'cpanel' && tryClearCpanelStub(targetDir))) {
+        die(
+          `Target directory is not empty: ${targetDir}\n` +
+            `  Either remove it (mv ${targetDir} ${targetDir}.bak) or pass a different --dir.`,
+        )
+      }
     }
   } else {
     // Try to create it — surfaces the permission error early.
@@ -2334,23 +2420,33 @@ function printPm2NginxGuidance({ siteUrl, port, slug, runUser, pm2Home }) {
   log.gray(`PM2:   sudo -u ${runUser} PM2_HOME=${pm2Home} pm2 status`)
 }
 
-function startCpanel({ targetDir, envPath }) {
-  // cPanel uses Passenger via the "Setup Node.js App" interface. The
-  // operator points it at the install dir + an app.js entry. We write
-  // an app.js shim that the standalone server.js can be invoked through.
-  log.info('cPanel surface: writing app.js Passenger shim.')
-  // Inline env-file parser — `node:dotenv` does NOT exist (the real
-  // module is the third-party `dotenv` package which isn't bundled).
-  // cPanel's Passenger doesn't accept --env-file flags, so we parse
-  // env.production into process.env ourselves before requiring the
-  // standalone server.
+function startCpanel({ targetDir }) {
+  // cPanel uses Passenger via the "Setup Node.js App" interface. The operator
+  // points the (already-created) app at the app.js startup file we write here.
+  // The operator-facing "finish in cPanel" steps are printed ONCE, in the
+  // post-install banner in main(); this function only writes the shim — and
+  // does it silently — so there is never a second, contradictory cPanel list.
+  // Inline env-file parser — `node:dotenv` does NOT exist (the real module is
+  // the third-party `dotenv` package which isn't bundled), and cPanel's
+  // Passenger doesn't accept --env-file flags. So the shim parses env.production
+  // into process.env itself, then starts the standalone server.
+  //
+  // CRITICAL: the unpacked release ships a package.json with "type": "module",
+  // so this app.js is loaded as an ES MODULE. It MUST use import + top-level
+  // await — `require`/`__dirname` are undefined in ESM scope and crash the app
+  // on every Passenger boot ("ReferenceError: require is not defined"). The
+  // standalone server.js is CommonJS; `await import()` loads it via Node's
+  // CJS/ESM interop and runs its top-level listen().
   const shim = `// CaveCMS Passenger shim — cPanel "Setup Node.js App" invokes this.
-// Reads env.production at boot and execs the standalone server.
-const fs = require('node:fs')
-const path = require('node:path')
-const envPath = path.join(__dirname, 'env.production')
+// The unpacked install's package.json is "type": "module", so this .js file
+// runs as an ES module: use import + top-level await, never require().
+// Loads env.production into process.env, then starts the standalone server.
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+const envPath = join(dirname(fileURLToPath(import.meta.url)), 'env.production')
 try {
-  const text = fs.readFileSync(envPath, 'utf8')
+  const text = readFileSync(envPath, 'utf8')
   for (const raw of text.split(/\\r?\\n/)) {
     const line = raw.trim()
     if (!line || line.startsWith('#')) continue
@@ -2364,19 +2460,9 @@ try {
   console.error('[cavecms] failed to read env.production:', err && err.message)
   process.exit(1)
 }
-require('./.next/standalone/server.js')
+await import('./.next/standalone/server.js')
 `
   writeFileSync(join(targetDir, 'app.js'), shim)
-  log.ok('Wrote app.js for Passenger.')
-  console.log('')
-  log.info('Next steps (do these in cPanel):')
-  log.gray('  1. Open cPanel → "Setup Node.js App" → "Create Application"')
-  log.gray(`  2. Application Root:  ${targetDir.replace(homedir(), '~')}`)
-  log.gray(`  3. Application URL:   (your domain — cPanel maps this for you)`)
-  log.gray('  4. Application Startup File: app.js')
-  log.gray('  5. Click "Run NPM Install" — NOT NEEDED, dependencies are bundled')
-  log.gray('  6. Click "Start App"')
-  log.gray('  7. Open <your-domain>/install to finish setup in the browser.')
 }
 
 function startLaptop({ targetDir, envPath, config }) {
@@ -2395,7 +2481,7 @@ function startService({ surface, targetDir, envPath, config, skipStart, siteName
   }
   if (surface === 'vps') return startVps({ targetDir, envPath, config })
   if (surface === 'pm2') return startPm2({ targetDir, envPath, config, siteName })
-  if (surface === 'cpanel') return startCpanel({ targetDir, envPath })
+  if (surface === 'cpanel') return startCpanel({ targetDir })
   return startLaptop({ targetDir, envPath, config })
 }
 
@@ -3995,7 +4081,7 @@ async function main(argv) {
   console.log('')
 
   log.step(1, 7, 'Pre-flight checks…')
-  const createdTargetDir = preflightTargetDir(targetDir)
+  const createdTargetDir = preflightTargetDir(targetDir, surface)
   // Port collision check runs early, BEFORE we download the zip — so a
   // misconfigured --port doesn't waste minutes on a download that
   // can't bind. The default 3040 from DEFAULT_PORT may already be in
@@ -4079,9 +4165,24 @@ async function main(argv) {
     console.log('')
     console.log(c('cyan', 'Next:'))
     const installUrl = `${config.siteUrl}/install?t=${encodeURIComponent(secrets.INSTALL_BOOTSTRAP_TOKEN)}`
-    console.log(c('gray', '  1. Open ') + c('bold', installUrl))
-    console.log(c('gray', '  2. Walk the in-app wizard: admin account → site identity → branding → contact → SMTP → security → done'))
-    console.log(c('gray', '  3. Sign in at ') + c('bold', `${config.siteUrl}/${secrets.LOGIN_PATH}`))
+    if (surface === 'cpanel') {
+      // cPanel's "Setup Node.js App → Create Application" ALREADY ran — it is
+      // what produced the venv this installer ran inside. So there is nothing
+      // to create: point the EXISTING app at the app.js we just wrote, restart
+      // it, then finish in the browser. Printed ONCE here; startCpanel writes
+      // the shim silently so there is no second, contradictory cPanel list.
+      console.log(c('gray', '  Finish in cPanel — in this order:'))
+      console.log(c('gray', '  1. Your cavecms app already exists') + c('gray', ' — do NOT create it again (creating it is what gave you the venv you ran this in).'))
+      console.log(c('gray', '  2. cPanel → Setup Node.js App → open your cavecms app → set ') + c('bold', 'Application startup file: app.js') + c('gray', ', then Save. (The installer just wrote it for you.)'))
+      console.log(c('gray', '  3. Do NOT click ') + c('bold', 'Run NPM Install') + c('gray', ' — the dependencies are already bundled in the release.'))
+      console.log(c('gray', '  4. Click ') + c('bold', 'Restart') + c('gray', '. (No port to set — Passenger assigns one; the PORT in env.production is ignored.)'))
+      console.log(c('gray', '  5. Open ') + c('bold', installUrl) + c('gray', ' and walk the wizard: admin account → site identity → branding → contact → SMTP → security.'))
+      console.log(c('gray', '  6. Sign in at ') + c('bold', `${config.siteUrl}/${secrets.LOGIN_PATH}`))
+    } else {
+      console.log(c('gray', '  1. Open ') + c('bold', installUrl))
+      console.log(c('gray', '  2. Walk the in-app wizard: admin account → site identity → branding → contact → SMTP → security → done'))
+      console.log(c('gray', '  3. Sign in at ') + c('bold', `${config.siteUrl}/${secrets.LOGIN_PATH}`))
+    }
     console.log('')
     console.log(c('yellow', '  Note: ') + c('gray', 'the ?t=… token is a one-shot bootstrap secret. Do NOT share it.'))
     console.log(c('gray', '  Lost the URL? Run:  ') + c('bold', `grep INSTALL_BOOTSTRAP_TOKEN ${envPath}`))
