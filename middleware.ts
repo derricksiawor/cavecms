@@ -90,6 +90,13 @@ interface SecurityConfig {
   /** IndexNow verification key, or null when IndexNow is disabled. When
    *  set, middleware serves `/{key}.txt` (the key itself) at the edge. */
   indexNowKey?: string | null
+  /** True ONLY for the cold-start bootstrap fallback (the loopback config
+   *  fetch couldn't be read — e.g. the standalone server binds a Unix socket
+   *  under Passenger/cPanel rather than 127.0.0.1:$PORT). When true, `installed`
+   *  is a guess, so security-sensitive gates that depend on a CONFIRMED state
+   *  (the hidden-admin /install 404) must NOT fire — the page-level
+   *  `isInstalled()` reads the DB directly and decides accurately. */
+  __fromBootstrap?: boolean
 }
 
 const SECURITY_CACHE_TTL_MS = 3000
@@ -161,6 +168,12 @@ function bootstrapSecurityConfig(): SecurityConfig {
     // first cfg fetch, and /install + the wizard endpoints remain
     // reachable directly if the operator types the URL.
     installed: true,
+    // Mark this as the cold-start GUESS so install-state-sensitive gates that
+    // would otherwise hard-fail (e.g. the /install 404) defer to the DB-accurate
+    // page-level check. Critical under Passenger/cPanel where the loopback
+    // config fetch ALWAYS fails (Unix socket, not 127.0.0.1:$PORT) so this
+    // bootstrap is the only config the middleware ever sees.
+    __fromBootstrap: true,
     // ── blog-system worktree (Phase 5) ──
     // Default segments → the segment rewrite is a no-op, so a cold-start
     // outage keeps today's /blog + /projects routing working.
@@ -677,11 +690,16 @@ export async function middleware(
     const installUrl = new URL(`${fwdProto}://${fwdHost}/install`)
     return NextResponse.redirect(installUrl, 307)
   }
-  // If already installed, /install is permanently 404 — not a
-  // redirect. A 307/308 to /admin would leak the admin path to any
-  // crawler probing /install on a CaveCMS install. Hidden-admin
-  // policy applies here too.
-  if (installed && pathname.startsWith('/install')) {
+  // If already installed, /install is permanently 404 — not a redirect (a
+  // 307/308 to /admin would leak the admin path to a crawler probing /install;
+  // hidden-admin policy). BUT only when we have a CONFIRMED config. On the
+  // cold-start bootstrap fallback — notably Passenger/cPanel, where the loopback
+  // config fetch can never reach the Unix-socket-bound app, so EVERY request
+  // gets the bootstrap — `installed` is a guess that defaults to true; 404'ing
+  // /install there would permanently block the wizard on a genuinely fresh
+  // install. Defer to page.tsx's isInstalled(), which reads the DB directly and
+  // renders the wizard (fresh) or an "Already installed" 200 (no admin leak).
+  if (installed && pathname.startsWith('/install') && cfg?.__fromBootstrap !== true) {
     return notFoundResponse()
   }
 

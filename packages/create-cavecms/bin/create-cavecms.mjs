@@ -696,6 +696,22 @@ function preflightNodeVersion() {
   }
 }
 
+// The cPanel startup file (app.js) is an ES module that the cPanel Node host
+// loads with require(). require()-ing an ES module is only enabled by default
+// on Node 20.19+, 22.12+, or 23+; on older Node the app would 503 on boot. Fail
+// here with a clear, actionable message instead of a silent runtime failure.
+function preflightCpanelNode() {
+  const [maj, min] = process.versions.node.split('.').map(Number)
+  const ok = maj >= 23 || (maj === 22 && min >= 12) || (maj === 20 && min >= 19)
+  if (!ok) {
+    die(
+      `Node ${process.versions.node} can't load the cPanel startup file (require of an ES module).\n` +
+        `  CaveCMS on cPanel needs Node 20.19+, 22.12+, or 23+.\n` +
+        `  In cPanel → Setup Node.js App, set the app's Node.js version to a newer one, then re-run the installer.`,
+    )
+  }
+}
+
 function preflightPlatform() {
   const p = platform()
   if (p === 'win32') {
@@ -999,8 +1015,8 @@ function looksLikeCavecmsInstall(targetDir, entries) {
       /* unreadable / not JSON → not our marker */
     }
   }
-  // Our startup shim — app.cjs (current) or app.js (old ESM shim, for upgrades
-  // off a prior broken install). Both reference the standalone server.
+  // Our startup shim — app.js (current) or app.cjs (the 0.2.1 install, being
+  // upgraded off). Both reference the standalone server.
   for (const shimName of ['app.cjs', 'app.js']) {
     if (!entries.includes(shimName)) continue
     try {
@@ -2609,31 +2625,54 @@ function printPm2NginxGuidance({ siteUrl, port, slug, runUser, pm2Home }) {
 }
 
 function startCpanel({ targetDir }) {
-  // cPanel runs the app under a Node host (LiteSpeed's lsnode, or Passenger)
-  // that loads the startup file with require(). The operator points it at the
-  // app.cjs we write here. The "finish in cPanel" steps are printed ONCE, in the
-  // post-install banner in main(); this function only writes the shim, silently.
+  // cPanel runs the app under a Node host (LiteSpeed's lsnode, or Passenger) that
+  // loads the startup file with require(). cPanel's DEFAULT startup file is
+  // app.js, and the field is fiddly to change — so we keep app.js and make it
+  // require()-loadable, with NO cPanel field change needed. The "finish in cPanel"
+  // steps print ONCE in the post-install banner; this only writes the shim.
   //
-  // CRITICAL — why .cjs and NOT app.js:
-  //  - The unpacked release ships package.json with "type": "module", so any
-  //    `.js` file at the install root is treated as an ES module.
-  //  - The host loads the startup file with require(). require() of an ES module
-  //    that uses top-level await throws ERR_REQUIRE_ASYNC_MODULE; an ESM file
-  //    using `require` internally throws "require is not defined". Either way the
-  //    app 503s on every boot.
-  //  - A `.cjs` file is CommonJS REGARDLESS of "type":"module", so require()
-  //    loads it cleanly. The standalone server.js is itself CommonJS, so a plain
-  //    `require('./.next/standalone/server.js')` starts it. No ESM, no TLA.
-  // `node:dotenv` doesn't exist and the host doesn't pass --env-file, so the
-  // shim parses env.production into process.env itself first.
+  // CRITICAL — why this exact shape:
+  //  - The release ships package.json "type":"module", so app.js is an ES module:
+  //    it MUST use import (not `require`, undefined in ESM scope).
+  //  - The host require()s app.js. require() of an ESM graph that uses top-level
+  //    await throws ERR_REQUIRE_ASYNC_MODULE — so there must be NO top-level await.
+  //    The standalone server is started with a fire-and-forget dynamic import so
+  //    the module evaluates synchronously and require() returns cleanly; the
+  //    host's listen-patching captures the server's async listen() as usual.
+  //  - require(ESM) needs Node >= 20.19 / 22.12 / 23 — enforced in preflight for
+  //    the cpanel surface (preflightCpanelNode) so an unsupported Node fails with
+  //    a clear message, never a silent boot 503.
   const shim = `// CaveCMS startup file — cPanel "Setup Node.js App" require()s this.
-// A .cjs file is CommonJS regardless of the install's "type":"module", so the
-// host's require()-based Node loader (lsnode / Passenger) loads it with no ESM
-// or top-level-await error. Loads env.production into process.env, then starts
-// the standalone server.
-const { readFileSync } = require('node:fs')
-const { join } = require('node:path')
-const envPath = join(__dirname, 'env.production')
+// The install root is "type":"module", so this .js file is an ES module: it uses
+// import (require is undefined in ESM scope) and NO top-level await (require()
+// cannot load an ESM graph that uses top-level await). It (1) stages static
+// assets into the standalone bundle, (2) loads env.production, then (3) starts
+// the server via a fire-and-forget dynamic import so this module evaluates
+// synchronously and require() returns cleanly.
+import { readFileSync, cpSync, existsSync, lstatSync, unlinkSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+const root = dirname(fileURLToPath(import.meta.url))
+// The Next standalone server serves /_next/static + public from its OWN dir, but
+// the release ships them at the install root — without this, every CSS/JS asset
+// 404s (an unstyled site). Stage them in (idempotent; mirrors
+// scripts/start-standalone.mjs) on each boot so updates re-sync too.
+const standaloneDir = join(root, '.next', 'standalone')
+for (const pair of [
+  [join(root, '.next', 'static'), join(standaloneDir, '.next', 'static')],
+  [join(root, 'public'), join(standaloneDir, 'public')],
+]) {
+  const src = pair[0]
+  const dst = pair[1]
+  try {
+    if (!existsSync(src)) continue
+    try { if (lstatSync(dst).isSymbolicLink()) unlinkSync(dst) } catch {}
+    cpSync(src, dst, { recursive: true, force: true })
+  } catch (err) {
+    console.error('[cavecms] failed to stage', dst, '-', err && err.message)
+  }
+}
+const envPath = join(root, 'env.production')
 try {
   const text = readFileSync(envPath, 'utf8')
   for (const raw of text.split(/\\r?\\n/)) {
@@ -2649,13 +2688,16 @@ try {
   console.error('[cavecms] failed to read env.production:', err && err.message)
   process.exit(1)
 }
-require('./.next/standalone/server.js')
+import('./.next/standalone/server.js').catch((err) => {
+  console.error('[cavecms] failed to start the server:', err && err.message)
+  process.exit(1)
+})
 `
-  writeFileSync(join(targetDir, 'app.cjs'), shim)
-  // Remove a stale app.js (old shim, or the cPanel "It works!" stub) so the only
-  // startup file present is the working app.cjs and nothing points at the broken one.
+  writeFileSync(join(targetDir, 'app.js'), shim)
+  // Remove a stale app.cjs from a prior (0.2.1) install so app.js is the single
+  // canonical startup file matching cPanel's default field.
   try {
-    rmSync(join(targetDir, 'app.js'), { force: true })
+    rmSync(join(targetDir, 'app.cjs'), { force: true })
   } catch {
     /* best-effort */
   }
@@ -2834,7 +2876,7 @@ function detectInstallSurface(dir, env) {
     (typeof env.UPLOADS_ROOT === 'string' && env.UPLOADS_ROOT.startsWith('/opt/cavecms')) ||
     (typeof env.CAVECMS_STATE_DIR === 'string' && env.CAVECMS_STATE_DIR.startsWith('/opt/cavecms'))
   ) return 'vps'
-  // The cPanel startup shim is app.cjs (current) or app.js (old installs).
+  // The cPanel startup shim is app.js (current) or app.cjs (the 0.2.1 install).
   if (existsSync(join(dir, 'app.cjs')) || existsSync(join(dir, 'app.js'))) return 'cpanel'
   return 'laptop'
 }
@@ -4240,6 +4282,9 @@ async function main(argv) {
   // 1. Surface detect → (interactive) confirm gate / (non-interactive) loud log.
   const surface = await resolveSurface(args)
   log.info(`Surface: ${c('bold', surface)}`)
+  // cPanel's startup file is an ES module loaded via require() — needs a Node
+  // version where require(ESM) is enabled. Check once the surface is known.
+  if (surface === 'cpanel') preflightCpanelNode()
 
   // 2. Site name + target dir.
   if (!args.siteName && !args.targetDir) {
@@ -4367,13 +4412,13 @@ async function main(argv) {
     const installUrl = `${config.siteUrl}/install?t=${encodeURIComponent(secrets.INSTALL_BOOTSTRAP_TOKEN)}`
     if (surface === 'cpanel') {
       // cPanel's "Setup Node.js App → Create Application" ALREADY ran — it is
-      // what produced the venv this installer ran inside. So there is nothing
-      // to create: point the EXISTING app at the app.cjs we just wrote, restart
-      // it, then finish in the browser. Printed ONCE here; startCpanel writes
-      // the shim silently so there is no second, contradictory cPanel list.
+      // what produced the venv this installer ran inside. There is nothing to
+      // create: the startup file is app.js (cPanel's default — no change needed),
+      // so just restart, then finish in the browser. Printed ONCE here;
+      // startCpanel writes app.js silently — no second, contradictory list.
       console.log(c('gray', '  Finish in cPanel — in this order:'))
       console.log(c('gray', '  1. Your cavecms app already exists') + c('gray', ' — do NOT create it again (creating it is what gave you the venv you ran this in).'))
-      console.log(c('gray', '  2. cPanel → Setup Node.js App → open your cavecms app → set ') + c('bold', 'Application startup file: app.cjs') + c('gray', ', then Save. (The installer just wrote it for you.)'))
+      console.log(c('gray', '  2. cPanel → Setup Node.js App → open your cavecms app. The ') + c('bold', 'Application startup file') + c('gray', ' is ') + c('bold', 'app.js') + c('gray', ' — the cPanel default, already set. (The installer just wrote the real app.js.)'))
       console.log(c('gray', '  3. Do NOT click ') + c('bold', 'Run NPM Install') + c('gray', ' — the dependencies are already bundled in the release.'))
       console.log(c('gray', '  4. Click ') + c('bold', 'Restart') + c('gray', '. (No port to set — the host assigns one; the PORT in env.production is ignored.)'))
       console.log(c('gray', '  5. Open ') + c('bold', installUrl) + c('gray', ' and walk the wizard: admin account → site identity → branding → contact → SMTP → security.'))
