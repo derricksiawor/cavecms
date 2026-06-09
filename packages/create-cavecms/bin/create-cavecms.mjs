@@ -978,11 +978,11 @@ function isCpanelStubAppJs(appJsPath) {
 
 // cPanel self-heal: transparently clear the known Node.js-Selector stub so the
 // operator never has to (dangerously) rm -rf their app root by hand. Returns
-// true (having cleared) ONLY when the directory contains NOTHING but the exact
-// stub set AND app.js is the stock placeholder. On ANY deviation — a real file,
-// a stray dotfile, a non-stub app.js — it returns false, leaving the caller to
-// raise the normal hard "directory not empty" error. A real prior install or
-// any user data is therefore never touched.
+// true (having cleared) ONLY when the directory contains NOTHING but a subset of
+// the exact stub set AND, if app.js is present, it is the stock placeholder. On
+// ANY deviation — a real file, a stray dotfile, a non-stub app.js — it returns
+// false, leaving the caller to raise the normal hard "directory not empty"
+// error. A real prior install or any user data is therefore never touched.
 function tryClearCpanelStub(targetDir) {
   // FULL listing — dotfiles INCLUDED. Any entry outside the allowlist (a real
   // file, a stray .git, an unexpected .htaccess) must block the auto-clear.
@@ -996,9 +996,16 @@ function tryClearCpanelStub(targetDir) {
   for (const name of entries) {
     if (!CPANEL_STUB_ENTRIES.has(name)) return false
   }
-  // The stub MUST include app.js, and it must be the stock placeholder.
-  if (!entries.includes('app.js')) return false
-  if (!isCpanelStubAppJs(join(targetDir, 'app.js'))) return false
+  // If app.js is present it MUST be the stock "It works!" placeholder — never a
+  // real CaveCMS launcher or a real custom app. When app.js is ABSENT, whatever
+  // remains is a subset of {public, tmp, stderr.log}: cPanel-managed throwaway
+  // scaffolding (empty public/tmp dirs + the stderr log) that the Node.js
+  // Selector keeps recreating — e.g. after a failed run the operator is often
+  // left with just `tmp/`. Clearing those is always safe, so don't require
+  // app.js to be present.
+  if (entries.includes('app.js') && !isCpanelStubAppJs(join(targetDir, 'app.js'))) {
+    return false
+  }
 
   // Safe to clear. Label dirs with a trailing slash for the transparency
   // line BEFORE removing, then delete exactly the stub entries (the allowlist
