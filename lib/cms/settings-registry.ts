@@ -734,6 +734,19 @@ const siteGeneral = z.object({
       (u) => u.startsWith('https://') && !u.endsWith('/'),
       'must_be_https_no_trailing_slash',
     )
+    // No embedded credentials. siteUrl is consumed by server-side fetchers
+    // (notably the cPanel update health probe, which derives its target host
+    // from it and carries a bearer token); a `user:pass@host` form could
+    // smuggle the probe to an external host. A real site URL never has
+    // userinfo, so reject it outright.
+    .refine((u) => {
+      try {
+        const parsed = new URL(u)
+        return !parsed.username && !parsed.password
+      } catch {
+        return false
+      }
+    }, 'must_not_contain_credentials')
     .optional()
     .or(z.literal('').transform(() => undefined)),
   siteName: z.string().max(120).optional(),

@@ -96,3 +96,11 @@ export const PRESTAGE_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000
  *  download starts. Mirrors the orchestrator's preflight disk floor
  *  (500 MB) since we can't know the artifact size before downloading. */
 export const PRESTAGE_MIN_FREE_BYTES = 500 * 1024 * 1024
+
+/** Minimum available memory (MB, from /proc/meminfo — LVE-virtualized on
+ *  CloudLinux, so it reflects the account's own cap) before a prestage
+ *  download starts. Prestage is a background nicety; below this floor it
+ *  steps aside so the live site keeps the budget — the artifact downloads
+ *  inline at apply time instead. 256 MB covers the wget child + stream
+ *  hashing comfortably while leaving the app room to serve. */
+export const PRESTAGE_MIN_AVAILABLE_MEMORY_MB = 256

@@ -4,6 +4,7 @@ import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
 import { registry } from '@/lib/cms/settings-registry'
 import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 import { getCurrentVersionNotes } from '@/lib/updates/getCurrentVersionNotes'
+import { readMemoryBudget, MEMORY_TIGHT_BELOW_MB } from '@/lib/updates/memoryBudget'
 import { UpdatesClient } from './UpdatesClient'
 
 // Admin-only Settings → Updates surface.
@@ -65,6 +66,15 @@ export default async function UpdatesSettingsPage() {
   const current = getCurrentVersion()
   const currentVersionNotes = getCurrentVersionNotes()
 
+  // Memory readout — shown only on the cpanel surface (shared hosting is
+  // where account-wide memory caps make sites mysteriously 503 under update
+  // load; a roomy VPS doesn't need the noise). /proc/meminfo is virtualized
+  // per account on CloudLinux, so totalMb IS the operator's real cap.
+  const memory =
+    process.env.CAVECMS_RESTART_MODE === 'cpanel' ? readMemoryBudget() : null
+  const memoryTight =
+    memory?.totalMb != null && memory.totalMb < MEMORY_TIGHT_BELOW_MB
+
   return (
     <div className="max-w-4xl">
       <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
@@ -79,6 +89,35 @@ export default async function UpdatesSettingsPage() {
         goes wrong, we&rsquo;ll automatically put your site back the way it
         was.
       </p>
+
+      {memory?.totalMb != null && (
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold ${
+              memoryTight
+                ? 'bg-amber-100/70 text-amber-800'
+                : 'bg-emerald-100/60 text-emerald-800'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                memoryTight ? 'bg-amber-500' : 'bg-emerald-500'
+              }`}
+            />
+            {memory.totalMb >= 1024
+              ? `${(memory.totalMb / 1024).toFixed(1)} GB memory`
+              : `${memory.totalMb} MB memory`}
+          </span>
+          {memoryTight && (
+            <p className="text-xs text-warm-stone">
+              Your hosting plan&rsquo;s memory is on the tight side for
+              updates and busy traffic — asking your host for 2 GB gives this
+              site comfortable headroom.
+            </p>
+          )}
+        </div>
+      )}
 
       <UpdatesClient
         initial={initial}

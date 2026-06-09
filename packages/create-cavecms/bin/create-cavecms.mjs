@@ -2771,6 +2771,13 @@ try {
   console.error('[cavecms] failed to read env.production:', err && err.message)
   process.exit(1)
 }
+// Log the effective V8 heap ceiling once at boot — makes the memory tuning
+// (NODE_OPTIONS via the host's app config) verifiable from stderr.log, and a
+// missing cap diagnosable in one glance on memory-limited shared hosting.
+import('node:v8').then((v8) => {
+  const mb = Math.round(v8.getHeapStatistics().heap_size_limit / 1048576)
+  console.error('[cavecms] V8 heap limit: ' + mb + ' MB')
+}).catch(() => {})
 import('./.next/standalone/server.js').catch((err) => {
   console.error('[cavecms] failed to start the server:', err && err.message)
   process.exit(1)
@@ -2784,6 +2791,8 @@ import('./.next/standalone/server.js').catch((err) => {
   } catch {
     /* best-effort */
   }
+  // Tune the host's Node app for shared-hosting memory caps (best-effort).
+  tuneCpanelMemory({ targetDir })
   // Touch tmp/restart.txt (what cPanel's Restart button does) so the host
   // swaps the install-time placeholder (quiesceCpanelApp) for the real app
   // on the next request — no manual Restart needed on a re-install. The
@@ -2794,6 +2803,98 @@ import('./.next/standalone/server.js').catch((err) => {
     writeFileSync(join(targetDir, 'tmp', 'restart.txt'), String(Date.now()))
   } catch {
     /* best-effort — the banner's Restart step covers it */
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// cPanel memory tuning — fit the app inside the account's LVE cap
+// ════════════════════════════════════════════════════════════════════
+//
+// Shared cPanel hosting caps the WHOLE account's memory (CloudLinux LVE,
+// commonly 1 GB). Node's default V8 heap ceiling is far above that, so under
+// pressure V8 keeps allocating instead of GC-ing hard — and the kernel
+// SIGKILLs the process. The operator sees a 503 with no log line anywhere.
+// Two knobs, both set through the host's own app config (cloudlinux-selector
+// writes them into the app's .htaccess, applied at every spawn):
+//   - NODE_OPTIONS=--max-old-space-size=<half the LVE cap> — V8 GCs under
+//     pressure instead of dying. /proc/meminfo is LVE-virtualized on
+//     CloudLinux, so MemTotal IS the account's cap.
+//   - LSAPI_CHILDREN=2 — LiteSpeed's Node runner defaults to 6 workers per
+//     app; each is a full server. Two fit a small cap and still overlap
+//     requests.
+// Best-effort: a host without cloudlinux-selector gets a one-line hint to
+// set the variable in the cPanel UI instead. Never fails the install.
+function tuneCpanelMemory({ targetDir }) {
+  let memTotalMb = null
+  try {
+    const m = /^MemTotal:\s+(\d+)\s*kB/m.exec(readFileSync('/proc/meminfo', 'utf8'))
+    if (m) memTotalMb = Math.floor(Number(m[1]) / 1024)
+  } catch {
+    /* not Linux / unreadable — fall through to the conservative default */
+  }
+  const heapMb = memTotalMb
+    ? Math.max(256, Math.min(1024, Math.floor(memTotalMb / 2)))
+    : 384
+  const home = homedir()
+  if (!targetDir.startsWith(home + '/')) {
+    log.gray('  Skipping memory tuning (install dir is outside the home directory).')
+    return
+  }
+  const appRoot = targetDir.slice(home.length + 1)
+  const user = process.env.USER ?? process.env.LOGNAME ?? ''
+  const manualHint = () => {
+    log.warn('Could not apply memory tuning automatically. In cPanel → Setup Node.js App →')
+    log.warn(`your app → Environment Variables, add: NODE_OPTIONS = --max-old-space-size=${heapMb}`)
+  }
+  if (!whichCommand('cloudlinux-selector') || !user) {
+    manualHint()
+    return
+  }
+  // `set --env-vars` REPLACES the app's whole env-var set (no merge). On a
+  // RE-install the operator may have added their own vars through the cPanel
+  // UI between runs — read the current set first and merge ours on top, so
+  // tuning can never silently wipe theirs. The `get` JSON shape isn't
+  // formally documented, so the walk is defensive: find the node keyed by
+  // our app-root and take its env-vars map; found nothing → assume none.
+  let existingVars = {}
+  const g = spawnSync(
+    'cloudlinux-selector',
+    ['get', '--json', '--interpreter', 'nodejs', '--user', user],
+    { encoding: 'utf8', timeout: 30_000 },
+  )
+  if (g.status === 0 && typeof g.stdout === 'string' && g.stdout.trim()) {
+    const findEnvVars = (node) => {
+      if (!node || typeof node !== 'object') return null
+      for (const [key, value] of Object.entries(node)) {
+        if (key === appRoot && value && typeof value === 'object') {
+          const ev = value.env_vars ?? value.envVars
+          if (ev && typeof ev === 'object' && !Array.isArray(ev)) return ev
+        }
+        const found = findEnvVars(value)
+        if (found) return found
+      }
+      return null
+    }
+    try {
+      existingVars = findEnvVars(JSON.parse(g.stdout)) ?? {}
+    } catch {
+      existingVars = {}
+    }
+  }
+  const envVarsJson = JSON.stringify({
+    ...existingVars,
+    NODE_OPTIONS: `--max-old-space-size=${heapMb}`,
+    LSAPI_CHILDREN: '2',
+  })
+  const r = spawnSync(
+    'cloudlinux-selector',
+    ['set', '--json', '--interpreter', 'nodejs', '--user', user, '--app-root', appRoot, '--env-vars', envVarsJson],
+    { encoding: 'utf8', timeout: 30_000 },
+  )
+  if (r.status === 0) {
+    log.ok(`Memory tuning applied: V8 heap capped at ${heapMb} MB, app workers at 2.`)
+  } else {
+    manualHint()
   }
 }
 
@@ -3023,6 +3124,13 @@ const ORCHESTRATOR_ENV_ALLOWLIST = [
   // allowlist); the CLI never defaults it (see runOrchestrator note on the CF
   // curl-403 hazard), so the orchestrator keeps its curl-friendly default.
   'PORT', 'CAVECMS_RELEASE_PROBE_URL',
+  // Healthz routing overrides. On cPanel/Passenger there is no TCP loopback
+  // listener, so the default 127.0.0.1:$PORT probe can never answer — the
+  // operator (or runOrchestrator's own cpanel derivation) points the probe
+  // at the public URL instead, which the orchestrator pins to 127.0.0.1 via
+  // curl --resolve. Without these in the allowlist a shell-set override was
+  // silently stripped and cpanel CLI updates always died at step 1.
+  'CAVECMS_HEALTHZ_URL', 'CAVECMS_PUBLIC_HEALTHZ_URL',
   // Operator opt-ins the orchestrator honours only when explicitly set.
   // (CAVECMS_UPDATE_DRY_RUN is intentionally NOT here — it's a dev/test
   //  harness flag, gated behind CAVECMS_DEV_BUILD in runOrchestrator so an
@@ -3121,13 +3229,49 @@ function acquireCliLock(lockPath, statusPath) {
   return 'held'
 }
 
+// Public site URL from the install's own DB (settings.site_general.siteUrl)
+// — used to derive the cpanel public healthz probe, hands-off. mysql2 comes
+// from the standalone bundle (same createRequire trick as install-migrate).
+// Best-effort: any failure returns null and the caller prints a hint.
+async function readPublicSiteUrl(dir, env) {
+  try {
+    if (!env.DATABASE_URL) return null
+    const { createRequire } = await import('node:module')
+    const requireFromStandalone = createRequire(join(dir, '.next', 'standalone', 'package.json'))
+    const mysql = requireFromStandalone('mysql2/promise')
+    const conn = await mysql.createConnection({ uri: env.DATABASE_URL, connectTimeout: 8_000 })
+    try {
+      const [rows] = await conn.query("SELECT value FROM settings WHERE `key` = 'site_general' LIMIT 1")
+      const value = Array.isArray(rows) && rows[0] ? rows[0].value : null
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value
+      const u = parsed && typeof parsed.siteUrl === 'string' ? parsed.siteUrl.trim() : ''
+      if (!/^https?:\/\//.test(u)) return null
+      // Reject embedded credentials (user:pass@host): this URL becomes the
+      // bearer-carrying healthz probe target, and userinfo would defeat the
+      // orchestrator's 127.0.0.1 --resolve pin (the orchestrator also gates
+      // this — belt and suspenders). A real site URL never has userinfo.
+      try {
+        const parsedUrl = new URL(u)
+        if (parsedUrl.username || parsedUrl.password) return null
+      } catch {
+        return null
+      }
+      return u.replace(/\/+$/, '')
+    } finally {
+      await conn.end()
+    }
+  } catch {
+    return null
+  }
+}
+
 // Build the env the orchestrator needs + spawn it in the FOREGROUND
 // (stdio inherit) so the operator watches progress live and gets the
 // real exit code. Reconstructs the recipe from
 // app/api/admin/updates/apply/route.ts (SCRIPT_ENV_ALLOWLIST /
 // buildScriptEnv) out of the sealed env.production instead of the
 // running process's env.
-function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, force, target }) {
+async function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, force, target }) {
   const scriptPath = join(dir, 'scripts', 'cavecms-update.sh')
   if (!existsSync(scriptPath)) {
     die(
@@ -3187,6 +3331,21 @@ function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, force, t
   // + Passenger (cpanel) installs.
   childEnv.CAVECMS_RESTART_MODE = surface === 'vps' ? 'systemd' : surface
   if (surface === 'vps') childEnv.CAVECMS_SYSTEMD_UNIT = 'cavecms.service'
+  // cPanel/Passenger: no TCP loopback listener exists, so the default
+  // 127.0.0.1:$PORT healthz can never answer and every probe-gated step
+  // fails. Derive the public healthz URL from the install's own site_general
+  // setting (parity with the dashboard apply route, which derives it from
+  // the request's forwarded host); the orchestrator pins it to 127.0.0.1 via
+  // curl --resolve so the probe stays on-box.
+  if (childEnv.CAVECMS_RESTART_MODE === 'cpanel' && !childEnv.CAVECMS_PUBLIC_HEALTHZ_URL) {
+    const siteUrl = await readPublicSiteUrl(dir, env)
+    if (siteUrl) {
+      childEnv.CAVECMS_PUBLIC_HEALTHZ_URL = `${siteUrl}/healthz`
+    } else {
+      log.warn(`Couldn't read this site's public URL for the health check. If the ${mode} fails at`)
+      log.warn(`"Getting ready", re-run with:  CAVECMS_PUBLIC_HEALTHZ_URL=https://your-domain.com/healthz cavecms ${mode}`)
+    }
+  }
   // Resolve the status + lock path the same way the dashboard does, so our
   // lock and its lock are the same file. For legacy installs (no
   // CAVECMS_STATE_DIR) fall back to the per-install `.cavecms-state` dir
@@ -3238,17 +3397,49 @@ function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, force, t
     die('An update or rollback is already in progress on this install. Wait for it to finish, then try again.')
   }
 
-  const r = spawnSync('bash', [scriptPath, ...args], {
-    cwd: dir,
-    stdio: 'inherit',
-    env: childEnv,
-    // Overall wall-clock backstop so a wedged sub-step (hung pm2 daemon,
-    // stalled mirror) can't pin an unattended `cavecms update` forever. 60 min
-    // is well above a legitimate pnpm install+build on a small VPS. SIGTERM so
-    // the orchestrator's TERM trap still runs lock + maintenance cleanup; the
-    // r.signal branch below then prints the actionable retry message.
-    timeout: 60 * 60 * 1000,
-    killSignal: 'SIGTERM',
+  // Async spawn (NOT spawnSync) so a status-file poller can narrate progress
+  // alongside the run. The orchestrator is quiet on stdout — it talks through
+  // update-status.json — so without this the operator stared at a silent
+  // terminal until the prompt came back, with no idea whether anything
+  // happened (and a step-1 failure printed NOTHING at all). The poller prints
+  // each step transition; the final outcome is read from the status file
+  // after exit. The 60-min wall-clock backstop matches the old spawnSync
+  // timeout: SIGTERM so the orchestrator's TERM trap still runs lock +
+  // maintenance cleanup.
+  const r = await new Promise((resolveRun) => {
+    const child = spawn('bash', [scriptPath, ...args], {
+      cwd: dir,
+      stdio: 'inherit',
+      env: childEnv,
+    })
+    const killer = setTimeout(() => {
+      try { child.kill('SIGTERM') } catch { /* already gone */ }
+    }, 60 * 60 * 1000)
+    let lastStepKey = ''
+    const poll = setInterval(() => {
+      try {
+        const s = JSON.parse(readFileSync(statusPath, 'utf8'))
+        if (!s || typeof s !== 'object') return
+        const key = `${s.state}|${s.step}|${s.stepLabel ?? ''}`
+        if (key === lastStepKey) return
+        lastStepKey = key
+        if (s.state === 'preflight' || s.state === 'updating' || s.state === 'restarting') {
+          log.step(s.step || 1, s.totalSteps || 6, s.stepLabel || s.state)
+        }
+      } catch {
+        /* status not written yet / mid-write — next tick reads it */
+      }
+    }, 1000)
+    child.on('error', (error) => {
+      clearTimeout(killer)
+      clearInterval(poll)
+      resolveRun({ error, status: null, signal: null })
+    })
+    child.on('close', (status, signal) => {
+      clearTimeout(killer)
+      clearInterval(poll)
+      resolveRun({ error: undefined, status, signal })
+    })
   })
   // spawnSync ran to completion in the foreground; the orchestrator's EXIT
   // trap already rm'd the lock. Defensively clean up in case it was SIGKILL'd
@@ -3283,6 +3474,31 @@ function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, force, t
       die(`The rollback engine was stopped by ${r.signal} (often the out-of-memory killer or an external stop). The restore may have been interrupted — your site could be left in maintenance mode and partially rolled back. Re-run \`cavecms rollback\` (it's idempotent), then check \`cavecms status\`.`)
     }
     die(`The updater engine was stopped by ${r.signal} (often the out-of-memory killer or an external stop). No changes were committed; your previous version should still be running — check 'cavecms status'.`)
+  }
+  // Report the OUTCOME from the status file — the orchestrator exits without
+  // printing a verdict, and "the prompt came back" must never be the only
+  // signal the operator gets (a 1-second step-1 failure used to look exactly
+  // like a successful detach).
+  let final = null
+  try {
+    final = JSON.parse(readFileSync(statusPath, 'utf8'))
+  } catch {
+    /* no status file — fall through to exit-code-only reporting */
+  }
+  console.log('')
+  if ((r.status ?? 1) === 0) {
+    if (final && final.state === 'restart_required') {
+      log.ok(`${mode === 'rollback' ? 'Rollback' : 'Update'} installed. Restart the app to finish switching versions.`)
+    } else {
+      log.ok(`${mode === 'rollback' ? 'Rollback' : 'Update'} complete — your site is live on the new version.`)
+    }
+  } else if (final && (final.state === 'failed' || final.state === 'rolled_back')) {
+    log.err(`${mode === 'rollback' ? 'Rollback' : 'Update'} failed at step ${final.step}: ${final.stepLabel || final.state}`)
+    if (final.error) log.err(`  ${final.error}`)
+    const logDir = childEnv.CAVECMS_LOG_DIR || join(stateDir, 'logs')
+    log.gray(`  Step logs: ${logDir}`)
+  } else {
+    log.err(`${mode === 'rollback' ? 'Rollback' : 'Update'} did not complete (exit ${r.status ?? 'unknown'}). Check 'cavecms status'.`)
   }
   process.exit(r.status ?? 1)
 }
@@ -3376,7 +3592,7 @@ async function commandUpdate(argv) {
   log.ok(`Updating ${shortSha(current)} → ${target.version} (${targetSha.slice(0, 12)})`)
   log.gray('Your site stays online until the new version is verified healthy; a failed update rolls back automatically.')
   console.log('')
-  runOrchestrator({ dir, envPath, env, mode: 'update', targetSha, fromSha: current, force: opts.force, target })
+  await runOrchestrator({ dir, envPath, env, mode: 'update', targetSha, fromSha: current, force: opts.force, target })
 }
 
 async function commandRollback(argv) {
@@ -3413,7 +3629,7 @@ async function commandRollback(argv) {
   log.warn('This restores the previous version from the most recent snapshot.')
   log.gray(`  Current version: ${shortSha(current)}`)
   console.log('')
-  runOrchestrator({ dir, envPath, env, mode: 'rollback', fromSha: current })
+  await runOrchestrator({ dir, envPath, env, mode: 'rollback', fromSha: current })
 }
 
 function commandVersion(argv) {

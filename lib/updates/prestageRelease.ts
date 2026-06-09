@@ -2,25 +2,26 @@ import 'server-only'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
+  createReadStream,
   readFileSync,
   renameSync,
   unlinkSync,
   statSync,
   statfsSync,
 } from 'node:fs'
-import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { getSetting } from '@/lib/cms/getSettings'
 import { safeRevalidate } from '@/lib/cache/revalidate'
 import { tag } from '@/lib/cache/tags'
 import { getCurrentVersion } from './getCurrentVersion'
-import { RELEASE_PUBKEYS_PEM } from './releasePubkey'
 import { compareSemver } from './semver'
 import type { LatestRelease } from './checkLatestRelease'
 import {
   PRESTAGE_CACHE_KEEP,
   PRESTAGE_MIN_FREE_BYTES,
+  PRESTAGE_MIN_AVAILABLE_MEMORY_MB,
   PRESTAGE_WGET_TIMEOUT_SEC,
   PRESTAGE_DOWNLOAD_TIMEOUT_MS,
 } from './constants'
@@ -56,9 +57,9 @@ export type PrestageReason =
   | 'in_flight'
   | 'lock_failed'
   | 'disk'
+  | 'memory'
   | 'download_failed'
   | 'sha256_mismatch'
-  | 'signature_invalid'
   | 'rename_failed'
 
 export interface PrestageResult {
@@ -97,30 +98,17 @@ async function writeStageState(
   }
 }
 
-// SHA-256 of a file's bytes, lowercase hex.
-function sha256OfBuffer(buf: Buffer): string {
-  return createHash('sha256').update(buf).digest('hex')
-}
-
-// Ed25519-verify bytes against any trusted key. Mirrors the orchestrator's
-// shared verify_tarball_signature (dual-key).
-function ed25519Verify(payload: Buffer, signatureB64: string): boolean {
-  let sig: Buffer
-  try {
-    sig = Buffer.from(signatureB64, 'base64')
-  } catch {
-    return false
-  }
-  for (const pem of RELEASE_PUBKEYS_PEM) {
-    try {
-      const pubkey = createPublicKey({ key: pem, format: 'pem' })
-      if (pubkey.asymmetricKeyType !== 'ed25519') continue
-      if (cryptoVerify(null, payload, pubkey, sig)) return true
-    } catch {
-      /* malformed key — try the next */
-    }
-  }
-  return false
+// SHA-256 of a file, lowercase hex, STREAMED — constant memory regardless of
+// artifact size. (The release artifact is ~150 MB; hashing a full readFileSync
+// Buffer of it is what used to push memory-capped shared hosts into SIGKILL.)
+function sha256OfFileStreaming(path: string): Promise<string> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('error', rejectPromise)
+    stream.on('end', () => resolvePromise(hash.digest('hex')))
+  })
 }
 
 function freeBytes(dir: string): number | null {
@@ -129,6 +117,21 @@ function freeBytes(dir: string): number | null {
     return Number(st.bavail) * Number(st.bsize)
   } catch {
     return null // statfsSync unavailable / unsupported → skip the guard
+  }
+}
+
+// Available memory in MB from /proc/meminfo (Linux only; null elsewhere).
+// Inside a CloudLinux LVE this file is VIRTUALIZED to the account's own cap
+// (docs.cloudlinux.com, virtualized /proc), so the value reflects what the
+// kernel will actually allow this account — exactly the budget that matters.
+function memAvailableMb(): number | null {
+  try {
+    const text = readFileSync('/proc/meminfo', 'utf8')
+    const m = /^MemAvailable:\s+(\d+)\s*kB/m.exec(text)
+    if (!m || !m[1]) return null
+    return Math.floor(Number(m[1]) / 1024)
+  } catch {
+    return null // not Linux / unreadable → skip the guard
   }
 }
 
@@ -269,6 +272,30 @@ export async function prestageRelease(
       return { staged: false, reason: 'disk' }
     }
 
+    // Memory guard — prestage is a background NICETY; it must never compete
+    // with the live site for a tight memory budget (CloudLinux LVE caps the
+    // WHOLE account, often at 1 GB). Below the floor, step aside as a benign
+    // INELIGIBLE (mirroring the minPreviousVersion skip — this is "not now",
+    // not a failure): the update downloads inline when the operator applies.
+    const availMb = memAvailableMb()
+    if (availMb !== null && availMb < PRESTAGE_MIN_AVAILABLE_MEMORY_MB) {
+      log('prestage_skipped_low_memory', { availMb })
+      writePrestageStatus({
+        state: 'prestage_ineligible',
+        version: release.version,
+        sha: release.sha,
+        sha256: release.sha256,
+        error: 'skipped — memory is tight on this server; the update will download when you apply it',
+      })
+      await writeStageState({
+        stageState: 'ineligible',
+        stagedSha: release.sha,
+        stagedVersion: release.version,
+        stageError: 'memory',
+      })
+      return { staged: false, reason: 'memory' }
+    }
+
     // Mark downloading (status file + durable record).
     writePrestageStatus({
       state: 'prestage_downloading',
@@ -325,19 +352,26 @@ export async function prestageRelease(
       return { staged: false, reason: 'download_failed' }
     }
 
-    // Read once; verify sha256 + Ed25519 on the same bytes.
-    let buf: Buffer
+    // Verify sha256 by STREAMING the file. THIS is the memory fix: the old
+    // readFileSync transiently held the whole ~150 MB artifact in heap to
+    // hash it, and on shared hosts (CloudLinux LVE caps the entire account,
+    // often at 1 GB) that single allocation, stacked on a live Next server,
+    // got the process SIGKILLed — operators saw their site 503 the moment a
+    // release became available. (The wget download itself was never the heap
+    // problem — it streams to disk in its own process.) Ed25519 authenticity
+    // is deliberately NOT checked here: it can't be streamed (EdDSA signs
+    // the whole message) and the orchestrator independently verifies BOTH
+    // sha256 AND the signature on this exact staged file before installing
+    // (cavecms-update.sh step 2, verify_tarball_sha256 +
+    // verify_tarball_signature) — a prestaged file is a warm cache, never a
+    // trust decision.
+    let bytes = 0
     try {
-      buf = readFileSync(tmpPath)
-    } catch (err) {
-      tryUnlink(tmpPath)
-      log('prestage_read_failed', {
-        err: err instanceof Error ? err.message : String(err),
-      })
-      await writeStageState({ stageState: 'failed', stageError: 'download_failed' })
-      return { staged: false, reason: 'download_failed' }
+      bytes = statSync(tmpPath).size
+    } catch {
+      bytes = 0
     }
-    if (buf.length === 0) {
+    if (bytes === 0) {
       tryUnlink(tmpPath)
       writePrestageStatus({
         state: 'prestage_failed',
@@ -351,7 +385,18 @@ export async function prestageRelease(
     }
 
     const wantSha256 = release.sha256.toLowerCase()
-    if (sha256OfBuffer(buf) !== wantSha256) {
+    let gotSha256 = ''
+    try {
+      gotSha256 = await sha256OfFileStreaming(tmpPath)
+    } catch (err) {
+      tryUnlink(tmpPath)
+      log('prestage_read_failed', {
+        err: err instanceof Error ? err.message : String(err),
+      })
+      await writeStageState({ stageState: 'failed', stageError: 'download_failed' })
+      return { staged: false, reason: 'download_failed' }
+    }
+    if (gotSha256 !== wantSha256) {
       tryUnlink(tmpPath)
       writePrestageStatus({
         state: 'prestage_failed',
@@ -363,21 +408,6 @@ export async function prestageRelease(
       await writeStageState({ stageState: 'failed', stageError: 'sha256_mismatch' })
       return { staged: false, reason: 'sha256_mismatch' }
     }
-
-    if (!ed25519Verify(buf, release.signature)) {
-      tryUnlink(tmpPath)
-      writePrestageStatus({
-        state: 'prestage_failed',
-        version: release.version,
-        sha: release.sha,
-        sha256: release.sha256,
-        error: 'signature did not verify against any trusted key',
-      })
-      await writeStageState({ stageState: 'failed', stageError: 'signature_invalid' })
-      return { staged: false, reason: 'signature_invalid' }
-    }
-
-    const bytes = buf.length
 
     // Atomic rename into the deterministic cache path + write the stamp.
     try {

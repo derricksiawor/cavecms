@@ -156,17 +156,46 @@ LOCK_PATH="${STATUS_PATH}.lock"
 # cert must not be unable to update because of it.
 HEALTHZ_RESOLVE_ARGS=()
 if [ "$RESTART_MODE" = "cpanel" ] && [ -n "${CAVECMS_PUBLIC_HEALTHZ_URL:-}" ]; then
-  HEALTHZ_URL="$CAVECMS_PUBLIC_HEALTHZ_URL"
-  _hz_hostport=$(printf '%s' "$HEALTHZ_URL" | awk -F/ '{print $3}')
-  _hz_host="${_hz_hostport%%:*}"
-  _hz_port="${_hz_hostport#*:}"
-  if [ "$_hz_port" = "$_hz_hostport" ]; then
-    case "$HEALTHZ_URL" in
-      https://*) _hz_port=443 ;;
-      *) _hz_port=80 ;;
-    esac
+  _hz_authority=$(printf '%s' "$CAVECMS_PUBLIC_HEALTHZ_URL" | awk -F/ '{print $3}')
+  # SECURITY — the probe below carries `Authorization: Bearer $HEALTHZ_TOKEN`,
+  # and the whole point of --resolve is to keep it on 127.0.0.1. But curl
+  # connects to the host AFTER any `user@` userinfo, while our --resolve key
+  # is built from the string BEFORE it — so a URL like
+  # `https://evil@attacker.tld/healthz` (a hostile/compromised-admin siteUrl,
+  # or an injected X-Forwarded-Host) makes the --resolve a no-op and ships the
+  # bearer to an external host. Refuse any authority with userinfo (`@`),
+  # whitespace, or an empty/odd host; only a strict hostname[:port] (or
+  # bracketed IPv6) earns the pin. On rejection we DON'T route publicly —
+  # HEALTHZ_URL stays the loopback default, which simply fails closed on
+  # Passenger (no worse than before this feature existed). Mirrors the
+  # loopback gate in cavecms-update-helpers.sh internal_base_url().
+  _hz_host=""
+  _hz_port=""
+  case "$_hz_authority" in
+    *@*|*[!a-zA-Z0-9.:_\[\]-]*|"")
+      echo "[cavecms-update] refusing public healthz authority (userinfo/invalid chars): $_hz_authority" >&2
+      ;;
+    *)
+      case "$_hz_authority" in
+        \[*\]) _hz_host="$_hz_authority"; _hz_port="" ;;        # [IPv6] no port
+        \[*\]:*) _hz_host="${_hz_authority%%]:*}]"; _hz_port="${_hz_authority##*]:}" ;;  # [IPv6]:port
+        *:*) _hz_host="${_hz_authority%%:*}"; _hz_port="${_hz_authority#*:}" ;;
+        *) _hz_host="$_hz_authority"; _hz_port="" ;;
+      esac
+      ;;
+  esac
+  # Port (when present) must be all digits; host must be non-empty.
+  case "$_hz_port" in *[!0-9]*) _hz_host="" ;; esac
+  if [ -n "$_hz_host" ]; then
+    HEALTHZ_URL="$CAVECMS_PUBLIC_HEALTHZ_URL"
+    if [ -z "$_hz_port" ]; then
+      case "$HEALTHZ_URL" in
+        https://*) _hz_port=443 ;;
+        *) _hz_port=80 ;;
+      esac
+    fi
+    HEALTHZ_RESOLVE_ARGS=(--resolve "${_hz_host}:${_hz_port}:127.0.0.1" -k)
   fi
-  HEALTHZ_RESOLVE_ARGS=(--resolve "${_hz_host}:${_hz_port}:127.0.0.1" -k)
 fi
 
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
