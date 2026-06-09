@@ -199,6 +199,19 @@ function die(msg) {
 // timeout (which is "forever").
 const DEFAULT_SUDO_TIMEOUT_MS = 30000
 
+// Locate a command on PATH. `command -v` is a shell builtin, but passing an
+// args array together with a `shell` option trips Node 24's DEP0190
+// DeprecationWarning (args are concatenated, not escaped) — and it prints
+// right into the middle of the installer's prompts. Run bash explicitly and
+// hand the name over as a positional parameter instead: properly escaped,
+// no shell option, no warning. Returns the resolved path, or null.
+function whichCommand(cmd) {
+  const r = spawnSync('/bin/bash', ['-c', 'command -v -- "$1"', 'bash', cmd], {
+    encoding: 'utf8',
+  })
+  return r.status === 0 ? r.stdout.trim() : null
+}
+
 function runSudo(args, opts = {}) {
   return spawnSync('sudo', args, {
     stdio: 'inherit',
@@ -580,8 +593,7 @@ function hasDesktopSignals() {
  * reasons we did/didn't pick pm2 without duplicating the conditions.
  */
 function detectPm2Surface() {
-  const hasPm2 = spawnSync('command', ['-v', 'pm2'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
-  if (!hasPm2) return false
+  if (!whichCommand('pm2')) return false
   const hasWwwData = spawnSync('id', ['www-data'], { stdio: 'ignore' }).status === 0
   if (!hasWwwData) return false
   const pm2Home = process.env.CAVECMS_PM2_HOME ?? '/var/www/.pm2'
@@ -727,8 +739,7 @@ function preflightDeps() {
   const required = ['wget', 'unzip', 'curl']
   const missing = []
   for (const cmd of required) {
-    const r = spawnSync('command', ['-v', cmd], { shell: '/bin/bash', stdio: 'ignore' })
-    if (r.status !== 0) missing.push(cmd)
+    if (!whichCommand(cmd)) missing.push(cmd)
   }
   if (missing.length) {
     die(
@@ -1793,6 +1804,21 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `NODE_ENV=production`,
     `PORT=${config.port}`,
     `DATABASE_URL=${databaseUrl}`,
+    // Shared cPanel/CloudLinux hosts cap MySQL connections per DB user
+    // (max_user_connections, commonly 10–30), and the host's Node runner
+    // (Passenger/lsnode) may keep several app instances alive at once —
+    // each with its own pool. The app's default pool is 15 PER INSTANCE,
+    // so two instances alone can exhaust the user's whole quota and
+    // every later connection (including a migration) gets refused. Cap
+    // the pool small on this surface so the fleet stays under the cap.
+    ...(surface === 'cpanel'
+      ? [
+          `# Shared hosts cap MySQL connections per DB user (max_user_connections)`,
+          `# and may run several app instances at once. A small per-instance pool`,
+          `# keeps the whole fleet under that cap (app default is 15 — too big here).`,
+          `DB_POOL_LIMIT=5`,
+        ]
+      : []),
     `JWT_SECRET=${secrets.JWT_SECRET}`,
     `CSRF_SECRET=${secrets.CSRF_SECRET}`,
     `PREVIEW_SECRET=${secrets.PREVIEW_SECRET}`,
@@ -1910,6 +1936,65 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
 // ════════════════════════════════════════════════════════════════════
 // Migrate
 // ════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════
+// cPanel quiesce — get the old app OFF the database before migrating
+// ════════════════════════════════════════════════════════════════════
+//
+// On cPanel the host's Node runner (Passenger / LiteSpeed lsnode) respawns
+// the configured startup file the moment ANY request hits the domain — a
+// bot, the operator's own browser tab. On a RE-install, that means the
+// previous app.js boots mid-install and opens its DB pool, eating the
+// shared host's per-user connection quota (max_user_connections) right
+// when the migration needs a slot. pkill doesn't help: the runner just
+// respawns it on the next hit.
+//
+// Neutralise it hands-off:
+//   1. Overwrite app.js with a DB-free placeholder that serves a friendly
+//      503 "setting up" page (same ESM-no-TLA shape the real shim needs).
+//   2. Touch tmp/restart.txt — the exact mechanism cPanel's own Restart
+//      button uses. The runner shuts the old instances down and spawns
+//      the placeholder on the next request.
+//   3. Fire ONE best-effort request at the site to trigger that swap now
+//      (the runner restarts lazily, on-request).
+// Old connections then drain within seconds; install-migrate.mjs retries
+// on max_user_connections while they do. startCpanel() writes the REAL
+// app.js at the final step and touches restart.txt again.
+async function quiesceCpanelApp({ targetDir, siteUrl }) {
+  const placeholder = `// CaveCMS install-time placeholder — replaced by the real app.js when the
+// install finishes. Serves a friendly "setting up" page and NEVER touches
+// the database, so the installer's migration gets the connection slots.
+import { createServer } from 'node:http'
+const server = createServer((req, res) => {
+  res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '60' })
+  res.end('<!doctype html><meta charset="utf-8"><title>One moment</title><body style="font-family:-apple-system,system-ui,sans-serif;display:flex;min-height:90vh;align-items:center;justify-content:center"><p>This site is being set up — back in a moment.</p></body>')
+})
+server.listen(process.env.PORT || 3000)
+`
+  try {
+    writeFileSync(join(targetDir, 'app.js'), placeholder)
+    mkdirSync(join(targetDir, 'tmp'), { recursive: true })
+    writeFileSync(join(targetDir, 'tmp', 'restart.txt'), String(Date.now()))
+    log.gray('  Parked the web app on a placeholder page while the database is set up.')
+  } catch (err) {
+    // Best-effort — the migration's own retry-on-connection-cap still
+    // covers us if the placeholder couldn't be written.
+    log.warn(`Could not park the web app before migrating (${err instanceof Error ? err.message : err}) — continuing.`)
+    return
+  }
+  if (siteUrl) {
+    // The runner restarts lazily (on the NEXT request) — send that request
+    // ourselves so old instances die NOW, not whenever a visitor shows up.
+    try {
+      await fetch(siteUrl, { signal: AbortSignal.timeout(8_000), redirect: 'manual' })
+    } catch {
+      /* unreachable from the box (DNS/proxy) — fine, any external hit triggers it */
+    }
+    // Give the runner a beat to actually shut the old instances down so
+    // their pooled connections close before the first migrate attempt.
+    await new Promise((r) => setTimeout(r, 3_000))
+  }
+}
 
 function runMigrations({ targetDir, envPath }) {
   const scriptPath = join(targetDir, 'scripts', 'install-migrate.mjs')
@@ -2238,11 +2323,9 @@ function startVps({ targetDir, envPath, config }) {
     const apacheActive =
       existsSync('/etc/apache2/sites-available') ||
       existsSync('/etc/httpd/conf.d') ||
-      spawnSync('command', ['-v', 'apache2'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0 ||
-      spawnSync('command', ['-v', 'httpd'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
-    const nginxActive =
-      existsSync('/etc/nginx') &&
-      spawnSync('command', ['-v', 'nginx'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
+      whichCommand('apache2') !== null ||
+      whichCommand('httpd') !== null
+    const nginxActive = existsSync('/etc/nginx') && whichCommand('nginx') !== null
     if (apacheActive && !nginxActive) return 'apache'
     if (nginxActive && !apacheActive) return 'nginx'
     if (apacheActive && nginxActive) {
@@ -2421,10 +2504,7 @@ function startPm2({ targetDir, envPath, config, siteName }) {
   // because `sudo -u www-data pm2 …` won't necessarily inherit the
   // invoker's PATH (sudo's secure_path can strip /usr/local/bin where
   // pm2 typically lives on Debian).
-  const pm2Bin = (() => {
-    const r = spawnSync('command', ['-v', 'pm2'], { shell: '/bin/bash', encoding: 'utf8' })
-    return r.status === 0 ? r.stdout.trim() : 'pm2'
-  })()
+  const pm2Bin = whichCommand('pm2') ?? 'pm2'
 
   // Provision system dirs FIRST — we need /var/log/cavecms to exist
   // (and to be writable by runUser) before pm2 start tries to open
@@ -2700,6 +2780,17 @@ import('./.next/standalone/server.js').catch((err) => {
     rmSync(join(targetDir, 'app.cjs'), { force: true })
   } catch {
     /* best-effort */
+  }
+  // Touch tmp/restart.txt (what cPanel's Restart button does) so the host
+  // swaps the install-time placeholder (quiesceCpanelApp) for the real app
+  // on the next request — no manual Restart needed on a re-install. The
+  // post-install banner still says to click Restart, which is the required
+  // first-install step (the app may be stopped in cPanel) and harmless here.
+  try {
+    mkdirSync(join(targetDir, 'tmp'), { recursive: true })
+    writeFileSync(join(targetDir, 'tmp', 'restart.txt'), String(Date.now()))
+  } catch {
+    /* best-effort — the banner's Restart step covers it */
   }
 }
 
@@ -3222,7 +3313,7 @@ async function commandUpdate(argv) {
     // (snapshot_current_tree hard-fails without it) — check it here so a
     // missing rsync fails fast with an actionable hint, like rollback does,
     // instead of opaquely at orchestrator step 2.
-    if (spawnSync('command', ['-v', 'rsync'], { shell: '/bin/bash', stdio: 'ignore' }).status !== 0) {
+    if (!whichCommand('rsync')) {
       die(
         'update needs rsync (it snapshots your current version before applying), which is not installed.\n' +
           '  Install it and retry:  Debian/Ubuntu → sudo apt install rsync   ·   RHEL/Alma → sudo yum install rsync',
@@ -3309,7 +3400,7 @@ async function commandRollback(argv) {
   // (no download → no wget/unzip needed). Fail early with a clear hint if a
   // hard dep is missing, instead of an opaque mid-restore failure.
   for (const cmd of ['rsync', 'curl']) {
-    if (spawnSync('command', ['-v', cmd], { shell: '/bin/bash', stdio: 'ignore' }).status !== 0) {
+    if (!whichCommand(cmd)) {
       die(
         `rollback needs ${cmd}, which is not installed.\n` +
           `  Install it and retry:  Debian/Ubuntu → sudo apt install ${cmd}   ·   RHEL/Alma → sudo yum install ${cmd}`,
@@ -4067,8 +4158,7 @@ async function commandBackup(argv) {
   })
   assertNoOpInProgress(sharedLockPath, childEnv.CAVECMS_UPDATE_STATUS_PATH || join(childEnv.CAVECMS_STATE_DIR, 'update-status.json'), 'backup')
   if (opts.includeEnv) {
-    const hasAge =
-      spawnSync('command', ['-v', 'age'], { shell: '/bin/bash', stdio: 'ignore' }).status === 0
+    const hasAge = whichCommand('age') !== null
     if (!hasAge && !opts.insecurePlaintextEnv) {
       die(
         '--include-env writes your secrets (incl. the encryption + session keys) into the backup.\n' +
@@ -4387,6 +4477,10 @@ async function main(argv) {
 
     if (!args.skipMigrate) {
       log.step(6, 7, 'Running migrations…')
+      // cPanel: a previous install's app can be auto-respawned by the host
+      // mid-install and hold every DB connection slot the migration needs.
+      // Park it on a DB-free placeholder first (see quiesceCpanelApp).
+      if (surface === 'cpanel') await quiesceCpanelApp({ targetDir, siteUrl: config.siteUrl })
       runMigrations({ targetDir, envPath })
     } else {
       log.warn('Skipping migrations (--skip-migrate).')

@@ -274,6 +274,74 @@ async function updateSchemaFingerprint(conn) {
   log(`schema_fingerprint: ${fingerprint.slice(0, 16)}…`)
 }
 
+// Shared hosts (cPanel/CloudLinux) cap connections per DB user
+// (max_user_connections, often 10–30). A still-draining app instance —
+// e.g. one the host's Node runner (Passenger/lsnode) auto-respawned on a
+// stray web hit during install — can transiently hold every slot. That is
+// a WAIT condition, not a config error: the slots free up within seconds
+// to a couple of minutes once the old instances die. Retry instead of
+// failing the whole install on the first refusal.
+const CONNECTION_CAP_CODES = new Set([
+  'ER_TOO_MANY_USER_CONNECTIONS', // 1203 — per-user cap (max_user_connections)
+  'ER_USER_LIMIT_REACHED', // 1226 — per-user resource limit (MAX_USER_CONNECTIONS grant)
+  'ER_CON_COUNT_ERROR', // 1040 — server-wide max_connections
+])
+
+function isConnectionCapError(err) {
+  if (!err || typeof err !== 'object') return false
+  if (CONNECTION_CAP_CODES.has(err.code)) return true
+  return err.errno === 1040 || err.errno === 1203 || err.errno === 1226
+}
+
+async function connectWithRetry(url) {
+  // 12 attempts × 10s ≈ 2 minutes of patience — covers an old app
+  // instance shutting down and MySQL reaping its connections. Anything
+  // still blocked after that is genuinely stuck (or the cap is set
+  // pathologically low) and needs the operator/host.
+  const MAX_ATTEMPTS = 12
+  const RETRY_DELAY_MS = 10_000
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await mysql.createConnection({
+        uri: url,
+        // multipleStatements: true — required for migrations that ship
+        // WITHOUT `--> statement-breakpoint` markers (hand-written .sql
+        // files added to db/migrations/ without going through
+        // `drizzle-kit generate`). For drizzle-generated migrations
+        // (with breakpoints), splitStatements still cuts them up and we
+        // dispatch one statement per query for diagnostic precision —
+        // the multipleStatements flag is just a permissive ceiling that
+        // accepts the raw multi-statement chunk for migrations that
+        // lack markers. Diagnostic cost: a failed statement in a
+        // marker-less migration shows MariaDB's error pointing at the
+        // line within the file, not at a particular split-index.
+        multipleStatements: true,
+        // Reasonable connect timeout for a fresh-install flow where the DB
+        // is on the same box and should respond instantly.
+        connectTimeout: 10_000,
+      })
+    } catch (err) {
+      if (!isConnectionCapError(err)) throw err
+      if (attempt >= MAX_ATTEMPTS) {
+        logErr('The database is still refusing connections: every connection slot')
+        logErr('for this DB user is in use (max_user_connections).')
+        logErr('Usually a previous copy of the app is still running and holding them.')
+        logErr('')
+        logErr('  1. Stop the app (cPanel → Setup Node.js App → Stop App),')
+        logErr('     wait a minute, then re-run this install.')
+        logErr('  2. If it persists, ask your host to clear stuck MySQL connections /')
+        logErr('     raise max_user_connections for this database user.')
+        process.exit(75) // EX_TEMPFAIL — retryable, not a config error
+      }
+      log(
+        `Database connection slots are full (max_user_connections) — ` +
+          `waiting for them to free up… (attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS / 1000}s)`,
+      )
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+    }
+  }
+}
+
 async function main() {
   const url = requireDatabaseUrl()
   const journal = readJournal()
@@ -294,24 +362,7 @@ async function main() {
     process.exit(70) // EX_SOFTWARE — release artifact bug
   }
 
-  const conn = await mysql.createConnection({
-    uri: url,
-    // multipleStatements: true — required for migrations that ship
-    // WITHOUT `--> statement-breakpoint` markers (hand-written .sql
-    // files added to db/migrations/ without going through
-    // `drizzle-kit generate`). For drizzle-generated migrations
-    // (with breakpoints), splitStatements still cuts them up and we
-    // dispatch one statement per query for diagnostic precision —
-    // the multipleStatements flag is just a permissive ceiling that
-    // accepts the raw multi-statement chunk for migrations that
-    // lack markers. Diagnostic cost: a failed statement in a
-    // marker-less migration shows MariaDB's error pointing at the
-    // line within the file, not at a particular split-index.
-    multipleStatements: true,
-    // Reasonable connect timeout for a fresh-install flow where the DB
-    // is on the same box and should respond instantly.
-    connectTimeout: 10_000,
-  })
+  const conn = await connectWithRetry(url)
   try {
     // Cross-process advisory lock. Prevents two concurrent
     // install-migrate runs (or a CLI install racing with a contributor's
