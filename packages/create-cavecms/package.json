@@ -1,6 +1,6 @@
 {
   "name": "create-cavecms",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "One-command installer for CaveCMS. Downloads the latest signed release, generates secrets, prompts for the minimum (DB + URL), writes a sealed env.production, runs migrations, and starts the service. Customers never touch env files by hand.",
   "license": "SEE LICENSE IN LICENSE.md",
   "author": "Derrick S. K. Siawor",
