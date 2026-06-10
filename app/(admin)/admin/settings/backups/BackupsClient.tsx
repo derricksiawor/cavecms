@@ -78,6 +78,23 @@ export function BackupsClient({
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
+  // Guard against navigating away mid-upload. The restore archive uploads
+  // from the BROWSER (XHR), so leaving the page aborts it part-way — which
+  // is exactly the silent "upload stopped" we just fixed the streaming for.
+  // While an upload is in flight (uploadPct != null) ask the browser to
+  // confirm before unload; remove the guard the instant it finishes so a
+  // normal navigation is never blocked.
+  useEffect(() => {
+    if (uploadPct === null) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      // Legacy browsers require returnValue to be set to trigger the prompt.
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [uploadPct])
+
   // ── Cloud destinations (device-flow connect/disconnect) ──
   const [dest, setDest] = useState<DestinationsSummary>(destinations)
   const [connecting, setConnecting] = useState<CloudProvider | null>(null)

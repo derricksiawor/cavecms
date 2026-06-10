@@ -70,6 +70,14 @@ HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=scripts/lib/cavecms-backup-helpers.sh
 . "${HELPERS_DIR}/cavecms-backup-helpers.sh"
 
+# cPanel/Passenger: route the step-7 verify probe at the install's PUBLIC
+# healthz URL (pinned to 127.0.0.1) instead of the dead loopback. Without
+# this the verify can NEVER pass on Passenger, so a fully-completed restore
+# times out and rolls itself back. compute_healthz_resolve sets HEALTHZ_URL +
+# HEALTHZ_RESOLVE_ARGS (no-op off cPanel); verify_healthz consumes them.
+RESTART_MODE="${CAVECMS_RESTART_MODE:-pm2}"
+compute_healthz_resolve
+
 if ! assert_allowed_status_path "$STATUS_PATH"; then
   echo "[cavecms-restore] STATUS_PATH '$STATUS_PATH' not under allowed prefix" >&2
   exit 2
@@ -495,6 +503,12 @@ if [ "${CAVECMS_RESTART_MODE:-pm2}" = "laptop" ]; then
   post_maintenance_toggle false || true; MAINT_ON=0
   rstatus restart_required 7 "Restore complete — restart your CaveCMS process to finish" "" "$COMPAT_WARN"
   post_backup_audit_terminal restore_completed "$ARCHIVE_ID"
+  # Invalidate every session AFTER the terminal status is written, so the
+  # operator's progress modal reaches "complete" before their own session is
+  # expired — then their next request lands on login, re-authenticating
+  # against the RESTORED users table (no "stuck in the old account"). See the
+  # helper for why. Best-effort.
+  invalidate_all_sessions
   rm -rf "$UPLOADS_TRASH" 2>/dev/null || true
   release_op_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
   rm -rf "$SCRATCH" "$SAFETY_DIR"; SCRATCH=""; SAFETY_DIR=""
@@ -514,6 +528,10 @@ post_maintenance_toggle false || true; MAINT_ON=0
 
 rstatus completed 7 "Restore complete" "" "$COMPAT_WARN"
 post_backup_audit_terminal restore_completed "$ARCHIVE_ID"
+# Invalidate every session AFTER "complete" is written (see the restart_required
+# path above for the rationale): the operator's modal reaches the success frame,
+# then their next request re-authenticates against the restored users table.
+invalidate_all_sessions
 rm -rf "$UPLOADS_TRASH" 2>/dev/null || true
 release_op_lock "$SHARED_LOCK_PATH"; LOCK_HELD=0
 rm -rf "$SCRATCH" "$SAFETY_DIR"; SCRATCH=""; SAFETY_DIR=""

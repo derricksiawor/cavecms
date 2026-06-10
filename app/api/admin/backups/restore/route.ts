@@ -20,6 +20,7 @@ import {
 } from '@/lib/backups/statusFile'
 import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
+import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
 import { resolveBackupDir, isValidArchiveBasename } from '@/lib/backups/store'
 
 // POST /api/admin/backups/restore — restore from an EXISTING local backup.
@@ -68,6 +69,12 @@ export const POST = withError(async (req: Request) => {
     CAVECMS_RESTORE_ARCHIVE: archivePath,
   }
   if (body.restoreEnv) env.CAVECMS_RESTORE_ENV = '1'
+  // cPanel: the restore's step-7 health verify can't reach the app over the
+  // 127.0.0.1 loopback (private socket), so it would time out and roll back a
+  // GOOD restore. Hand it the public healthz URL (the orchestrator pins it to
+  // 127.0.0.1). No-op off cPanel.
+  const publicHealthz = derivePublicHealthzUrl(req)
+  if (publicHealthz) env.CAVECMS_PUBLIC_HEALTHZ_URL = publicHealthz
 
   let pid: number | null = null
   try {

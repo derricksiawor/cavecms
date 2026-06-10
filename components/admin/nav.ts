@@ -33,6 +33,7 @@ import {
   Map as MapIcon,
   PlugZap,
   Cookie,
+  UserCircle,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -111,6 +112,7 @@ export const NAV: readonly NavItem[] = [
   { label: 'Sitemaps & Crawl', href: '/admin/seo/sitemaps', roles: ['admin'], icon: MapIcon, parent: '/admin/seo' },
   { label: 'Connect & Verify', href: '/admin/seo/connect', roles: ['admin'], icon: PlugZap, parent: '/admin/seo' },
   { label: 'Activity', href: '/admin/activity', roles: ['admin'], icon: ShieldCheck },
+  { label: 'Account', href: '/admin/account', roles: ['admin', 'editor', 'viewer'], icon: UserCircle },
   { label: 'Help', href: '/admin/help', roles: ['admin', 'editor', 'viewer'], icon: HelpCircle },
 ]
 

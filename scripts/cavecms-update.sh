@@ -144,59 +144,14 @@ else
 fi
 LOCK_PATH="${STATUS_PATH}.lock"
 
-# cPanel/Passenger healthz routing. The host runs the app on a private Unix
-# socket — there is NO TCP loopback listener, so the default
-# 127.0.0.1:$PORT probe can never answer on this surface and every update
-# failed at step 1. The apply route hands us the install's PUBLIC healthz
-# URL instead; we curl it pinned to 127.0.0.1 (--resolve) so the request
-# goes straight to the local web server (LiteSpeed/Apache) — no DNS, no
-# CDN bot-wall in the path — which proxies it onto the app's socket.
-# -k: the connection target is literally 127.0.0.1, so TLS here only has
-# to carry the bearer across loopback; a box with an incomplete AutoSSL
-# cert must not be unable to update because of it.
-HEALTHZ_RESOLVE_ARGS=()
-if [ "$RESTART_MODE" = "cpanel" ] && [ -n "${CAVECMS_PUBLIC_HEALTHZ_URL:-}" ]; then
-  _hz_authority=$(printf '%s' "$CAVECMS_PUBLIC_HEALTHZ_URL" | awk -F/ '{print $3}')
-  # SECURITY — the probe below carries `Authorization: Bearer $HEALTHZ_TOKEN`,
-  # and the whole point of --resolve is to keep it on 127.0.0.1. But curl
-  # connects to the host AFTER any `user@` userinfo, while our --resolve key
-  # is built from the string BEFORE it — so a URL like
-  # `https://evil@attacker.tld/healthz` (a hostile/compromised-admin siteUrl,
-  # or an injected X-Forwarded-Host) makes the --resolve a no-op and ships the
-  # bearer to an external host. Refuse any authority with userinfo (`@`),
-  # whitespace, or an empty/odd host; only a strict hostname[:port] (or
-  # bracketed IPv6) earns the pin. On rejection we DON'T route publicly —
-  # HEALTHZ_URL stays the loopback default, which simply fails closed on
-  # Passenger (no worse than before this feature existed). Mirrors the
-  # loopback gate in cavecms-update-helpers.sh internal_base_url().
-  _hz_host=""
-  _hz_port=""
-  case "$_hz_authority" in
-    *@*|*[!a-zA-Z0-9.:_\[\]-]*|"")
-      echo "[cavecms-update] refusing public healthz authority (userinfo/invalid chars): $_hz_authority" >&2
-      ;;
-    *)
-      case "$_hz_authority" in
-        \[*\]) _hz_host="$_hz_authority"; _hz_port="" ;;        # [IPv6] no port
-        \[*\]:*) _hz_host="${_hz_authority%%]:*}]"; _hz_port="${_hz_authority##*]:}" ;;  # [IPv6]:port
-        *:*) _hz_host="${_hz_authority%%:*}"; _hz_port="${_hz_authority#*:}" ;;
-        *) _hz_host="$_hz_authority"; _hz_port="" ;;
-      esac
-      ;;
-  esac
-  # Port (when present) must be all digits; host must be non-empty.
-  case "$_hz_port" in *[!0-9]*) _hz_host="" ;; esac
-  if [ -n "$_hz_host" ]; then
-    HEALTHZ_URL="$CAVECMS_PUBLIC_HEALTHZ_URL"
-    if [ -z "$_hz_port" ]; then
-      case "$HEALTHZ_URL" in
-        https://*) _hz_port=443 ;;
-        *) _hz_port=80 ;;
-      esac
-    fi
-    HEALTHZ_RESOLVE_ARGS=(--resolve "${_hz_host}:${_hz_port}:127.0.0.1" -k)
-  fi
-fi
+# cPanel/Passenger healthz routing — shared with the restore orchestrator
+# via compute_healthz_resolve (cavecms-update-helpers.sh). On cPanel the app
+# is on a private socket so the default 127.0.0.1:$PORT probe can never answer
+# and every update died at step 1; the helper pins the install's PUBLIC
+# healthz URL to 127.0.0.1 via curl --resolve (with the userinfo security gate
+# that keeps the bearer token on-box). No-op off cPanel. Sets HEALTHZ_URL +
+# the HEALTHZ_RESOLVE_ARGS array consumed by healthz_args below.
+compute_healthz_resolve
 
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
 # operator points STATUS_PATH at /etc/cron.d/* or similar. CAVECMS_STATE_DIR
@@ -590,9 +545,15 @@ rollback_to_previous() {
   # require a commit match (the FILES are restored); the operator restarts
   # the foreground process to load the rolled-back code.
   if [ "$RESTART_MODE" = "laptop" ]; then target_commit=""; fi
-  local healthz_args=()
+  # Seed with the cPanel public-healthz --resolve pin (empty off cPanel), same
+  # as the forward verify + the restore verify. Without it, a SUCCESSFUL
+  # rollback on Passenger probes the dead 127.0.0.1 loopback, never sees
+  # status:ok, and falsely reports "your site may be offline — contact
+  # support" — the exact false-negative this batch exists to kill, on the
+  # rollback leg.
+  local healthz_args=(${HEALTHZ_RESOLVE_ARGS[@]+"${HEALTHZ_RESOLVE_ARGS[@]}"})
   if [ -n "$HEALTHZ_TOKEN" ]; then
-    healthz_args=(-H "Authorization: Bearer $HEALTHZ_TOKEN")
+    healthz_args+=(-H "Authorization: Bearer $HEALTHZ_TOKEN")
   fi
   local success=0
   local i

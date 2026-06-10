@@ -25,6 +25,7 @@ import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 import { findValidStaged } from '@/lib/updates/releaseCache'
 import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
 import { meetsMinPrevious } from '@/lib/updates/semver'
+import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
 import {
   readStatus,
   writeStatus,
@@ -681,26 +682,9 @@ export const POST = withError(async (req: Request) => {
 
     // (2) Build a NARROW env for the child — secrets stay in the
     //     parent. (3) Open the spawn log with O_NOFOLLOW + 0600.
-    // Public healthz URL for the cpanel surface (see buildScriptEnv). Built
-    // from the request's forwarded host — same derivation the middleware's
-    // proxy-safe redirects use — never from req.nextUrl (which carries the
-    // bound listener address, not the public hostname).
-    const fwdHost = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
-    const fwdProto = req.headers.get('x-forwarded-proto') ?? 'https'
-    const firstProto = (fwdProto.split(',')[0] ?? 'https').trim()
-    const firstHost = (fwdHost?.split(',')[0] ?? '').trim()
-    // Forwarded host is attacker-influenceable (a spoofed X-Forwarded-Host, or
-    // a proxy that forwards it verbatim). The orchestrator carries a bearer
-    // token to this host, so a `user@evil` authority would smuggle it off-box
-    // — accept ONLY a strict hostname[:port] (or bracketed IPv6). The
-    // orchestrator re-gates this too (defence in depth); rejecting here means
-    // a bad value falls back to the loopback default rather than routing
-    // publicly at all.
-    const validHost = /^(?:[a-zA-Z0-9.-]+|\[[0-9a-fA-F:]+\])(?::\d+)?$/.test(firstHost)
-    const publicHealthzUrl =
-      process.env.CAVECMS_RESTART_MODE === 'cpanel' && validHost
-        ? `${firstProto === 'http' ? 'http' : 'https'}://${firstHost}/healthz`
-        : undefined
+    // Public healthz URL for the cpanel surface (see buildScriptEnv) — shared
+    // derivation with the restore routes, gated + userinfo-safe.
+    const publicHealthzUrl = derivePublicHealthzUrl(req)
     const scriptEnv = buildScriptEnv(target, current.sha, {
       force,
       downloadUrl,

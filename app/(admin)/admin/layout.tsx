@@ -11,7 +11,21 @@ import { CommandPaletteProvider } from '@/components/admin/CommandPalette'
 export const dynamic = 'force-dynamic'
 
 export function generateMetadata() {
-  return { robots: { index: false, follow: false } }
+  // The admin chrome carries the PRODUCT brand, not the operator's site
+  // brand (same principle as the sidebar Wordmark, and the way WordPress
+  // shows its own mark in wp-admin). Without this, admin inherited the
+  // root layout's icons — the operator's uploaded favicon, or the bundled
+  // default — so operators saw a non-CaveCMS (often Next's) tab icon in the
+  // dashboard. Pin the CaveCMS brand mark here so every admin tab is
+  // unmistakably CaveCMS regardless of the site's own favicon.
+  return {
+    robots: { index: false, follow: false },
+    icons: {
+      icon: [{ url: '/cavecms-mark.svg', type: 'image/svg+xml' }],
+      shortcut: [{ url: '/cavecms-mark.svg' }],
+      apple: [{ url: '/cavecms-mark.svg' }],
+    },
+  }
 }
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

@@ -128,6 +128,29 @@ _backup_cred_file() {
 }
 
 # ---------------------------------------------------------------------------
+# invalidate_all_sessions — bump tokens_valid_after = NOW for every user so
+# every JWT session minted before this instant is rejected on the next request.
+# Called after a RESTORE so the operator (and everyone) must re-authenticate
+# against the RESTORED users table, instead of riding a pre-restore session
+# that now points at a DIFFERENT account at the same user id (the "stuck in the
+# old account" confusion). Best-effort: the data is already committed by the
+# time we run, so a failure here must NOT fail the restore — it only means
+# sessions aren't force-expired. Always returns 0; logs on failure.
+# ---------------------------------------------------------------------------
+invalidate_all_sessions() {
+  command -v mysql >/dev/null 2>&1 || return 0
+  local cred_db cf db
+  cred_db=$(_backup_cred_file) || { echo "[cavecms-restore] invalidate_all_sessions: no DB creds" >&2; return 0; }
+  cf=$(echo "$cred_db" | awk 'NR==1'); db=$(echo "$cred_db" | awk 'NR==2')
+  mysql --defaults-extra-file="$cf" --connect-timeout=10 "$db" \
+    -e "UPDATE users SET tokens_valid_after = NOW(3)" \
+    >>"${LOG_DIR:-/tmp}/restore-db.log" 2>&1 \
+    || echo "[cavecms-restore] invalidate_all_sessions: UPDATE failed (non-fatal)" >&2
+  rm -f "$cf" 2>/dev/null || true
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # dump_database <out.sql.gz>
 # Generalized db_backup: full mysqldump (schema + data + routines/triggers/
 # events), single-transaction, gzip to the caller-supplied path. Echoes the
@@ -401,8 +424,13 @@ verify_healthz() {
   local need="${1:-2}"
   local deadline_secs="${2:-90}"
   local url="${HEALTHZ_URL:-${CAVECMS_HEALTHZ_URL:-http://127.0.0.1:3040/healthz}}"
-  local args=()
-  [ -n "${HEALTHZ_TOKEN:-}" ] && args=(-H "Authorization: Bearer ${HEALTHZ_TOKEN}")
+  # Seed with the cPanel public-healthz --resolve pin (empty on other
+  # surfaces) so the restore's verify can reach a Passenger app on its own
+  # public host instead of the dead 127.0.0.1 loopback — the fix for the
+  # "good restore rolled back at Verifying" bug. The caller runs
+  # compute_healthz_resolve (cavecms-update-helpers.sh) before us.
+  local args=(${HEALTHZ_RESOLVE_ARGS[@]+"${HEALTHZ_RESOLVE_ARGS[@]}"})
+  [ -n "${HEALTHZ_TOKEN:-}" ] && args+=(-H "Authorization: Bearer ${HEALTHZ_TOKEN}")
   local ok=0 start now
   start=$(date +%s)
   while :; do

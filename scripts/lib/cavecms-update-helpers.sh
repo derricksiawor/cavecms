@@ -29,6 +29,73 @@ now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 rand_suffix() { echo "$$.$RANDOM.$RANDOM"; }
 
 # ---------------------------------------------------------------------------
+# compute_healthz_resolve — cPanel/Passenger public-healthz routing.
+# Shared by the update orchestrator AND the restore orchestrator so the
+# logic (and its SECURITY gate) lives in exactly one place.
+#
+# On cPanel/Passenger the app listens on a private Unix socket, so the
+# default 127.0.0.1:$PORT healthz probe can never answer — which used to
+# fail every update at step 1 and ROLL BACK every good restore at the
+# verify step. The dashboard/CLI hand us the install's PUBLIC healthz URL
+# in CAVECMS_PUBLIC_HEALTHZ_URL; we curl it pinned to 127.0.0.1 via
+# `--resolve` so the request goes straight to the local web server
+# (LiteSpeed/Apache) — no DNS, no CDN bot-wall — which proxies it onto
+# the app socket.
+#
+# SECURITY: the probe carries `Authorization: Bearer $HEALTHZ_TOKEN`, and
+# --resolve is what keeps it on 127.0.0.1. But curl connects to the host
+# AFTER any `user@` userinfo while our --resolve key is built from the
+# string BEFORE it, so a URL like `https://evil@attacker.tld/healthz`
+# (a hostile/compromised-admin siteUrl, or an injected X-Forwarded-Host)
+# would make --resolve a no-op and ship the bearer to an external host.
+# We refuse any authority with userinfo (`@`), whitespace, an odd host,
+# or a non-numeric port; only a strict hostname[:port] (or bracketed
+# IPv6) earns the pin. On rejection HEALTHZ_URL stays the loopback
+# default (fails closed on Passenger — no worse than before this feature).
+#
+# Sets globals: HEALTHZ_URL (overridden on success) and the
+# HEALTHZ_RESOLVE_ARGS array (curl --resolve … -k, empty otherwise).
+# Idempotent; safe to call once after RESTART_MODE + HEALTHZ_URL are set.
+# ---------------------------------------------------------------------------
+compute_healthz_resolve() {
+  HEALTHZ_RESOLVE_ARGS=()
+  [ "${RESTART_MODE:-}" = "cpanel" ] || return 0
+  [ -n "${CAVECMS_PUBLIC_HEALTHZ_URL:-}" ] || return 0
+
+  local authority host port
+  authority=$(printf '%s' "$CAVECMS_PUBLIC_HEALTHZ_URL" | awk -F/ '{print $3}')
+  host=""
+  port=""
+  case "$authority" in
+    *@*|*[!a-zA-Z0-9.:_\[\]-]*|"")
+      echo "[cavecms] refusing public healthz authority (userinfo/invalid chars): $authority" >&2
+      return 0
+      ;;
+    \[*\]) host="$authority"; port="" ;;            # [IPv6] no port
+    \[*\]:*) host="${authority%%]:*}]"; port="${authority##*]:}" ;;  # [IPv6]:port
+    *:*) host="${authority%%:*}"; port="${authority#*:}" ;;
+    *) host="$authority"; port="" ;;
+  esac
+  # Port must be all-digits AND in range (a bad port can't exfil — curl just
+  # fails to connect and the probe falls closed — but reject it cleanly).
+  case "$port" in
+    "") : ;;
+    *[!0-9]*) host="" ;;
+    *) [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || host="" ;;
+  esac
+  [ -n "$host" ] || return 0
+
+  HEALTHZ_URL="$CAVECMS_PUBLIC_HEALTHZ_URL"
+  if [ -z "$port" ]; then
+    case "$HEALTHZ_URL" in
+      https://*) port=443 ;;
+      *) port=80 ;;
+    esac
+  fi
+  HEALTHZ_RESOLVE_ARGS=(--resolve "${host}:${port}:127.0.0.1" -k)
+}
+
+# ---------------------------------------------------------------------------
 # JSON-escape a single value for embedding inside `"..."` JSON strings.
 # Prefers jq when available, falls back to awk for the common subset.
 # ---------------------------------------------------------------------------
