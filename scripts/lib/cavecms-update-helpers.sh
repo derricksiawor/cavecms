@@ -294,8 +294,10 @@ snapshot_current_tree() {
   #   - snapshots : would recurse infinitely (we're snapshotting INTO
   #     a child of REPO_DIR if SNAPSHOT_ROOT is under REPO_DIR — it
   #     isn't by default but operators can override)
-  #   - .tarball-old.* / *.tmp.* : in-flight backup files from a
-  #     previous orchestrator's tarball-mode swap
+  #   - *.tarball-old.* / *.tmp.* : in-flight backup files from a
+  #     previous orchestrator's tarball-mode swap. The aside-files are
+  #     named `<path>.tarball-old.<pid>` (suffix, not prefix), so the
+  #     pattern needs the leading `*` to match them.
   #   - public/uploads : OPERATOR CONTENT. Files uploaded between the
   #     snapshot and a rollback (potentially 1+ hour later via the
   #     watchdog) MUST survive — otherwise we'd silently delete
@@ -308,7 +310,7 @@ snapshot_current_tree() {
     --exclude='.next/cache' \
     --exclude='snapshots' \
     --exclude='.cavecms-state' \
-    --exclude='.tarball-old.*' \
+    --exclude='*.tarball-old.*' \
     --exclude='*.tmp.*' \
     --exclude='rollback-meta.json*' \
     --exclude='public/uploads' \
@@ -368,6 +370,8 @@ restore_from_snapshot() {
     --exclude='.next/cache' \
     --exclude='snapshots' \
     --exclude='.cavecms-state' \
+    --exclude='*.tarball-old.*' \
+    --exclude='*.tmp.*' \
     --exclude='rollback-meta.json*' \
     --exclude='public/uploads' \
     --exclude='public/media' \

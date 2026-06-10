@@ -687,16 +687,45 @@ extract_tarball_atomic() {
   # (`-e` skips silently) and a real move for git-mode installs.
   local backup_suffix=".tarball-old.$$"
   local move_aside_paths='app components lib public scripts db tests middleware.ts next.config.ts package.json pnpm-lock.yaml tsconfig.json .next'
+  # Sweep aside-dirs orphaned by a previous dead attempt BEFORE moving
+  # anything. We hold the update lock, so any `*.tarball-old.*` entry is
+  # guaranteed cruft — and it must not be allowed to collide with this
+  # run's aside-names: after PID reuse, `mv .next .next.tarball-old.<pid>`
+  # onto an existing directory NESTS `.next` inside it instead of
+  # renaming, and the swap then mixes old and new trees.
+  find "$dest" -maxdepth 1 -name '*.tarball-old.*' -exec rm -rf {} + 2>/dev/null || true
+  local moved="" move_failed=""
   for d in $move_aside_paths; do
-    if [ -e "$dest/$d" ]; then
+    if [ -e "$dest/$d" ] || [ -L "$dest/$d" ]; then
       mv "$dest/$d" "$dest/$d$backup_suffix" 2>/dev/null || true
+      # Verify the path is actually gone. A swallowed mv failure here
+      # used to surface later as `cp: cannot create directory ...: File
+      # exists` mid-copy — half-swapping the tree. Abort BEFORE cp
+      # touches anything instead.
+      if [ -e "$dest/$d" ] || [ -L "$dest/$d" ]; then
+        move_failed="$d"
+        break
+      fi
+      moved="$moved $d"
     fi
   done
+  if [ -n "$move_failed" ]; then
+    for d in $moved; do
+      mv "$dest/$d$backup_suffix" "$dest/$d" 2>/dev/null || true
+    done
+    rm -rf "$extract_tmp"
+    echo "[tarball-swap] could not move aside '$move_failed' — aborting before copy" >&2
+    return 5
+  fi
   # Copy from the extracted release root.
   if ! cp -a "$release_dir"/. "$dest"/ ; then
-    # Best-effort restore on copy failure.
+    # Restore on copy failure. The partial copy may have recreated any
+    # of the moved-aside paths — remove the partial before moving the
+    # original back, otherwise the original is unrestorable and the
+    # aside-dir leaks as cruft.
     for d in $move_aside_paths; do
-      if [ -e "$dest/$d$backup_suffix" ] && [ ! -e "$dest/$d" ]; then
+      if [ -e "$dest/$d$backup_suffix" ] || [ -L "$dest/$d$backup_suffix" ]; then
+        rm -rf "${dest:?}/${d:?}"
         mv "$dest/$d$backup_suffix" "$dest/$d" 2>/dev/null || true
       fi
     done
@@ -1324,6 +1353,7 @@ if [ -n "${CAVECMS_UPDATE_TARBALL_URL:-}" ]; then
       2) reason="missing top-level directory" ;;
       3) reason="missing package.json or pnpm-lock.yaml" ;;
       4) reason="copy into install directory failed" ;;
+      5) reason="couldn't move the previous version's files aside" ;;
       *) reason="unknown error" ;;
     esac
     # extract_tarball_atomic's mode-4 path (copy failed partway) can
