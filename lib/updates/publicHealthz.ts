@@ -1,4 +1,5 @@
 import 'server-only'
+import { classifyHost } from '@/lib/security/hostKind'
 
 // Derive the install's PUBLIC healthz URL from the operator's CONFIGURED site
 // URL (settings.site_general.siteUrl, via getSiteOrigin), for the cPanel
@@ -40,6 +41,11 @@ export function derivePublicHealthzUrl(
   // is already trusted, so this is belt-and-suspenders — but cheap and absolute.)
   if (u.username || u.password) return undefined
   if (!/^(?:[a-zA-Z0-9.-]+|\[[0-9a-fA-F:]+\])$/.test(u.hostname)) return undefined
+  // A loopback Site URL (localhost / 127.x / ::1 / 0.0.0.0) can never reach the
+  // Passenger app on cPanel — probing it just times out into a cryptic failure.
+  // Return undefined so the caller refuses early with an actionable message
+  // instead of handing the orchestrator a dead URL.
+  if (classifyHost(u.hostname) === 'loopback') return undefined
   if (u.port) {
     const port = Number(u.port)
     if (!Number.isInteger(port) || port < 1 || port > 65535) return undefined

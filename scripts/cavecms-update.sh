@@ -153,6 +153,11 @@ LOCK_PATH="${STATUS_PATH}.lock"
 # the HEALTHZ_RESOLVE_ARGS array consumed by healthz_args below.
 compute_healthz_resolve
 
+# The bare host:port we probe, for operator-facing failure messages (the health
+# check is the operator's OWN site, so naming it is safe + diagnostic). Computed
+# once here, after compute_healthz_resolve finalises HEALTHZ_URL.
+HEALTHZ_HOST="${HEALTHZ_URL#*://}"; HEALTHZ_HOST="${HEALTHZ_HOST%%/*}"
+
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
 # operator points STATUS_PATH at /etc/cron.d/* or similar. CAVECMS_STATE_DIR
 # (per-install runtime-state directory) is also accepted when set.
@@ -576,7 +581,7 @@ rollback_to_previous() {
     fi
   done
   if [ $success -lt 2 ]; then
-    write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version but it isn't responding" "Your site may be offline — contact support immediately." ""
+    write_status "failed" "${CURRENT_STEP:-1}" "We restored your previous version but it isn't responding" "We couldn't reach your site at ${HEALTHZ_HOST} after restoring. If that isn't your real site address, fix your Site URL under Settings, General. Otherwise your site may be offline, contact support." ""
     return 1
   fi
   return 0
@@ -1012,6 +1017,18 @@ if ! curl -fsS --max-time 10 -o /dev/null "$RELEASE_PROBE_URL"; then
   exit 1
 fi
 
+# Backstop: on cPanel the health check can only reach the Passenger app via its
+# PUBLIC URL. If HEALTHZ_URL is still a loopback (the operator's Site URL is
+# localhost/unset, or an override points at localhost), every probe is refused.
+# Fail NOW with a specific, actionable message instead of a generic "not
+# responding" — and skip the probe. The dashboard + CLI already refuse this
+# before spawning; this is the orchestrator-level backstop.
+if [ "$RESTART_MODE" = "cpanel" ] && \
+   printf '%s' "$HEALTHZ_URL" | grep -qiE '^https?://(127(\.[0-9]{1,3}){3}|localhost|0\.0\.0\.0|\[::1?\])(:[0-9]+)?/'; then
+  write_status "failed" 1 "Your site address is set to localhost" "Updates can't reach your site at ${HEALTHZ_HOST} to verify the new version. Set your Site URL to your real domain under Settings, General, then try again." ""
+  exit 1
+fi
+
 # DB: healthz reports db_ping=ok before we touch anything.
 # Seeded with the cpanel loopback-resolve args (empty elsewhere) so every
 # later probe — restart verify, step-6 verify loop — inherits them too.
@@ -1021,7 +1038,7 @@ if [ -n "$HEALTHZ_TOKEN" ]; then
 fi
 healthz_response=$(curl -fsS --max-time 10 ${healthz_args[@]+"${healthz_args[@]}"} "$HEALTHZ_URL" 2>/dev/null || echo "")
 if [ -z "$healthz_response" ] || ! echo "$healthz_response" | grep -q '"status":"ok"'; then
-  write_status "failed" 1 "Your site isn't responding properly" "We can't update right now — try again in a moment." ""
+  write_status "failed" 1 "Your site isn't responding properly" "We couldn't reach your site's health check at ${HEALTHZ_HOST}. If that isn't your real site address, fix your Site URL under Settings, General, then try again." ""
   exit 1
 fi
 

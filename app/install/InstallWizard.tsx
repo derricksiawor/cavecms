@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Wordmark } from '@/components/Wordmark'
 import { TEMPLATE_CLIENT_META } from '@/lib/cms/siteTemplates/clientMeta'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import { setInstallToken, installFetch } from './installFetch'
 
 // Single-page multi-step install wizard. Modelled on WordPress's
@@ -63,10 +64,18 @@ const STEP_LABELS: Record<Step, string> = {
 
 export function InstallWizard({
   guessedSiteUrl,
+  surface,
+  guessIsLoopback,
   bootstrapToken,
   tokenRequired,
 }: {
   guessedSiteUrl: string
+  /** Deployment surface (cpanel/vps/pm2/laptop). Public surfaces must not
+   *  accept a localhost Site URL; laptop may. */
+  surface: string
+  /** True when guessedSiteUrl is a loopback host — on a public surface the
+   *  Site URL field is left empty (with a hint) instead of pre-filling it. */
+  guessIsLoopback: boolean
   bootstrapToken: string | null
   /** Mirrors the server's requireInstallToken() gate. False in
    *  contributor dev with no INSTALL_BOOTSTRAP_TOKEN — banner stays
@@ -221,6 +230,8 @@ export function InstallWizard({
               {step === 'site' && (
                 <SiteStep
                   defaultUrl={guessedSiteUrl}
+                  surface={surface}
+                  guessIsLoopback={guessIsLoopback}
                   onNext={() => goTo('template')}
                   onBack={backTo('site')}
                 />
@@ -665,14 +676,25 @@ function AdminStep({ onNext, onBack }: { onNext: () => void; onBack?: () => void
 
 function SiteStep({
   defaultUrl,
+  surface,
+  guessIsLoopback,
   onNext,
   onBack,
 }: {
   defaultUrl: string
+  surface: string
+  guessIsLoopback: boolean
   onNext: () => void
   onBack?: () => void
 }) {
-  const [siteUrl, setSiteUrl] = useState(defaultUrl.replace(/^http:/, 'https:'))
+  // On a public install reached over localhost (SSH tunnel / port-forward
+  // during cPanel setup), don't pre-fill the loopback URL — start empty so the
+  // operator enters their real domain. Laptop + any non-loopback guess keep the
+  // prefill.
+  const publicLoopback = guessIsLoopback && surface !== 'laptop'
+  const [siteUrl, setSiteUrl] = useState(
+    publicLoopback ? '' : defaultUrl.replace(/^http:/, 'https:'),
+  )
   const [siteName, setSiteName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -681,6 +703,15 @@ function SiteStep({
     e.preventDefault()
     if (submitting) return
     setError(null)
+    // Client-side mirror of the server gate, so the operator sees the problem
+    // before the round-trip. The server (site-init route) re-checks.
+    const trimmed = siteUrl.replace(/\/+$/, '')
+    if (surface !== 'laptop' && isLoopbackUrl(trimmed)) {
+      setError(
+        "Your site address can't be localhost. Enter the public web address visitors use, for example https://yoursite.com.",
+      )
+      return
+    }
     setSubmitting(true)
     try {
       const r = await installFetch('/api/install/site-init', {
@@ -720,7 +751,9 @@ function SiteStep({
             className={inputClass}
           />
           <span className="mt-2 block text-xs text-warm-stone">
-            Must start with https. No trailing slash.
+            {publicLoopback
+              ? "You're reaching setup over localhost. Enter your site's real public address, for example https://yoursite.com"
+              : 'Must start with https. No trailing slash.'}
           </span>
         </div>
         <div>

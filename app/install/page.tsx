@@ -1,5 +1,6 @@
 import { headers } from 'next/headers'
 import { isInstalled } from '@/lib/install/installState'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import { InstallWizard } from './InstallWizard'
 
 // Public install wizard (no auth — there's no admin user yet).
@@ -23,13 +24,23 @@ export default async function InstallPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const alreadyInstalled = await isInstalled()
-  // Default site URL hint = whatever host the operator hit us at.
-  // Stripped to https://<host> so they can confirm vs. edit. Most
-  // operators just hit Continue.
+  // Default Site URL hint. Prefer the real domain the CLI captured at install
+  // time (written to env.production as CAVECMS_SITE_URL on public surfaces) —
+  // the request host is localhost when the operator reaches /install over an
+  // SSH tunnel / localhost forward during cPanel setup, which is exactly how
+  // installs ended up persisting siteUrl=https://localhost:PORT. Fall back to
+  // the request host (correct for laptop dev + any install reached directly).
   const h = await headers()
   const host = h.get('host') ?? 'localhost:3040'
   const proto = h.get('x-forwarded-proto') ?? 'http'
-  const guessedSiteUrl = `${proto}://${host}`
+  const requestGuess = `${proto}://${host}`
+  const cliSiteUrl = process.env.CAVECMS_SITE_URL
+  const guessedSiteUrl =
+    cliSiteUrl && /^https?:\/\/.+/.test(cliSiteUrl) ? cliSiteUrl : requestGuess
+  // Surface + loopback flag so the wizard knows NOT to pre-fill localhost on a
+  // public install (cpanel/vps/pm2). Laptop keeps the localhost prefill.
+  const surface = process.env.CAVECMS_RESTART_MODE ?? 'laptop'
+  const guessIsLoopback = isLoopbackUrl(guessedSiteUrl)
 
   // Bootstrap token — the CLI prints a `/install?t=<token>` URL. The
   // server-rendered wizard receives the token via this query param and
@@ -71,6 +82,8 @@ export default async function InstallPage({
   return (
     <InstallWizard
       guessedSiteUrl={guessedSiteUrl}
+      surface={surface}
+      guessIsLoopback={guessIsLoopback}
       bootstrapToken={bootstrapToken}
       tokenRequired={tokenRequired}
     />

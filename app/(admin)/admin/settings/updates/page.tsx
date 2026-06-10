@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { requireRoleOrRedirect } from '@/lib/auth/requireRoleOrRedirect'
@@ -5,6 +6,8 @@ import { registry } from '@/lib/cms/settings-registry'
 import { getCurrentVersion } from '@/lib/updates/getCurrentVersion'
 import { getCurrentVersionNotes } from '@/lib/updates/getCurrentVersionNotes'
 import { readMemoryBudget, MEMORY_TIGHT_BELOW_MB } from '@/lib/updates/memoryBudget'
+import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import { UpdatesClient } from './UpdatesClient'
 
 // Admin-only Settings → Updates surface.
@@ -75,6 +78,15 @@ export default async function UpdatesSettingsPage() {
   const memoryTight =
     memory?.totalMb != null && memory.totalMb < MEMORY_TIGHT_BELOW_MB
 
+  // A public install whose Site URL is localhost can't be updated (the health
+  // check can't reach it), and its sitemap + emails are broken too. Surface it
+  // here so an already-misconfigured install self-diagnoses instead of hitting
+  // the cryptic update failure first. Laptop installs legitimately use localhost.
+  const siteUrlIsLoopback =
+    !!process.env.CAVECMS_RESTART_MODE &&
+    process.env.CAVECMS_RESTART_MODE !== 'laptop' &&
+    isLoopbackUrl(await getSiteOrigin())
+
   return (
     <div className="max-w-4xl">
       <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-copper-600">
@@ -89,6 +101,26 @@ export default async function UpdatesSettingsPage() {
         goes wrong, we&rsquo;ll automatically put your site back the way it
         was.
       </p>
+
+      {siteUrlIsLoopback && (
+        <div className="mt-6 rounded-2xl border border-amber-300/70 bg-amber-50/70 px-5 py-4">
+          <p className="text-sm font-semibold text-amber-900">
+            Your Site URL is set to localhost
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-amber-800">
+            That stops updates from reaching your site, and it breaks your
+            sitemap and the links in your emails. Set it to your real public
+            address under{' '}
+            <Link
+              href="/admin/settings"
+              className="font-semibold text-amber-900 underline underline-offset-2 hover:text-amber-950"
+            >
+              Settings, General
+            </Link>
+            .
+          </p>
+        </div>
+      )}
 
       {memory?.totalMb != null && (
         <div className="mt-5 flex flex-wrap items-center gap-2">

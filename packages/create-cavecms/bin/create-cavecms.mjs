@@ -1588,6 +1588,21 @@ function envOr(envVar, fallback) {
   return typeof v === 'string' && v.length > 0 ? v : fallback
 }
 
+// True when a URL points at a loopback host (localhost / 127.0.0.0-8 / ::1 /
+// 0.0.0.0) — a public install can never be reached there, so it's an invalid
+// Site URL on cpanel/vps/pm2. Mirrors lib/security/hostKind.ts LOOPBACK_RE
+// (this standalone CLI can't import app code). `new URL().hostname` normalises
+// IPv6 (brackets kept), so bare/bracketed forms both match.
+const LOOPBACK_HOST_RE = /^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|::1?|\[::1?\])$/i
+function isLoopbackHost(url) {
+  if (!url) return false
+  try {
+    return LOOPBACK_HOST_RE.test(new URL(url).hostname)
+  } catch {
+    return false
+  }
+}
+
 async function gatherConfig({ surface, siteName, port, yes }) {
   const config = {
     db: {
@@ -1604,6 +1619,19 @@ async function gatherConfig({ surface, siteName, port, yes }) {
   if (yes) {
     if (!config.db.user) die('CAVECMS_DB_USER is required in non-interactive mode (--yes).')
     if (!config.db.password) die('CAVECMS_DB_PASSWORD is required in non-interactive mode (--yes).')
+    // A public install (cpanel/vps/pm2) needs a real domain. Silently
+    // accepting an empty / localhost CAVECMS_SITE_URL here is how installs
+    // ended up with siteUrl=https://localhost:PORT — which breaks the
+    // updater's health check, the sitemap, and update emails. Laptop is
+    // exempt (localhost is the whole point of a local dev install).
+    if (surface !== 'laptop') {
+      if (!config.siteUrl) {
+        die('CAVECMS_SITE_URL is required in non-interactive mode (--yes) on a public install. Set it to your real domain, e.g. https://yoursite.com.')
+      }
+      if (isLoopbackHost(config.siteUrl)) {
+        die(`CAVECMS_SITE_URL can't be localhost on a public install. Use the real domain visitors use, e.g. https://yoursite.com.`)
+      }
+    }
     return config
   }
 
@@ -1635,6 +1663,7 @@ async function gatherConfig({ surface, siteName, port, yes }) {
         validate: (v) => {
           if (!/^https:\/\/.+/.test(v)) return 'Must be an https:// URL.'
           if (v.endsWith('/')) return 'Drop the trailing slash (e.g. https://mysite.com).'
+          if (isLoopbackHost(v)) return 'A public install needs your real domain, not localhost (e.g. https://yoursite.com).'
           return null
         },
       })
@@ -1780,6 +1809,17 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
   // in `laptop` mode (build + "restart required" prompt, no rollback).
   const restartMode = surface === 'vps' ? 'systemd' : surface
 
+  // CAVECMS_SITE_URL is written RAW into the newline-joined, mode-600
+  // env.production (DB creds go through buildDatabaseUrl's encodeURIComponent,
+  // so they're safe — this value is not). A control char / line break would
+  // inject a second env line; the WHATWG URL parser silently strips \r\n\t from
+  // hostnames, so a crafted CAVECMS_SITE_URL=https://x.com\nCAVECMS_RESTART_MODE=laptop
+  // would pass the loopback gate yet smuggle a line that DEFEATS it. Reject here,
+  // the single chokepoint every surface flows through.
+  if (config.siteUrl && /[\u0000-\u001f\u007f]/.test(config.siteUrl)) {
+    die('CAVECMS_SITE_URL must not contain control characters or line breaks.')
+  }
+
   // Per-install backup output dir for the operator-facing backup/restore
   // engine (scripts/cavecms-backup.sh). A host-filesystem fact like
   // UPLOADS_ROOT — the engine must locate it + disk-check it BEFORE it can
@@ -1862,6 +1902,16 @@ function writeSealedEnv({ targetDir, surface, config, secrets, release }) {
     `# then asks you to restart the process. Hosted surfaces restart`,
     `# automatically. When unset (legacy installs) the updater defaults to pm2.`,
     `CAVECMS_RESTART_MODE=${restartMode}`,
+    // The operator's public domain, captured at CLI time. The install wizard
+    // pre-fills its Site URL field from THIS (app/install/page.tsx) instead of
+    // the request host — so reaching /install over an SSH tunnel / localhost
+    // forward (common on cPanel during setup) no longer pre-fills
+    // https://localhost:PORT. Only written for public surfaces with a real
+    // (non-loopback) domain; laptop installs legitimately use localhost and
+    // let the wizard guess from the request.
+    ...(surface !== 'laptop' && config.siteUrl && !isLoopbackHost(config.siteUrl)
+      ? [`CAVECMS_SITE_URL=${config.siteUrl}`]
+      : []),
     // Laptop + cPanel installs run with NO service manager (systemd unit /
     // pm2 ecosystem) to inject the installer-pinned vars — laptop is bare
     // `node --env-file=env.production`, cPanel is the host's Node runner
@@ -3253,6 +3303,9 @@ async function readPublicSiteUrl(dir, env) {
       try {
         const parsedUrl = new URL(u)
         if (parsedUrl.username || parsedUrl.password) return null
+        // A loopback Site URL can never reach the Passenger app — treat it as
+        // "no usable public URL" so the caller refuses with a clear message.
+        if (isLoopbackHost(u)) return null
       } catch {
         return null
       }
@@ -3341,7 +3394,19 @@ async function runOrchestrator({ dir, envPath, env, mode, targetSha, fromSha, fo
     const siteUrl = await readPublicSiteUrl(dir, env)
     if (siteUrl) {
       childEnv.CAVECMS_PUBLIC_HEALTHZ_URL = `${siteUrl}/healthz`
+    } else if (mode === 'update') {
+      // No usable public URL (loopback / unset / unreadable) on cPanel means the
+      // health check can only ever probe the dead Passenger loopback and time
+      // out into a cryptic "Getting ready" failure. Refuse now with an
+      // actionable message instead. (An explicit CAVECMS_PUBLIC_HEALTHZ_URL in
+      // env.production skips this whole block — the operator override stands.)
+      die(
+        `Your Site URL is set to localhost (or isn't a public web address), so the update can't reach your site to verify the new version.\n` +
+          `  Fix it under Settings, General with your real domain, then run:  cavecms update\n` +
+          `  Or override just this run:  CAVECMS_PUBLIC_HEALTHZ_URL=https://your-domain.com/healthz cavecms update`,
+      )
     } else {
+      // Rollback / other recovery flows must never be blocked — warn only.
       log.warn(`Couldn't read this site's public URL for the health check. If the ${mode} fails at`)
       log.warn(`"Getting ready", re-run with:  CAVECMS_PUBLIC_HEALTHZ_URL=https://your-domain.com/healthz cavecms ${mode}`)
     }

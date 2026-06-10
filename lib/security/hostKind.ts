@@ -18,7 +18,10 @@
 
 export type HostKind = 'loopback' | 'lan' | 'public'
 
-const LOOPBACK_RE = /^(?:localhost|127(?:\.\d{1,3}){3}|::1|\[::1\])$/i
+// `0.0.0.0` (the "all interfaces" address, never a real site host) and the
+// IPv6 unspecified `::` / `[::]` count as loopback for our purposes — a Site
+// URL or Host pointed at any of these can never be reached from the outside.
+const LOOPBACK_RE = /^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|::1?|\[::1?\])$/i
 // Private-use ranges from RFC 1918 + RFC 6598 + link-local + mDNS. A
 // release served from one of these is reachable only on the LAN; HSTS
 // pinning it to HTTPS would lock out every device on the network
@@ -30,6 +33,23 @@ const CGNAT       = /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}$/
 const LINK_LOCAL  = /^169\.254(?:\.\d{1,3}){2}$/
 const MDNS        = /\.local\.?$/i
 
+// Strip a trailing `:port` to get the bare hostname, WITHOUT mangling IPv6.
+// `host.split(':')[0]` is wrong for IPv6: `[::1]:3040` → `[` and `::1` → ``.
+// Rules: bracketed IPv6 (`[::1]` / `[::1]:port`) → keep through the `]`; bare
+// host with a single `:digits` suffix → strip it; bare IPv6 (multiple colons,
+// no brackets, e.g. `::1` / `2001:db8::1`) → leave as-is.
+function bareHostname(host: string): string {
+  const h = host.trim()
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']')
+    return (end >= 0 ? h.slice(0, end + 1) : h).toLowerCase()
+  }
+  const first = h.indexOf(':')
+  if (first === -1) return h.toLowerCase()
+  // Multiple colons with no brackets → bare IPv6 (no port). One colon → host:port.
+  return (first === h.lastIndexOf(':') ? h.slice(0, first) : h).toLowerCase()
+}
+
 /**
  * Classify a Host header. Strips any port suffix before matching.
  * Returns 'public' when no host is supplied — the conservative default
@@ -37,7 +57,7 @@ const MDNS        = /\.local\.?$/i
  */
 export function classifyHost(host: string | null | undefined): HostKind {
   if (!host) return 'public'
-  const hostname = host.split(':')[0]?.toLowerCase().trim() ?? ''
+  const hostname = bareHostname(host)
   if (!hostname) return 'public'
   if (LOOPBACK_RE.test(hostname)) return 'loopback'
   if (
@@ -58,4 +78,20 @@ export function classifyHost(host: string | null | undefined): HostKind {
 export function isUnroutableForHsts(host: string | null | undefined): boolean {
   const kind = classifyHost(host)
   return kind !== 'public'
+}
+
+/**
+ * True when a full URL points at a loopback host (`localhost`, `127.0.0.0/8`,
+ * `::1`, `0.0.0.0`). Used to reject a misconfigured Site URL — a public install
+ * pointed at loopback can't be reached for health checks, sitemap, or emails.
+ * `new URL(url).hostname` normalises the host (brackets kept for IPv6), so this
+ * sidesteps the raw-Host-header parsing quirks. Returns false on a non-URL.
+ */
+export function isLoopbackUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  try {
+    return classifyHost(new URL(url).hostname) === 'loopback'
+  } catch {
+    return false
+  }
 }

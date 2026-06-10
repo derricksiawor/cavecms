@@ -5,6 +5,7 @@ import { withError } from '@/lib/api/withError'
 import { readJsonBody } from '@/lib/api/jsonBody'
 import { HttpError } from '@/lib/auth/requireRole'
 import { isInstalled } from '@/lib/install/installState'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import { requireInstallToken } from '@/lib/install/installEndpointHelpers'
 import { rateLimit } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
@@ -59,6 +60,28 @@ export const POST = withError(async (req: Request) => {
   }
 
   const body = Body.parse(await readJsonBody(req))
+
+  // A public install (cpanel / vps / pm2) can never have a localhost Site URL —
+  // the in-app updater's health check, the sitemap, and update emails all
+  // derive from it, and a loopback host breaks every one of them. The wizard
+  // pre-fills this from the request host, which is localhost when the operator
+  // reaches /install over an SSH tunnel during setup, so this is the
+  // authoritative gate. Laptop dev installs legitimately use localhost.
+  // The message is rendered verbatim in the wizard, so it's a full sentence.
+  // Gate on the surface being SET to a public one: an UNSET var means
+  // contributor dev (`pnpm dev`) or a laptop install, both of which legitimately
+  // use localhost. A real public install always has this written by the CLI.
+  const installSurface = process.env.CAVECMS_RESTART_MODE
+  if (
+    installSurface &&
+    installSurface !== 'laptop' &&
+    isLoopbackUrl(body.siteUrl)
+  ) {
+    throw new HttpError(
+      422,
+      "Your site address can't be localhost. Enter the public web address visitors use, for example https://yoursite.com.",
+    )
+  }
 
   // Write site_general ONLY — completion lives in /api/install/complete.
   const siteGeneralValue = JSON.stringify({

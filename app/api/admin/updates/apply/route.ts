@@ -27,6 +27,7 @@ import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
 import { meetsMinPrevious } from '@/lib/updates/semver'
 import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import {
   readStatus,
   writeStatus,
@@ -554,6 +555,23 @@ export const POST = withError(async (req: Request) => {
     } catch (err) {
       if (err instanceof HttpError) throw err
       // Release-host unreachable / manifest error — proceed leniently.
+    }
+  }
+
+  // cPanel can only health-check the Passenger app via its public Site URL.
+  // If that URL is loopback / unset / malformed, the update would probe a dead
+  // socket and time out into a cryptic "your site isn't responding" — refuse
+  // now, before the lock + spawn, with an actionable message. (derivePublicHealthzUrl
+  // returns undefined for all of those on cpanel.)
+  if (process.env.CAVECMS_RESTART_MODE === 'cpanel') {
+    const siteOrigin = await getSiteOrigin()
+    if (!derivePublicHealthzUrl(siteOrigin)) {
+      throw new HttpError(
+        400,
+        isLoopbackUrl(siteOrigin)
+          ? "Your Site URL is set to localhost, so the update can't reach your site to verify it. Set it to your real domain under Settings, General, then try again."
+          : "Your Site URL isn't set to a public web address, so the update can't reach your site to verify it. Set it under Settings, General, then try again.",
+      )
     }
   }
 

@@ -22,6 +22,7 @@ import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
 import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import { resolveBackupDir, isValidArchiveBasename } from '@/lib/backups/store'
 
 // POST /api/admin/backups/restore — restore from an EXISTING local backup.
@@ -56,6 +57,21 @@ export const POST = withError(async (req: Request) => {
     return new Response(JSON.stringify({ error: 'backup_in_progress' }), { status: 409, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
   }
 
+  // cPanel verifies the restored site via its public Site URL (the 127.0.0.1
+  // loopback is the dead Passenger socket). If that URL is loopback / unset on
+  // cPanel, the step-7 verify would time out and roll back a GOOD restore —
+  // refuse now, before seeding status, with an actionable message.
+  const siteOrigin = await getSiteOrigin()
+  const publicHealthz = derivePublicHealthzUrl(siteOrigin)
+  if (process.env.CAVECMS_RESTART_MODE === 'cpanel' && !publicHealthz) {
+    throw new HttpError(
+      400,
+      isLoopbackUrl(siteOrigin)
+        ? "Your Site URL is set to localhost, so the restore can't reach your site to verify it. Set it to your real domain under Settings, General, then try again."
+        : "Your Site URL isn't set to a public web address, so the restore can't reach your site to verify it. Set it under Settings, General, then try again.",
+    )
+  }
+
   writeRestoreStatus({
     state: 'validating',
     step: 0,
@@ -70,11 +86,6 @@ export const POST = withError(async (req: Request) => {
     CAVECMS_RESTORE_ARCHIVE: archivePath,
   }
   if (body.restoreEnv) env.CAVECMS_RESTORE_ENV = '1'
-  // cPanel: the restore's step-7 health verify can't reach the app over the
-  // 127.0.0.1 loopback (private socket), so it would time out and roll back a
-  // GOOD restore. Hand it the public healthz URL, derived from the operator's
-  // CONFIGURED site URL (not the request host). No-op off cPanel.
-  const publicHealthz = derivePublicHealthzUrl(await getSiteOrigin())
   if (publicHealthz) env.CAVECMS_PUBLIC_HEALTHZ_URL = publicHealthz
 
   let pid: number | null = null

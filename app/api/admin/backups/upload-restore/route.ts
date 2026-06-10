@@ -20,6 +20,7 @@ import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
 import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
 import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
+import { isLoopbackUrl } from '@/lib/security/hostKind'
 import { resolveBackupDir } from '@/lib/backups/store'
 
 // POST /api/admin/backups/upload-restore (raw body) — upload an archive +
@@ -65,6 +66,20 @@ export const POST = withError(async (req: Request) => {
   const r = readRestoreStatus()
   if (r && (r.state === 'validating' || r.state === 'restoring' || r.state === 'restarting') && !isRestoreStale(r)) {
     return new Response(JSON.stringify({ error: 'restore_in_progress' }), { status: 409, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+  }
+
+  // cPanel verifies the restored site via its public Site URL. Refuse early —
+  // before streaming a multi-GB upload — if that URL is loopback / unset, since
+  // the step-7 verify would otherwise time out and roll back a GOOD restore.
+  const siteOrigin = await getSiteOrigin()
+  const publicHealthz = derivePublicHealthzUrl(siteOrigin)
+  if (process.env.CAVECMS_RESTART_MODE === 'cpanel' && !publicHealthz) {
+    throw new HttpError(
+      400,
+      isLoopbackUrl(siteOrigin)
+        ? "Your Site URL is set to localhost, so the restore can't reach your site to verify it. Set it to your real domain under Settings, General, then try again."
+        : "Your Site URL isn't set to a public web address, so the restore can't reach your site to verify it. Set it under Settings, General, then try again.",
+    )
   }
 
   if (!req.body) throw new HttpError(400, 'no_file')
@@ -148,10 +163,9 @@ export const POST = withError(async (req: Request) => {
     // state (it's a one-shot upload, not a kept backup).
     CAVECMS_RESTORE_CLEANUP_ARCHIVE: '1',
   }
-  // cPanel: route the step-7 verify at the public healthz URL (derived from the
-  // operator's CONFIGURED site URL, not the request host) so it can't time out
-  // on the dead loopback and roll back a good restore. No-op off cPanel.
-  const publicHealthz = derivePublicHealthzUrl(await getSiteOrigin())
+  // cPanel: route the step-7 verify at the public healthz URL (computed above
+  // from the operator's CONFIGURED site URL) so it can't time out on the dead
+  // loopback and roll back a good restore. No-op off cPanel.
   if (publicHealthz) restoreEnv.CAVECMS_PUBLIC_HEALTHZ_URL = publicHealthz
   try {
     pid = spawnBackupEngine({
