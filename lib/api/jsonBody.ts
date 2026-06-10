@@ -1,12 +1,13 @@
 import 'server-only'
 import { HttpError } from '@/lib/auth/requireRole'
 
-// Hard ceiling on JSON request bodies for CMS routes. Bigger than the
-// largest reasonable block payload (gallery with 48 images + max-length
-// captions + body_richtext) but well under what could DoS microdiff or
-// blow the JSON column write limit. Defends against a hostile editor
-// posting a deeply-nested adversarial structure.
-const MAX_JSON_BYTES = 256 * 1024
+// Request-size backstop for CMS routes. This is NOT a content limit — it's
+// raised high enough (16 MB) that no real page, legal doc, or long article in a
+// single block ever approaches it; it exists only so a pathological/hostile
+// payload (deeply-nested adversarial structure, runaway upload) can't OOM the
+// server or blow the JSON column write limit. Per-field content caps were
+// removed (see lib/cms/limits.ts) — operators write as much as they want.
+const MAX_JSON_BYTES = 16 * 1024 * 1024
 
 /**
  * Reads the request body as JSON with two guards on top of req.json():

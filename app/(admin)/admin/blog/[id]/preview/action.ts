@@ -20,7 +20,7 @@ import { renderMarkdown } from '@/lib/cms/markdown'
 // The body length cap mirrors the PATCH route — anything bigger is
 // rejected before the pipeline runs so the editor can't be used as
 // a CPU exhaustion vector against the server.
-const BODY_MD_MAX = 180_000
+const BODY_MD_MAX = 5_000_000
 
 export async function previewMarkdown(md: string): Promise<string> {
   const ctx = await requireRole(['admin', 'editor'])

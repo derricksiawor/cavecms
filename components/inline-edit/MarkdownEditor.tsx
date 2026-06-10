@@ -147,11 +147,8 @@ export function MarkdownEditor({
 
         <div className="ml-auto flex items-center gap-2">
           {maxLength && (
-            <span className={clsx(
-              'text-[10px] font-medium tabular-nums tracking-wider',
-              value.length > maxLength * 0.95 ? 'text-copper-700' : 'text-warm-stone',
-            )}>
-              {value.length.toLocaleString()}/{maxLength.toLocaleString()}
+            <span className="text-[10px] font-medium tabular-nums tracking-wider text-warm-stone">
+              {value.length.toLocaleString()}
             </span>
           )}
           <button

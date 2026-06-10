@@ -41,7 +41,7 @@ const ID_PATTERN = /^[1-9][0-9]{0,9}$/
 // is ~100 bytes — 180K chars leaves headroom so a 250K-character
 // post never trips body_too_large. The textarea + previewMarkdown
 // caps match.
-const BODY_MD_MAX = 180_000
+const BODY_MD_MAX = 5_000_000
 
 function parseId(raw: string): number {
   if (!ID_PATTERN.test(raw)) throw new HttpError(400, 'invalid_id')

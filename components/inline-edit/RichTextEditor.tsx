@@ -225,11 +225,8 @@ export function RichTextEditor({
           <span className="text-[11px] font-semibold tracking-wider">Tx</span>
         </TbBtn>
         {showLimit && (
-          <span className={clsx(
-            'ml-auto text-[10px] font-medium tabular-nums tracking-wider',
-            length > (maxLength ?? Infinity) * 0.9 ? 'text-copper-700' : 'text-warm-stone',
-          )}>
-            {length}/{maxLength}
+          <span className="ml-auto text-[10px] font-medium tabular-nums tracking-wider text-warm-stone">
+            {length.toLocaleString()}
           </span>
         )}
       </div>
