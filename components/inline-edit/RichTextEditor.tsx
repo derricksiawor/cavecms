@@ -297,7 +297,7 @@ export function RichTextEditor({
         onKeyUp={queryState}
         onMouseUp={queryState}
         data-placeholder={placeholder ?? ''}
-        className="min-h-[8rem] px-4 py-3 text-sm leading-relaxed text-near-black focus:outline-none prose prose-sm max-w-none prose-headings:font-serif prose-p:my-2 prose-a:text-copper-700 prose-a:underline empty:before:content-[attr(data-placeholder)] empty:before:text-warm-stone/60 [&:not(:focus):empty]:before:content-[attr(data-placeholder)]"
+        className="min-h-[8rem] max-h-[60vh] overflow-y-auto px-4 py-3 text-sm leading-relaxed text-near-black focus:outline-none prose prose-sm max-w-none prose-headings:font-serif prose-p:my-2 prose-a:text-copper-700 prose-a:underline empty:before:content-[attr(data-placeholder)] empty:before:text-warm-stone/60 [&:not(:focus):empty]:before:content-[attr(data-placeholder)]"
       />
     </div>
   )
