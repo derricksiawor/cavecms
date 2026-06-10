@@ -85,14 +85,21 @@ compute_healthz_resolve() {
   esac
   [ -n "$host" ] || return 0
 
+  # Probe the DIRECT public URL — NO `--resolve` pin.
+  #
+  # The earlier design pinned the probe to 127.0.0.1 (`--resolve host:443:
+  # 127.0.0.1`) to keep the bearer on-box. But on cPanel/LiteSpeed that pin is
+  # BROKEN: connecting to 127.0.0.1:443 with SNI=<the site> does NOT route to
+  # the operator's vhost — LiteSpeed returns its default cPanel 404 (confirmed
+  # on a live box: the probe got "404 Not Found ... for 127.0.0.1 requesting
+  # <site> port 443"). So every cPanel update/restore that built the pin failed
+  # its health check. The public URL routes correctly by Host, so use it
+  # directly. Security is preserved by the userinfo gate ABOVE — `host` is a
+  # validated bare hostname, so the bearer can only ever go to the operator's
+  # OWN domain, never an attacker's (a `user@evil` authority was already
+  # rejected). `-k` tolerates an incomplete AutoSSL cert on that own domain.
   HEALTHZ_URL="$CAVECMS_PUBLIC_HEALTHZ_URL"
-  if [ -z "$port" ]; then
-    case "$HEALTHZ_URL" in
-      https://*) port=443 ;;
-      *) port=80 ;;
-    esac
-  fi
-  HEALTHZ_RESOLVE_ARGS=(--resolve "${host}:${port}:127.0.0.1" -k)
+  HEALTHZ_RESOLVE_ARGS=(-k)
 }
 
 # ---------------------------------------------------------------------------

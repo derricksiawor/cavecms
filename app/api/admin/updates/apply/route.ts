@@ -26,6 +26,7 @@ import { findValidStaged } from '@/lib/updates/releaseCache'
 import { checkLatestRelease } from '@/lib/updates/checkLatestRelease'
 import { meetsMinPrevious } from '@/lib/updates/semver'
 import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
+import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import {
   readStatus,
   writeStatus,
@@ -683,8 +684,10 @@ export const POST = withError(async (req: Request) => {
     // (2) Build a NARROW env for the child — secrets stay in the
     //     parent. (3) Open the spawn log with O_NOFOLLOW + 0600.
     // Public healthz URL for the cpanel surface (see buildScriptEnv) — shared
-    // derivation with the restore routes, gated + userinfo-safe.
-    const publicHealthzUrl = derivePublicHealthzUrl(req)
+    // derivation with the restore routes. Derived from the operator's CONFIGURED
+    // site URL (NOT the request host), so the orchestrator's bearer can only
+    // ever reach the operator's own domain.
+    const publicHealthzUrl = derivePublicHealthzUrl(await getSiteOrigin())
     const scriptEnv = buildScriptEnv(target, current.sha, {
       force,
       downloadUrl,

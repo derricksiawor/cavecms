@@ -19,6 +19,7 @@ import {
 import { RESTORE_TOTAL_STEPS } from '@/lib/backups/constants'
 import { spawnBackupEngine } from '@/lib/backups/spawnEngine'
 import { derivePublicHealthzUrl } from '@/lib/updates/publicHealthz'
+import { getSiteOrigin } from '@/lib/cms/getSiteOrigin'
 import { resolveBackupDir } from '@/lib/backups/store'
 
 // POST /api/admin/backups/upload-restore (raw body) — upload an archive +
@@ -147,9 +148,10 @@ export const POST = withError(async (req: Request) => {
     // state (it's a one-shot upload, not a kept backup).
     CAVECMS_RESTORE_CLEANUP_ARCHIVE: '1',
   }
-  // cPanel: route the step-7 verify at the public healthz URL so it can't
-  // time out on the dead loopback and roll back a good restore. No-op off cPanel.
-  const publicHealthz = derivePublicHealthzUrl(req)
+  // cPanel: route the step-7 verify at the public healthz URL (derived from the
+  // operator's CONFIGURED site URL, not the request host) so it can't time out
+  // on the dead loopback and roll back a good restore. No-op off cPanel.
+  const publicHealthz = derivePublicHealthzUrl(await getSiteOrigin())
   if (publicHealthz) restoreEnv.CAVECMS_PUBLIC_HEALTHZ_URL = publicHealthz
   try {
     pid = spawnBackupEngine({
