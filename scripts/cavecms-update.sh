@@ -144,20 +144,6 @@ else
 fi
 LOCK_PATH="${STATUS_PATH}.lock"
 
-# cPanel/Passenger healthz routing — shared with the restore orchestrator
-# via compute_healthz_resolve (cavecms-update-helpers.sh). On cPanel the app
-# is on a private socket so the default 127.0.0.1:$PORT probe can never answer
-# and every update died at step 1; the helper pins the install's PUBLIC
-# healthz URL to 127.0.0.1 via curl --resolve (with the userinfo security gate
-# that keeps the bearer token on-box). No-op off cPanel. Sets HEALTHZ_URL +
-# the HEALTHZ_RESOLVE_ARGS array consumed by healthz_args below.
-compute_healthz_resolve
-
-# The bare host:port we probe, for operator-facing failure messages (the health
-# check is the operator's OWN site, so naming it is safe + diagnostic). Computed
-# once here, after compute_healthz_resolve finalises HEALTHZ_URL.
-HEALTHZ_HOST="${HEALTHZ_URL#*://}"; HEALTHZ_HOST="${HEALTHZ_HOST%%/*}"
-
 # Path allowlist — same guard as lib/updates/statusFile.ts. Refuse if
 # operator points STATUS_PATH at /etc/cron.d/* or similar. CAVECMS_STATE_DIR
 # (per-install runtime-state directory) is also accepted when set.
@@ -237,6 +223,21 @@ fi
 HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 # shellcheck source=scripts/lib/cavecms-update-helpers.sh
 . "${HELPERS_DIR}/cavecms-update-helpers.sh"
+
+# cPanel/Passenger healthz routing — shared with the restore orchestrator via
+# compute_healthz_resolve. On cPanel the app is on a private socket so the
+# default 127.0.0.1:$PORT probe can never answer and every update died at step
+# 1; the helper points the probe at the install's PUBLIC healthz URL (with the
+# userinfo security gate that keeps the bearer token on-box). No-op off cPanel.
+# Sets HEALTHZ_URL + the HEALTHZ_RESOLVE_ARGS array consumed by healthz_args
+# below. MUST run AFTER the helper source above — it lives here, not up in the
+# early-setup block, because that's where the function is defined.
+compute_healthz_resolve
+
+# The bare host:port we probe, for operator-facing failure messages (the health
+# check is the operator's OWN site, so naming it is safe + diagnostic). Computed
+# once, after compute_healthz_resolve finalises HEALTHZ_URL.
+HEALTHZ_HOST="${HEALTHZ_URL#*://}"; HEALTHZ_HOST="${HEALTHZ_HOST%%/*}"
 
 STARTED_AT="$(now_iso)"
 # Export so the python3 subprocess in post_audit_terminal can read it
