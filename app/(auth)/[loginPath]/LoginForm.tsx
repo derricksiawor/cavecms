@@ -108,7 +108,7 @@ function loadRecaptchaV2(): Promise<GrecaptchaV2Api> {
 }
 
 export function LoginForm({
-  csrf,
+  csrf: initialCsrf,
   action,
   recaptchaSiteKey,
   recaptchaVersion,
@@ -118,6 +118,11 @@ export function LoginForm({
   recaptchaSiteKey: string
   recaptchaVersion: 'v2' | 'v3'
 }) {
+  // The pre-CSRF nonce is single-use and consumed on every attempt, so the
+  // server returns a fresh one in each failure response. Hold it in state and
+  // swap it into the hidden field so a retry after a wrong password isn't sent
+  // with a dead token (which used to 401 even with the correct password).
+  const [csrf, setCsrf] = useState(initialCsrf)
   const [err, setErr] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   // v3
@@ -204,8 +209,12 @@ export function LoginForm({
       }
       const res = await fetch(action, { method: 'POST', body: fd, credentials: 'same-origin' })
       const data = (await res.json().catch(() => null)) as
-        | { ok?: boolean; next?: string; error?: string; locked?: boolean; retryAfter?: number }
+        | { ok?: boolean; next?: string; error?: string; locked?: boolean; retryAfter?: number; csrf?: string }
         | null
+      // Swap in the fresh single-use pre-CSRF token for the next attempt. The
+      // server sends one with every failure response; without this, a retry
+      // after a wrong password reuses the consumed token and always 401s.
+      if (typeof data?.csrf === 'string' && data.csrf) setCsrf(data.csrf)
       if (res.ok && data?.ok && typeof data.next === 'string') {
         window.location.href = data.next
         return

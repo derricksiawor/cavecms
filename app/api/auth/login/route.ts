@@ -7,7 +7,7 @@ import { signSessionJwt } from '@/lib/auth/sign-session-jwt'
 import { issueCsrf } from '@/lib/auth/csrf'
 import { computeLockState, recordFailure, recordSuccess } from '@/lib/auth/lockout'
 import { invalidateUser } from '@/lib/auth/userCache'
-import { consumePreCsrf } from '@/lib/auth/preCsrf'
+import { issuePreCsrf, consumePreCsrf } from '@/lib/auth/preCsrf'
 import { rateLimitDynInfo } from '@/lib/auth/rateLimit'
 import { clientIpFromHeaders } from '@/lib/http/clientIp'
 import {
@@ -34,9 +34,18 @@ const EMAIL_RE =
   /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,191}\.[A-Za-z]{2,}$/
 const NEXT_FALLBACK_PATH = '/auth/rotate'
 
+// Every failure response carries a FRESH single-use pre-CSRF token. The
+// pre-CSRF nonce is consumed on every attempt (success or fail), so without a
+// replacement the form's token is dead after the first wrong password and every
+// retry — even with the correct password — fails at consumePreCsrf and looks
+// like another bad credential. The client swaps this into its hidden field so
+// the next attempt has a live token, no page reload. CSRF stays protected: a
+// cross-site attacker cannot read this JSON response to harvest the token, and
+// the per-IP/per-email rate limits + reCAPTCHA + lockout remain the brute-force
+// bound (each failure response is itself rate-limited).
 const generic = (status = 401): Response =>
   new Response(
-    JSON.stringify({ error: 'Invalid email or password' }),
+    JSON.stringify({ error: 'Invalid email or password', csrf: issuePreCsrf() }),
     {
       status,
       headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
@@ -57,6 +66,8 @@ const lockedResponse = (retryAfter: number): Response =>
       error: 'Too many failed attempts. Please try again later.',
       retryAfter,
       locked: true,
+      // Fresh token so a retry AFTER the wait isn't also dead-on-arrival.
+      csrf: issuePreCsrf(),
     }),
     {
       status: 429,

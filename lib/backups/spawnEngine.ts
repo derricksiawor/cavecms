@@ -58,6 +58,9 @@ const ENGINE_ENV_ALLOWLIST: readonly string[] = [
   'CAVECMS_INTERNAL_URL',
   // Restart + process-manager handles (restore restarts the app).
   'CAVECMS_RESTART_MODE',
+  // The CLI-captured install domain — restore's reapply_site_url falls back to
+  // this to re-point the restored Site URL when the install has no usable one yet.
+  'CAVECMS_SITE_URL',
   'CAVECMS_SYSTEMD_UNIT',
   'PM2_HOME',
   'CAVECMS_PM2_APP_NAME',

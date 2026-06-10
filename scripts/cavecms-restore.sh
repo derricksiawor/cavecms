@@ -427,6 +427,10 @@ fi
 CURRENT_STEP=3
 rstatus restoring 3 "Restoring your content"
 MUTATION_STARTED=1
+# Capture THIS install's own Site URL before the backup overwrites settings, so
+# we can re-point the restored site at the domain it actually serves (the backup
+# carries the SOURCE site's domain). Read now — drop_all_tables destroys it next.
+RESTORE_PREV_SITE_URL="$(read_site_url)"
 # DROP all existing tables/views FIRST so an OLDER dump (which only DROP+CREATEs
 # the tables it knows about) doesn't leave the install's NEWER tables behind —
 # those would make the subsequent forward-migrate re-run their CREATE and fail.
@@ -479,6 +483,16 @@ fi
 # Data is fully restored + migrated. From here a SIGTERM should NOT undo the
 # restore (on_term writes restart_required instead of rolling back).
 RESTORE_COMMITTED=1
+
+# Re-point the restored Site URL at THIS install's domain (captured above). The
+# backup carried the source site's domain; without this, emails, the sitemap,
+# and the updater would all point at the wrong host after a migrate/clone/DR
+# restore. Best-effort — never fails the restore (keeps the backup's value if no
+# usable domain resolves). Skipped when env.production is being restored too
+# (--restore-env), since that intentionally adopts the backup's full identity.
+if [ "${CAVECMS_RESTORE_ENV:-0}" != "1" ]; then
+  reapply_site_url "${RESTORE_PREV_SITE_URL:-}"
+fi
 
 # Optional env.production restore (--restore-env).
 if [ "${CAVECMS_RESTORE_ENV:-0}" = "1" ]; then

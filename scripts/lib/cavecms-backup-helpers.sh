@@ -151,6 +151,84 @@ invalidate_all_sessions() {
 }
 
 # ---------------------------------------------------------------------------
+# read_site_url — print this install's currently-configured Site URL
+# (settings.site_general.siteUrl), or empty if unreadable. The restore captures
+# it BEFORE the backup overwrites settings, so the install's own domain can be
+# re-applied afterwards (see reapply_site_url). Best-effort: empty on any error.
+# ---------------------------------------------------------------------------
+read_site_url() {
+  command -v mysql >/dev/null 2>&1 || { printf ''; return 0; }
+  local cred_db cf db out
+  cred_db=$(_backup_cred_file) || { printf ''; return 0; }
+  cf=$(echo "$cred_db" | awk 'NR==1'); db=$(echo "$cred_db" | awk 'NR==2')
+  out=$(mysql --defaults-extra-file="$cf" --connect-timeout=10 -N -s "$db" \
+    -e "SELECT JSON_UNQUOTE(JSON_EXTRACT(value,'\$.siteUrl')) FROM settings WHERE \`key\`='site_general' LIMIT 1" \
+    2>/dev/null)
+  rm -f "$cf" 2>/dev/null || true
+  [ "$out" = "NULL" ] && out=""   # JSON null → empty
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
+# _site_url_usable <url> — true when <url> is a clean http(s) URL safe to write
+# and appropriate for THIS surface. Rejects: empty, non-http(s), anything with a
+# quote / backslash / whitespace / control char (SQL + JSON-break safety), and
+# loopback hosts EXCEPT on a laptop install (where localhost is legitimate).
+# ---------------------------------------------------------------------------
+_site_url_usable() {
+  local u="$1"
+  [ -n "$u" ] || return 1
+  case "$u" in https://*|http://*) : ;; *) return 1 ;; esac
+  case "$u" in *[\'\"\\\ ]*) return 1 ;; esac          # no quote/backslash/space
+  printf '%s' "$u" | LC_ALL=C grep -q '[[:cntrl:]]' && return 1
+  # Loopback (localhost / 127.x / 0.0.0.0 / ::1) only on a laptop install. The
+  # ERE matches lookalikes safely (localhost.example.com is NOT loopback).
+  if printf '%s' "$u" | grep -qiE '^https?://(127(\.[0-9]{1,3}){3}|localhost|0\.0\.0\.0|\[::1?\])(:[0-9]+)?(/|$)'; then
+    [ "${CAVECMS_RESTART_MODE:-}" = "laptop" ] && return 0 || return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# reapply_site_url <prev_url> — after a restore, the loaded DB carries the
+# SOURCE site's Site URL. Re-point it at THIS install's OWN domain so emails,
+# sitemap, and the updater keep working on the domain this install actually
+# serves (migrations / clones / disaster-recovery onto a new domain). Cross-
+# platform by design: it uses the install's own config, not server-specific
+# parsing. Detection chain:
+#   1. <prev_url> — the Site URL captured before the restore (this install's domain)
+#   2. CAVECMS_SITE_URL env — the domain the CLI captured at install (public surfaces)
+# If neither resolves to a usable domain, the backup's value is kept (logged) —
+# this NEVER fails the restore. Best-effort: always returns 0.
+# ---------------------------------------------------------------------------
+reapply_site_url() {
+  local prev="$1" domain="" log="${LOG_DIR:-/tmp}/restore-db.log"
+  if _site_url_usable "$prev"; then domain="$prev"
+  elif _site_url_usable "${CAVECMS_SITE_URL:-}"; then domain="${CAVECMS_SITE_URL}"
+  fi
+  if [ -z "$domain" ]; then
+    echo "[cavecms-restore] reapply_site_url: no usable install domain; keeping the backup's Site URL" >> "$log"
+    return 0
+  fi
+  domain="${domain%/}"   # drop a trailing slash
+  command -v mysql >/dev/null 2>&1 || return 0
+  local cred_db cf db
+  cred_db=$(_backup_cred_file) || return 0
+  cf=$(echo "$cred_db" | awk 'NR==1'); db=$(echo "$cred_db" | awk 'NR==2')
+  # _site_url_usable constrained $domain to a strict URL charset (no quote /
+  # backslash / control), so it's safe to interpolate into the JSON_SET literal.
+  if mysql --defaults-extra-file="$cf" --connect-timeout=10 "$db" \
+       -e "UPDATE settings SET value = JSON_SET(CAST(value AS JSON), '\$.siteUrl', '${domain}') WHERE \`key\`='site_general'" \
+       >> "$log" 2>&1; then
+    echo "[cavecms-restore] Site URL set to ${domain} (this install's domain)" >> "$log"
+  else
+    echo "[cavecms-restore] reapply_site_url: UPDATE failed (non-fatal)" >> "$log"
+  fi
+  rm -f "$cf" 2>/dev/null || true
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # dump_database <out.sql.gz>
 # Generalized db_backup: full mysqldump (schema + data + routines/triggers/
 # events), single-transaction, gzip to the caller-supplied path. Echoes the
