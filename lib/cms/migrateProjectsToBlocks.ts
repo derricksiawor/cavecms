@@ -185,6 +185,7 @@ export async function insertProjectPageTree(
   //   - each widget through parseAndSanitize
   const built = buildProjectSections(
     {
+      id: project.id,
       slug: project.slug,
       name: project.name,
       status: project.status,

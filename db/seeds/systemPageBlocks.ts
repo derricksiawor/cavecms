@@ -20,6 +20,7 @@ import { contentBlocks } from '../schema'
 // the whole seed (page existence check → block COUNT → inserts) is one TX.
 type SeedTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 import { parseAndSanitize } from '@/lib/cms/parse'
+import { contactFormPresetData } from '@/lib/cms/formPresets'
 import type {
   SectionSpec,
   ColumnSpec,
@@ -355,7 +356,13 @@ export const CONTACT_SECTIONS: SectionSpec[] = [
     kind: 'section',
     meta: { columns: 1, background: 'obsidian', padding: 'md' },
     columns: [{ kind: 'column', widgets: [
-      { kind: 'widget', blockType: 'contact_form', data: { heading: 'Send us a note.', intro: 'A short message about what you need — we will come back with next steps the same business day.', submit_label: 'Send message', success_headline: 'Thanks — we received your message.', success_body: 'A member of our team will be in touch shortly.' } },
+      // The contact form is a general lx_form seeded with the Contact
+      // preset (lib/cms/formPresets.ts) — same engine as every other
+      // form on the site, POSTs to /api/leads/form.
+      { kind: 'widget', blockType: 'lx_form', data: contactFormPresetData({
+        heading: 'Send us a note.',
+        intro: 'A short message about what you need — we will come back with next steps the same business day.',
+      }) },
     ] }],
   },
 ]

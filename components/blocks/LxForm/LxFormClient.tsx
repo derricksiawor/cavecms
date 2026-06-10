@@ -244,7 +244,20 @@ export function LxFormClient({
               <span className={`font-sans text-sm ${onDark ? 'text-white/85' : 'text-near-black'}`}>{f.placeholder || f.label}</span>
             </span>
           ) : (
-            <input type={f.type} name={f.name} required={f.required} placeholder={f.placeholder} className={inputClass} />
+            <input
+              type={f.type}
+              name={f.name}
+              required={f.required}
+              placeholder={f.placeholder}
+              // Native date/time picker chrome (calendar grid, clock face)
+              // follows the field theme via color-scheme — without it a dark
+              // section gets a glaring light popover.
+              className={clsx(
+                inputClass,
+                (f.type === 'date' || f.type === 'time') &&
+                  (onDark ? '[color-scheme:dark]' : '[color-scheme:light]'),
+              )}
+            />
           )}
         </label>
         )

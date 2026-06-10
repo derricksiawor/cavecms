@@ -1,15 +1,21 @@
 import 'server-only'
 import type { BlockType } from './block-registry'
 import { isValidMapEmbedUrl } from './block-registry'
+import {
+  projectInquiryFormPresetData,
+  gatedDownloadFormPresetData,
+} from './formPresets'
 
 // Pure mapper: a project's section rows → a list of CMS SECTIONS, each
 // holding the ordered PRIMITIVE block widgets that compose it. Every
 // element an operator should be able to edit is its own primitive block
 // (lx_heading, lx_text, lx_eyebrow, lx_action, lx_figure, lx_gallery,
 // lx_map, lx_stat, lx_icon_list, lx_testimonial, …) — no monolithic
-// "project" wrapper blocks. The only project-specific blocks that
-// survive are the two lead forms (lx_inquiry_form / lx_brochure_form),
-// because a form is one irreducible widget.
+// "project" wrapper blocks. The lead forms are general `lx_form`
+// instances seeded with the project-inquiry / gated-download presets
+// (lib/cms/formPresets.ts): project binding is DATA (a hidden
+// project_id field + a deliver_file action snapshotting the brochure
+// PDF), not render-time RenderContext infrastructure.
 //
 // Shared by the projects→blocks backfill AND new-project creation so
 // both produce identical trees. No DB access — the caller validates
@@ -62,6 +68,10 @@ function oneCol(widgets: ProjectWidget[]): ProjectColumn[] {
 }
 
 export interface ProjectContextForTree {
+  /** projects.id — snapshotted into the seeded forms' hidden
+   *  project_id field so the lead pipeline can scope leads + CRM
+   *  without render-time project context. */
+  id: number
   slug: string
   name: string
   status: string
@@ -612,42 +622,89 @@ export function buildProjectSections(
     }
   }
 
-  // ── Inquiry — the one irreducible widget: a lead form. It renders
-  //    its own eyebrow + heading + body from its block data, so we pass
-  //    the copy INTO the form (not as separate primitives — that would
-  //    double-render). The heading/body are editable via the form
-  //    block's drawer. padding 'none' because the form brings its own
-  //    band padding.
+  // ── Inquiry — a general lx_form seeded with the project-inquiry
+  //    preset (name/email/phone + tour date/time + optional message +
+  //    a hidden project_id snapshot). The section copy (eyebrow →
+  //    heading → standfirst) is composed from primitives so every
+  //    line is its own editable block; the lx_menu_anchor preserves
+  //    the page contract — the hero CTA + sticky header hash-link to
+  //    `/projects/<slug>#inquiry-form`.
   {
     const q = byKey.get('inquiry') ?? {}
-    out.push({
-      meta: { columns: 1, background: 'cream', padding: 'none' },
-      columns: oneCol([
-        {
-          blockType: 'lx_inquiry_form',
-          data: {
-            ...(nonEmpty(q.heading) ? { heading: clampPlain(str(q.heading), 220) } : {}),
-            ...(nonEmpty(q.body_richtext) ? { body_richtext: str(q.body_richtext) } : {}),
-          },
+    const heading = nonEmpty(q.heading)
+      ? clampPlain(str(q.heading), 220)
+      : clampPlain(`Reach out about ${project.name}`, 220)
+    const widgets: ProjectWidget[] = [
+      { blockType: 'lx_menu_anchor', data: { anchorId: 'inquiry-form' } },
+      { blockType: 'lx_eyebrow', data: { text: 'Speak with our team', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { blockType: 'lx_heading', data: { text: heading, level: 'h2', size: 'display-lg', alignment: 'center', tone: 'obsidian', animation: 'slide-up' } },
+      {
+        blockType: 'lx_text',
+        data: {
+          body_richtext: nonEmpty(q.body_richtext)
+            ? str(q.body_richtext)
+            : '<p>Share a few details and a member of our sales team will be in touch — usually within a working day — to arrange a private viewing or answer your questions.</p>',
+          size: 'body-lg',
+          alignment: 'center',
+          tone: 'warm-stone',
+          maxWidth: 'medium',
+          animation: 'fade-in',
         },
-      ]),
+      },
+      {
+        blockType: 'lx_form',
+        data: projectInquiryFormPresetData({
+          projectId: project.id,
+          projectName: project.name,
+        }),
+      },
+    ]
+    out.push({
+      meta: { columns: 1, background: 'cream', padding: 'xl' },
+      columns: oneCol(widgets),
     })
   }
 
-  // ── Brochure — same: the lead-gated form renders its own copy. Only
-  //    when a PDF exists on the project row (the form gates on it).
+  // ── Brochure — a gated-download lx_form whose deliver_file action
+  //    snapshots the project's brochure PDF at seed time (re-point is
+  //    a drawer edit if the operator later swaps the PDF). Seeded only
+  //    when a PDF exists on the project row — a gate with no file
+  //    would lose real leads. lx_menu_anchor keeps the hero CTA's
+  //    `#brochure` target working.
   if (project.brochurePdfId !== null) {
     const b = byKey.get('brochure') ?? {}
-    out.push({
-      meta: { columns: 1, background: 'cream', padding: 'none' },
-      columns: oneCol([
-        {
-          blockType: 'lx_brochure_form',
-          data: nonEmpty(b.gate_message_richtext)
-            ? { gate_message_richtext: str(b.gate_message_richtext) }
-            : {},
+    const widgets: ProjectWidget[] = [
+      { blockType: 'lx_menu_anchor', data: { anchorId: 'brochure' } },
+      { blockType: 'lx_eyebrow', data: { text: 'Get the brochure', tone: 'champagne', alignment: 'center', animation: 'fade-in' } },
+      { blockType: 'lx_heading', data: { text: 'The complete dossier, sent to your inbox', level: 'h2', size: 'display-lg', alignment: 'center', tone: 'obsidian', animation: 'slide-up' } },
+      {
+        blockType: 'lx_text',
+        data: {
+          body_richtext: nonEmpty(b.gate_message_richtext)
+            ? str(b.gate_message_richtext)
+            : '<p>We’ll email you a download link with the full brochure, including pricing, plans, and the neighbourhood guide. The link works for 7 days.</p>',
+          size: 'body-lg',
+          alignment: 'center',
+          tone: 'warm-stone',
+          maxWidth: 'medium',
+          animation: 'fade-in',
         },
-      ]),
+      },
+      {
+        blockType: 'lx_form',
+        data: gatedDownloadFormPresetData({
+          projectId: project.id,
+          projectName: project.name,
+          file: {
+            media_id: project.brochurePdfId,
+            alt: clampPlain(`${project.name} brochure`, 220) || 'Project brochure',
+          },
+        }),
+      },
+    ]
+    out.push({
+      meta: { columns: 1, background: 'cream', padding: 'xl' },
+      columns: oneCol(widgets),
     })
   }
 

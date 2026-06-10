@@ -100,21 +100,11 @@ export const POST = withError(async (req: Request) => {
   const userAgent = (headerObj['user-agent'] ?? '').slice(0, 255)
   const formName = (body._formName || 'Form').slice(0, 120)
 
-  const [insertRes] = (await db.execute(sql`
-    INSERT INTO leads (source, name, email, phone, message, payload, enquiry_type, ip, user_agent)
-    VALUES ('form', ${name}, ${normEmail || null}, ${phone}, ${message}, ${JSON.stringify(items)}, 'enquiry', ${ip}, ${userAgent})
-  `)) as unknown as [{ insertId: number }]
-  const leadId = Number(insertRes.insertId)
-
-  // ── deliver_file after-submit actions ────────────────────────────────
-  // Load the form block's actions SERVER-SIDE (never trust a client-supplied
-  // media id), then run any deliver_file action: sign a download token and
-  // either email the link (email mode) or hand it back for an on-screen
-  // download (instant). manual mode delivers nothing here — the lead is saved
-  // + the team notified below, exactly as before.
-  // Load the lx_form block ONCE — its `data` JSON carries BOTH the deliver_file
-  // actions AND the per-instance crmDestinations, so the delivery step here and
-  // the CRM dispatch below share this single read.
+  // ── Load the form block FIRST (before the lead INSERT) ───────────────
+  // Its `data` JSON carries the deliver_file actions, the per-instance
+  // crmDestinations, AND the project binding (a hidden `project_id` field
+  // seeded by the project tree-builder / data migration) — all read
+  // SERVER-SIDE so none of them can be tampered with client-side.
   //
   // SECURITY NOTE: `_blockId` is client-supplied and validated only as a real
   // lx_form id — it is NOT bound to the form actually submitted. So a deliver_file
@@ -125,9 +115,11 @@ export const POST = withError(async (req: Request) => {
   // and an email/lead is still captured); the signed token unforgeably binds
   // lead_id+media_id, so no arbitrary media is reachable. To enforce a strict
   // per-form gate, bake the block id into the server-issued preCsrf token.
+  // The same bound applies to the project binding: the worst a forged
+  // _blockId can do is attribute the lead to that other form's project.
   let blockData: Record<string, unknown> | null = null
   const blockId = body._blockId ? Number(body._blockId) : NaN
-  if (Number.isInteger(blockId) && blockId > 0 && Number.isInteger(leadId) && leadId > 0) {
+  if (Number.isInteger(blockId) && blockId > 0) {
     try {
       const [brows] = (await db.execute(sql`
         SELECT data FROM content_blocks
@@ -141,13 +133,55 @@ export const POST = withError(async (req: Request) => {
         }
       }
     } catch {
-      // best-effort; the lead is already saved
+      // best-effort; the submission still lands as an unbound lead
     }
   }
 
+  // Resolve the project binding from the block's stored hidden
+  // `project_id` field (never the submitted FormData — the stored
+  // defaultValue is operator-controlled, the wire value is not). Bound
+  // only when the project still exists and isn't trashed, so the
+  // leads.project_id FK insert can never fail on a stale snapshot.
+  let projectId: number | null = null
+  if (blockData) {
+    const fields = Array.isArray((blockData as { fields?: unknown }).fields)
+      ? ((blockData as { fields: unknown[] }).fields as Array<Record<string, unknown>>)
+      : []
+    const hidden = fields.find(
+      (f) =>
+        f && typeof f === 'object' && f.type === 'hidden' && f.name === 'project_id',
+    )
+    const rawVal = hidden?.defaultValue
+    if (typeof rawVal === 'string' && /^\d{1,10}$/.test(rawVal.trim())) {
+      const candidate = Number(rawVal.trim())
+      if (Number.isInteger(candidate) && candidate > 0) {
+        try {
+          const [prows] = (await db.execute(sql`
+            SELECT id FROM projects
+            WHERE id = ${candidate} AND deleted_at IS NULL
+          `)) as unknown as [Array<{ id: number }>]
+          if (prows[0]) projectId = prows[0].id
+        } catch {
+          // best-effort; the lead lands unbound
+        }
+      }
+    }
+  }
+
+  const [insertRes] = (await db.execute(sql`
+    INSERT INTO leads (source, name, email, phone, message, payload, enquiry_type, project_id, ip, user_agent)
+    VALUES ('form', ${name}, ${normEmail || null}, ${phone}, ${message}, ${JSON.stringify(items)}, 'enquiry', ${projectId}, ${ip}, ${userAgent})
+  `)) as unknown as [{ insertId: number }]
+  const leadId = Number(insertRes.insertId)
+
+  // ── deliver_file after-submit actions ────────────────────────────────
+  // Run any deliver_file action from the block read above: sign a download
+  // token and either email the link (email mode) or hand it back for an
+  // on-screen download (instant). manual mode delivers nothing here — the
+  // lead is saved + the team notified below, exactly as before.
   const downloads: Array<{ url: string; name: string }> = []
   let emailedFile = false
-  if (blockData) {
+  if (blockData && Number.isInteger(leadId) && leadId > 0) {
     try {
       const actions = lxFormActionsSchema.safeParse(
         (blockData as { actions?: unknown }).actions ?? [],
@@ -245,6 +279,9 @@ export const POST = withError(async (req: Request) => {
     if (name) cavecmsFields.name ??= name
     if (normEmail) cavecmsFields.email ??= normEmail
     if (phone) cavecmsFields.phone ??= phone
+    // Server-resolved project binding wins over any client-sent value —
+    // the CRM field-map sees the same trusted id the lead row carries.
+    if (projectId !== null) cavecmsFields.project_id = String(projectId)
     const { dispatchLeadToCrms } = await import('@/lib/crm/dispatch')
     await dispatchLeadToCrms({
       leadId,

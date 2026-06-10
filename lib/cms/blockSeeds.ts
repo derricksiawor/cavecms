@@ -71,7 +71,13 @@ import {
   Table as TableIcon,
   GitCommitVertical,
   ToggleRight,
+  FileDown,
 } from 'lucide-react'
+import {
+  contactFormPresetData,
+  projectInquiryFormPresetData,
+  gatedDownloadFormPresetData,
+} from './formPresets'
 
 // Types that are seed-creatable from a picker WITHOUT a MediaPicker
 // round-trip. Image is a special case — it's listed in the PICTURE
@@ -80,8 +86,6 @@ import {
 // (the image-block Zod schema requires a positive media_id, so a
 // seed payload can't include it).
 export type SeedBlockType =
-  // Fixed-slot widget — kept palette-visible for non-contact pages.
-  | 'contact_form'
   // ─── Luxury redesign — lx_* widget primitives ───────────────────
   | 'lx_heading'
   | 'lx_text'
@@ -243,7 +247,6 @@ export const CATEGORY_BY_TYPE: Record<SeedBlockType, BlockCategory> = {
   lx_map: 'embed',
   lx_embed: 'embed',
   lx_code: 'embed',
-  contact_form: 'embed',
   lx_form: 'embed',
   // Dynamic
   lx_featured_projects: 'dynamic',
@@ -270,8 +273,8 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
   // LUXURY REDESIGN — lx_* widget primitives. Order here is the order
   // operators see in the palette: Heading → Text → Eyebrow → Action →
   // Figure → Rule → Space. Most-reached-for editorial widgets first.
-  // Every entry is an lx_* block (plus contact_form); the legacy widget
-  // family was purged, so the palette is 100% luxury primitives.
+  // Every entry is an lx_* block; the legacy widget family was purged,
+  // so the palette is 100% luxury primitives.
   // ════════════════════════════════════════════════════════════════
   {
     type: 'lx_heading',
@@ -679,17 +682,6 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     keywords: ['reveal', 'expand', 'spoiler', 'details'],
   },
 
-  // ─── Fixed-slot widget — not strictly in the lx_ family but kept in
-  // the palette because it's the only operator-pickable form widget
-  // and the contact-page renderer expects exactly one instance.
-  {
-    type: 'contact_form',
-    label: 'Contact form',
-    description: 'Name + email + phone + message — POSTs to /api/leads/contact.',
-    icon: Mail,
-    aliases: ['form', 'lead', 'message'],
-    keywords: ['enquiry', 'inquiry', 'reach', 'get in touch'],
-  },
   {
     type: 'lx_form',
     label: 'Form builder',
@@ -698,19 +690,40 @@ export const SEED_ENTRIES: readonly SeedEntry[] = [
     aliases: ['form', 'custom form', 'fields', 'survey', 'signup'],
     keywords: ['lead', 'contact', 'composable', 'builder', 'newsletter'],
   },
+
+  // ─── lx_form presets (lib/cms/formPresets.ts) — ready-made field
+  // configs for the three system form flows. Same block type as Form
+  // builder; the `data` override seeds the preset.
+  {
+    type: 'lx_form',
+    label: 'Contact form',
+    description: 'Name + email + phone + message — the classic contact-page form.',
+    icon: Mail,
+    data: contactFormPresetData(),
+    aliases: ['contact', 'lead', 'message'],
+    keywords: ['enquiry', 'reach', 'get in touch'],
+  },
+  {
+    type: 'lx_form',
+    label: 'Project inquiry',
+    description: 'Name + email + phone + preferred tour date & time — the project lead form.',
+    icon: PhoneCall,
+    data: projectInquiryFormPresetData({}),
+    aliases: ['inquiry', 'enquiry', 'tour', 'viewing'],
+    keywords: ['schedule', 'project', 'lead', 'appointment'],
+  },
+  {
+    type: 'lx_form',
+    label: 'Gated download',
+    description: 'Trade contact details for a file — attach the PDF in the After-submit tab.',
+    icon: FileDown,
+    data: gatedDownloadFormPresetData({}),
+    aliases: ['brochure', 'lead magnet', 'download', 'pdf'],
+    keywords: ['gate', 'deliver', 'file', 'whitepaper', 'guide'],
+  },
 ]
 
 export const SEED_DATA: Record<SeedBlockType, Record<string, unknown>> = {
-  // contact_form — fixed-slot widget on the contact page; surfaces in
-  // the palette so operators can drop a form on other pages too.
-  // Minimum required is heading + submit_label; intro/success_* stay
-  // optional so a freshly-picked form renders with the renderer's
-  // default success panel.
-  contact_form: {
-    heading: 'Send us a message',
-    submit_label: 'Send message',
-  },
-
   // lx_form — a composable form; the seed ships a sensible 3-field contact
   // form the operator extends in the drawer.
   lx_form: {

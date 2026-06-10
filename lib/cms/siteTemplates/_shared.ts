@@ -16,6 +16,7 @@
 // Padding is the validated enum: sm | md | lg | xl | 2xl
 
 import type { ColumnSpec, SectionSpec, WidgetSpec } from './types'
+import { contactFormPresetData } from '../formPresets'
 
 export type SectionBackground =
   | 'cream'
@@ -246,20 +247,12 @@ export function contactForm(opts: {
   successHeadline?: string
   successBody?: string
 } = {}): WidgetSpec {
+  // A general lx_form seeded with the Contact preset — the retired
+  // fixed-slot `contact_form` block's replacement (same copy knobs).
   return {
     kind: 'widget',
-    blockType: 'contact_form',
-    data: {
-      heading: opts.heading ?? 'Send us a note.',
-      intro:
-        opts.intro ??
-        'A short message about what you need — we will come back within one business day.',
-      submit_label: opts.submitLabel ?? 'Send message',
-      success_headline:
-        opts.successHeadline ?? 'Thanks — we received your message.',
-      success_body:
-        opts.successBody ?? 'A member of our team will be in touch shortly.',
-    },
+    blockType: 'lx_form',
+    data: contactFormPresetData(opts),
   }
 }
 

@@ -16,7 +16,7 @@ import {
 } from '@/lib/cms/blockSeeds'
 import { mapInsertBlockError } from '@/lib/cms/insertBlockErrors'
 import { useSectionTemplateGallery } from './SectionTemplateGalleryHost'
-import { useInsertBlock, useInlineEditState } from './InlineEditContext'
+import { useInsertBlock } from './InlineEditContext'
 import { useMediaPicker } from './MediaPickerProvider'
 import { safeStorage } from '@/lib/client/safeStorage'
 import { SavedBlocksPanel } from './SavedBlocksPanel'
@@ -102,7 +102,6 @@ export function WidgetPickerBody({
   const insertBlock = useInsertBlock()
   const templateGallery = useSectionTemplateGallery()
   const mediaPicker = useMediaPicker()
-  const liveBlocks = useInlineEditState().blocks
   const inFlightRef = useRef(false)
   // Separate guard for the media-first OPEN (runInsert's inFlightRef only
   // guards AFTER the pick) so a rapid double-click can't re-open the picker.
@@ -117,24 +116,7 @@ export function WidgetPickerBody({
     if (autoFocusSearch) searchInputRef.current?.focus()
   }, [autoFocusSearch])
 
-  // Hide single-slot template blocks the page ALREADY has so the palette never
-  // offers an insert the server will 409. contact_form is the contact page's
-  // reserved fixed slot (FIXED_BLOCK_KEYS_PER_PAGE) — offering it there
-  // produced a "We couldn't add that"-class failure. Gating on the live tree
-  // (not the page slug) also hides it once an operator adds one to any other
-  // page; liveBlocks is the optimistic count, so the pill disappears the
-  // instant a contact_form lands.
-  const hasContactForm = useMemo(
-    () => liveBlocks.some((b) => b.blockType === 'contact_form'),
-    [liveBlocks],
-  )
-  const visibleEntries = useMemo(
-    () =>
-      SEED_ENTRIES.filter(isPaletteVisible).filter(
-        (e) => e.type !== 'contact_form' || !hasContactForm,
-      ),
-    [hasContactForm],
-  )
+  const visibleEntries = useMemo(() => SEED_ENTRIES.filter(isPaletteVisible), [])
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (q === '') return visibleEntries
