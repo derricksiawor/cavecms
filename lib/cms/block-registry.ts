@@ -510,7 +510,9 @@ export const blockSchemas = {
         z.object({
           name: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
           label: safeRequiredText(1, TEXT_MAX.caption),
-          type: z.enum(['text', 'email', 'tel', 'textarea', 'select', 'checkbox', 'hidden']).default('text'),
+          // 'date'/'time' render as native pickers (the project-inquiry
+          // preset's tour scheduling fields use them).
+          type: z.enum(['text', 'email', 'tel', 'date', 'time', 'textarea', 'select', 'checkbox', 'hidden']).default('text'),
           required: z.boolean().default(false),
           placeholder: safeText(120).optional(),
           // Dropdown options — each a { label (shown), value (submitted = the

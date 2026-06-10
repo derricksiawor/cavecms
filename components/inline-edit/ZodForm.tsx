@@ -2797,6 +2797,7 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
           kind: 'select', key: 'type', label: 'Type',
           options: [
             { value: 'text', label: 'Text' }, { value: 'email', label: 'Email' }, { value: 'tel', label: 'Phone' },
+            { value: 'date', label: 'Date' }, { value: 'time', label: 'Time' },
             { value: 'textarea', label: 'Long text' }, { value: 'select', label: 'Dropdown' }, { value: 'checkbox', label: 'Checkbox' },
             { value: 'hidden', label: 'Hidden (fixed value)' },
           ],
