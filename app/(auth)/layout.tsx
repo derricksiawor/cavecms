@@ -15,9 +15,13 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 py-16">
         {children}
 
-        <p className="mt-10 text-center text-[10px] uppercase tracking-[0.2em] text-obsidian/50">
-          A Time Macro LLC Product
-        </p>
+        <div className="mt-10 flex w-full max-w-xs items-center gap-5">
+          <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-r from-transparent to-obsidian/20" />
+          <p className="whitespace-nowrap text-[10px] uppercase tracking-[0.2em] text-obsidian/50">
+            A Time Macro LLC Product
+          </p>
+          <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-l from-transparent to-obsidian/20" />
+        </div>
       </div>
     </main>
   )
