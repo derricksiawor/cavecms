@@ -12,8 +12,12 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         aria-hidden="true"
         className="pointer-events-none absolute -bottom-40 right-[-10rem] h-[520px] w-[520px] rounded-full bg-copper-200/40 blur-[140px]"
       />
-      <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16">
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 py-16">
         {children}
+
+        <p className="mt-10 text-center text-[10px] uppercase tracking-[0.2em] text-obsidian/50">
+          A Time Macro LLC Product
+        </p>
       </div>
     </main>
   )
