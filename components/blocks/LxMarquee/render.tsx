@@ -15,7 +15,8 @@ const MARQUEE_CSS = `
 @keyframes lx-marquee-right { from { transform: translateX(-50%) } to { transform: translateX(0) } }
 @media (prefers-reduced-motion: reduce) { .lx-marquee-track { animation: none !important } }
 `
-const SPEED_DUR: Record<BlockData<'lx_marquee'>['speed'], string> = {
+// 'static' renders without animation (handled before this map is read).
+const SPEED_DUR: Record<Exclude<BlockData<'lx_marquee'>['speed'], 'static'>, string> = {
   slow: '40s',
   medium: '25s',
   fast: '14s',
@@ -43,7 +44,41 @@ export function LxMarquee({
   const isToken = isColorToken(tone)
   const textClass = isToken ? TONE_TEXT[tone] : undefined
   const custom = !isToken ? resolveColorValue(tone) : undefined
-  const anim = `lx-marquee-${data.direction} ${SPEED_DUR[data.speed]} linear infinite`
+  const anim =
+    data.speed === 'static'
+      ? undefined
+      : `lx-marquee-${data.direction} ${SPEED_DUR[data.speed]} linear infinite`
+  const isStatic = anim === undefined
+
+  // Static mode — the content ONCE, centered, no scroll, no duplicate.
+  // Logos keep the gap rhythm but may wrap on narrow viewports; text
+  // renders the single phrase (no fill-the-viewport repetition).
+  if (isStatic) {
+    return (
+      <div className={clsx('w-full', outerClass)} aria-label={data.mode === 'text' ? data.text : 'Logos'}>
+        {data.mode === 'logos' ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-16 gap-y-8 px-8">
+            {data.logos.map((logo, i) => (
+              <MediaImg
+                key={i}
+                media={media.get(logo.media_id)}
+                alt={logo.alt}
+                variant="thumb"
+                className="h-10 w-auto object-contain opacity-60 grayscale transition hover:opacity-100 hover:grayscale-0"
+              />
+            ))}
+          </div>
+        ) : (
+          <p
+            className={clsx('px-8 text-center font-serif text-3xl font-semibold tracking-tight sm:text-4xl', textClass)}
+            style={custom ? { color: custom } : undefined}
+          >
+            {data.text}
+          </p>
+        )}
+      </div>
+    )
+  }
 
   const oneSet =
     data.mode === 'logos' ? (

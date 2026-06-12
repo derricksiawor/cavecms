@@ -5,7 +5,12 @@ import { usePathname } from 'next/navigation'
 import { Menu, X, ChevronDown } from 'lucide-react'
 import { isLikelyExternal } from '@/lib/url/external'
 import { acquireScrollLock, releaseScrollLock } from '@/lib/client/bodyScrollLock'
-import { isNavLinkActive, type HeaderThemeClasses } from '@/lib/cms/headerTheme'
+import {
+  isNavLinkActive,
+  navLinkOverrideProps,
+  type ChromeOverrideProps,
+  type HeaderThemeClasses,
+} from '@/lib/cms/headerTheme'
 import type { NavItem, NavChild } from '@/lib/cms/navTypes'
 
 const PROJECTS_HREF = '/projects'
@@ -42,11 +47,19 @@ export function SiteHeaderMobile({
   cta,
   theme,
   projects,
+  ctaOverride,
+  navColor,
+  navActiveColor,
 }: {
   navItems: NavItem[]
   cta: Cta | null
   theme: HeaderThemeClasses
   projects: Project[]
+  // Optional operator colour overrides (Settings → Site header) — the
+  // drawer mirrors the desktop bar so the chrome reads as one surface.
+  ctaOverride?: ChromeOverrideProps | null
+  navColor?: string
+  navActiveColor?: string
 }) {
   // usePathname() (not a server-passed prop) — the root layout that
   // mounts <SiteHeader /> is cached across client-side navigations,
@@ -76,6 +89,16 @@ export function SiteHeaderMobile({
     return init
   })
   const toggle = (key: string) => setExpanded((m) => ({ ...m, [key]: !m[key] }))
+
+  // Operator nav-colour overrides, shared across every drawer link. The
+  // helpers return '' / undefined when nothing is overridden so the
+  // theme class set renders unchanged.
+  const navOvCls = (active: boolean) => {
+    const o = navLinkOverrideProps(active, navColor, navActiveColor)
+    return o ? ` ${o.className}` : ''
+  }
+  const navOvStyle = (active: boolean) =>
+    navLinkOverrideProps(active, navColor, navActiveColor)?.style
 
   // Close on Escape; lock body scroll while the drawer is open.
   useEffect(() => {
@@ -145,7 +168,8 @@ export function SiteHeaderMobile({
                         onClick={() => toggle(key)}
                         className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-colors ${
                           parentActive ? theme.drawerNavActive : theme.drawerNav
-                        }`}
+                        }${navOvCls(parentActive)}`}
+                        style={navOvStyle(parentActive)}
                       >
                         <span>{item.label}</span>
                         <ChevronDown
@@ -168,7 +192,8 @@ export function SiteHeaderMobile({
                                 aria-current={pathname === item.href ? 'page' : undefined}
                                 className={`block rounded-xl px-4 py-2.5 text-sm font-medium uppercase tracking-[0.18em] transition-colors ${
                                   pathname === item.href ? theme.drawerNavActive : theme.drawerNav
-                                }`}
+                                }${navOvCls(pathname === item.href)}`}
+                                style={navOvStyle(pathname === item.href)}
                               >
                                 Go to {item.label}
                               </Link>
@@ -186,7 +211,8 @@ export function SiteHeaderMobile({
                                   aria-current={active ? 'page' : undefined}
                                   className={`block rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
                                     active ? theme.drawerNavActive : theme.drawerNav
-                                  }`}
+                                  }${navOvCls(active)}`}
+                                  style={navOvStyle(active)}
                                 >
                                   {l.label}
                                 </Link>
@@ -210,7 +236,8 @@ export function SiteHeaderMobile({
                     aria-current={active ? 'page' : undefined}
                     className={`flex items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-colors ${
                       active ? theme.drawerNavActive : theme.drawerNav
-                    }`}
+                    }${navOvCls(active)}`}
+                    style={navOvStyle(active)}
                   >
                     {item.label}
                   </Link>
@@ -223,7 +250,8 @@ export function SiteHeaderMobile({
                 onClick={() => setOpen(false)}
                 target={cta.openInNew || isLikelyExternal(cta.href) ? '_blank' : undefined}
                 rel={cta.openInNew || isLikelyExternal(cta.href) ? 'noopener noreferrer' : undefined}
-                className={`mt-6 inline-flex w-fit items-center justify-center rounded-full px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] transition-all ${theme.drawerCta}`}
+                className={`mt-6 inline-flex w-fit items-center justify-center rounded-full px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.22em] transition-all ${theme.drawerCta}${ctaOverride ? ` ${ctaOverride.className}` : ''}`}
+                style={ctaOverride?.style}
               >
                 {cta.text}
               </Link>

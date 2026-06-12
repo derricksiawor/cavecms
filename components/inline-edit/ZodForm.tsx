@@ -83,7 +83,12 @@ export type FieldShape =
   | { kind: 'media_array'; key: string; label: string; help?: string; noCaption?: boolean }
   | { kind: 'string_array'; key: string; label: string; placeholder?: string; maxItems?: number; help?: string }
   | { kind: 'number'; key: string; label: string; min?: number; max?: number; step?: number; help?: string }
-  | { kind: 'boolean'; key: string; label: string; help?: string }
+  // `defaultValue` is the DISPLAY state when the stored object predates
+  // the key (value undefined). Use it for schema-defaulted-true booleans
+  // (e.g. footer.newsletterEnabled) so the toggle matches the live
+  // render instead of showing a misleading OFF. Untouched, the key stays
+  // absent on save and the Zod default keeps filling on read.
+  | { kind: 'boolean'; key: string; label: string; help?: string; defaultValue?: boolean }
   | { kind: 'select'; key: string; label: string; valueAsNumber?: boolean; options: Array<{ value: string; label: string }>; help?: string }
   | { kind: 'date'; key: string; label: string; min?: string; max?: string; help?: string }
   | { kind: 'social_link'; key: string; label: string }
@@ -459,7 +464,7 @@ function FieldRenderer({
       return (
         <div className="rounded-xl border border-ivory/15 bg-ivory/[0.04] px-4 py-3">
           <Switch
-            checked={Boolean(value)}
+            checked={value === undefined ? (shape.defaultValue ?? false) : Boolean(value)}
             onChange={onChange}
             label={shape.label}
             help={shape.help}
@@ -1864,6 +1869,16 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       allowAlpha: false,
       help: 'Pick a brand token (globe icon turns blue when bound) — or open the picker to dial in a custom luxury hue.',
     },
+    {
+      kind: 'string', key: 'highlightText', label: 'Highlight words (optional)',
+      maxLength: TEXT_MAX.title, placeholder: 'e.g. Today',
+      help: 'Two-tone heading: the first occurrence of these words inside the heading is recoloured with the highlight colour below.',
+    },
+    {
+      kind: 'color', key: 'highlightColor', label: 'Highlight colour',
+      tokens: ['champagne', 'obsidian', 'ivory'], allowCustom: true,
+      help: 'Colour for the highlighted words. Leave empty for the champagne accent.',
+    },
     { kind: 'gradient', key: 'textGradient', label: 'Gradient text', help: 'Fills the heading with a gradient (overrides the tone colour). Toggle off for a solid colour.' },
     { kind: 'string', key: 'fontSize', label: 'Exact font size (optional)', placeholder: 'e.g. 56px, 3.5rem, clamp(2.25rem,5vw,3.5rem)', help: 'Pixel-match a brand. Overrides the Visual size when set. A clamp() keeps it responsive.' },
     { kind: 'string', key: 'lineHeight', label: 'Exact line height (optional)', placeholder: 'e.g. 1.1 or 61px', help: 'A unitless number (1.1) or a length. Overrides the default tight leading.' },
@@ -2662,7 +2677,9 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       kind: 'select', key: 'speed', label: 'Speed',
       options: [
         { value: 'slow', label: 'Slow' }, { value: 'medium', label: 'Medium' }, { value: 'fast', label: 'Fast' },
+        { value: 'static', label: 'Static (no scroll)' },
       ],
+      help: 'Static renders the logos or text as a centered row with no motion.',
     },
     {
       kind: 'select', key: 'direction', label: 'Direction',
@@ -2842,6 +2859,17 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       ],
     },
     { kind: 'string', key: 'submitLabel', label: 'Submit button label', maxLength: TEXT_MAX.ctaText },
+    {
+      kind: 'color', key: 'submitFillColor', label: 'Submit button fill (optional)',
+      tokens: ['obsidian', 'champagne', 'ivory'], allowCustom: true,
+      help: 'Background of the submit button. Leave empty for the default (dark pill on light sections, white on dark).',
+    },
+    {
+      kind: 'color', key: 'submitTextColor', label: 'Submit button text (optional)',
+      tokens: ['obsidian', 'champagne', 'ivory'], allowCustom: true,
+    },
+    { kind: 'boolean', key: 'submitFullWidth', label: 'Full-width submit button', help: 'Stretch the button across the form instead of the default compact pill.' },
+    { kind: 'number', key: 'submitRadius', label: 'Submit corner radius (px)', min: 0, max: 64, step: 1, help: 'Leave blank for a full pill. 0 = square; e.g. 10 = rounded rectangle.' },
     { kind: 'string', key: 'successHeadline', label: 'Success headline', maxLength: TEXT_MAX.title },
     { kind: 'string', key: 'successBody', label: 'Success message', maxLength: TEXT_MAX.body, multiline: true },
     { kind: 'color', key: 'tone', label: 'Tone', tokens: ['obsidian', 'ivory'], allowCustom: true },
@@ -2945,6 +2973,15 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
       kind: 'color', key: 'fillColor', label: 'Fill colour (optional)',
       tokens: ['champagne', 'ivory', 'obsidian'], allowCustom: true,
       help: 'Solid button background — overrides the variant fill (e.g. #ffffff for a white button; the primary variant already has dark label text).',
+    },
+    {
+      kind: 'select', key: 'elevation', label: 'Elevation',
+      options: [
+        { value: 'pulse', label: 'Glow pulse (primary default)' },
+        { value: 'shadow', label: 'Shadow only' },
+        { value: 'none', label: 'Flat (no shadow or pulse)' },
+      ],
+      help: 'Primary buttons ship with a soft shadow + champagne glow pulse. Pick Flat for an un-elevated brand button.',
     },
     { kind: 'number', key: 'radius', label: 'Corner radius (px)', min: 0, max: 64, step: 1, help: 'Leave blank for a full pill. 0 = square; e.g. 14 = rounded rectangle.' },
     { kind: 'number', key: 'radiusTopLeft', label: '↳ Top-left radius (px)', min: 0, max: 64, step: 1, help: 'Per-corner override of the radius above.' },

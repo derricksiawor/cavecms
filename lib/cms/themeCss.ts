@@ -140,6 +140,21 @@ export function brandVarsCss(p: ThemePalette): string {
   // --color-bone to these, and @theme inline maps the utilities to them).
   if (p.accent !== THEME_PALETTE_DEFAULT.accent) {
     put('--brand-antique-gold', darkenHex(p.accent, 0.15))
+    // Copper scale — the warm accent RAMP (link/hover accents, admin
+    // chrome, light tint wells). Re-derived from the operator accent so
+    // copper-tinted chrome follows the brand instead of staying the
+    // hand-picked copper. Tint ratios approximate the default ramp's
+    // lightness steps around copper-500 ≈ the accent slot.
+    put('--brand-copper-50', lightenHex(p.accent, 0.92))
+    put('--brand-copper-100', lightenHex(p.accent, 0.8))
+    put('--brand-copper-200', lightenHex(p.accent, 0.6))
+    put('--brand-copper-300', lightenHex(p.accent, 0.35))
+    put('--brand-copper-400', lightenHex(p.accent, 0.12))
+    put('--brand-copper-500', p.accent)
+    put('--brand-copper-600', darkenHex(p.accent, 0.12))
+    put('--brand-copper-700', darkenHex(p.accent, 0.3))
+    put('--brand-copper-800', darkenHex(p.accent, 0.45))
+    put('--brand-copper-900', darkenHex(p.accent, 0.58))
   }
   if (p.surfaceLight !== THEME_PALETTE_DEFAULT.surfaceLight) {
     // `bone` is a subtle DIVIDER/hairline. It must stay visible against the
@@ -153,6 +168,27 @@ export function brandVarsCss(p: ThemePalette): string {
         ? darkenHex(p.surfaceLight, 0.08)
         : lightenHex(p.surfaceDark, 0.12),
     )
+    // Cream family — the warm LIGHT-surface ramp (page wells, light pills,
+    // form fields). Re-derived from the operator's light surface; when the
+    // "light" surface is itself dark (a dark-site palette), derive from the
+    // anchored light ink pole instead so cream surfaces never go dark under
+    // dark text. Ratios approximate the default ramp around cream-200 ≈ the
+    // light surface slot.
+    const creamBase =
+      relLuminance(p.surfaceLight) >= LIGHT_THRESHOLD ? p.surfaceLight : inkLight
+    put('--brand-cream', creamBase)
+    put('--brand-cream-50', lightenHex(creamBase, 0.55))
+    put('--brand-cream-100', lightenHex(creamBase, 0.35))
+    put('--brand-cream-200', creamBase)
+    put('--brand-cream-300', darkenHex(creamBase, 0.05))
+    put('--brand-cream-400', darkenHex(creamBase, 0.15))
+  }
+  // Dark ink fills (near-black buttons/footers, charcoal admin cards) follow
+  // the anchored dark ink pole. Emitted only when the pole diverges from the
+  // default near-black so a default install stays byte-identical.
+  if (inkDark !== FALLBACK_INK_DARK) {
+    put('--brand-near-black', inkDark)
+    put('--brand-deep-charcoal', lightenHex(inkDark, 0.08))
   }
 
   return `:root{${decls.join(';')}}`

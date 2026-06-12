@@ -8,29 +8,16 @@
    near-black text per the luxury-ui-design guide.
    ──────────────────────────────────────────────────────────────────────── */
 @theme {
-  --color-copper-50: #FDF8F5;
-  --color-copper-100: #F6E6D9;
-  --color-copper-200: #ECC8AB;
-  --color-copper-300: #D89F71;
-  --color-copper-400: #C2853D;
-  --color-copper-500: #B87333;
-  --color-copper-600: #A66529;
-  --color-copper-700: #8B5320;
-  --color-copper-800: #6E4119;
-  --color-copper-900: #553212;
-
-  --color-cream: #F3E9DC;
-  --color-cream-50: #FDFCFA;
-  --color-cream-100: #F9F5EF;
-  --color-cream-200: #F3E9DC;
-  --color-cream-300: #E8DAC4;
-  --color-cream-400: #D9C5A4;
-
-  --color-near-black: #050505;
-  --color-deep-charcoal: #1A1A1A;
-  /* --color-warm-stone moved to the luxury @theme inline block below so it
-     routes through var(--brand-secondary) — a plain @theme token cannot hold
-     a var() value (Tailwind drops it), which is why it lives in @theme inline. */
+  /* copper-* / cream-* / near-black / deep-charcoal moved to the luxury
+     @theme inline block below so they route through --brand-* vars (the
+     copper scale derives from the accent, the cream family from the light
+     surface, near-black from the dark ink pole) and Settings → Theme
+     re-skins ALL chrome — no hardcoded colors anywhere in the engine.
+     A plain @theme token cannot hold a var() value (Tailwind drops it),
+     which is why they live in @theme inline; their DEFAULTS (equal to the
+     historic hex) are declared in the @layer base :root block below, so a
+     default install renders byte-identical. Same story as --color-warm-stone
+     (the first token to make this move). */
 
   --font-sans: var(--font-montserrat), system-ui, -apple-system, sans-serif;
   --font-serif: var(--font-playfair), Georgia, serif;
@@ -396,6 +383,33 @@
     --brand-primary:       #050505;
     --brand-antique-gold:  #8B6F3A;  /* derived hover; injection overrides when accent changes */
     --brand-bone:          #E8E1D4;  /* derived divider; injection overrides when light surface changes */
+    /* ── Derived copper scale (warm accent ramp: links, hovers, admin
+       accents). Defaults are the hand-picked luxury hex; themeCss.ts
+       overrides the whole ramp (derived from the operator accent) when
+       the accent diverges from the default. ───────────────────────── */
+    --brand-copper-50:  #FDF8F5;
+    --brand-copper-100: #F6E6D9;
+    --brand-copper-200: #ECC8AB;
+    --brand-copper-300: #D89F71;
+    --brand-copper-400: #C2853D;
+    --brand-copper-500: #B87333;
+    --brand-copper-600: #A66529;
+    --brand-copper-700: #8B5320;
+    --brand-copper-800: #6E4119;
+    --brand-copper-900: #553212;
+    /* ── Derived cream family (warm light surfaces: page wells, light
+       pills, form fields). Overridden from the operator's light surface
+       when it diverges. ───────────────────────────────────────────── */
+    --brand-cream:      #F3E9DC;
+    --brand-cream-50:   #FDFCFA;
+    --brand-cream-100:  #F9F5EF;
+    --brand-cream-200:  #F3E9DC;
+    --brand-cream-300:  #E8DAC4;
+    --brand-cream-400:  #D9C5A4;
+    /* ── Dark ink fills (near-black buttons/footers, charcoal cards).
+       Overridden from the anchored dark ink pole when it diverges. ── */
+    --brand-near-black:    #050505;
+    --brand-deep-charcoal: #1A1A1A;
     --brand-base-bg:       #F5F1EA;  /* light mode default */
     --brand-base-fg:       #050505;
     /* CONTRAST-ANCHORED ink poles. `ivory` (the LIGHT pole — light text on
@@ -419,6 +433,29 @@
     --color-antique-gold: var(--brand-antique-gold);
     --color-bone:         var(--brand-bone);
     --color-primary:      var(--brand-primary);
+    /* Copper / cream / dark-ink aliases — these tokens moved from the
+       plain @theme block (which auto-emitted them as :root vars) into
+       @theme inline (which does NOT), so the inline-style consumers
+       (resolveColorValue writes var(--color-copper-500) etc.) need the
+       globals re-declared here, routed through the same brand knobs. */
+    --color-copper-50:  var(--brand-copper-50);
+    --color-copper-100: var(--brand-copper-100);
+    --color-copper-200: var(--brand-copper-200);
+    --color-copper-300: var(--brand-copper-300);
+    --color-copper-400: var(--brand-copper-400);
+    --color-copper-500: var(--brand-copper-500);
+    --color-copper-600: var(--brand-copper-600);
+    --color-copper-700: var(--brand-copper-700);
+    --color-copper-800: var(--brand-copper-800);
+    --color-copper-900: var(--brand-copper-900);
+    --color-cream:      var(--brand-cream);
+    --color-cream-50:   var(--brand-cream-50);
+    --color-cream-100:  var(--brand-cream-100);
+    --color-cream-200:  var(--brand-cream-200);
+    --color-cream-300:  var(--brand-cream-300);
+    --color-cream-400:  var(--brand-cream-400);
+    --color-near-black:    var(--brand-near-black);
+    --color-deep-charcoal: var(--brand-deep-charcoal);
   }
 }
 
@@ -440,6 +477,28 @@
   --color-antique-gold: var(--brand-antique-gold);
   --color-bone:         var(--brand-bone);
   --color-primary:      var(--brand-primary);
+  /* Copper / cream / dark-ink utilities route through the derived brand
+     ramps (see the @layer base defaults + lib/cms/themeCss.ts derivation)
+     so bg-copper-700 / text-cream-50 / bg-near-black follow Settings →
+     Theme like every other token — no hardcoded chrome colors remain. */
+  --color-copper-50:  var(--brand-copper-50);
+  --color-copper-100: var(--brand-copper-100);
+  --color-copper-200: var(--brand-copper-200);
+  --color-copper-300: var(--brand-copper-300);
+  --color-copper-400: var(--brand-copper-400);
+  --color-copper-500: var(--brand-copper-500);
+  --color-copper-600: var(--brand-copper-600);
+  --color-copper-700: var(--brand-copper-700);
+  --color-copper-800: var(--brand-copper-800);
+  --color-copper-900: var(--brand-copper-900);
+  --color-cream:      var(--brand-cream);
+  --color-cream-50:   var(--brand-cream-50);
+  --color-cream-100:  var(--brand-cream-100);
+  --color-cream-200:  var(--brand-cream-200);
+  --color-cream-300:  var(--brand-cream-300);
+  --color-cream-400:  var(--brand-cream-400);
+  --color-near-black:    var(--brand-near-black);
+  --color-deep-charcoal: var(--brand-deep-charcoal);
 
   /* ─── Typography families — Playfair Display for titles/headings,
      Montserrat for body/UI text. Matches the client's brand identity
@@ -519,11 +578,13 @@
    spotlight without any hard edge. pointer-events-none so it never
    intercepts clicks. */
 @utility lx-glow-champagne {
+  /* color-mix over the brand accent (not a baked champagne rgba) so the
+     glow follows Settings → Theme like every other accent surface. */
   background: radial-gradient(
     circle at center,
-    rgba(201, 169, 97, 0.32) 0%,
-    rgba(201, 169, 97, 0.16) 30%,
-    rgba(201, 169, 97, 0) 70%
+    color-mix(in srgb, var(--brand-accent) 32%, transparent) 0%,
+    color-mix(in srgb, var(--brand-accent) 16%, transparent) 30%,
+    transparent 70%
   );
   filter: blur(40px);
   pointer-events: none;
@@ -535,9 +596,9 @@
 @utility lx-glow-champagne-icon {
   background: radial-gradient(
     circle at center,
-    rgba(201, 169, 97, 0.4) 0%,
-    rgba(201, 169, 97, 0.18) 40%,
-    rgba(201, 169, 97, 0) 70%
+    color-mix(in srgb, var(--brand-accent) 40%, transparent) 0%,
+    color-mix(in srgb, var(--brand-accent) 18%, transparent) 40%,
+    transparent 70%
   );
   filter: blur(20px);
   pointer-events: none;
@@ -548,9 +609,9 @@
 @utility lx-glow-antique-gold {
   background: radial-gradient(
     circle at center,
-    rgba(139, 111, 58, 0.35) 0%,
-    rgba(139, 111, 58, 0.15) 40%,
-    rgba(139, 111, 58, 0) 70%
+    color-mix(in srgb, var(--brand-antique-gold) 35%, transparent) 0%,
+    color-mix(in srgb, var(--brand-antique-gold) 15%, transparent) 40%,
+    transparent 70%
   );
   filter: blur(30px);
   pointer-events: none;
@@ -562,10 +623,10 @@
    beat reads as deliberate, not anxious. */
 @keyframes lx-pulse-champagne {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(201, 169, 97, 0.45);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-accent) 45%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 16px rgba(201, 169, 97, 0);
+    box-shadow: 0 0 0 16px transparent;
   }
 }
 @utility lx-pulse-champagne {
@@ -1084,14 +1145,35 @@
    UNLAYERED so it wins over Tailwind's layered hover:* utilities. Empty
    var() fallbacks mean an unset property is simply ignored (no-op), so an
    operator can set only scale, only colour, etc. */
+/* Rest-state fill / text via CSS vars (set inline from block or settings
+   data). An inline `background-color` / `color` style would beat EVERY
+   class rule — including .cms-hover:hover below — which is exactly the
+   bug that made hoverFillColor a no-op whenever fillColor was set. Routing
+   the rest state through a var + class keeps the cascade in play: these
+   are unlayered (beat the variant's layered background and text utilities)
+   but lower-specificity than .cms-hover:hover, so hover overrides win.
+   NB: explicit fallbacks, never the empty-fallback var() shorthand, and
+   NEVER a star-slash sequence inside this comment — a "bg-star-slash"
+   typo here once closed the comment early and the parser's error
+   recovery silently swallowed the .cms-rest-bg rule that follows. The
+   classes are safe with concrete fallbacks because renderers only attach
+   them when the matching var is set inline. */
+.cms-rest-bg {
+  background-color: var(--cms-rest-bg, transparent);
+}
+.cms-rest-fg {
+  color: var(--cms-rest-fg, currentColor);
+}
 .cms-hover {
   transition-property: background-color, color, transform, box-shadow, border-color;
   transition-duration: var(--cms-hover-dur, 200ms);
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 .cms-hover:hover {
-  background-color: var(--cms-hover-bg, );
-  color: var(--cms-hover-fg, );
+  /* Fall back to the rest-state vars so a scale-only / text-only hover
+     override doesn't blank the custom fill on hover. */
+  background-color: var(--cms-hover-bg, var(--cms-rest-bg, ));
+  color: var(--cms-hover-fg, var(--cms-rest-fg, ));
   transform: translateY(var(--cms-hover-lift, 0px)) scale(var(--cms-hover-scale, 1));
   box-shadow: var(--cms-hover-shadow, );
   border-color: var(--cms-hover-border, );

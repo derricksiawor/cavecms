@@ -28,9 +28,11 @@ const SIZE_CLASS: Record<BlockData<'lx_action'>['size'], string> = {
 }
 
 const VARIANT_CLASS: Record<BlockData<'lx_action'>['variant'], string> = {
-  // Primary — champagne fill, obsidian text. Pulses by default.
+  // Primary — champagne fill, obsidian text. Elevation (shadow + pulse)
+  // is resolved separately via ELEVATION_CLASS so the operator can opt
+  // out (`elevation: 'none'` = a flat brand button).
   'primary-gold':
-    'bg-champagne text-obsidian hover:bg-antique-gold hover:text-ivory shadow-lg shadow-champagne/20 lx-pulse-champagne',
+    'bg-champagne text-obsidian hover:bg-antique-gold hover:text-ivory',
   // Tinted — translucent champagne with champagne text (no border).
   // The "outline" mental model becomes a soft tinted pill.
   'secondary-outline':
@@ -39,6 +41,14 @@ const VARIANT_CLASS: Record<BlockData<'lx_action'>['variant'], string> = {
   ghost: 'bg-transparent text-ivory hover:text-champagne',
   // Link-arrow — handled separately below.
   'link-arrow': '',
+}
+
+// Elevation classes. Default (no explicit `elevation`) preserves the
+// historic treatment: primary-gold pulses, everything else is flat.
+const ELEVATION_CLASS: Record<'none' | 'shadow' | 'pulse', string> = {
+  none: '',
+  shadow: 'shadow-lg shadow-champagne/20',
+  pulse: 'shadow-lg shadow-champagne/20 lx-pulse-champagne',
 }
 
 const ALIGN_CONTAINER: Record<BlockData<'lx_action'>['alignment'], string> = {
@@ -111,6 +121,22 @@ export function LxAction({
   const hoverScale = typeof data.hoverScale === 'number' ? data.hoverScale / 100 : undefined
   const hasHover = !!(hoverBg || hoverFg || hoverScale || data.transitionMs)
 
+  // Elevation: explicit value wins; unset keeps the historic default
+  // (primary-gold pulses, the rest are flat).
+  const elevation =
+    data.elevation ?? (data.variant === 'primary-gold' ? 'pulse' : 'none')
+
+  // Gradient FILL on the pill (background-image layers over the variant's
+  // solid bg). Not applicable to link-arrow (it's text, no pill).
+  const fillCss = !isLinkArrow ? compileGradient(data.backgroundGradient) : undefined
+  // Solid fill colour (e.g. a white button) — overrides the variant fill; a
+  // gradient wins over it. Applied through the `--cms-rest-bg` var + the
+  // `.cms-rest-bg` class (NOT an inline background-color) so the
+  // `.cms-hover:hover` rule can still win — an inline style beats every
+  // class rule and made hoverFillColor a silent no-op next to fillColor.
+  const solidFill =
+    !isLinkArrow && !fillCss && data.fillColor ? resolveColorValue(data.fillColor) : undefined
+
   const buttonClass = clsx(
     'inline-flex items-center justify-center gap-2 w-fit uppercase tracking-[0.22em] min-h-[44px] transition-all duration-base ease-luxury',
     familyClass,
@@ -118,8 +144,10 @@ export function LxAction({
     // Default full pill; a custom px radius overrides via inline style.
     !customRadius && 'rounded-full',
     hasHover && 'cms-hover',
+    solidFill && 'cms-rest-bg',
     SIZE_CLASS[data.size],
     VARIANT_CLASS[data.variant],
+    !isLinkArrow && ELEVATION_CLASS[elevation],
   )
 
   // Link-arrow — type + animated arrow. No pill chrome. The arrow
@@ -132,19 +160,12 @@ export function LxAction({
 
   const containerClass = clsx(ALIGN_CONTAINER[data.alignment], outerClass)
 
-  // Gradient FILL on the pill (background-image layers over the variant's
-  // solid bg). Not applicable to link-arrow (it's text, no pill).
-  const fillCss = !isLinkArrow ? compileGradient(data.backgroundGradient) : undefined
-  // Solid fill colour (e.g. a white button) — overrides the variant fill; a
-  // gradient wins over it. Plus an exact corner radius (px).
-  const solidFill =
-    !isLinkArrow && !fillCss && data.fillColor ? resolveColorValue(data.fillColor) : undefined
   const pillStyle: CSSProperties | undefined =
     fillCss || solidFill || customRadius || hasHover || fam.style
       ? ({
           ...fam.style,
           ...(fillCss ? { backgroundImage: fillCss } : {}),
-          ...(solidFill ? { backgroundColor: solidFill } : {}),
+          ...(solidFill ? { '--cms-rest-bg': solidFill } : {}),
           ...(radiusInline ? { borderRadius: radiusInline } : {}),
           ...(hoverBg ? { '--cms-hover-bg': hoverBg } : {}),
           ...(hoverFg ? { '--cms-hover-fg': hoverFg } : {}),

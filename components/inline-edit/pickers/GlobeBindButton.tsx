@@ -59,9 +59,12 @@ export function GlobeBindButton<T extends string = string>({
           'inline-flex h-7 w-7 items-center justify-center rounded-full ' +
           'border transition-all duration-quick ' +
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/70 ' +
+          // Unbound state uses warm-stone (not cream) so the affordance
+          // reads on BOTH the dark drawer and the light Settings page —
+          // the cream hairline + cream glyph vanished on the light surface.
           (bound
             ? 'border-copper-400/70 bg-copper-400/15 text-copper-300 hover:border-copper-400 hover:bg-copper-400/25'
-            : 'border-cream-50/20 bg-transparent text-cream-50/55 hover:border-cream-50/40 hover:text-cream-50')
+            : 'border-warm-stone/45 bg-transparent text-warm-stone hover:border-copper-400/70 hover:text-copper-400')
         }
       >
         <Globe className="h-3.5 w-3.5" aria-hidden />

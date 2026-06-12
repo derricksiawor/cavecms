@@ -13,6 +13,8 @@
 // Class strings are static (no template interpolation) so Tailwind's
 // JIT scanner sees every utility used and emits them at build time.
 
+import type { CSSProperties } from 'react'
+
 export type HeaderTheme = 'cream' | 'obsidian' | 'ivory' | 'champagne' | 'bone'
 
 export interface HeaderThemeClasses {
@@ -43,7 +45,7 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
     nav: 'text-near-black/80',
     navHover: 'hover:text-copper-700',
     navActive: 'text-copper-700 font-semibold',
-    cta: 'bg-near-black text-cream-50 hover:bg-copper-700 hover:shadow-[0_18px_40px_-22px_rgba(196,124,68,0.6)]',
+    cta: 'bg-near-black text-cream-50 hover:bg-copper-700 hover:shadow-[0_18px_40px_-22px_color-mix(in_srgb,var(--brand-copper-500)_60%,transparent)]',
     hamburger: 'text-near-black hover:bg-warm-stone/10',
     drawer: 'bg-cream-50',
     drawerNav: 'text-near-black hover:bg-warm-stone/10',
@@ -63,7 +65,7 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
     nav: 'text-ivory/80',
     navHover: 'hover:text-champagne',
     navActive: 'text-champagne font-semibold',
-    cta: 'bg-champagne text-obsidian hover:bg-cream-50 hover:shadow-[0_18px_40px_-22px_rgba(201,169,97,0.5)]',
+    cta: 'bg-champagne text-obsidian hover:bg-cream-50 hover:shadow-[0_18px_40px_-22px_color-mix(in_srgb,var(--brand-accent)_50%,transparent)]',
     hamburger: 'text-ivory hover:bg-ivory/10',
     drawer: 'bg-obsidian',
     drawerNav: 'text-ivory hover:bg-ivory/10',
@@ -77,7 +79,7 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
     nav: 'text-obsidian/80',
     navHover: 'hover:text-copper-700',
     navActive: 'text-copper-700 font-semibold',
-    cta: 'bg-obsidian text-ivory hover:bg-copper-700 hover:shadow-[0_18px_40px_-22px_rgba(196,124,68,0.6)]',
+    cta: 'bg-obsidian text-ivory hover:bg-copper-700 hover:shadow-[0_18px_40px_-22px_color-mix(in_srgb,var(--brand-copper-500)_60%,transparent)]',
     hamburger: 'text-obsidian hover:bg-obsidian/10',
     drawer: 'bg-ivory',
     drawerNav: 'text-obsidian hover:bg-obsidian/10',
@@ -91,7 +93,7 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
     nav: 'text-obsidian/80',
     navHover: 'hover:text-obsidian',
     navActive: 'text-obsidian font-semibold',
-    cta: 'bg-obsidian text-champagne hover:bg-near-black hover:shadow-[0_18px_40px_-22px_rgba(5,5,5,0.5)]',
+    cta: 'bg-obsidian text-champagne hover:bg-near-black hover:shadow-[0_18px_40px_-22px_color-mix(in_srgb,var(--brand-near-black)_50%,transparent)]',
     hamburger: 'text-obsidian hover:bg-obsidian/10',
     drawer: 'bg-champagne',
     drawerNav: 'text-obsidian hover:bg-obsidian/10',
@@ -105,7 +107,7 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
     nav: 'text-obsidian/80',
     navHover: 'hover:text-copper-700',
     navActive: 'text-copper-700 font-semibold',
-    cta: 'bg-obsidian text-bone hover:bg-copper-700 hover:shadow-[0_18px_40px_-22px_rgba(196,124,68,0.6)]',
+    cta: 'bg-obsidian text-bone hover:bg-copper-700 hover:shadow-[0_18px_40px_-22px_color-mix(in_srgb,var(--brand-copper-500)_60%,transparent)]',
     hamburger: 'text-obsidian hover:bg-obsidian/10',
     drawer: 'bg-bone',
     drawerNav: 'text-obsidian hover:bg-obsidian/10',
@@ -113,6 +115,74 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
     drawerClose: 'text-obsidian hover:bg-obsidian/10',
     drawerCta: 'bg-obsidian text-bone hover:bg-copper-700',
   },
+}
+
+// ─── Operator colour overrides for chrome buttons + nav links ─────────
+// Optional hex overrides from settings (site_header.cta*/nav*, footer
+// accent/cta*) translate to the shared `.cms-rest-*` / `.cms-hover`
+// CSS-var pattern (globals.css) — NOT inline background/color styles,
+// because an inline style would beat the `.cms-hover:hover` rule and
+// kill the hover override. Returns null when nothing is overridden so
+// callers can skip the props entirely (theme classes alone, unchanged
+// markup for existing installs).
+
+export interface ChromeOverrideProps {
+  className: string
+  style: CSSProperties
+}
+
+export function ctaOverrideProps(o: {
+  fill?: string | null
+  text?: string | null
+  hoverFill?: string | null
+  hoverText?: string | null
+  radius?: number | null
+}): ChromeOverrideProps | null {
+  const style: Record<string, string> = {}
+  const classes: string[] = []
+  if (o.fill) {
+    style['--cms-rest-bg'] = o.fill
+    classes.push('cms-rest-bg')
+  }
+  if (o.text) {
+    style['--cms-rest-fg'] = o.text
+    classes.push('cms-rest-fg')
+  }
+  if (o.hoverFill || o.hoverText) {
+    classes.push('cms-hover')
+    if (o.hoverFill) style['--cms-hover-bg'] = o.hoverFill
+    if (o.hoverText) style['--cms-hover-fg'] = o.hoverText
+  }
+  if (typeof o.radius === 'number') style.borderRadius = `${o.radius}px`
+  if (classes.length === 0 && Object.keys(style).length === 0) return null
+  return { className: classes.join(' '), style: style as CSSProperties }
+}
+
+// Nav-link colour overrides. Rest links take navColor via the rest-var
+// (so hover can still change colour); when navActiveColor is set it
+// doubles as the rest links' hover colour (hover previews the active
+// treatment). Active links take navActiveColor as a plain inline color.
+export function navLinkOverrideProps(
+  active: boolean,
+  navColor?: string | null,
+  navActiveColor?: string | null,
+): ChromeOverrideProps | null {
+  if (active) {
+    if (!navActiveColor) return null
+    return { className: '', style: { color: navActiveColor } }
+  }
+  const style: Record<string, string> = {}
+  const classes: string[] = []
+  if (navColor) {
+    style['--cms-rest-fg'] = navColor
+    classes.push('cms-rest-fg')
+  }
+  if (navActiveColor) {
+    style['--cms-hover-fg'] = navActiveColor
+    classes.push('cms-hover')
+  }
+  if (classes.length === 0) return null
+  return { className: classes.join(' '), style: style as CSSProperties }
 }
 
 // Active-link predicate for nav items. The home link ('/') needs strict

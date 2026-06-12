@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { isLikelyExternal, externalRel } from '@/lib/url/external'
-import { isNavLinkActive, type HeaderThemeClasses } from '@/lib/cms/headerTheme'
+import { isNavLinkActive, navLinkOverrideProps, type HeaderThemeClasses } from '@/lib/cms/headerTheme'
 import type { NavItem, NavChild } from '@/lib/cms/navTypes'
 
 // Desktop nav links. Client component so the "active" class recomputes
@@ -33,6 +33,8 @@ export function SiteHeaderNav({
   theme,
   projects,
   initialPathname,
+  navColor,
+  navActiveColor,
 }: {
   navItems: NavItem[]
   theme: HeaderThemeClasses
@@ -41,6 +43,10 @@ export function SiteHeaderNav({
   // client render so the active-link class/aria-current match exactly;
   // usePathname() takes over after mount to stay reactive on soft navs.
   initialPathname: string
+  // Optional operator colour overrides (Settings → Site header). Unset →
+  // the theme class set renders unchanged.
+  navColor?: string
+  navActiveColor?: string
 }) {
   const livePathname = usePathname()
   const [mounted, setMounted] = useState(false)
@@ -58,6 +64,8 @@ export function SiteHeaderNav({
               links={item.children}
               theme={theme}
               pathname={pathname}
+              navColor={navColor}
+              navActiveColor={navActiveColor}
             />
           )
         }
@@ -70,11 +78,14 @@ export function SiteHeaderNav({
               links={projects.map((p) => ({ label: p.name, href: `/projects/${p.slug}` }))}
               theme={theme}
               pathname={pathname}
+              navColor={navColor}
+              navActiveColor={navActiveColor}
             />
           )
         }
         // 3) Flat link.
         const active = isNavLinkActive(item.href, pathname)
+        const ov = navLinkOverrideProps(active, navColor, navActiveColor)
         return (
           <Link
             key={`${i}-${item.label}-${item.href}`}
@@ -84,7 +95,8 @@ export function SiteHeaderNav({
             aria-current={active ? 'page' : undefined}
             className={`text-sm font-medium transition-[color] duration-200 ${
               active ? theme.navActive : `${theme.nav} ${theme.navHover}`
-            }`}
+            }${ov ? ` ${ov.className}` : ''}`}
+            style={ov?.style}
           >
             {item.label}
           </Link>
@@ -102,11 +114,15 @@ function NavDropdown({
   links,
   theme,
   pathname,
+  navColor,
+  navActiveColor,
 }: {
   trigger: { label: string; href: string }
   links: NavChild[]
   theme: HeaderThemeClasses
   pathname: string
+  navColor?: string
+  navActiveColor?: string
 }) {
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -152,9 +168,11 @@ function NavDropdown({
 
   useEffect(() => () => clearCloseTimer(), [])
 
+  const triggerOv = navLinkOverrideProps(parentActive, navColor, navActiveColor)
   const triggerClass = `inline-flex items-center gap-1 text-sm font-medium transition-[color] duration-200 ${
     parentActive ? theme.navActive : `${theme.nav} ${theme.navHover}`
-  }`
+  }${triggerOv ? ` ${triggerOv.className}` : ''}`
+  const triggerStyle = triggerOv?.style
 
   return (
     <div
@@ -176,6 +194,7 @@ function NavDropdown({
           aria-haspopup="menu"
           aria-expanded={open}
           className={triggerClass}
+          style={triggerStyle}
         >
           {trigger.label}
           <ChevronDown
@@ -192,6 +211,7 @@ function NavDropdown({
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
           className={triggerClass}
+          style={triggerStyle}
         >
           {trigger.label}
           <ChevronDown
@@ -219,6 +239,7 @@ function NavDropdown({
           >
             {links.map((l, li) => {
               const active = isNavLinkActive(l.href, pathname)
+              const ov = navLinkOverrideProps(active, navColor, navActiveColor)
               return (
                 <li key={`${li}-${l.label}-${l.href}`}>
                   <Link
@@ -230,7 +251,8 @@ function NavDropdown({
                     aria-current={active ? 'page' : undefined}
                     className={`block px-5 py-2.5 text-sm font-medium transition-colors ${
                       active ? theme.drawerNavActive : `${theme.drawerNav}`
-                    }`}
+                    }${ov ? ` ${ov.className}` : ''}`}
+                    style={ov?.style}
                   >
                     {l.label}
                   </Link>

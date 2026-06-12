@@ -4,8 +4,9 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { env } from '@/lib/env'
 import { getSetting } from '@/lib/cms/getSettings'
+import type { SettingsValue } from '@/lib/cms/settings-registry'
 import { resolveMedia } from '@/lib/cms/resolveMedia'
-import { resolveHeaderTheme } from '@/lib/cms/headerTheme'
+import { resolveHeaderTheme, ctaOverrideProps } from '@/lib/cms/headerTheme'
 import { isLikelyExternal } from '@/lib/url/external'
 import { SiteHeaderMobile } from './SiteHeaderMobile'
 import { SiteHeaderNav } from './SiteHeaderNav'
@@ -56,7 +57,7 @@ export async function SiteHeader() {
   const pathname = (await headers()).get('x-pathname') ?? ''
   if (isExcludedPath(pathname)) return null
 
-  let header
+  let header: SettingsValue<'site_header'>
   try {
     header = await getSetting('site_header')
   } catch (err) {
@@ -111,6 +112,18 @@ export async function SiteHeader() {
 
   const cta = header.primaryCta
   const hasCta = cta && cta.text.trim() !== '' && cta.href.trim() !== ''
+
+  // Optional operator colour overrides (Settings → Site header). Null
+  // when nothing is set → the theme class set renders unchanged.
+  const ctaOv = ctaOverrideProps({
+    fill: header.ctaFillColor,
+    text: header.ctaTextColor,
+    hoverFill: header.ctaHoverFillColor,
+    hoverText: header.ctaHoverTextColor,
+    radius: header.ctaRadius,
+  })
+  const navColor = header.navColor
+  const navActiveColor = header.navActiveColor
 
   // Published-projects list for the Projects nav dropdown. Sorted by
   // featured_order (NULLS LAST so curated featured items lead) then
@@ -176,6 +189,8 @@ export async function SiteHeader() {
           theme={theme}
           projects={projectsList}
           initialPathname={pathname}
+          navColor={navColor}
+          navActiveColor={navActiveColor}
         />
 
         {hasCta && (
@@ -183,7 +198,8 @@ export async function SiteHeader() {
             href={cta.href}
             target={cta.openInNew || isLikelyExternal(cta.href) ? '_blank' : undefined}
             rel={cta.openInNew || isLikelyExternal(cta.href) ? 'noopener noreferrer' : undefined}
-            className={`ml-auto hidden w-fit items-center gap-2 rounded-full px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em] transition-all sm:inline-flex lg:ml-6 ${theme.cta}`}
+            className={`ml-auto hidden w-fit items-center gap-2 rounded-full px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em] transition-all sm:inline-flex lg:ml-6 ${theme.cta}${ctaOv ? ` ${ctaOv.className}` : ''}`}
+            style={ctaOv?.style}
           >
             {cta.text}
           </Link>
@@ -195,6 +211,9 @@ export async function SiteHeader() {
             cta={hasCta ? cta : null}
             theme={theme}
             projects={projectsList}
+            ctaOverride={ctaOv}
+            navColor={navColor}
+            navActiveColor={navActiveColor}
           />
         </div>
       </div>

@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import clsx from 'clsx'
 import { HONEYPOT_FIELD } from '@/lib/leads/honeypot'
 import { useRecaptchaForLead } from '@/lib/security/recaptchaClient'
+import { resolveColorValue } from '@/lib/cms/designTokens'
 import type { BlockData } from '@/lib/cms/block-registry'
 
 type Field = BlockData<'lx_form'>['fields'][number]
@@ -28,6 +29,10 @@ const colSpanFor = (w?: string) =>
 export function LxFormClient({
   fields,
   submitLabel,
+  submitFillColor,
+  submitTextColor,
+  submitFullWidth = false,
+  submitRadius,
   successHeadline,
   successBody,
   formName,
@@ -37,6 +42,14 @@ export function LxFormClient({
 }: {
   fields: Field[]
   submitLabel: string
+  /** Optional submit-button overrides (token or #hex). Unset keeps the
+   *  tone-derived default pill. Fill/text route through the shared
+   *  rest-state CSS vars so the values live in the cascade, decoupled
+   *  from the field-text colour entirely. */
+  submitFillColor?: string
+  submitTextColor?: string
+  submitFullWidth?: boolean
+  submitRadius?: number
   successHeadline?: string
   successBody?: string
   formName: string
@@ -46,6 +59,22 @@ export function LxFormClient({
 }) {
   const inputClass = inputClassFor(onDark)
   const labelClass = onDark ? 'text-white/70' : 'text-warm-stone'
+
+  // Resolve the submit overrides once. resolveColorValue maps a brand
+  // token to its var(--color-*) and passes #hex through (anything else
+  // is dropped, so a malformed persist can't inject CSS).
+  const submitFill = resolveColorValue(submitFillColor)
+  const submitText = resolveColorValue(submitTextColor)
+  const submitStyle: CSSProperties | undefined =
+    submitFill || submitText || typeof submitRadius === 'number'
+      ? ({
+          ...(submitFill ? { '--cms-rest-bg': submitFill } : {}),
+          ...(submitText ? { '--cms-rest-fg': submitText } : {}),
+          ...(typeof submitRadius === 'number'
+            ? { borderRadius: `${submitRadius}px` }
+            : {}),
+        } as CSSProperties)
+      : undefined
   const formRef = useRef<HTMLFormElement>(null)
   const recaptcha = useRecaptchaForLead()
   const [status, setStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle')
@@ -267,13 +296,22 @@ export function LxFormClient({
         type="submit"
         disabled={status === 'sending'}
         className={clsx(
-          'inline-flex w-fit items-center rounded-full px-7 py-3 font-sans text-xs font-semibold uppercase tracking-[0.2em] transition-colors disabled:opacity-50',
+          'inline-flex items-center font-sans text-xs font-semibold uppercase tracking-[0.2em] transition-colors disabled:opacity-50',
+          submitFullWidth ? 'w-full justify-center' : 'w-fit',
+          // submitRadius overrides the pill via inline style.
+          typeof submitRadius !== 'number' && 'rounded-full',
+          'px-7 py-3',
           // On a dark card a near-black button vanishes — use a white pill with
           // dark text for contrast; on a light section keep the dark pill.
+          // Operator fill/text overrides ride the unlayered rest-state var
+          // classes, which beat these layered utilities when set.
           onDark
             ? 'bg-white text-near-black hover:bg-white/85'
             : 'bg-near-black text-cream-50 hover:bg-copper-700',
+          submitFill && 'cms-rest-bg',
+          submitText && 'cms-rest-fg',
         )}
+        style={submitStyle}
       >
         {status === 'sending' ? 'Sending…' : submitLabel}
       </button>

@@ -146,6 +146,17 @@ const ctaRef = z.object({
   openInNew: z.boolean().optional(),
 })
 
+// Optional hex colour for chrome overrides (header CTA / nav, footer
+// accent / Subscribe button). #RGB / #RRGGBB / #RRGGBBAA — same shape
+// resolveColorValue accepts, so a stored value can never inject CSS.
+// '' (a cleared picker) normalises to undefined so the key drops out
+// of the stored JSON instead of failing the regex.
+const optionalHexColor = z
+  .string()
+  .regex(HEX_COLOR_RE, 'invalid_hex_color')
+  .optional()
+  .or(z.literal('').transform(() => undefined))
+
 // Public footer theme. Same palette as the header (headerTheme) so the
 // two surfaces can be matched. Default 'obsidian' reproduces the
 // historic always-dark footer; resolveFooterTheme (lib/cms/footerTheme)
@@ -196,6 +207,11 @@ const footer = z.object({
   // back-fills on read for installs whose stored footer JSON predates
   // this field — no migration needed.
   logoMaxHeight: z.number().int().min(24).max(96).default(48),
+  // Newsletter card on/off. Default true preserves the historic
+  // always-rendered card (`.default()` back-fills on read for stored
+  // rows that predate the field — no migration). When false the whole
+  // middle column is skipped and the footer grid reflows to 2 columns.
+  newsletterEnabled: z.boolean().default(true),
   // Newsletter card heading / body / CTA label. Previously hardcoded
   // in SiteFooter.tsx — exposed as flat keys so the admin form
   // renderer (which doesn't do dotted-path access) shows them as
@@ -203,6 +219,17 @@ const footer = z.object({
   newsletterHeading: z.string().max(120).optional(),
   newsletterBody: z.string().max(400).optional(),
   newsletterCtaLabel: z.string().max(40).optional(),
+  // ─── Optional accent + Subscribe-button colour overrides ───
+  // Mirrors the site_header CTA overrides so a brand colour can carry
+  // through the footer without engine edits. All optional — unset
+  // falls back to the footer theme's class set (footerTheme.ts).
+  // accentColor recolours the column + newsletter headings (the
+  // theme's `accent` tier); the cta* keys restyle the Subscribe button.
+  accentColor: optionalHexColor,
+  ctaFillColor: optionalHexColor,
+  ctaTextColor: optionalHexColor,
+  ctaHoverFillColor: optionalHexColor,
+  ctaHoverTextColor: optionalHexColor,
   // Copyright line. Empty → renderer falls back to the header brand
   // name. The renderer auto-appends the current year so the operator
   // doesn't have to update it annually.
@@ -416,6 +443,25 @@ const siteHeader = z.object({
   // Nullable so a fresh one-pager install can omit the CTA entirely.
   // Public renderer treats `null` and empty-text-or-href as "no CTA".
   primaryCta: ctaRef.nullable(),
+  // ─── Optional CTA + nav colour overrides ───
+  // Brand-exact chrome without touching engine source. All optional —
+  // unset falls back to the theme's class set (headerTheme.ts), so
+  // existing installs render byte-identical. Hex only (the settings
+  // picker emits hex; tokens stay a block-layer concept). Empty string
+  // (a cleared picker) normalises to undefined so the key drops out.
+  // CTA pill: fill / text at rest, fill / text on hover, corner radius.
+  ctaFillColor: optionalHexColor,
+  ctaTextColor: optionalHexColor,
+  ctaHoverFillColor: optionalHexColor,
+  ctaHoverTextColor: optionalHexColor,
+  // Pill corner radius in px. Unset = the default full pill.
+  ctaRadius: z.number().int().min(0).max(64).optional(),
+  // Nav links: rest colour + active-link colour (the active default is
+  // the theme's accent, e.g. text-copper-700 on light themes). When
+  // navActiveColor is set it also becomes the hover colour of rest
+  // links, so hover previews the active treatment.
+  navColor: optionalHexColor,
+  navActiveColor: optionalHexColor,
 })
 
 // ───────────────────────── Security ─────────────────────────
@@ -1535,6 +1581,7 @@ export const registry = {
       columns: [],
       logo: null,
       logoMaxHeight: 48,
+      newsletterEnabled: true,
       newsletterHeading: 'Stay informed',
       newsletterBody: 'Updates and announcements. One click to unsubscribe.',
       newsletterCtaLabel: 'Subscribe',

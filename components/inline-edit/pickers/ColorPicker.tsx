@@ -171,9 +171,12 @@ export function ColorPickerField({
     ? { background: resolved }
     : {
         // Empty / undefined value — show the diagonal-stripe "no colour"
-        // affordance so the operator knows nothing is set.
+        // affordance so the operator knows nothing is set. Warm-stone
+        // stripes (not cream) so the empty swatch reads on BOTH surfaces
+        // this picker renders on: the dark EditDrawer AND the light
+        // admin Settings page (cream stripes were invisible on cream).
         background:
-          'repeating-linear-gradient(45deg, rgba(245,241,234,0.06) 0 4px, rgba(245,241,234,0.16) 4px 8px)',
+          'repeating-linear-gradient(45deg, rgba(110,102,90,0.10) 0 4px, rgba(110,102,90,0.30) 4px 8px)',
       }
 
   const hasEyedropper =
@@ -248,6 +251,9 @@ export function ColorPickerField({
       </div>
 
       <div className="flex items-center gap-2">
+        {/* warm-stone border (not cream/15) — visible on the dark drawer
+            AND the light Settings page, where the old cream hairline (and
+            an empty or light swatch behind it) was literally invisible. */}
         <button
           ref={triggerRef}
           type="button"
@@ -255,7 +261,7 @@ export function ColorPickerField({
           aria-label={`${label} — open colour picker`}
           aria-haspopup="dialog"
           aria-expanded={open}
-          className="group relative h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-cream-50/15 transition-all duration-quick hover:scale-[1.03] hover:border-copper-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/70"
+          className="group relative h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-warm-stone/45 transition-all duration-quick hover:scale-[1.03] hover:border-copper-400/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-copper-400/70"
           style={swatchStyle}
         >
           <span className="sr-only">Pick {label.toLowerCase()}</span>

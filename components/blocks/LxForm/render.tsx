@@ -63,6 +63,10 @@ export function LxForm({
             <LxFormClient
               fields={data.fields}
               submitLabel={data.submitLabel}
+              submitFillColor={data.submitFillColor}
+              submitTextColor={data.submitTextColor}
+              submitFullWidth={data.submitFullWidth}
+              submitRadius={data.submitRadius}
               successHeadline={data.successHeadline}
               successBody={data.successBody}
               formName={data.heading || 'Form'}

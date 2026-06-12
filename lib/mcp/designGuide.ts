@@ -211,6 +211,15 @@ hero (dark, xl: eyebrow + display-2xl headline + 1–2 line subhead + ONE primar
   sticky, scroll motion (parallax/fade/zoom/tilt), card hover (lift/shadow/border),
   per-block custom CSS, SVG shape dividers between sections, background VIDEO,
   content max-width, responsive per-breakpoint type, a nested \`childLayout:'grid'\`
-  card grid inside a column, a standalone \`lx_icon\`, a composable \`lx_form\`,
-  button hover + per-corner radius + fill colour, figure lightbox/hover-zoom, and
-  operator-defined global brand swatches. Use them to match any brand to the pixel.`
+  card grid inside a column, a standalone \`lx_icon\`, a composable \`lx_form\`
+  (incl. submit fill/text colour + full-width + radius), button hover + per-corner
+  radius + fill colour + a flat \`elevation:'none'\` opt-out of the primary glow,
+  two-tone headings (\`lx_heading.highlightText\`/\`highlightColor\`), a static
+  (non-scrolling) \`lx_marquee\` logo row (\`speed:'static'\`), figure
+  lightbox/hover-zoom, and operator-defined global brand swatches.
+- CHROME OVERRIDES (header/footer without engine edits): \`site_header\` takes
+  optional \`ctaFillColor\`/\`ctaTextColor\`/\`ctaHoverFillColor\`/\`ctaHoverTextColor\`/
+  \`ctaRadius\` + \`navColor\`/\`navActiveColor\`; \`footer\` takes \`newsletterEnabled\`
+  (false removes the newsletter column), \`accentColor\`, and the same \`cta*\`
+  colour set for its Subscribe button. All #hex, all optional — unset keeps the
+  theme defaults. Use them to match any brand to the pixel.`

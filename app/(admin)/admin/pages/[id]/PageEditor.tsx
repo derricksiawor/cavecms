@@ -1211,8 +1211,13 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
           />
         )}
 
-        {/* Top bar */}
-        <header className="sticky top-0 z-10 -mx-4 rounded-2xl border border-warm-stone/20 bg-cream-50/95 px-4 py-4 backdrop-blur-md sm:mx-0 sm:px-5">
+        {/* Top bar. NOT sticky — pinning this tall card (title + slug +
+            status rows) over the scrolling form ate a third of the
+            viewport and read as a rendering bug. The save-status pill
+            below is informative on save (saves happen on blur, when the
+            operator is AT the field), so losing it off-screen mid-scroll
+            costs nothing. */}
+        <header className="-mx-4 rounded-2xl border border-warm-stone/20 bg-cream-50 px-4 py-4 sm:mx-0 sm:px-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-6">
             <div className="flex-1 min-w-0 space-y-2">
               <label className="block">
@@ -1288,8 +1293,7 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
               </div>
             </div>
           </div>
-          {/* Save-status pill — lives in the sticky header so the
-              operator always sees the editor's current persistence
+          {/* Save-status pill — the editor's current persistence
               state. Three modes:
                 - Saving: copper accent + spinner-style label
                 - Saved (in-session): copper accent + relative time

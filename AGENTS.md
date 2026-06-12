@@ -124,6 +124,21 @@ token may write:
   `default_seo` — `site_general` itself is NOT token-writable.)
 - **`theme_palette`** — brand colours (primary/secondary/accent/surfaces,
   light|dark mode).
+- **`site_header`** — logo, brand text, nav, primary CTA — plus optional
+  brand-exact chrome overrides (all `#hex`, all optional; unset keeps the
+  header theme's defaults): `ctaFillColor`, `ctaTextColor`,
+  `ctaHoverFillColor`, `ctaHoverTextColor`, `ctaRadius` (0–64 px; unset =
+  full pill) for the CTA pill, and `navColor` / `navActiveColor` for the
+  nav links (`navActiveColor` also becomes the rest links' hover colour).
+  Example: an orange CTA pill + orange active nav is
+  `{ "ctaFillColor": "#E8590C", "ctaHoverFillColor": "#D9480F",
+  "navActiveColor": "#E8590C" }` merged into the current value.
+- **`footer`** — tagline, link columns, newsletter card, legal links — plus:
+  `newsletterEnabled` (boolean, default `true`; `false` removes the whole
+  newsletter column and the footer grid reflows), `accentColor` (the small
+  uppercase column/newsletter headings), and `ctaFillColor` /
+  `ctaTextColor` / `ctaHoverFillColor` / `ctaHoverTextColor` for the
+  Subscribe button. All optional `#hex`.
 - **`typography_roles`** — the two site fonts:
   `{ "display": "<catalog-key>", "body": "<catalog-key>" }`. `display` is
   the headings/serif face, `body` the body/sans face. Setting
@@ -148,6 +163,25 @@ pin one specific face on that block only. `weight` must be a weight the
 chosen font actually ships (a role's curated set, or the font's variable
 range) — an out-of-range weight is rejected. Omit both to inherit the
 block's built-in default.
+
+### Brand-exact block styling worth knowing (beyond the schema basics)
+
+Four block-level knobs agents commonly need when matching a brand (full
+shapes in `lib/cms/block-registry.ts`):
+
+- **`lx_action.elevation`** — `'none' | 'shadow' | 'pulse'`. Unset keeps
+  the default (primary-gold pulses; other variants are flat). Set
+  `'none'` for a flat, un-elevated primary button. `fillColor` +
+  `hoverFillColor`/`hoverTextColor` work together (the hover override
+  wins on hover).
+- **`lx_heading.highlightText` + `highlightColor`** — two-tone headings:
+  the first occurrence of `highlightText` inside `text` renders in the
+  highlight colour (token or `#hex`; default champagne).
+- **`lx_marquee.speed: 'static'`** — renders the logos/text as a
+  centered, non-scrolling row.
+- **`lx_form.submitFillColor` / `submitTextColor` / `submitFullWidth` /
+  `submitRadius`** — style the submit button (token or `#hex`, boolean,
+  px) without touching the field-text colour.
 
 ### Fast path — batch many edits in ONE call (PREFER THIS)
 

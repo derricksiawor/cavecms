@@ -404,6 +404,13 @@ export const blockSchemas = {
         .default('display-lg'),
       alignment: z.enum(['left', 'center', 'right']).default('left'),
       tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).default('obsidian'),
+      // Two-tone heading: the FIRST occurrence of `highlightText` inside
+      // `text` is wrapped in an accent span ("Choose Tomorrow, Today"
+      // with "Today" in the brand accent). highlightColor is a token or
+      // #hex; unset falls back to the champagne accent. No match → the
+      // heading renders unchanged.
+      highlightText: safeText(TEXT_MAX.title).optional(),
+      highlightColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
       italic: z.boolean().default(false),
       // Optional typography overrides. Default = renderer's hard-coded
       // baseline (display family + bold). Operator opts in via the
@@ -561,6 +568,17 @@ export const blockSchemas = {
         })
       }),
     submitLabel: safeRequiredText(1, TEXT_MAX.ctaText).default('Submit'),
+    // Submit-button styling overrides. All optional — unset keeps the
+    // tone-derived default pill (dark on light sections, white on dark).
+    // Previously the ONLY way to recolour the submit was meta.customCss
+    // overriding --color-near-black on the wrapper, which bled into the
+    // field text because input text shared that token. Dedicated fields
+    // decouple the submit fill from the field text entirely.
+    submitFillColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
+    submitTextColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
+    submitFullWidth: z.boolean().default(false),
+    // Corner radius in px (0 = square). Unset = the default full pill.
+    submitRadius: z.number().int().min(0).max(64).optional(),
     successHeadline: safeText(TEXT_MAX.title).optional(),
     successBody: safeText(TEXT_MAX.body).optional(),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_text).default('obsidian'),
@@ -622,6 +640,13 @@ export const blockSchemas = {
       // primary variant, which already has dark label text). A gradient fill
       // wins over this when both are set.
       fillColor: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_heading).optional(),
+      // Elevation treatment. UNSET preserves the historic behaviour
+      // (primary-gold ships shadow + champagne pulse; other variants are
+      // flat). 'none' = a flat brand button with no shadow/pulse — the
+      // opt-out that previously required faking a primary via
+      // secondary-outline + fillColor. 'shadow' = soft shadow only;
+      // 'pulse' = shadow + the champagne glow pulse.
+      elevation: z.enum(['none', 'shadow', 'pulse']).optional(),
       // Hover-state overrides (Elementor parity) — bg, label colour, scale,
       // and transition duration on hover. Rendered via CSS custom properties
       // + the `cms-hover` utility so :hover styling works from inline data.
@@ -1719,11 +1744,14 @@ export const blockSchemas = {
   // ── Stretch wave ("even better than Elementor") ─────────────────
 
   // Marquee — logo / text ticker. Pure-CSS scroll, reduced-motion safe.
+  // speed 'static' opts out of the scroll entirely: the content renders
+  // ONCE as a centered, non-animated row (a classic "trusted by" logo
+  // strip without motion).
   lx_marquee: z.object({
     mode: z.enum(['text', 'logos']).default('text'),
     text: safeText(TEXT_MAX.title).optional(),
     logos: z.array(MediaRef).max(24).default([]),
-    speed: z.enum(['slow', 'medium', 'fast']).default('medium'),
+    speed: z.enum(['slow', 'medium', 'fast', 'static']).default('medium'),
     direction: z.enum(['left', 'right']).default('left'),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_marquee).default('obsidian'),
   }),

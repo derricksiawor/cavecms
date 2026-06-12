@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import clsx from 'clsx'
 import { InlineEditable } from '@/components/inline-edit/InlineEditable'
 import { MotionTarget } from '@/components/motion/MotionTarget'
@@ -58,6 +58,26 @@ const TOKEN_TEXT_CLASS: Record<string, string> = {
   obsidian: 'text-primary',
   ivory: 'text-ivory',
   champagne: 'text-champagne',
+}
+
+// Two-tone highlight: wrap the FIRST occurrence of `match` in an accent
+// span. Pure React-node splitting (no HTML), so nothing user-supplied is
+// ever parsed as markup. No match / no highlight → the plain string.
+function renderHighlighted(
+  text: string,
+  match: string | undefined,
+  color: string,
+): ReactNode {
+  if (!match || match.trim() === '') return text
+  const idx = text.indexOf(match)
+  if (idx === -1) return text
+  return (
+    <>
+      {text.slice(0, idx)}
+      <span style={{ color }}>{match}</span>
+      {text.slice(idx + match.length)}
+    </>
+  )
 }
 
 export function LxHeading({
@@ -154,9 +174,18 @@ export function LxHeading({
     )
   }
 
+  // Highlight colour: explicit override, else the champagne accent.
+  // Skipped under gradient text — the span's solid colour would punch a
+  // flat patch into the gradient fill.
+  const highlightColor =
+    resolveColorValue(data.highlightColor) ?? 'var(--color-champagne)'
+  const headingContent = data.textGradient
+    ? data.text
+    : renderHighlighted(data.text, data.highlightText, highlightColor)
+
   const heading = (
     <Tag className={className} style={{ ...toneStyle, ...fam.style }}>
-      {data.text}
+      {headingContent}
     </Tag>
   )
 

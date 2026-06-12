@@ -1,5 +1,5 @@
 'use client'
-import { useState, type FormEvent } from 'react'
+import { useState, type CSSProperties, type FormEvent } from 'react'
 import { HONEYPOT_FIELD } from '@/lib/leads/honeypot'
 import { useRecaptchaForLead } from '@/lib/security/recaptchaClient'
 
@@ -38,6 +38,7 @@ export function NewsletterForm({
   ctaLabel = 'Subscribe',
   fieldClass = DEFAULT_FIELD_CLASS,
   ctaClass = DEFAULT_CTA_CLASS,
+  ctaStyle,
   noticeClass = DEFAULT_NOTICE_CLASS,
 }: {
   csrf: string
@@ -46,6 +47,9 @@ export function NewsletterForm({
   fieldClass?: string
   /** Submit button classes from the footer theme (accent fill). */
   ctaClass?: string
+  /** Operator colour-override CSS vars for the Subscribe button (see
+   *  ctaOverrideProps in lib/cms/headerTheme — rest/hover fill + text). */
+  ctaStyle?: CSSProperties
   /** Status-copy colour from the footer theme (muted tier). */
   noticeClass?: string
 }) {
@@ -121,6 +125,7 @@ export function NewsletterForm({
         type="submit"
         disabled={busy}
         className={`text-sm font-medium px-5 py-3 min-h-[44px] rounded transition-colors w-fit disabled:opacity-50 ${ctaClass}`}
+        style={ctaStyle}
       >
         {busy ? 'Subscribing…' : ctaLabel}
       </button>

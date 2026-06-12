@@ -8,6 +8,7 @@ import { isLikelyExternal, externalRel } from '@/lib/url/external'
 import { NewsletterForm } from '@/components/leads/NewsletterForm'
 import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { resolveFooterTheme } from '@/lib/cms/footerTheme'
+import { ctaOverrideProps } from '@/lib/cms/headerTheme'
 
 // Public site footer. Renders the newsletter signup form with a
 // freshly-minted HMAC preCsrf nonce so a same-page POST works
@@ -47,11 +48,19 @@ interface FooterShape {
   columns: Array<{ label: string; links: Array<{ text: string; href: string }> }>
   logo?: { media_id: number; alt: string } | null
   logoMaxHeight?: number
+  newsletterEnabled?: boolean
   newsletterHeading?: string
   newsletterBody?: string
   newsletterCtaLabel?: string
   copyright?: string
   legalLinks?: Array<{ text: string; href: string }>
+  // Optional operator colour overrides (Settings → Footer). Unset →
+  // the footer theme's class set renders unchanged.
+  accentColor?: string
+  ctaFillColor?: string
+  ctaTextColor?: string
+  ctaHoverFillColor?: string
+  ctaHoverTextColor?: string
 }
 const DEFAULT_FOOTER: FooterShape = {
   tagline: '',
@@ -59,6 +68,7 @@ const DEFAULT_FOOTER: FooterShape = {
   columns: [],
   logo: null,
   logoMaxHeight: 48,
+  newsletterEnabled: true,
   newsletterHeading: 'Stay informed',
   newsletterBody:
     'Quarterly updates on new launches and project milestones. One click to unsubscribe.',
@@ -164,6 +174,7 @@ export async function SiteFooter() {
   // 'obsidian' reproduces the original always-dark footer.
   const ft = resolveFooterTheme(footer.theme)
 
+  const newsletterEnabled = footer.newsletterEnabled !== false
   const newsletterHeading = footer.newsletterHeading || 'Stay informed'
   const newsletterBody =
     footer.newsletterBody ||
@@ -172,11 +183,27 @@ export async function SiteFooter() {
   const copyrightText = (footer.copyright?.trim() || headerBrand).trim()
   const legalLinks = footer.legalLinks ?? []
 
+  // Optional colour overrides. The accent tints the column + newsletter
+  // headings inline (an inline color beats the theme's layered text-*
+  // utility); the Subscribe button routes through the shared rest/hover
+  // CSS-var pattern so its hover override still wins (see headerTheme).
+  const accentStyle = footer.accentColor ? { color: footer.accentColor } : undefined
+  const ctaOv = ctaOverrideProps({
+    fill: footer.ctaFillColor,
+    text: footer.ctaTextColor,
+    hoverFill: footer.ctaHoverFillColor,
+    hoverText: footer.ctaHoverTextColor,
+  })
+
   return (
     <footer
       className={`${ft.surface}${mobileCtaOn ? ' pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0' : ''}`}
     >
-      <div className="max-w-6xl mx-auto px-6 py-16 grid grid-cols-1 md:grid-cols-3 gap-12">
+      <div
+        className={`max-w-6xl mx-auto px-6 py-16 grid grid-cols-1 gap-12 ${
+          newsletterEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'
+        }`}
+      >
         <div>
           {logoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -237,35 +264,44 @@ export async function SiteFooter() {
           )}
         </div>
 
-        <div>
-          <h2 className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}>
-            {newsletterHeading}
-          </h2>
-          <p className={`mt-4 text-sm ${ft.muted} leading-relaxed`}>
-            {newsletterBody}
-          </p>
-          {csrf ? (
-            <NewsletterForm
-              csrf={csrf}
-              ctaLabel={newsletterCtaLabel}
-              fieldClass={ft.field}
-              ctaClass={ft.cta}
-              noticeClass={ft.muted}
-            />
-          ) : (
-            // CSRF nonce mint failed (upstream blip). Skip the form
-            // rather than render a guaranteed-fail submission UX —
-            // the contact block + columns above still render.
-            <p className={`mt-6 text-sm ${ft.subtle}`}>
-              Newsletter signup temporarily unavailable.
+        {newsletterEnabled && (
+          <div>
+            <h2
+              className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}
+              style={accentStyle}
+            >
+              {newsletterHeading}
+            </h2>
+            <p className={`mt-4 text-sm ${ft.muted} leading-relaxed`}>
+              {newsletterBody}
             </p>
-          )}
-        </div>
+            {csrf ? (
+              <NewsletterForm
+                csrf={csrf}
+                ctaLabel={newsletterCtaLabel}
+                fieldClass={ft.field}
+                ctaClass={`${ft.cta}${ctaOv ? ` ${ctaOv.className}` : ''}`}
+                ctaStyle={ctaOv?.style}
+                noticeClass={ft.muted}
+              />
+            ) : (
+              // CSRF nonce mint failed (upstream blip). Skip the form
+              // rather than render a guaranteed-fail submission UX —
+              // the contact block + columns above still render.
+              <p className={`mt-6 text-sm ${ft.subtle}`}>
+                Newsletter signup temporarily unavailable.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-6">
           {footer.columns.map((c) => (
             <div key={c.label}>
-              <h4 className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}>
+              <h4
+                className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}
+                style={accentStyle}
+              >
                 {c.label}
               </h4>
               <ul className="mt-3 space-y-2">
