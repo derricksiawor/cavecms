@@ -54,7 +54,10 @@ const SETTINGS_MEDIA_FIELDS: Record<
   string,
   ReadonlyArray<{ field: string; mediaId: (v: unknown) => number | null }>
 > = {
-  site_header: [{ field: 'site_header.logo', mediaId: (v) => subMediaId(v, 'logo') }],
+  site_header: [
+    { field: 'site_header.logo', mediaId: (v) => subMediaId(v, 'logo') },
+    { field: 'site_header.overlayLogo', mediaId: (v) => subMediaId(v, 'overlayLogo') },
+  ],
   footer: [{ field: 'footer.logo', mediaId: (v) => subMediaId(v, 'logo') }],
   default_seo: [
     { field: 'default_seo.ogImage', mediaId: (v) => subMediaId(v, 'ogImage') },

@@ -87,12 +87,15 @@ export function SiteHeaderBarBody({
               />
             )}
             {overlayLogoSrc && (
+              // Hidden only when the main logo exists to take over — if the
+              // operator uploaded ONLY the overlay logo, it stays visible in
+              // the solid state too (a blank brand area is never acceptable).
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={overlayLogoSrc}
                 alt={logoAlt}
                 style={{ height: `${logoMaxHeight}px` }}
-                className={`w-auto max-w-[280px] object-contain${overlayActive ? '' : ' hidden'}`}
+                className={`w-auto max-w-[280px] object-contain${overlayActive || !logoSrc ? '' : ' hidden'}`}
               />
             )}
           </>
