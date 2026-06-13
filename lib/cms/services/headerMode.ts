@@ -80,6 +80,7 @@ async function firstSectionIsDark(pageId: number): Promise<boolean> {
     SELECT meta FROM content_blocks
     WHERE page_id = ${pageId} AND kind = 'section'
       AND parent_id IS NULL AND deleted_at IS NULL
+      AND draft_state <> 'added'
     ORDER BY position ASC
     LIMIT 1
   `)) as unknown as [Array<{ meta: unknown }>]

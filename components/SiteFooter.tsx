@@ -175,6 +175,17 @@ export async function SiteFooter() {
   const ft = resolveFooterTheme(footer.theme)
 
   const newsletterEnabled = footer.newsletterEnabled !== false
+  // 12-col footer spans. When there are no link columns (fresh install /
+  // operator hasn't added any), the brand + newsletter widen to fill the
+  // row so the footer never shows a dead empty third on the right.
+  const hasFooterCols = footer.columns.length > 0
+  const brandSpan = hasFooterCols
+    ? 'md:col-span-4'
+    : newsletterEnabled
+      ? 'md:col-span-7'
+      : 'md:col-span-12'
+  const newsletterSpan = hasFooterCols ? 'md:col-span-3' : 'md:col-span-5'
+  const linkColsSpan = newsletterEnabled ? 'md:col-span-5' : 'md:col-span-8'
   const newsletterHeading = footer.newsletterHeading || 'Stay informed'
   const newsletterBody =
     footer.newsletterBody ||
@@ -205,7 +216,7 @@ export async function SiteFooter() {
          horizontal slot (wrapping gracefully past 4) instead of stacking
          in a single narrow cell. */}
       <div className="max-w-6xl mx-auto px-6 py-16 grid grid-cols-1 gap-12 md:grid-cols-12">
-        <div className="md:col-span-4">
+        <div className={brandSpan}>
           {logoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -266,7 +277,7 @@ export async function SiteFooter() {
         </div>
 
         {newsletterEnabled && (
-          <div className="md:col-span-3">
+          <div className={newsletterSpan}>
             <h2
               className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}
               style={accentStyle}
@@ -296,36 +307,36 @@ export async function SiteFooter() {
           </div>
         )}
 
-        <div
-          className={`grid content-start gap-x-8 gap-y-10 [grid-template-columns:repeat(auto-fit,minmax(110px,1fr))] ${
-            newsletterEnabled ? 'md:col-span-5' : 'md:col-span-8'
-          }`}
-        >
-          {footer.columns.map((c) => (
-            <div key={c.label}>
-              <h4
-                className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}
-                style={accentStyle}
-              >
-                {c.label}
-              </h4>
-              <ul className="mt-3 space-y-2">
-                {c.links.map((l) => (
-                  <li key={l.href}>
-                    <a
-                      href={l.href}
-                      target={isLikelyExternal(l.href) ? '_blank' : undefined}
-                      rel={externalRel(l.href, true)}
-                      className={`text-sm ${ft.strong} ${ft.strongHover} transition-colors`}
-                    >
-                      {l.text}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+        {hasFooterCols && (
+          <div
+            className={`grid content-start gap-x-8 gap-y-10 [grid-template-columns:repeat(auto-fit,minmax(110px,1fr))] ${linkColsSpan}`}
+          >
+            {footer.columns.map((c) => (
+              <div key={c.label}>
+                <h4
+                  className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}
+                  style={accentStyle}
+                >
+                  {c.label}
+                </h4>
+                <ul className="mt-3 space-y-2">
+                  {c.links.map((l) => (
+                    <li key={l.href}>
+                      <a
+                        href={l.href}
+                        target={isLikelyExternal(l.href) ? '_blank' : undefined}
+                        rel={externalRel(l.href, true)}
+                        className={`text-sm ${ft.strong} ${ft.strongHover} transition-colors`}
+                      >
+                        {l.text}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className={`border-t ${ft.border}`}>
