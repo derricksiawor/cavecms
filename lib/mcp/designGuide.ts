@@ -222,4 +222,11 @@ hero (dark, xl: eyebrow + display-2xl headline + 1–2 line subhead + ONE primar
   \`ctaRadius\` + \`navColor\`/\`navActiveColor\`; \`footer\` takes \`newsletterEnabled\`
   (false removes the newsletter column), \`accentColor\`, and the same \`cta*\`
   colour set for its Subscribe button. All #hex, all optional — unset keeps the
-  theme defaults. Use them to match any brand to the pixel.`
+  theme defaults. Use them to match any brand to the pixel.
+- OVERLAY HEADER (the custom-coded luxury-site pattern): set \`site_header\`
+  \`headerMode:'overlay'\` to float the header transparent over the hero, turning
+  into the solid themed bar on scroll. Upload a WHITE/light logo variant and set
+  it as \`overlayLogo\` — it shows only while transparent; the main \`logo\` takes
+  over once solid. \`overlayTone:'light'|'dark'\` sets the transparent-state text
+  colour (light = white, for dark hero photos). Pair with a full-bleed dark hero
+  (lx_hero with a background image) for the classic look.`

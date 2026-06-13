@@ -117,6 +117,53 @@ export const HEADER_THEMES: Record<HeaderTheme, HeaderThemeClasses> = {
   },
 }
 
+// ─── Overlay (transparent-over-hero) top-state class sets ─────────────
+// When site_header.headerMode === 'overlay', the bar starts transparent
+// over the first section and adopts the solid theme above once the page
+// scrolls. These sets cover ONLY the surfaces visible in the transparent
+// state (bar, brand, nav, hamburger); the CTA pill and the mobile drawer
+// keep the solid theme's classes in both states — the CTA stays a
+// branded button over the hero, and the drawer always opens as a solid
+// panel. Tone is operator-chosen: 'light' (white text — dark hero
+// photos) or 'dark' (near-black — light heroes).
+export type OverlayTone = 'light' | 'dark'
+
+const OVERLAY_TOP: Record<
+  OverlayTone,
+  Pick<
+    HeaderThemeClasses,
+    'bar' | 'brand' | 'nav' | 'navHover' | 'navActive' | 'hamburger'
+  >
+> = {
+  light: {
+    bar: 'border-b border-transparent bg-transparent',
+    brand: 'text-white',
+    nav: 'text-white/85',
+    navHover: 'hover:text-white',
+    navActive: 'text-white font-semibold',
+    hamburger: 'text-white hover:bg-white/15',
+  },
+  dark: {
+    bar: 'border-b border-transparent bg-transparent',
+    brand: 'text-near-black',
+    nav: 'text-near-black/80',
+    navHover: 'hover:text-near-black',
+    navActive: 'text-near-black font-semibold',
+    hamburger: 'text-near-black hover:bg-near-black/10',
+  },
+}
+
+/** The class set for the transparent (top-of-page) overlay state: the
+ *  tone's transparent surfaces merged over the solid theme, so the CTA
+ *  and drawer stay consistent with the scrolled bar. */
+export function resolveOverlayTopTheme(
+  tone: unknown,
+  solid: HeaderThemeClasses,
+): HeaderThemeClasses {
+  const t: OverlayTone = tone === 'dark' ? 'dark' : 'light'
+  return { ...solid, ...OVERLAY_TOP[t] }
+}
+
 // ─── Operator colour overrides for chrome buttons + nav links ─────────
 // Optional hex overrides from settings (site_header.cta*/nav*, footer
 // accent/cta*) translate to the shared `.cms-rest-*` / `.cms-hover`

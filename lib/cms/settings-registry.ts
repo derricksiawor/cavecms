@@ -410,6 +410,22 @@ const siteHeader = z.object({
   logoMaxHeight: z.number().int().min(24).max(96).default(40),
   // Visual theme — see headerTheme above.
   theme: headerTheme,
+  // ─── Overlay (transparent-over-hero) header ───
+  // 'solid' (default) = the classic sticky themed bar. 'overlay' = the
+  // header floats transparent over the first section so the hero shows
+  // through, then turns into the solid themed bar once the page scrolls.
+  // `.default()` back-fills on read for stored rows that predate the
+  // field — no migration needed.
+  headerMode: z.enum(['solid', 'overlay']).default('solid'),
+  // Logo for the TRANSPARENT state only — usually a white/light version
+  // of the brand mark. The main `logo` above takes over the moment the
+  // bar turns solid on scroll. Unset → the main logo is used in both
+  // states.
+  overlayLogo: mediaRef.nullable().optional(),
+  // Text + nav tone while the bar is transparent: 'light' (white — for
+  // dark hero photos) or 'dark' (near-black — for light heroes). The
+  // scrolled solid state always uses `theme` above.
+  overlayTone: z.enum(['light', 'dark']).default('light'),
   // Primary navigation links shown in the top bar. Capped at 6 per
   // operator request — keeps the bar from wrapping and forces editorial
   // discipline.
@@ -1598,6 +1614,8 @@ export const registry = {
       logo: null,
       logoMaxHeight: 40,
       theme: 'cream',
+      headerMode: 'solid',
+      overlayTone: 'light',
       // Empty nav for the one-pager welcome template — the operator
       // wires up their own links (or section anchors) under
       // Settings → Branding after the install. Earlier defaults

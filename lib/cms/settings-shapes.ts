@@ -273,6 +273,35 @@ export const SETTINGS_SHAPES: Record<string, FieldShape[]> = {
       help: 'This only sets whether the header bar reads light or dark — background, text, border, nav-hover, and button shift together. It does NOT set your colours. The actual colours (and the ready-made styles like Obsidian & Gold, Carbon, or Sand & Sea you saw on cavecms) come from your site-wide palette under Settings → Theme. Pick your palette there; pick this bar’s light-or-dark tone here.',
     },
     {
+      kind: 'select',
+      key: 'headerMode',
+      label: 'Header style',
+      options: [
+        { value: 'solid', label: 'Solid bar (default)' },
+        {
+          value: 'overlay',
+          label: 'Overlay — transparent over your hero, solid on scroll',
+        },
+      ],
+      help: 'Overlay floats the header transparently over the top of every page so your hero image shows through, then turns it into the solid bar above as soon as the visitor scrolls. Works best when your pages open with a full-width photo or dark section.',
+    },
+    {
+      kind: 'media',
+      key: 'overlayLogo',
+      label: 'Overlay logo',
+      help: 'Shown only while the header is transparent — usually a white or light version of your logo so it reads over the hero. The moment the bar turns solid on scroll, your main logo above takes over. Leave empty to use the main logo in both states.',
+    },
+    {
+      kind: 'select',
+      key: 'overlayTone',
+      label: 'Overlay text tone',
+      options: [
+        { value: 'light', label: 'Light — white text over a dark hero (default)' },
+        { value: 'dark', label: 'Dark — near-black text over a light hero' },
+      ],
+      help: 'The colour of your brand name and navigation links while the header is transparent. Once it turns solid, the header tone above takes over.',
+    },
+    {
       kind: 'menu_builder',
       key: 'navItems',
       label: 'Top navigation links',

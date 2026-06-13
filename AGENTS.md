@@ -133,6 +133,14 @@ token may write:
   Example: an orange CTA pill + orange active nav is
   `{ "ctaFillColor": "#E8590C", "ctaHoverFillColor": "#D9480F",
   "navActiveColor": "#E8590C" }` merged into the current value.
+  **Overlay header** (transparent over the hero, solid on scroll):
+  `headerMode` = `"solid"` (default) | `"overlay"`. With overlay, set
+  `overlayLogo` = `{ "media_id": <id>, "alt": "<text>" }` to a WHITE/light
+  version of the logo (upload it via `POST /api/cms/media` first) — it
+  shows only while the bar is transparent; the main `logo` takes over the
+  moment the bar turns solid. `overlayTone` = `"light"` (default — white
+  text for dark heroes) | `"dark"` (near-black for light heroes) colours
+  the brand text + nav links in the transparent state only.
 - **`footer`** — tagline, link columns, newsletter card, legal links — plus:
   `newsletterEnabled` (boolean, default `true`; `false` removes the whole
   newsletter column and the footer grid reflows), `accentColor` (the small

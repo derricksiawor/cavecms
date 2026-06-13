@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { headers } from 'next/headers'
 import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -6,10 +5,13 @@ import { env } from '@/lib/env'
 import { getSetting } from '@/lib/cms/getSettings'
 import type { SettingsValue } from '@/lib/cms/settings-registry'
 import { resolveMedia } from '@/lib/cms/resolveMedia'
-import { resolveHeaderTheme, ctaOverrideProps } from '@/lib/cms/headerTheme'
-import { isLikelyExternal } from '@/lib/url/external'
-import { SiteHeaderMobile } from './SiteHeaderMobile'
-import { SiteHeaderNav } from './SiteHeaderNav'
+import {
+  resolveHeaderTheme,
+  resolveOverlayTopTheme,
+  ctaOverrideProps,
+} from '@/lib/cms/headerTheme'
+import { SiteHeaderBarBody } from './SiteHeaderBarBody'
+import { SiteHeaderOverlay } from './SiteHeaderOverlay'
 
 // Public site header — logo + brand text on the left, navigation
 // in the centre, optional primary CTA on the right. All operator-
@@ -81,6 +83,8 @@ export async function SiteHeader() {
       logo: null,
       logoMaxHeight: 40,
       theme: 'cream' as const,
+      headerMode: 'solid' as const,
+      overlayTone: 'light' as const,
       navItems: [],
       primaryCta: { text: '', href: '' },
     }
@@ -110,8 +114,27 @@ export async function SiteHeader() {
   const logoSrc = logo?.md ?? logo?.lg ?? logo?.thumb ?? null
   const logoAlt = header.logo?.alt || logo?.alt || header.brandText
 
+  // Overlay mode's transparent-state logo (usually a white version).
+  // Same degraded-fallback pattern as the main logo above.
+  const headerMode = header.headerMode ?? 'solid'
+  let overlayLogoSrc: string | null = null
+  if (headerMode === 'overlay' && header.overlayLogo) {
+    try {
+      const om = await resolveMedia(header.overlayLogo.media_id)
+      overlayLogoSrc = om?.md ?? om?.lg ?? om?.thumb ?? null
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          msg: 'site_header_overlay_logo_degraded',
+          media_id: header.overlayLogo.media_id,
+          err_name: err instanceof Error ? err.name : 'unknown',
+        }),
+      )
+    }
+  }
+
   const cta = header.primaryCta
-  const hasCta = cta && cta.text.trim() !== '' && cta.href.trim() !== ''
 
   // Optional operator colour overrides (Settings → Site header). Null
   // when nothing is set → the theme class set renders unchanged.
@@ -149,6 +172,36 @@ export async function SiteHeader() {
     )
   }
 
+  // Shared bar-content props — identical for both modes so the two
+  // headers can never drift (the bar body is one component).
+  const barProps = {
+    brandText: header.brandText,
+    logoSrc,
+    logoAlt,
+    logoMaxHeight: header.logoMaxHeight ?? 40,
+    navItems: header.navItems,
+    projects: projectsList,
+    pathname,
+    cta: cta ?? null,
+    ctaOverride: ctaOv,
+    navColor,
+    navActiveColor,
+  }
+
+  // Overlay mode: transparent bar floating over the first section,
+  // turning into the solid themed bar on scroll (client wrapper owns
+  // the scroll state + the logo swap).
+  if (headerMode === 'overlay') {
+    return (
+      <SiteHeaderOverlay
+        {...barProps}
+        overlayLogoSrc={overlayLogoSrc}
+        solidTheme={theme}
+        overlayTheme={resolveOverlayTopTheme(header.overlayTone, theme)}
+      />
+    )
+  }
+
   return (
     <header
       data-site-header
@@ -158,65 +211,7 @@ export async function SiteHeader() {
          padding (not the max-w-6xl content container the body sections
          use). Operator wants the header to read as part of the chrome,
          not as another centred content block. */}
-      <div className="flex items-center gap-4 px-6 py-4 sm:px-8 lg:px-12">
-        <Link
-          href="/"
-          aria-label={header.brandText || 'Home'}
-          className={`group flex items-center gap-3 ${theme.brand}`}
-        >
-          {logoSrc ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={logoSrc}
-              alt={logoAlt}
-              style={{ height: `${header.logoMaxHeight ?? 40}px` }}
-              className="w-auto max-w-[280px] object-contain"
-            />
-          ) : (
-            <span className="font-serif text-xl font-bold tracking-tight">
-              {header.brandText || 'CaveCMS'}
-            </span>
-          )}
-          {logoSrc && header.brandText && (
-            <span className={`hidden font-serif text-base font-semibold tracking-tight sm:inline ${theme.brand}`}>
-              {header.brandText}
-            </span>
-          )}
-        </Link>
-
-        <SiteHeaderNav
-          navItems={header.navItems}
-          theme={theme}
-          projects={projectsList}
-          initialPathname={pathname}
-          navColor={navColor}
-          navActiveColor={navActiveColor}
-        />
-
-        {hasCta && (
-          <Link
-            href={cta.href}
-            target={cta.openInNew || isLikelyExternal(cta.href) ? '_blank' : undefined}
-            rel={cta.openInNew || isLikelyExternal(cta.href) ? 'noopener noreferrer' : undefined}
-            className={`ml-auto hidden w-fit items-center gap-2 rounded-full px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.22em] transition-all sm:inline-flex lg:ml-6 ${theme.cta}${ctaOv ? ` ${ctaOv.className}` : ''}`}
-            style={ctaOv?.style}
-          >
-            {cta.text}
-          </Link>
-        )}
-
-        <div className="ml-auto lg:hidden">
-          <SiteHeaderMobile
-            navItems={header.navItems}
-            cta={hasCta ? cta : null}
-            theme={theme}
-            projects={projectsList}
-            ctaOverride={ctaOv}
-            navColor={navColor}
-            navActiveColor={navActiveColor}
-          />
-        </div>
-      </div>
+      <SiteHeaderBarBody {...barProps} theme={theme} />
     </header>
   )
 }
