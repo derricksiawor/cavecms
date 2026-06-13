@@ -68,6 +68,10 @@ export const PageEditorPatch = z
     seoDescription: seoDescriptionSchema,
     heroImageId: mediaIdSchema,
     ogImageId: mediaIdSchema,
+    // Per-page header-mode override (migration 0042). null clears the
+    // override back to inherit (site default + first-section
+    // auto-resolve). Presentation-tier, so editors may set it.
+    headerMode: z.enum(['solid', 'overlay']).nullable().optional(),
     // Per-entity SEO fields (migration 0032) — content fields any
     // editor may set, same tier as seoTitle/seoDescription.
     ...SeoEditorFields,

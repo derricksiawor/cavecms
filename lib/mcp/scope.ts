@@ -124,7 +124,7 @@ export const MCP_TOOLS = spec({
     action: 'write',
     minRole: 'editor',
     tier: 'write',
-    summary: "Update a page's fields (title, slug, SEO, published, isHome).",
+    summary: "Update a page's fields (title, slug, SEO, published, isHome, headerMode).",
   },
   delete_page: {
     name: 'delete_page',

@@ -31,6 +31,8 @@ export interface PageRawRow {
   seo_score: number | null
   readability_score: number | null
   seo_meta: unknown
+  // Per-page header-mode override (migration 0042); NULL = inherit.
+  header_mode: string | null
   preview_epoch: number
   version: number
   updated_by: number | null

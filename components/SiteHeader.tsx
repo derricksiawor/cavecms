@@ -10,6 +10,7 @@ import {
   resolveOverlayTopTheme,
   ctaOverrideProps,
 } from '@/lib/cms/headerTheme'
+import { resolveHeaderRenderMode } from '@/lib/cms/services/headerMode'
 import { SiteHeaderBarBody } from './SiteHeaderBarBody'
 import { SiteHeaderOverlay } from './SiteHeaderOverlay'
 
@@ -114,9 +115,18 @@ export async function SiteHeader() {
   const logoSrc = logo?.md ?? logo?.lg ?? logo?.thumb ?? null
   const logoAlt = header.logo?.alt || logo?.alt || header.brandText
 
+  // Per-page header mode: explicit pages.header_mode override, else the
+  // site default — and on overlay-default sites the page's FIRST section
+  // surface decides (dark hero → transparent overlay; light top → the
+  // solid themed bar from scroll 0, so the header is never invisible
+  // over a white page). See lib/cms/services/headerMode.ts.
+  const headerMode = await resolveHeaderRenderMode(
+    pathname,
+    header.headerMode ?? 'solid',
+  )
+
   // Overlay mode's transparent-state logo (usually a white version).
   // Same degraded-fallback pattern as the main logo above.
-  const headerMode = header.headerMode ?? 'solid'
   let overlayLogoSrc: string | null = null
   if (headerMode === 'overlay' && header.overlayLogo) {
     try {

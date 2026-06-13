@@ -391,7 +391,9 @@ export function buildServer(init: McpRequestContext): McpServer {
     'update_page',
     {
       id: num(),
-      fields: fields('Page fields to change: title, slug, published, isHome, SEO'),
+      fields: fields(
+        'Page fields to change: title, slug, published, isHome, SEO, and headerMode ("solid" | "overlay" | null) — a per-page override of the site header style (null = inherit the site default + auto-resolve)',
+      ),
     },
     async (args) =>
       respond(

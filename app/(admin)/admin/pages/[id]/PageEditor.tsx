@@ -52,6 +52,7 @@ import { csrfFetch } from '@/lib/client/csrf'
 import { Button } from '@/components/ui/Button'
 import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
 import { useToast } from '@/components/inline-edit/Toast'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
 import {
@@ -253,6 +254,8 @@ interface DirtyFields {
   ogImageId?: number | null
   published?: boolean
   isHome?: boolean
+  // Per-page header-mode override (migration 0042). null = inherit.
+  headerMode?: 'solid' | 'overlay' | null
   // Per-entity SEO fields (migration 0032).
   focusKeyphrase?: string | null
   robotsNoindex?: boolean
@@ -304,6 +307,15 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
   )
   const [ogImageId, setOgImageId] = useState<number | null>(page.og_image_id)
   const [published, setPublished] = useState<boolean>(page.published === 1)
+  // Per-page header-mode override (migration 0042). '' (the Select's
+  // value for "Inherit") maps to null on save.
+  const normalizedPageHeaderMode: 'solid' | 'overlay' | null =
+    page.header_mode === 'solid' || page.header_mode === 'overlay'
+      ? page.header_mode
+      : null
+  const [headerMode, setHeaderMode] = useState<'solid' | 'overlay' | null>(
+    normalizedPageHeaderMode,
+  )
 
   // Per-entity SEO fields (migration 0032). `page.seo_meta` is the raw
   // JSON string (MariaDB JSON ≡ LONGTEXT) — parse it defensively here on
@@ -330,6 +342,7 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
   }, [])
 
   const [seoOpen, setSeoOpen] = useState(false)
+  const [headerOpen, setHeaderOpen] = useState(false)
   const [savingFields, setSavingFields] = useState<Set<string>>(new Set())
   // Wall-clock time of the most recent successful save in this editor
   // session. `null` before the first save — the header pill falls back
@@ -375,6 +388,7 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
     if (heroImageId !== page.hero_image_id) d.heroImageId = heroImageId
     if (ogImageId !== page.og_image_id) d.ogImageId = ogImageId
     if (published !== (page.published === 1)) d.published = published
+    if (headerMode !== normalizedPageHeaderMode) d.headerMode = headerMode
     return d
   }, [
     page,
@@ -385,6 +399,8 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
     heroImageId,
     ogImageId,
     published,
+    headerMode,
+    normalizedPageHeaderMode,
   ])
 
   // ── SEO-panel field diff (migration 0032) ──
@@ -772,6 +788,16 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
       requestBlurSave({ heroImageId: newId }, 'heroImageId')
     }
   }
+  // Per-page header-mode override. The Select uses '' for "Inherit",
+  // which persists as null (clears the override).
+  const saveHeaderMode = (raw: string) => {
+    const next: 'solid' | 'overlay' | null =
+      raw === 'solid' || raw === 'overlay' ? raw : null
+    setHeaderMode(next)
+    if (next !== normalizedPageHeaderMode) {
+      requestBlurSave({ headerMode: next }, 'headerMode')
+    }
+  }
   const saveOgImage = (v: MediaRef | undefined) => {
     const newId = v?.media_id ?? null
     setOgImageId(newId)
@@ -1150,6 +1176,7 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
     if (d.seoDescription !== undefined) setSeoDescription(d.seoDescription)
     if (d.heroImageId !== undefined) setHeroImageId(d.heroImageId)
     if (d.ogImageId !== undefined) setOgImageId(d.ogImageId)
+    if (d.headerMode !== undefined) setHeaderMode(d.headerMode)
     if (d.published !== undefined && isAdmin) setPublished(d.published)
     // Per-entity SEO fields (migration 0032). The SEO-batch 409 path
     // buffers these alongside the blur-save fields, so the recovery
@@ -1422,6 +1449,41 @@ function PageEditorInner({ role, page, blocks, audit }: PageEditorProps) {
               />
             </div>
           </div>
+        </Accordion>
+
+        {/* Header style — per-page override of the site-wide header mode.
+            Only meaningful when the site header is set to Overlay
+            (Settings → Site header); on a Solid-default site every page
+            is solid unless forced to Overlay here. */}
+        <Accordion
+          title="Header style"
+          subtitle="Override the site header for this page only"
+          open={headerOpen}
+          onToggle={setHeaderOpen}
+          hasContent={headerMode !== null}
+        >
+          <label className="block">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-warm-stone">
+              Header on this page
+            </span>
+            <div className="mt-1.5">
+              <Select
+                value={headerMode ?? ''}
+                onChange={saveHeaderMode}
+                disabled={isReadOnly}
+                options={[
+                  { value: '', label: 'Inherit site default' },
+                  { value: 'solid', label: 'Solid bar' },
+                  { value: 'overlay', label: 'Overlay — transparent over the hero' },
+                ]}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-warm-stone">
+              Inherit follows Settings → Site header. On an overlay site,
+              CaveCMS already keeps the bar solid on pages that don’t open
+              with a dark hero — set Solid or Overlay here only to force it.
+            </p>
+          </label>
         </Accordion>
 
         {/* Blocks region — full CRUD: Add (type picker), Move up/down,
@@ -2057,6 +2119,7 @@ function describeDraftFields(diff: unknown): string[] {
   if ('seoDescription' in o) out.push('SEO description')
   if ('heroImageId' in o) out.push('hero image')
   if ('ogImageId' in o) out.push('social card image')
+  if ('headerMode' in o) out.push('header style')
   if ('published' in o) out.push('publish')
   if ('isHome' in o) out.push('home page')
   // Per-entity SEO fields (migration 0032) — buffered on a SEO-batch 409

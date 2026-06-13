@@ -43,6 +43,7 @@ const EDITOR_FIELDS = [
   'seoDescription',
   'heroImageId',
   'ogImageId',
+  'headerMode',
 ] as const
 const ADMIN_ONLY_FIELDS = ['slug', 'published', 'isHome'] as const
 
@@ -141,6 +142,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
     seoDescription?: string | null
     heroImageId?: number | null
     ogImageId?: number | null
+    headerMode?: 'solid' | 'overlay' | null
     version: number
     slug?: string
     published?: boolean
@@ -444,6 +446,7 @@ export const PATCH = withError<RouteCtx>(async (req, { params }) => {
         seoDescription: { col: 'seo_description', rowKey: 'seo_description' },
         heroImageId: { col: 'hero_image_id', rowKey: 'hero_image_id' },
         ogImageId: { col: 'og_image_id', rowKey: 'og_image_id' },
+        headerMode: { col: 'header_mode', rowKey: 'header_mode' },
       }
       for (const field of EDITOR_FIELDS) {
         const v = body[field as keyof typeof body]

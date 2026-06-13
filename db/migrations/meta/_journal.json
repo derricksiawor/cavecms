@@ -281,6 +281,13 @@
 			"when": 1780963200000,
 			"tag": "0041_retire_legacy_form_blocks",
 			"breakpoints": true
+		},
+		{
+			"idx": 40,
+			"version": "5",
+			"when": 1781312000000,
+			"tag": "0042_page_header_mode",
+			"breakpoints": true
 		}
 	]
 }

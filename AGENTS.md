@@ -140,8 +140,18 @@ token may write:
   shows only while the bar is transparent; the main `logo` takes over the
   moment the bar turns solid. `overlayTone` = `"light"` (default — white
   text for dark heroes) | `"dark"` (near-black for light heroes) colours
-  the brand text + nav links in the transparent state only.
+  the brand text + nav links in the transparent state only. `headerMode`
+  is site-wide but resolved **per page**: on an overlay site, a page whose
+  FIRST section is light automatically renders the solid bar from the top
+  (so the header is never invisible white-on-white over a form/legal page).
+  Force a single page either way with
+  `PATCH /api/cms/pages/{id}` `{ "headerMode": "solid" | "overlay" | null,
+  "version": <n> }` (null = inherit the site default + auto-resolve), or
+  `update_page` over MCP.
 - **`footer`** — tagline, link columns, newsletter card, legal links — plus:
+  `columns` = `[{ "label": "<heading>", "links": [{ "text", "href" }] }]`
+  (up to 6) — they render as real horizontal columns beside the brand
+  block, so 3-4 columns give a full estate-style footer; plus:
   `newsletterEnabled` (boolean, default `true`; `false` removes the whole
   newsletter column and the footer grid reflows), `accentColor` (the small
   uppercase column/newsletter headings), and `ctaFillColor` /

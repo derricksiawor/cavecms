@@ -199,12 +199,13 @@ export async function SiteFooter() {
     <footer
       className={`${ft.surface}${mobileCtaOn ? ' pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0' : ''}`}
     >
-      <div
-        className={`max-w-6xl mx-auto px-6 py-16 grid grid-cols-1 gap-12 ${
-          newsletterEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'
-        }`}
-      >
-        <div>
+      {/* 12-col footer: brand block (4), optional newsletter (3), and the
+         link columns spread across the rest. The link columns use an
+         auto-fit track so 1, 2, 3, or 4+ columns each get their own
+         horizontal slot (wrapping gracefully past 4) instead of stacking
+         in a single narrow cell. */}
+      <div className="max-w-6xl mx-auto px-6 py-16 grid grid-cols-1 gap-12 md:grid-cols-12">
+        <div className="md:col-span-4">
           {logoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -265,7 +266,7 @@ export async function SiteFooter() {
         </div>
 
         {newsletterEnabled && (
-          <div>
+          <div className="md:col-span-3">
             <h2
               className={`text-[10px] font-semibold uppercase tracking-[0.32em] ${ft.accent}`}
               style={accentStyle}
@@ -295,7 +296,11 @@ export async function SiteFooter() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-6">
+        <div
+          className={`grid content-start gap-x-8 gap-y-10 [grid-template-columns:repeat(auto-fit,minmax(110px,1fr))] ${
+            newsletterEnabled ? 'md:col-span-5' : 'md:col-span-8'
+          }`}
+        >
           {footer.columns.map((c) => (
             <div key={c.label}>
               <h4

@@ -229,4 +229,11 @@ hero (dark, xl: eyebrow + display-2xl headline + 1–2 line subhead + ONE primar
   it as \`overlayLogo\` — it shows only while transparent; the main \`logo\` takes
   over once solid. \`overlayTone:'light'|'dark'\` sets the transparent-state text
   colour (light = white, for dark hero photos). Pair with a full-bleed dark hero
-  (lx_hero with a background image) for the classic look.`
+  (lx_hero with a background image) for the classic look. \`headerMode\` is
+  SITE-WIDE but resolved PER PAGE: on an overlay site, a page whose FIRST section
+  is light automatically renders the solid bar from the top (so the header is
+  never an invisible white-on-white over a form/legal page). Override one page
+  with \`update_page({ headerMode:'solid' | 'overlay' | null })\` (null = inherit).
+- FOOTER COLUMNS: \`footer.columns\` is \`[{ label, links:[{ text, href }] }]\`, up
+  to 6. They render as real horizontal columns (auto-fit) beside the brand block —
+  add 3-4 for a full estate-style footer ("The Estate", "Learn More", "Regulatory").`

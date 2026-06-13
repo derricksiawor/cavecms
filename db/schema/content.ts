@@ -66,6 +66,10 @@ export const pages = mysqlTable(
     readabilityScore: int('readability_score'),
     seoMeta: json('seo_meta'),
     heroImageId: int('hero_image_id'),
+    // Per-page header-mode override (migration 0042). NULL = inherit —
+    // the site_header.headerMode default plus the first-section surface
+    // auto-resolve decide; 'solid' | 'overlay' forces the mode here.
+    headerMode: varchar('header_mode', { length: 10 }),
     // Preview-token revocation token (mirrors projects.preview_epoch).
     // Bumped on every unpublish / slug rename / soft-delete / is_home
     // change so any leaked preview URL invalidates instantly.
