@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Trash2, ShieldOff, ShieldCheck } from 'lucide-react'
+import { Trash2, ShieldOff, ShieldCheck, KeyRound, Mail } from 'lucide-react'
 import { csrfFetch } from '@/lib/client/csrf'
 import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { Button } from '@/components/ui/Button'
@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/Input'
 import { PasswordPromptModal } from '@/components/admin/PasswordPromptModal'
 import { usePasswordReauth } from '@/hooks/usePasswordReauth'
 import { ConfirmModal } from '@/components/admin/ConfirmModal'
+import { SetPasswordModal } from './SetPasswordModal'
+import { ResetLinkModal } from './ResetLinkModal'
 import { useToast } from '@/components/inline-edit/Toast'
 import {
   AdminTable,
@@ -71,6 +73,11 @@ export function UsersTable({
   const [createError, setCreateError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [pendingRemove, setPendingRemove] = useState<UserRow | null>(null)
+  // Set-password modal target, and the reset-link result modal.
+  const [pwTarget, setPwTarget] = useState<UserRow | null>(null)
+  const [linkModal, setLinkModal] = useState<
+    { email: string; url: string; emailed: boolean } | null
+  >(null)
 
   const reauthCtl = usePasswordReauth()
   const reauth = reauthCtl.ensureReauth
@@ -201,6 +208,79 @@ export function UsersTable({
     } finally {
       setBusy(false)
       setPendingRemove(null)
+    }
+  }
+
+  // Admin sets the target's password directly (permanent). The modal stays
+  // open on failure so the operator can retry without re-opening it.
+  async function onSetPassword(password: string) {
+    if (!pwTarget || busy) return
+    setBusy(true)
+    try {
+      const r = await csrfFetch(`/api/admin/users/${pwTarget.id}/password`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (r.status === 409) {
+        toast.error("Can't set your own password here — use Settings.")
+        return
+      }
+      if (r.status === 404) {
+        toast.error('That user no longer exists. Refresh and try again.')
+        return
+      }
+      if (!r.ok) {
+        toast.error("We couldn't set that password. Try again.")
+        return
+      }
+      toast.success(`Password updated for ${pwTarget.email}.`)
+      setPwTarget(null)
+    } catch {
+      toast.error("We couldn't do that just now. Try again in a moment.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Admin generates a one-time reset link for the target. On success, surface
+  // the absolute link (built from the page origin so it works without a
+  // configured Site URL) in a copy modal.
+  async function sendResetLink(u: UserRow) {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await csrfFetch(`/api/admin/users/${u.id}/reset-link`, {
+        method: 'POST',
+      })
+      if (r.status === 409) {
+        toast.error("Can't send a reset link to your own account.")
+        return
+      }
+      if (r.status === 404) {
+        toast.error('That user no longer exists. Refresh and try again.')
+        return
+      }
+      if (!r.ok) {
+        toast.error("We couldn't create a reset link. Try again.")
+        return
+      }
+      const j = (await r.json().catch(() => null)) as
+        | { ok?: boolean; path?: string; emailed?: boolean }
+        | null
+      if (!j?.path) {
+        toast.error("We couldn't create a reset link. Try again.")
+        return
+      }
+      setLinkModal({
+        email: u.email,
+        url: `${window.location.origin}${j.path}`,
+        emailed: Boolean(j.emailed),
+      })
+    } catch {
+      toast.error("We couldn't do that just now. Try again in a moment.")
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -382,6 +462,22 @@ export function UsersTable({
             onSelect: () => patchUser(u, { active: u.active === 0 }),
           },
           {
+            id: 'set-password',
+            icon: KeyRound,
+            label: 'Set password',
+            description: 'Choose a new password for them',
+            disabled: busy,
+            onSelect: () => setPwTarget(u),
+          },
+          {
+            id: 'reset-link',
+            icon: Mail,
+            label: 'Send reset link',
+            description: 'One-time link to set their own password',
+            disabled: busy,
+            onSelect: () => sendResetLink(u),
+          },
+          {
             id: 'remove',
             icon: Trash2,
             label: 'Remove user',
@@ -473,7 +569,6 @@ export function UsersTable({
         />
       </div>
 
-      <PasswordPromptModal {...reauthCtl.modalProps} />
       <ConfirmModal
         open={pendingRemove !== null}
         title="Remove this user?"
@@ -490,6 +585,27 @@ export function UsersTable({
           if (!busy) setPendingRemove(null)
         }}
       />
+      <SetPasswordModal
+        open={pwTarget !== null}
+        email={pwTarget?.email ?? ''}
+        busy={busy}
+        onSubmit={onSetPassword}
+        onCancel={() => {
+          if (!busy) setPwTarget(null)
+        }}
+      />
+      <ResetLinkModal
+        open={linkModal !== null}
+        email={linkModal?.email ?? ''}
+        url={linkModal?.url ?? ''}
+        emailed={linkModal?.emailed ?? false}
+        onClose={() => setLinkModal(null)}
+      />
+      {/* Reauth prompt renders LAST so it paints above any other open modal
+          (set-password / reset-link / remove-confirm). At equal z-50, DOM
+          order decides stacking; if this rendered first, a sibling modal
+          opened alongside it would intercept clicks on the reauth button. */}
+      <PasswordPromptModal {...reauthCtl.modalProps} />
     </section>
   )
 }

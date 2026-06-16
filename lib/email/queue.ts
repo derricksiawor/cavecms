@@ -88,6 +88,19 @@ export async function enqueueEmail(p: EnqueueParams): Promise<number> {
   // truncated; aligns with Zod's max(180) email validation upstream
   // so legitimate boundary cases don't get silently shortened.
   const to = stripCrLf(p.to).slice(0, 180)
+  // Dev deliverability guard. Outside production, if CAVECMS_DEV_EMAIL_ALLOWLIST
+  // is set (comma-separated addresses), drop any recipient not on it so test
+  // fixtures / fake domains never hit real SMTP and harm sender reputation.
+  // Production is never affected; dev WITHOUT the var is never affected.
+  if (process.env.NODE_ENV !== 'production' && process.env.CAVECMS_DEV_EMAIL_ALLOWLIST) {
+    const allow = process.env.CAVECMS_DEV_EMAIL_ALLOWLIST.split(',')
+      .map((e) => normalizeEmail(e.trim()))
+      .filter(Boolean)
+    if (!allow.includes(normalizeEmail(to))) {
+      console.info(JSON.stringify({ level: 'info', msg: 'email_dropped_dev_allowlist', to }))
+      return -1
+    }
+  }
   const [res] = (await db.execute(sql`
     INSERT INTO pending_emails (to_email, subject, html_body, text_body, next_retry_at)
     VALUES (${to}, ${subject}, ${p.html}, ${p.text}, NOW(3))

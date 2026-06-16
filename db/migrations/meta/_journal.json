@@ -288,6 +288,13 @@
 			"when": 1781312000000,
 			"tag": "0042_page_header_mode",
 			"breakpoints": true
+		},
+		{
+			"idx": 42,
+			"version": "5",
+			"when": 1781398400000,
+			"tag": "0043_password_reset_tokens",
+			"breakpoints": true
 		}
 	]
 }
