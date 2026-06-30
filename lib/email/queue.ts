@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { normalizeEmail } from '@/lib/leads/normalizeEmail'
 import { getTransporter, getActiveSmtpConfig, getFromHeader, stripCrLf } from './transport'
+import type { PdfAttachment } from '@/lib/media/storedPdf'
 
 // Persist-on-enqueue email queue.
 //
@@ -65,6 +66,11 @@ export interface EnqueueParams {
   subject: string
   html: string
   text: string
+  // Optional gated-PDF attachment (lx_form deliver_file `attach` mode). Carried
+  // as a media-row id and resolved + streamed from disk at SEND time, so a
+  // failed resolution degrades to an attachment-less send rather than blocking
+  // the enqueue. NULL/undefined → an ordinary email.
+  attachmentMediaId?: number
 }
 
 /**
@@ -101,9 +107,17 @@ export async function enqueueEmail(p: EnqueueParams): Promise<number> {
       return -1
     }
   }
+  // A positive integer media id or NULL — never a fractional/zero value that
+  // could resolve to the wrong row at send time.
+  const attachmentMediaId =
+    typeof p.attachmentMediaId === 'number' &&
+    Number.isInteger(p.attachmentMediaId) &&
+    p.attachmentMediaId > 0
+      ? p.attachmentMediaId
+      : null
   const [res] = (await db.execute(sql`
-    INSERT INTO pending_emails (to_email, subject, html_body, text_body, next_retry_at)
-    VALUES (${to}, ${subject}, ${p.html}, ${p.text}, NOW(3))
+    INSERT INTO pending_emails (to_email, subject, html_body, text_body, attachment_media_id, next_retry_at)
+    VALUES (${to}, ${subject}, ${p.html}, ${p.text}, ${attachmentMediaId}, NOW(3))
   `)) as unknown as [InsertResult]
   queueMicrotask(() => {
     runOnce().catch((err: unknown) => {
@@ -124,6 +138,7 @@ interface PendingEmailRow {
   html_body: string
   text_body: string
   attempts: number
+  attachment_media_id: number | null
 }
 
 async function claim(): Promise<PendingEmailRow[]> {
@@ -149,7 +164,7 @@ async function claim(): Promise<PendingEmailRow[]> {
     )
   `)
   const [rows] = (await db.execute(sql`
-    SELECT id, to_email, subject, html_body, text_body, attempts
+    SELECT id, to_email, subject, html_body, text_body, attempts, attachment_media_id
     FROM pending_emails
     WHERE claim_until > NOW(3) AND resolved_at IS NULL
     ORDER BY next_retry_at, id
@@ -239,12 +254,33 @@ async function doRunOnce(): Promise<void> {
   const rows = await claim()
   for (const row of rows) {
     try {
+      // Resolve an optional PDF attachment from disk. A failure to resolve
+      // (soft-deleted media, oversized, or a vanished file) degrades to an
+      // attachment-less send + a log line — never a failed/dead-lettered email,
+      // matching the queue's best-effort ethos. The enqueue-time check already
+      // validated this in the common case, so a drop here is rare.
+      let attachments: PdfAttachment[] | undefined
+      if (row.attachment_media_id != null) {
+        const { buildPdfAttachment } = await import('@/lib/media/storedPdf')
+        const att = await buildPdfAttachment(row.attachment_media_id)
+        if (att) {
+          attachments = [att]
+        } else {
+          console.error(JSON.stringify({
+            level: 'error',
+            msg: 'email_attachment_dropped',
+            rowId: row.id,
+            mediaId: row.attachment_media_id,
+          }))
+        }
+      }
       await transporter.sendMail({
         from,
         to: row.to_email,
         subject: row.subject,
         html: row.html_body,
         text: row.text_body,
+        ...(attachments ? { attachments } : {}),
       })
       await db.execute(sql`
         UPDATE pending_emails

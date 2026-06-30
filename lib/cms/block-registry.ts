@@ -301,10 +301,13 @@ const deliverFileAction = z
     // work unchanged; the alt doubles as the file's human label.
     file: MediaRef,
     // email   → a signed, expiring download link is emailed to the submitter.
+    // attach  → the file itself is attached to the confirmation email (PDF,
+    //           ≤10MB). Degrades to `email` (a link) when the file is missing,
+    //           oversized, or non-PDF — see the lead route + lib/media/storedPdf.
     // instant → the success screen shows a Download button (same signed link).
     // manual  → no auto-delivery; lead saved + team notified (the legacy
     //           brochure flow), now an explicit operator choice, not the only path.
-    mode: z.enum(['email', 'instant', 'manual']).default('email'),
+    mode: z.enum(['email', 'attach', 'instant', 'manual']).default('email'),
     emailSubject: safeText(160).optional(),
     emailBody: safeText(TEXT_MAX.body).optional(),
   })

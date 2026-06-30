@@ -152,6 +152,10 @@ export const pendingEmails = mysqlTable(
     htmlBody: mediumtext('html_body').notNull(),
     textBody: mediumtext('text_body').notNull(),
     attempts: int('attempts').notNull().default(0),
+    // Optional gated-PDF attachment, carried as a media-row reference and
+    // streamed from disk at send time (see lib/email/queue + lib/media/storedPdf).
+    // NULL for every ordinary (non-attach) email — the default.
+    attachmentMediaId: int('attachment_media_id'),
     nextRetryAt: timestamp('next_retry_at', { fsp: 3 }).notNull().defaultNow(),
     resolvedAt: timestamp('resolved_at', { fsp: 3 }),
     lastError: text('last_error'),

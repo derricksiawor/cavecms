@@ -190,18 +190,63 @@ export const POST = withError(async (req: Request) => {
         ? actions.data.filter((a) => a.kind === 'deliver_file' && a.mode !== 'manual')
         : []
       if (deliverActions.length > 0) {
-        // getSiteOrigin + the SMTP probe are ONLY needed for email-mode actions —
-        // gate them so an instant-only form can never lose its download to a
-        // settings read throwing. SMTP is operator-configured (Settings → Email)
-        // and absent on a fresh install; there an emailed link enqueues but never
-        // sends, so email mode must fall back to the on-screen download.
-        const hasEmail = deliverActions.some((a) => a.mode === 'email')
+        // getSiteOrigin + the SMTP probe are ONLY needed for email-ish actions
+        // (email + attach) — gate them so an instant-only form can never lose
+        // its download to a settings read throwing. SMTP is operator-configured
+        // (Settings → Email) and absent on a fresh install; there an emailed
+        // link/attachment enqueues but never sends, so it must fall back to the
+        // on-screen download.
+        const needsEmailInfra = deliverActions.some(
+          (a) => a.mode === 'email' || a.mode === 'attach',
+        )
         const { getSiteOrigin } = await import('@/lib/cms/getSiteOrigin')
         const { getActiveSmtpConfig } = await import('@/lib/email/transport')
-        const siteOrigin = hasEmail ? await getSiteOrigin() : null
-        const smtpReady = hasEmail
+        const { checkStoredPdf, MAX_EMAIL_ATTACHMENT_BYTES } = await import(
+          '@/lib/media/storedPdf'
+        )
+        const siteOrigin = needsEmailInfra ? await getSiteOrigin() : null
+        const smtpReady = needsEmailInfra
           ? (await getActiveSmtpConfig().catch(() => null)) !== null
           : false
+
+        // Enqueue a secure-LINK email (the `email` mode body, and the graceful
+        // fallback for an `attach` action whose file can't be attached). Needs
+        // siteOrigin for the absolute link. Returns true only when the row
+        // actually queued, so a failure degrades to the on-screen download.
+        type DeliverAction = (typeof deliverActions)[number]
+        const sendLinkEmail = (rel: string, name: string, action: DeliverAction) =>
+          enqueueEmail({
+            to: normEmail,
+            subject: action.emailSubject || `Your download: ${name}`,
+            html:
+              `<p>${escapeHtml(action.emailBody || 'Thanks — here is your download.')}</p>` +
+              `<p><a href="${siteOrigin}${rel}">Download ${escapeHtml(name)}</a></p>` +
+              `<p style="color:#888;font-size:12px;">This link works for 7 days.</p>`,
+            text: `${action.emailBody || 'Here is your download.'}\n\n${siteOrigin}${rel}\n\nThis link works for 7 days.`,
+          })
+            .then(() => true)
+            .catch((e) => {
+              void logEnqueueFailure('form:deliver', normEmail || 'unknown', e)
+              return false
+            })
+
+        // Enqueue an email with the file ATTACHED (no link in the body — the
+        // operator chose to attach rather than link). The bytes are streamed
+        // from disk at send time via the persisted attachment_media_id.
+        const sendAttachEmail = (name: string, action: DeliverAction) =>
+          enqueueEmail({
+            to: normEmail,
+            subject: action.emailSubject || `Your download: ${name}`,
+            html: `<p>${escapeHtml(action.emailBody || 'Thanks — your download is attached.')}</p>`,
+            text: `${action.emailBody || 'Your download is attached.'}`,
+            attachmentMediaId: action.file.media_id,
+          })
+            .then(() => true)
+            .catch((e) => {
+              void logEnqueueFailure('form:deliver', normEmail || 'unknown', e)
+              return false
+            })
+
         for (const action of deliverActions) {
           // Per-action isolation — one malformed action can't drop the others.
           try {
@@ -212,26 +257,31 @@ export const POST = withError(async (req: Request) => {
             const rel = `/api/files/deliver/${token}`
             const name = action.file.alt || 'Your download'
             if (action.mode === 'email' && normEmail && siteOrigin && smtpReady) {
-              const sent = await enqueueEmail({
-                to: normEmail,
-                subject: action.emailSubject || `Your download: ${name}`,
-                html:
-                  `<p>${escapeHtml(action.emailBody || 'Thanks — here is your download.')}</p>` +
-                  `<p><a href="${siteOrigin}${rel}">Download ${escapeHtml(name)}</a></p>` +
-                  `<p style="color:#888;font-size:12px;">This link works for 7 days.</p>`,
-                text: `${action.emailBody || 'Here is your download.'}\n\n${siteOrigin}${rel}\n\nThis link works for 7 days.`,
-              })
-                .then(() => true)
-                .catch((e) => {
-                  void logEnqueueFailure('form:deliver', normEmail || 'unknown', e)
-                  return false
-                })
               // Only claim "check your inbox" when the email actually queued;
               // a failed enqueue degrades to the on-screen download below.
-              if (sent) emailedFile = true
+              if (await sendLinkEmail(rel, name, action)) emailedFile = true
               else downloads.push({ url: rel, name })
+            } else if (action.mode === 'attach' && normEmail && smtpReady) {
+              // Decide attach-vs-link on the media's metadata only (no fs read on
+              // the request path). A live PDF within the cap → attach (no link
+              // needed, so siteOrigin is irrelevant here); otherwise gracefully
+              // fall back to a secure link (which needs siteOrigin); failing
+              // that, the on-screen download. The file is NEVER lost.
+              const check = await checkStoredPdf(
+                action.file.media_id,
+                MAX_EMAIL_ATTACHMENT_BYTES,
+              )
+              if (check.ok) {
+                if (await sendAttachEmail(name, action)) emailedFile = true
+                else downloads.push({ url: rel, name })
+              } else if (siteOrigin) {
+                if (await sendLinkEmail(rel, name, action)) emailedFile = true
+                else downloads.push({ url: rel, name })
+              } else {
+                downloads.push({ url: rel, name })
+              }
             } else {
-              // instant mode, OR email mode with no valid email / site URL /
+              // instant mode, OR email/attach with no valid email / site URL /
               // configured SMTP → hand back an on-screen download so the file is
               // NEVER lost (the feature's invariant).
               downloads.push({ url: rel, name })

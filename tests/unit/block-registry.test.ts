@@ -69,4 +69,42 @@ describe('block registry', () => {
       }
     }
   })
+
+  describe('lx_form deliver_file after-submit actions', () => {
+    const form = (mode?: string) => ({
+      heading: 'Get the brochure',
+      fields: [{ type: 'email', name: 'email', label: 'Email', role: 'email' }],
+      actions: [
+        {
+          kind: 'deliver_file',
+          file: { media_id: 7, alt: 'Brochure' },
+          ...(mode ? { mode } : {}),
+        },
+      ],
+    })
+
+    it('accepts the new attach mode', () => {
+      const parsed = parseBlockData('lx_form', form('attach')) as {
+        actions: Array<{ mode: string }>
+      }
+      expect(parsed.actions[0]?.mode).toBe('attach')
+    })
+
+    it('keeps email/instant/manual working and defaults to email', () => {
+      for (const m of ['email', 'instant', 'manual']) {
+        const parsed = parseBlockData('lx_form', form(m)) as {
+          actions: Array<{ mode: string }>
+        }
+        expect(parsed.actions[0]?.mode).toBe(m)
+      }
+      const dflt = parseBlockData('lx_form', form()) as {
+        actions: Array<{ mode: string }>
+      }
+      expect(dflt.actions[0]?.mode).toBe('email')
+    })
+
+    it('rejects an unknown mode', () => {
+      expect(() => parseBlockData('lx_form', form('carrier-pigeon'))).toThrow()
+    })
+  })
 })

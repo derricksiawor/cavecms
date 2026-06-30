@@ -2884,7 +2884,9 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
           ? 'Deliver a file · instant download'
           : mode === 'manual'
             ? 'Deliver a file · team sends it'
-            : 'Deliver a file · emailed link'
+            : mode === 'attach'
+              ? 'Deliver a file · attached to email'
+              : 'Deliver a file · emailed link'
       },
       itemFields: [
         { kind: 'media', key: 'file', label: 'File to deliver', accept: 'pdf', help: 'The PDF a visitor receives after submitting — a brochure, price list, guide, etc.' },
@@ -2892,10 +2894,11 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
           kind: 'select', key: 'mode', label: 'How it’s delivered',
           options: [
             { value: 'email', label: 'Email a secure download link' },
+            { value: 'attach', label: 'Attach the file to the email' },
             { value: 'instant', label: 'Show a download button on success' },
             { value: 'manual', label: 'Don’t auto-send — my team will' },
           ],
-          help: 'An emailed link proves the address is real; instant hands the file over straight away.',
+          help: 'An emailed link proves the address is real; attach sends the PDF itself (max 10 MB — larger or non-PDF files are sent as a link instead); instant hands the file over straight away.',
         },
         { kind: 'string', key: 'emailSubject', label: 'Email subject (optional)', maxLength: 160, placeholder: 'Your download is ready' },
         { kind: 'string', key: 'emailBody', label: 'Email message (optional)', maxLength: TEXT_MAX.body, multiline: true },

@@ -295,6 +295,13 @@
 			"when": 1781398400000,
 			"tag": "0043_password_reset_tokens",
 			"breakpoints": true
+		},
+		{
+			"idx": 43,
+			"version": "5",
+			"when": 1781484800000,
+			"tag": "0044_pending_email_attachment",
+			"breakpoints": true
 		}
 	]
 }
