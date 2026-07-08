@@ -18,6 +18,7 @@ import {
   type AdminTableBulkAction,
 } from '@/components/admin/AdminTable'
 import { useListMutations } from '@/lib/admin/useListMutations'
+import { safeStorage } from '@/lib/client/safeStorage'
 import { RowActionsMenu } from '@/components/admin/RowActionsMenu'
 
 interface UserRow {
@@ -92,6 +93,24 @@ export function UsersTable({
     }
   }, [reauthCtl, reauthCtl.fatal, toast])
 
+  // One-shot invite outcome, stashed across the post-create reload. Tells
+  // the admin whether the invite email actually went out — and when it
+  // couldn't (no Site URL yet), what to do instead.
+  useEffect(() => {
+    const flash = safeStorage.get('cavecms:invite-flash')
+    if (!flash) return
+    safeStorage.remove('cavecms:invite-flash')
+    const [status, addr] = flash.split('|', 2)
+    if (!addr) return
+    if (status === 'emailed') {
+      toast.success(`Account created — invite email sent to ${addr}.`)
+    } else {
+      toast.success(
+        `Account created. We couldn't email ${addr} (set your Site URL under Settings → General) — share the sign-in link and starter password with them directly.`,
+      )
+    }
+  }, [toast])
+
   async function create() {
     if (busy) return
     setCreateError(null)
@@ -124,6 +143,11 @@ export function UsersTable({
         setCreateError("We couldn't add that user. Try again in a moment.")
         return
       }
+      const j = (await r.json().catch(() => ({}))) as { emailed?: boolean }
+      safeStorage.set(
+        'cavecms:invite-flash',
+        `${j.emailed === true ? 'emailed' : 'not-emailed'}|${email.trim()}`,
+      )
       window.location.reload()
     } finally {
       setBusy(false)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { csrfFetch, readCsrf } from '@/lib/client/csrf'
 import { ConfirmModal } from '@/components/inline-edit/ConfirmModal'
@@ -243,8 +244,12 @@ export function EditLockManager() {
     }
   }, [pageId, post, router, toast])
 
+  // Portal to <body> — this component lives inside the admin bar, whose
+  // backdrop-blur makes the bar the containing block for fixed-position
+  // descendants (same trap Toast.tsx documents). Un-portaled, the modal
+  // pins to the bar's box at the top of the screen, clipped.
   if (phase.kind === 'blocked') {
-    return (
+    return createPortal(
       <ConfirmModal
         title={`${phase.holder.name} is editing this page`}
         description={
@@ -260,12 +265,13 @@ export function EditLockManager() {
         ariaLabel="Someone is already editing this page"
         onCancel={previewInstead}
         onConfirm={takeover}
-      />
+      />,
+      document.body,
     )
   }
 
   if (phase.kind === 'lost') {
-    return (
+    return createPortal(
       <ConfirmModal
         title={`${phase.holder.name} took over this page`}
         description={
@@ -281,7 +287,8 @@ export function EditLockManager() {
         ariaLabel="Another editor took over this page"
         onCancel={previewInstead}
         onConfirm={takeover}
-      />
+      />,
+      document.body,
     )
   }
 

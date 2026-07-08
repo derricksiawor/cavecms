@@ -12,6 +12,11 @@ import { hashPassword } from '@/lib/auth/scrypt'
 import { requireFreshReauth } from '@/lib/auth/reauth'
 import { auditMetaFromRequest } from '@/lib/api/auditMeta'
 import { isDuplicateKey } from '@/lib/db/errors'
+import { getSiteOrigin, getSiteName } from '@/lib/cms/getSiteOrigin'
+import { getResolvedLoginPath } from '@/lib/security/getResolvedLoginPath'
+import { enqueueEmail } from '@/lib/email/queue'
+import { userInviteEmail } from '@/lib/email/templates/userInvite'
+import { logEnqueueFailure } from '@/lib/leads/logEnqueueFailure'
 
 interface UserRow {
   id: number
@@ -88,19 +93,53 @@ export const POST = withError(async (req) => {
     `)) as unknown as [InsertResult]
     const newUserId = Number(insertArr.insertId)
 
+    // Invite email — tells the new user their account exists and where to
+    // sign in. The starter password is NEVER emailed (the admin hands it
+    // over directly, and it's single-use anyway). Needs a configured Site
+    // URL to build the absolute sign-in link; without one, `emailed:false`
+    // tells the UI to say so. Enqueue only — delivery runs in the
+    // background (#0.599); a failed enqueue is logged, never a 500 (the
+    // account itself was created fine).
+    let emailed = false
+    const origin = await getSiteOrigin()
+    if (origin) {
+      try {
+        const [siteName, loginPath, inviterRows] = await Promise.all([
+          getSiteName(),
+          getResolvedLoginPath(),
+          db.execute(sql`
+            SELECT COALESCE(NULLIF(name, ''), email) AS name
+            FROM users WHERE id = ${ctx.userId} LIMIT 1
+          `) as unknown as Promise<[Array<{ name: string | null }>]>,
+        ])
+        const enqueuedId = await enqueueEmail(
+          userInviteEmail({
+            to: body.email.toLowerCase().trim(),
+            name: body.name ?? null,
+            siteName,
+            signInUrl: `${origin.replace(/\/+$/, '')}/${loginPath.replace(/^\/+/, '')}`,
+            invitedBy: inviterRows[0]?.[0]?.name ?? null,
+          }),
+        )
+        emailed = enqueuedId > 0
+      } catch (err) {
+        await logEnqueueFailure('admin:user_invite', body.email, err)
+      }
+    }
+
     // Audit row: never includes the password hash. Email + role only.
     await db.insert(auditLog).values({
       userId: ctx.userId,
       action: 'create',
       resourceType: 'user',
       resourceId: String(newUserId),
-      diff: { email: body.email, role: body.role } as unknown as object,
+      diff: { email: body.email, role: body.role, emailed } as unknown as object,
       ip: meta.ip,
       userAgent: meta.userAgent,
       requestId: meta.requestId,
     })
 
-    return new Response(JSON.stringify({ ok: true, id: newUserId }), {
+    return new Response(JSON.stringify({ ok: true, id: newUserId, emailed }), {
       status: 201,
       headers: {
         'content-type': 'application/json',
