@@ -37,6 +37,7 @@ import {
 } from 'lucide-react'
 import type { Role } from '@/lib/auth/requireRole'
 import { PillButton } from '@/components/admin/PillButton'
+import { EditLockManager } from '@/components/admin-bar/EditLockManager'
 import { CfSafeMailto } from '@/components/CfSafeMailto'
 import { ToastProvider, useToast } from '@/components/inline-edit/Toast'
 import { csrfFetch } from '@/lib/client/csrf'
@@ -300,6 +301,11 @@ function BarInner({
 
   return (
     <>
+      {/* Edit-lock lifecycle + takeover prompts. Mounted at the fragment
+          root (NOT inside the hidden-md desktop div) — its modals are
+          fixed-position and a display:none ancestor would swallow them on
+          mobile. Renders nothing until a lock conflict needs a decision. */}
+      {editMode && <EditLockManager />}
       {/* Desktop layout — md+ only. */}
       <div className="hidden flex-1 items-center gap-2 md:flex">
         <BarLink href={adminRoutes.dashboard()} icon={LayoutDashboard}>

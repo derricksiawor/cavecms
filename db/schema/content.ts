@@ -88,6 +88,13 @@ export const pages = mysqlTable(
     draftUndoCursor: int('draft_undo_cursor').notNull().default(0),
     draftUpdatedAt: timestamp('draft_updated_at', { fsp: 3 }),
     draftUpdatedBy: int('draft_updated_by'),
+    // Advisory edit lock (migration 0045) — which operator currently holds
+    // the inline editor for this page, renewed by heartbeat while editing.
+    // A heartbeat past the TTL means the lock is silently claimable. UI-level
+    // only: block-write APIs stay lock-agnostic so API tokens + agents keep
+    // editing headlessly.
+    editLockUserId: int('edit_lock_user_id'),
+    editLockHeartbeatAt: timestamp('edit_lock_heartbeat_at', { fsp: 3 }),
     updatedBy: int('updated_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { fsp: 3 }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { fsp: 3 }).notNull().defaultNow().onUpdateNow(),
