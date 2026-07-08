@@ -80,7 +80,7 @@ export type FieldShape =
   // The value is { href, openInNew } | undefined; a cleared href maps
   // to undefined so the optional schema accepts no-link state.
   | { kind: 'link'; key: string; label: string; help?: string }
-  | { kind: 'media_array'; key: string; label: string; help?: string; noCaption?: boolean }
+  | { kind: 'media_array'; key: string; label: string; help?: string; noCaption?: boolean; maxItems?: number }
   | { kind: 'string_array'; key: string; label: string; placeholder?: string; maxItems?: number; help?: string }
   | { kind: 'number'; key: string; label: string; min?: number; max?: number; step?: number; help?: string }
   // `defaultValue` is the DISPLAY state when the stored object predates
@@ -1316,6 +1316,7 @@ function MediaArrayField({
 }) {
   const { open } = useMediaPicker()
   const arr = Array.isArray(value) ? value : []
+  const canAdd = shape.maxItems === undefined || arr.length < shape.maxItems
   return (
     <fieldset className="space-y-3 rounded-2xl border border-warm-stone/20 bg-cream-50/60 p-4">
       <legend className="cavecms-sticky-legend sticky top-0 z-10 -mt-1 -ml-2 px-2 py-1 rounded-md backdrop-blur-md bg-cream-50/85">
@@ -1382,18 +1383,24 @@ function MediaArrayField({
         />
       )}
 
-      <button
-        type="button"
-        onClick={() =>
-          open(undefined, (m) =>
-            onChange([...arr, { ...m, __id: cryptoId() }]),
-          )
-        }
-        className="inline-flex items-center gap-2 rounded-full border border-warm-stone/30 bg-cream-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-near-black transition-all hover:border-copper-400 hover:text-copper-700"
-      >
-        <PlusIcon />
-        Add image
-      </button>
+      {canAdd ? (
+        <button
+          type="button"
+          onClick={() =>
+            open(undefined, (m) =>
+              onChange([...arr, { ...m, __id: cryptoId() }]),
+            )
+          }
+          className="inline-flex items-center gap-2 rounded-full border border-warm-stone/30 bg-cream-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-near-black transition-all hover:border-copper-400 hover:text-copper-700"
+        >
+          <PlusIcon />
+          Add image
+        </button>
+      ) : (
+        <p className="text-xs text-warm-stone">
+          Limit reached — remove an image to add another.
+        </p>
+      )}
     </fieldset>
   )
 }
@@ -3501,6 +3508,10 @@ const BASE_SHAPES_FOR_BLOCK: Record<string, FieldShape[]> = {
   ],
 
   lx_gallery: [
+    {
+      kind: 'media_array', key: 'images', label: 'Images', maxItems: 500,
+      help: 'Pick images from your media library. Drag to reorder; each image can carry its own caption.',
+    },
     {
       kind: 'select', key: 'columns', label: 'Columns (desktop)',
       valueAsNumber: true,

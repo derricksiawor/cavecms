@@ -1187,7 +1187,7 @@ export const blockSchemas = {
     images: z
       .array(MediaRef.extend({ caption: safeText(TEXT_MAX.short).optional() }))
       .min(1)
-      .max(48),
+      .max(500),
     columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
     ratio: z.enum(['1:1', '4:5', '4:3', '3:2']).default('1:1'),
     tone: colorTokenOrHex(BLOCK_TONE_ENUMS.lx_gallery).default('obsidian'),

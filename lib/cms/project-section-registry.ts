@@ -47,7 +47,7 @@ export const sectionSchemas = {
           name: z.string().max(60),
           images: z
             .array(MediaRef.extend({ caption: z.string().max(320).optional() }))
-            .max(48),
+            .max(500),
         }),
       )
       .max(8),
